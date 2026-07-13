@@ -119,5 +119,5 @@ Work Fabric 由以下逻辑能力组成：
 
 - [整体架构](docs/architecture.md)
 - [协作对接与工作交接详细设计](docs/superpowers/specs/2026-07-13-collaboration-handoff-fabric-design.md)
+- [Work Fabric Participation Protocol v1 设计](docs/superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)
-

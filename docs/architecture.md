@@ -99,6 +99,8 @@ Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具�
 
 统一参与协议是 Work Fabric 的核心产品。它统一协作语义，而不是强制统一传输方式。
 
+Protocol v1 的规范角色、Canonical Message、状态机、Event、Subscription 和 Binding 决策见 [Work Fabric Participation Protocol v1 设计](superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)。
+
 ### 4.1 协议领域
 
 | 协议领域 | 解决的问题 |
@@ -221,15 +223,13 @@ Receipt 至少区分：
 
 ```mermaid
 stateDiagram-v2
-    [*] --> DRAFT
-    DRAFT --> OFFERED: offer
-    DRAFT --> CANCELLED: cancel
+    [*] --> OFFERED: offer
     OFFERED --> ACCEPTED: accept responsibility
     OFFERED --> DECLINED: decline
     OFFERED --> EXPIRED: expire
     OFFERED --> CANCELLED: cancel
     ACCEPTED --> RESULT_RETURNED: return result
-    ACCEPTED --> TRANSFERRED: create child handoff
+    ACCEPTED --> TRANSFERRED: child handoff accepted
     ACCEPTED --> CANCELLED: permitted cancellation
     RESULT_RETURNED --> VERIFIED: verify result
     RESULT_RETURNED --> REWORK_REQUESTED: request rework
@@ -242,12 +242,14 @@ stateDiagram-v2
     CLOSED --> [*]
 ```
 
+`DRAFT` 不属于 Protocol v1 的互操作状态。客户端或 Exchange 实现可以保存本地草稿，但草稿不产生权威 Handoff、责任或领域事件。
+
 责任迁移规则：
 
 - `OFFERED` 被接受前，发起方仍承担责任。
 - `ACCEPTED` 后，责任转移给接收方。
 - `RESULT_RETURNED` 后，执行责任已经回传，验收责任转移给指定验收方。
-- `REWORK_REQUESTED` 使执行责任重新回到原接收方。
+- `REWORK_REQUESTED` 后验收方等待原接收方重新接受；重新接受后执行责任才回到原接收方。
 - `TRANSFERRED` 不表示新接收方已经承担责任；只有子 Handoff 被接受后，责任才转移成功。
 - 每次责任变化都产生独立 Receipt 和领域事件。
 
@@ -543,4 +545,3 @@ Agent Endpoint 使用 Capability Descriptor 声明输入、结果、限制、交
 - 基础协作审计时间线。
 
 Subscription、完整 Context Exchange、更多 Connector、关系投影和智能路由在后续里程碑演进。每个里程碑都增强协作互联能力，不把执行职责吸收到 Work Fabric 内部。
-
