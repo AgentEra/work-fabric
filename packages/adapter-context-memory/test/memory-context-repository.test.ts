@@ -5,6 +5,7 @@ import type {
   ContextAccessRequest,
   ContextReference,
   JsonObject,
+  JsonValue,
 } from "@work-fabric/exchange-spi";
 
 import { MemoryContextRepository } from "../src/index.js";
@@ -21,7 +22,7 @@ function contextBundle(overrides: JsonObject = {}): JsonObject {
       endpoint_ids: ["endpoint_01"],
       expires_at: null,
     },
-    digest: "sha256:context-01-v1",
+    digest: { algorithm: "sha-256", value: "context-01-v1" },
     extensions: {},
     ...overrides,
   };
@@ -73,7 +74,7 @@ describe("MemoryContextRepository", () => {
     expect(first).toEqual({
       context_id: "context_01",
       version: 1,
-      digest: "sha256:context-01-v1",
+      digest: "sha-256:context-01-v1",
     });
     expect(replay).toEqual(first);
     await expect(
@@ -85,9 +86,42 @@ describe("MemoryContextRepository", () => {
     await expect(
       repository.putBundle(
         "tenant_01",
-        contextBundle({ digest: "sha256:different" }),
+        contextBundle({
+          digest: { algorithm: "sha-256", value: "different" },
+        }),
       ),
     ).rejects.toThrow(/version|body|immutable|conflict/i);
+  });
+
+  it("normalizes a WFPP Digest and rejects every other Digest shape", async () => {
+    const repository = new MemoryContextRepository();
+
+    await expect(
+      repository.putBundle(
+        "tenant_01",
+        contextBundle({ context_id: "context_null_digest", digest: null }),
+      ),
+    ).resolves.toEqual({
+      context_id: "context_null_digest",
+      version: 1,
+      digest: null,
+    });
+
+    const invalidDigests: readonly JsonValue[] = [
+      "sha-256:legacy-string",
+      { algorithm: "sha-256" },
+      { algorithm: "md5", value: "abc123" },
+      { algorithm: "sha-256", value: "abc123", extra: true },
+      ["sha-256", "abc123"],
+    ];
+    for (const [index, digest] of invalidDigests.entries()) {
+      await expect(
+        repository.putBundle(
+          "tenant_01",
+          contextBundle({ context_id: `context_invalid_${index}`, digest }),
+        ),
+      ).rejects.toThrow(/digest|algorithm|value/i);
+    }
   });
 
   it("reports a known visible version with a matching digest as available", async () => {
@@ -123,7 +157,7 @@ describe("MemoryContextRepository", () => {
       "tenant_01",
       contextBundle({
         context_id: "context_no_audience",
-        digest: "sha256:no-audience",
+        digest: { algorithm: "sha-256", value: "no-audience" },
         visibility_scope: {
           actor_ids: [],
           endpoint_ids: [],
@@ -149,13 +183,13 @@ describe("MemoryContextRepository", () => {
     const repository = new MemoryContextRepository();
     const mutableBundle = structuredClone(contextBundle()) as {
       context_id: string;
-      digest: string;
+      digest: { algorithm: string; value: string };
       visibility_scope: { actor_ids: string[]; endpoint_ids: string[] };
     };
     const firstReference = await repository.putBundle("tenant_01", mutableBundle);
 
     mutableBundle.context_id = "mutated-input";
-    mutableBundle.digest = "sha256:mutated-input";
+    mutableBundle.digest.value = "mutated-input";
     mutableBundle.visibility_scope.actor_ids.length = 0;
     (firstReference as { context_id: string }).context_id = "mutated-output";
 
@@ -164,7 +198,7 @@ describe("MemoryContextRepository", () => {
         accessRequest({
           context_id: "context_01",
           version: 1,
-          digest: "sha256:context-01-v1",
+          digest: "sha-256:context-01-v1",
         }),
       ),
     ).resolves.toEqual({ kind: "available" });
@@ -173,7 +207,7 @@ describe("MemoryContextRepository", () => {
     ).resolves.toEqual({
       context_id: "context_01",
       version: 1,
-      digest: "sha256:context-01-v1",
+      digest: "sha-256:context-01-v1",
     });
   });
 
@@ -182,7 +216,7 @@ describe("MemoryContextRepository", () => {
     const reference: ContextReference = {
       context_id: "context_01",
       version: 1,
-      digest: "sha256:context-01-v1",
+      digest: "sha-256:context-01-v1",
     };
 
     await expect(
@@ -190,7 +224,10 @@ describe("MemoryContextRepository", () => {
         tenant_id: "tenant_01",
         bundle: contextBundle(),
         allowed_request: accessRequest(reference),
-        denied_request: accessRequest(reference, { actor_id: "actor_hidden" }),
+        denied_request: accessRequest(reference, {
+          actor_id: "actor_hidden",
+          endpoint_id: "endpoint_hidden",
+        }),
       }),
     ).resolves.toBeUndefined();
   });

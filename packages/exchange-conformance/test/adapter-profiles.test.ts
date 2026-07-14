@@ -96,26 +96,60 @@ function authorityAdapter(
   };
 }
 
+type ContextWeakness =
+  | "wrong_reference"
+  | "tenant_id"
+  | "context_id"
+  | "version"
+  | "actor_id"
+  | "endpoint_id";
+
+function isJsonObject(value: unknown): value is JsonObject {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function contextReference(bundle: JsonObject): ContextReference {
+  const digest = bundle.digest;
+  const normalizedDigest =
+    isJsonObject(digest)
+      ? `${String(digest.algorithm)}:${String(digest.value)}`
+      : null;
+  return {
+    context_id: String(bundle.context_id),
+    version: Number(bundle.version),
+    digest: normalizedDigest,
+  };
+}
+
 class ContextTestAdapter implements ContextRepository {
   readonly manifest: CapabilityManifest;
   behaviorCalls = 0;
   private bundle: JsonObject | null = null;
+  private tenantId: string | null = null;
+  private reference: ContextReference | null = null;
 
-  constructor(adapterManifest: CapabilityManifest) {
+  constructor(
+    adapterManifest: CapabilityManifest,
+    private readonly weakness: ContextWeakness | null = null,
+  ) {
     this.manifest = adapterManifest;
   }
 
-  async putBundle(_tenantId: string, bundle: JsonObject): Promise<ContextReference> {
+  async putBundle(tenantId: string, bundle: JsonObject): Promise<ContextReference> {
     this.behaviorCalls += 1;
     if (this.bundle !== null && JSON.stringify(this.bundle) !== JSON.stringify(bundle)) {
       throw new Error("immutable version conflict");
     }
     this.bundle = structuredClone(bundle);
-    return {
-      context_id: String(bundle.context_id),
-      version: Number(bundle.version),
-      digest: typeof bundle.digest === "string" ? bundle.digest : null,
-    };
+    this.tenantId = tenantId;
+    this.reference = contextReference(bundle);
+    return this.weakness === "wrong_reference"
+      ? {
+          context_id: "context_wrong",
+          version: 999,
+          digest: "sha-256:wrong",
+        }
+      : structuredClone(this.reference);
   }
 
   async checkAvailability(
@@ -125,30 +159,82 @@ class ContextTestAdapter implements ContextRepository {
     if (request.reference === null) {
       return { kind: "available" };
     }
+    if (this.reference === null || this.tenantId === null) {
+      return { kind: "unavailable", reason: "missing Context" };
+    }
+    if (
+      this.weakness !== "tenant_id" &&
+      request.tenant_id !== this.tenantId
+    ) {
+      return { kind: "unavailable", reason: "tenant mismatch" };
+    }
+    if (
+      this.weakness !== "context_id" &&
+      request.reference.context_id !== this.reference.context_id
+    ) {
+      return { kind: "unavailable", reason: "Context ID mismatch" };
+    }
+    if (
+      this.weakness !== "version" &&
+      request.reference.version !== this.reference.version
+    ) {
+      return { kind: "unavailable", reason: "version mismatch" };
+    }
     if (
       request.reference.digest !== null &&
-      request.reference.digest !== this.bundle?.digest
+      request.reference.digest !== this.reference.digest
     ) {
       return { kind: "unavailable", reason: "digest mismatch" };
     }
-    if (request.actor_id === "actor_allowed") {
-      return { kind: "available" };
+    if (
+      this.weakness !== "actor_id" &&
+      request.actor_id !== "actor_allowed"
+    ) {
+      return { kind: "unavailable", reason: "Actor hidden" };
     }
-    return { kind: "unavailable", reason: "hidden" };
+    if (
+      this.weakness !== "endpoint_id" &&
+      request.endpoint_id !== "endpoint_01"
+    ) {
+      return { kind: "unavailable", reason: "Endpoint hidden" };
+    }
+    return { kind: "available" };
   }
 }
 
 function signalAdapter(
   adapterManifest: CapabilityManifest,
   onDeliver: () => void = () => undefined,
-): SignalAdapter {
+  corruptObservation = false,
+): SignalAdapter & {
+  deliveries(): readonly {
+    readonly event: ProtocolEvent;
+    readonly destination: SignalDestination;
+  }[];
+} {
+  const deliveries: {
+    readonly event: ProtocolEvent;
+    readonly destination: SignalDestination;
+  }[] = [];
   return {
     manifest: adapterManifest,
     async deliver(
-      _event: ProtocolEvent,
+      deliveredEvent: ProtocolEvent,
       destination: SignalDestination,
     ): Promise<SignalDeliveryResult> {
       onDeliver();
+      deliveries.push({
+        event: {
+          ...structuredClone(deliveredEvent),
+          id: corruptObservation ? "event_corrupted" : deliveredEvent.id,
+        },
+        destination: {
+          ...structuredClone(destination),
+          destination_id: corruptObservation
+            ? "destination_corrupted"
+            : destination.destination_id,
+        },
+      });
       if (destination.destination_id === "retryable") {
         return { kind: "retryable_failure", detail: "temporary" };
       }
@@ -156,6 +242,9 @@ function signalAdapter(
         return { kind: "permanent_failure", detail: "invalid" };
       }
       return { kind: "accepted" };
+    },
+    deliveries() {
+      return structuredClone(deliveries);
     },
   };
 }
@@ -194,18 +283,22 @@ const authorityBase: AuthorityRequest = {
 const bundle: JsonObject = {
   context_id: "context_01",
   version: 1,
-  digest: "sha256:context-01",
+  created_at: "2026-07-14T00:00:00.000Z",
+  summary: "conformance Context",
+  items: [],
+  digest: { algorithm: "sha-256", value: "context-01" },
   visibility_scope: {
     actor_ids: ["actor_allowed"],
     endpoint_ids: ["endpoint_01"],
     expires_at: null,
   },
+  extensions: {},
 };
 
 const reference: ContextReference = {
   context_id: "context_01",
   version: 1,
-  digest: "sha256:context-01",
+  digest: "sha-256:context-01",
 };
 
 const destination = (destinationId: string): SignalDestination => ({
@@ -248,22 +341,74 @@ describe("peripheral Adapter Profile verifiers", () => {
         denied_request: {
           tenant_id: "tenant_01",
           actor_id: "actor_hidden",
-          endpoint_id: "endpoint_01",
+          endpoint_id: "endpoint_hidden",
           reference,
         },
       }),
     ).resolves.toBeUndefined();
   });
 
+  it("rejects Context anti-fakes with false references or missing isolation checks", async () => {
+    const weaknesses: readonly ContextWeakness[] = [
+      "wrong_reference",
+      "tenant_id",
+      "context_id",
+      "version",
+      "actor_id",
+      "endpoint_id",
+    ];
+
+    for (const weakness of weaknesses) {
+      await expect(
+        verifyContextProfile(
+          new ContextTestAdapter(contextManifest, weakness),
+          {
+            tenant_id: "tenant_01",
+            bundle,
+            allowed_request: {
+              tenant_id: "tenant_01",
+              actor_id: "actor_allowed",
+              endpoint_id: "endpoint_01",
+              reference,
+            },
+            denied_request: {
+              tenant_id: "tenant_01",
+              actor_id: "actor_hidden",
+              endpoint_id: "endpoint_hidden",
+              reference,
+            },
+          },
+        ),
+        `expected ${weakness} anti-fake to fail conformance`,
+      ).rejects.toThrow();
+    }
+  });
+
   it("verifies accepted, retryable, and permanent Signal outcomes", async () => {
+    const adapter = signalAdapter(signalManifest);
     await expect(
-      verifySignalProfile(signalAdapter(signalManifest), {
+      verifySignalProfile(adapter, {
         event,
         accepted_destination: destination("accepted"),
         retryable_destination: destination("retryable"),
         permanent_destination: destination("permanent"),
+        observe_deliveries: async () => adapter.deliveries(),
       }),
     ).resolves.toBeUndefined();
+  });
+
+  it("rejects a Signal adapter whose observed Event IDs and Destinations are corrupted", async () => {
+    const adapter = signalAdapter(signalManifest, () => undefined, true);
+
+    await expect(
+      verifySignalProfile(adapter, {
+        event,
+        accepted_destination: destination("accepted"),
+        retryable_destination: destination("retryable"),
+        permanent_destination: destination("permanent"),
+        observe_deliveries: async () => adapter.deliveries(),
+      }),
+    ).rejects.toThrow(/event|destination|delivery/i);
   });
 
   it("checks every exact profile and capability set before behavior", async () => {
@@ -321,26 +466,28 @@ describe("peripheral Adapter Profile verifiers", () => {
         denied_request: {
           tenant_id: "tenant_01",
           actor_id: "actor_hidden",
-          endpoint_id: "endpoint_01",
+          endpoint_id: "endpoint_hidden",
           reference,
         },
       }),
     ).rejects.toThrow(/digest_verification/i);
+    const signal = signalAdapter(
+      manifest("exchange.signal.v1", {
+        event_id_preservation: true,
+        outcome_classification: true,
+        payload_isolation: false,
+      }),
+      behaviorRan,
+    );
     await expect(
       verifySignalProfile(
-        signalAdapter(
-          manifest("exchange.signal.v1", {
-            event_id_preservation: true,
-            outcome_classification: true,
-            payload_isolation: false,
-          }),
-          behaviorRan,
-        ),
+        signal,
         {
           event,
           accepted_destination: destination("accepted"),
           retryable_destination: destination("retryable"),
           permanent_destination: destination("permanent"),
+          observe_deliveries: async () => signal.deliveries(),
         },
       ),
     ).rejects.toThrow(/payload_isolation/i);

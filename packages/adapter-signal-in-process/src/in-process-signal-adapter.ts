@@ -25,6 +25,20 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
+function destinationOutcome(
+  destination: SignalDestination,
+): SignalDeliveryResult {
+  const outcome = destination.configuration.outcome;
+  if (outcome === "retryable_failure" || outcome === "permanent_failure") {
+    const detail = destination.configuration.detail;
+    if (typeof detail !== "string") {
+      throw new TypeError(`${outcome} Destination outcome requires detail`);
+    }
+    return { kind: outcome, detail };
+  }
+  return { kind: "accepted" };
+}
+
 export class InProcessSignalAdapter implements SignalAdapter {
   private readonly configuredOutcomes = new Map<string, SignalDeliveryResult>();
   private readonly recordedDeliveries: RecordedDelivery[] = [];
@@ -47,7 +61,10 @@ export class InProcessSignalAdapter implements SignalAdapter {
       event: clonedEvent,
       destination: clonedDestination,
     });
-    return clone(this.configuredOutcomes.get(clonedEvent.id) ?? { kind: "accepted" });
+    return clone(
+      this.configuredOutcomes.get(clonedEvent.id) ??
+        destinationOutcome(clonedDestination),
+    );
   }
 
   deliveries(): readonly RecordedDelivery[] {

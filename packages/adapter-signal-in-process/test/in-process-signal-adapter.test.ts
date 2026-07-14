@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import { verifySignalProfile } from "@work-fabric/exchange-conformance";
 import type {
   ProtocolEvent,
+  SignalDeliveryResult,
   SignalDestination,
 } from "@work-fabric/exchange-spi";
 
@@ -29,11 +31,20 @@ function protocolEvent(id = "event_01"): ProtocolEvent {
   };
 }
 
-function destination(id = "destination_01"): SignalDestination {
+function destination(
+  id = "destination_01",
+  outcome?: SignalDeliveryResult["kind"],
+  detail?: string,
+): SignalDestination {
   return {
     destination_id: id,
     binding: "in-process",
-    configuration: { channel: "test", nested: { value: "original" } },
+    configuration: {
+      channel: "test",
+      nested: { value: "original" },
+      ...(outcome === undefined ? {} : { outcome }),
+      ...(detail === undefined ? {} : { detail }),
+    },
   };
 }
 
@@ -91,6 +102,46 @@ describe("InProcessSignalAdapter", () => {
       detail: "invalid destination",
     });
     expect(adapter.deliveries()).toHaveLength(2);
+  });
+
+  it("passes the reusable signal profile verifier with Destination-configured outcomes", async () => {
+    const adapter = new InProcessSignalAdapter();
+
+    await expect(
+      verifySignalProfile(adapter, {
+        event: protocolEvent(),
+        accepted_destination: destination("accepted", "accepted"),
+        retryable_destination: destination(
+          "retryable",
+          "retryable_failure",
+          "temporarily unavailable",
+        ),
+        permanent_destination: destination(
+          "permanent",
+          "permanent_failure",
+          "invalid destination",
+        ),
+        observe_deliveries: async () => adapter.deliveries(),
+      }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("keeps an Event-specific outcome ahead of Destination configuration", async () => {
+    const adapter = new InProcessSignalAdapter();
+    adapter.setOutcome("event_01", {
+      kind: "permanent_failure",
+      detail: "event-specific override",
+    });
+
+    await expect(
+      adapter.deliver(
+        protocolEvent(),
+        destination("retryable", "retryable_failure", "Destination fallback"),
+      ),
+    ).resolves.toEqual({
+      kind: "permanent_failure",
+      detail: "event-specific override",
+    });
   });
 
   it("isolates recorded payloads from both input and returned delivery mutation", async () => {

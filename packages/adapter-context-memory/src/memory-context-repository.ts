@@ -49,11 +49,23 @@ function requiredVersion(value: JsonValue | undefined): number {
   return value;
 }
 
-function optionalDigest(value: JsonValue | undefined): string | null {
+function normalizedDigest(value: JsonValue | undefined): string | null {
   if (value === null) {
     return null;
   }
-  return requiredString(value, "digest");
+  if (!isJsonObject(value)) {
+    throw new TypeError("digest must be a WFPP Digest object or null");
+  }
+  const keys = Object.keys(value).sort();
+  if (keys.length !== 2 || keys[0] !== "algorithm" || keys[1] !== "value") {
+    throw new TypeError("digest must contain exactly algorithm and value");
+  }
+  const algorithm = requiredString(value.algorithm, "digest.algorithm");
+  if (!new Set(["sha-256", "sha-384", "sha-512"]).has(algorithm)) {
+    throw new TypeError("digest.algorithm must be a WFPP digest algorithm");
+  }
+  const digestValue = requiredString(value.value, "digest.value");
+  return `${algorithm}:${digestValue}`;
 }
 
 function isJsonObject(value: JsonValue | undefined): value is JsonObject {
@@ -88,7 +100,7 @@ export class MemoryContextRepository implements ContextRepository {
     const clonedBundle = clone(bundle);
     const contextId = requiredString(clonedBundle.context_id, "context_id");
     const version = requiredVersion(clonedBundle.version);
-    const digest = optionalDigest(clonedBundle.digest);
+    const digest = normalizedDigest(clonedBundle.digest);
     const visibility = jsonObject(
       clonedBundle.visibility_scope,
       "visibility_scope",
