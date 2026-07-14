@@ -1123,9 +1123,9 @@ export interface SignalAdapter extends ExchangeAdapter {
 
 `LocalIdentityProvider` receives immutable evidence-to-Principal records and exposes Profile `exchange.identity.v1`. `LocalAuthorityPolicy` receives explicit allow rules keyed by Tenant, Principal, Actor, Endpoint, action, and optional resource and exposes `exchange.authority.v1`. Missing evidence or rule denies; do not implement wildcard allow.
 
-`MemoryContextRepository` stores cloned versioned bundles by Tenant, Context ID, and Version. `putBundle` is idempotent for the same Digest and rejects a different body at the same version. A null reference returns `available`; every non-null reference must exist and match Digest when supplied. Visibility requires at least one declared audience; a non-empty Actor list must contain the Actor and a non-empty Endpoint list must contain the Endpoint.
+`MemoryContextRepository` stores cloned, validated WFPP Context Bundles by Tenant, Context ID, and Version. Normalize the wire Digest `{ algorithm, value }` to the `ContextReference.digest` string `<algorithm>:<value>` (for example `sha-256:abc123`); preserve `null` as `null`, and reject any other Digest shape. `putBundle` is idempotent for the same Digest and rejects a different body at the same version. A null reference returns `available`; every non-null reference must exist and match the normalized Digest when supplied. Visibility requires at least one declared audience; a non-empty Actor list must contain the Actor and a non-empty Endpoint list must contain the Endpoint.
 
-`InProcessSignalAdapter` records cloned `{event, destination}` deliveries. It exposes test-only methods:
+`InProcessSignalAdapter` records cloned `{event, destination}` deliveries. For deterministic Profile fixtures, a Destination may use adapter-specific `configuration.outcome` (`accepted`, `retryable_failure`, or `permanent_failure`) and `configuration.detail`; these fields are not part of WFPP or the Signal SPI. The existing Event-specific outcome hook takes precedence. It exposes test-only methods:
 
 ```ts
 setOutcome(eventId: string, result: SignalDeliveryResult): void;
@@ -1176,6 +1176,10 @@ export interface SignalProfileFixtures {
   readonly accepted_destination: SignalDestination;
   readonly retryable_destination: SignalDestination;
   readonly permanent_destination: SignalDestination;
+  readonly observe_deliveries: () => Promise<readonly {
+    readonly event: ProtocolEvent;
+    readonly destination: SignalDestination;
+  }[]>;
 }
 
 export async function verifyIdentityProfile(
@@ -1199,7 +1203,7 @@ export async function verifySignalProfile(
 ): Promise<void>;
 ```
 
-The shared scenarios verify, respectively: known/unknown evidence and Actor type preservation; explicit allow/default deny; immutable versioned Context plus visibility/digest checks; Event ID preservation and all three delivery outcomes. Each verifier first checks the exact Profile name and required capability booleans.
+The shared scenarios verify, respectively: known/unknown evidence and Actor type preservation; explicit allow/default deny; immutable versioned Context plus visibility/digest checks; Event ID/Destination preservation through the Fixture's read-only Delivery Probe and all three delivery outcomes. The three Signal Destinations must be preconfigured by the Adapter test environment to produce their named outcomes; the verifier does not interpret Adapter-specific configuration. Each verifier first checks the exact Profile name and required capability booleans.
 
 - [ ] **Step 7: Verify package dependency direction and all Adapter Profiles**
 

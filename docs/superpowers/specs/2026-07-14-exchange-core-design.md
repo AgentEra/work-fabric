@@ -237,6 +237,8 @@ visibility_scope
 
 Context 内容可以由 Exchange、飞书、知识库、对象存储或独立 Workspace/Context Service 保存。大内容获取不进入事件提交事务。
 
+WFPP `ContextBundle.digest` 在线上协议中保持 `{ algorithm, value } | null`。Context SPI 的 `ContextReference.digest` 使用归一化字符串 `<algorithm>:<value> | null`（例如 `sha-256:abc123`），以便不同 Context Adapter 使用稳定、可比较且不依赖某个 SDK 的引用形式。协议对象到该字符串的归一化只能发生在可信的 Context Adapter 边界；不得接受未声明算法的任意字符串来冒充已验证的协议 Digest。
+
 若 Offer 不包含 Context，则 Accept 的 `context_available` 条件视为满足；若包含必要 Context，Recipient 在接受前必须能够访问。责任已经成立后 Context 暂时不可用，不回滚历史交接，而是通过查询状态和事件暴露 `context_unavailable`。
 
 ### 5.7 Transfer
@@ -481,6 +483,8 @@ SignalAdapter.deliver(canonical_event, destination)
 ```
 
 消费游标、订阅过滤、退避、重试、dead-letter 和投递状态属于 Exchange Runtime，不下放给飞书、Kafka 或 NATS Adapter。
+
+Signal Profile 的 Event ID 与 Destination 保留属于外部副作用，不能只从 `deliver` 的结果枚举推断。Conformance Harness 必须由 Adapter 测试环境提供只读 Delivery Probe，观察测试目的地实际收到的 Canonical Event 与 Destination；Probe 只属于测试 Fixture，不进入生产 Signal SPI。各结果场景由 Fixture 中预配置的 Adapter-specific Destination 产生，Profile Verifier 不依赖任何具体配置字段。
 
 ## 10. 幂等、并发和错误恢复
 
