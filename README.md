@@ -93,7 +93,7 @@ Work Fabric 由以下逻辑能力组成：
 - **Trust & Trace**：身份、委托、权限、因果、审计和责任历史。
 - **Read Projections**：Inbox、项目状态、协作时间线和关系视图。
 
-详细说明见[整体架构文档](docs/architecture.md)。
+详细说明见[整体架构文档](docs/architecture.md)。可执行的协议规范、Canonical Schema、Handoff 状态机、Golden Fixtures 和参考序列见 [WFPP v1 Core Protocol](protocol/README.md)。
 
 ## 示例接入
 
@@ -105,19 +105,22 @@ Work Fabric 由以下逻辑能力组成：
 
 ## 当前状态
 
-项目处于架构与协议设计阶段。第一个可交付里程碑聚焦最小协作交接闭环：
+项目已经完成 WFPP v1 Core Protocol Artifacts：协议正文、30 个公共 JSON Schema、机器可读 Handoff 生命周期、事件与订阅契约、Golden Fixtures、一致性 CLI 和三类参考序列。下一里程碑将以这些产物为唯一语义基线实现 Exchange Server 与独立 Binding：
 
-1. Unified Participation Protocol 与基础 Schema。
-2. Participant、Endpoint、WorkReference、CollaborationThread 和 Handoff。
-3. Handoff 状态机、Receipt 和 Outbox Event。
-4. Agent Endpoint Gateway。
-5. 飞书通知/交互 Adapter。
-6. 本地 Agent Runtime 参考接入。
-7. 基础协作审计时间线。
+1. Exchange Core 的权威状态、幂等、并发与 Outbox。
+2. 独立 HTTP/JSON、SSE 与 Webhook Binding。
+3. Agent Endpoint Gateway 与本地 Agent Runtime 参考接入。
+4. 飞书通知/交互 Adapter 和文档 Connector。
+5. 基础协作审计时间线与 Inbox Projection。
 
 ## 文档
 
 - [整体架构](docs/architecture.md)
+- [WFPP v1 Core Protocol 与 Schema 索引](protocol/README.md)
+- [机器可读 Handoff 生命周期](protocol/spec/handoff-lifecycle.json)
+- [一致性用例与 Exchange Contract](protocol/conformance/)
+- [人、Agent 与系统参考序列](protocol/examples/)
 - [协作对接与工作交接详细设计](docs/superpowers/specs/2026-07-13-collaboration-handoff-fabric-design.md)
 - [Work Fabric Participation Protocol v1 设计](docs/superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)
+- [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

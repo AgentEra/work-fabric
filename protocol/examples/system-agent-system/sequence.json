@@ -1,0 +1,150 @@
+{
+  "name": "Delivery system hands deployment preparation to an Agent and receives the result",
+  "description": "A system connector creates a Handoff, an Agent subscribes and acknowledges delivery, performs work externally, and returns deployment artifacts for system verification.",
+  "messages": [
+    {
+      "schema_id": "urn:work-fabric:schema:v1:handoff-offer",
+      "instance": {
+        "thread_id": "thread_release_2026_07",
+        "work_reference": {
+          "uri": "urn:delivery:release:2026-07",
+          "media_type": "application/vnd.release+json",
+          "version": "8",
+          "digest": null,
+          "extensions": {}
+        },
+        "target": {
+          "endpoint_id": "endpoint_release_agent_01"
+        },
+        "intent": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Prepare the deployment manifest and verification evidence"
+          }
+        ],
+        "authority_scope": {
+          "delegation_id": "delegation_release_01",
+          "scopes": ["release:read", "artifact:write"],
+          "resource_refs": ["urn:delivery:release:2026-07"],
+          "expires_at": "2026-07-15T08:00:00Z",
+          "may_redelegate": false
+        },
+        "acceptance_criteria": [
+          {
+            "criterion_id": "manifest-valid",
+            "description": "The deployment platform validates the manifest",
+            "required": true,
+            "result_schema_ref": null,
+            "required_evidence_types": ["validation_report"]
+          }
+        ],
+        "verifier": {
+          "actor_id": "actor_deployment_system_01",
+          "actor_type": "system"
+        },
+        "priority": "high",
+        "accept_by": "2026-07-14T09:00:00Z",
+        "result_due_at": "2026-07-15T08:00:00Z"
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:subscription-filter",
+      "instance": {
+        "event_types": ["workfabric.handoff.offered.v1"],
+        "actor_ids": ["actor_release_agent_01"],
+        "endpoint_ids": ["endpoint_release_agent_01"],
+        "thread_ids": [],
+        "handoff_ids": [],
+        "work_reference_uris": ["urn:delivery:release:2026-07"],
+        "capability_ids": ["release.preparation"],
+        "lifecycle_states": ["offered"]
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:protocol-event",
+      "instance": {
+        "specversion": "1.0",
+        "id": "event_release_offer_01",
+        "source": "urn:work-fabric:exchange:exchange_01",
+        "type": "workfabric.handoff.offered.v1",
+        "subject": "handoff_release_01",
+        "time": "2026-07-14T08:00:00Z",
+        "datacontenttype": "application/json",
+        "dataschema": "urn:work-fabric:schema:v1:handoff-offered-event",
+        "wftenant": "tenant_01",
+        "wfexchange": "exchange_01",
+        "wfthread": "thread_release_2026_07",
+        "wfhandoff": "handoff_release_01",
+        "wfsequence": 1,
+        "wfvisibility": "participants",
+        "data": {
+          "resource_version": 1,
+          "change": {
+            "change_type": "created",
+            "from_state": null,
+            "to_state": "offered"
+          },
+          "receipt": null
+        }
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:delivery-ack",
+      "instance": {
+        "delivery_id": "delivery_release_01",
+        "subscription_id": "subscription_release_agent_01",
+        "outcome": "acknowledged",
+        "acknowledged_at": "2026-07-14T08:00:02Z",
+        "last_event_id": "event_release_offer_01",
+        "cursor": "cursor_release_02"
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:result-submission",
+      "instance": {
+        "summary": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Prepared and validated the deployment manifest"
+          }
+        ],
+        "artifacts": [
+          {
+            "artifact_id": "artifact_manifest_01",
+            "artifact_type": "deployment_manifest",
+            "resource": {
+              "uri": "urn:deployment:manifest:release-2026-07",
+              "media_type": "application/yaml",
+              "version": "8",
+              "digest": null,
+              "extensions": {}
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "evidence_id": "evidence_validation_01",
+            "evidence_type": "validation_report",
+            "content": {
+              "kind": "data",
+              "schema_ref": "urn:example:schema:deployment-validation:v1",
+              "data": {
+                "valid": true,
+                "warnings": 0
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "lifecycle": [
+    { "interaction": "handoff.offer", "conditions": [], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
+    { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" },
+    { "interaction": "handoff.return_result", "conditions": ["result_schema_valid", "authority_valid"], "expected_state": "result_returned", "expected_event_type": "workfabric.handoff.result_returned.v1" },
+    { "interaction": "handoff.verify", "conditions": ["verifier_authorized", "criteria_satisfied"], "expected_state": "verified", "expected_event_type": "workfabric.handoff.verified.v1" },
+    { "interaction": "handoff.close", "conditions": ["verifier_authorized"], "expected_state": "closed", "expected_event_type": "workfabric.handoff.closed.v1" }
+  ]
+}

@@ -99,7 +99,7 @@ Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具�
 
 统一参与协议是 Work Fabric 的核心产品。它统一协作语义，而不是强制统一传输方式。
 
-Protocol v1 的规范角色、Canonical Message、状态机、Event、Subscription 和 Binding 决策见 [Work Fabric Participation Protocol v1 设计](superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)。
+Protocol v1 的规范角色、Canonical Message、状态机、Event、Subscription 和 Binding 决策见 [Work Fabric Participation Protocol v1 设计](superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)。已实现的语言无关规范、Schema 索引、机器可读生命周期、Golden Fixtures 和参考序列见 [WFPP v1 Core Protocol](../protocol/README.md)。
 
 ### 4.1 协议领域
 
@@ -132,6 +132,8 @@ L0  Transport Bindings
 ```
 
 不同传输绑定必须保持相同的领域语义和状态机。例如，飞书卡片点击和 Agent 的流式 `accept` 消息都可以表达 `RESPONSIBILITY_ACCEPTED`，但交互方式不同。
+
+Core Protocol Artifacts 是后续实现的唯一机器可读语义基线。Exchange Server、HTTP/SSE/Webhook、A2A、MCP、飞书 Adapter 和 Agent Runtime SDK 必须依赖这些 Core Artifact，并通过 `npm run conformance`；它们不能在各自实现中复制或重定义 Handoff 状态机。
 
 ### 4.3 兼容性规则
 
