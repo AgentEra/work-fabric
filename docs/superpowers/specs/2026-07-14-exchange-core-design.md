@@ -411,6 +411,8 @@ protocol_data
 
 初期可以只有一个 Partition。后续可以按租户或稳定的 Collaboration Scope 分区，而不改变领域和协议语义。
 
+Phase 1 的根 Handoff 在首次 Offer 时使用 `"partition:" + sha256(canonicalJson({ tenant_id, root_handoff_id }))` 确定 Partition，并随首个事件固化；后续单流命令沿用已提交事件的 Partition。子 Handoff 不独立哈希，始终继承根/父 Handoff 的 Partition，从而保证责任 Transfer 可以原子多流提交。
+
 “全局事件”表示所有规范事件都可以通过统一订阅机制发现和恢复消费，不表示物理存储必须使用单一序列。
 
 `partition_position` 是 Exchange 内部的恢复位置，不等于 WFPP CloudEvent 的 `wfsequence`。`wfsequence` 继续表达单个协议资源的顺序，Handoff 事件通常映射其 Resource Version；Subscription Cursor 是不透明值，可以封装一个或多个 Partition Position，客户端不得解析其内部格式。

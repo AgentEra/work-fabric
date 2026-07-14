@@ -1916,9 +1916,10 @@ authorize Principal/Actor/Endpoint/action/resource
 compute idempotency digest
 return saved same-digest Outcome before loading streams
 reject saved different-digest key
-decode command
-for Offer, persist the validated immutable Context Bundle through ContextRepository and replace it with ContextReference
+for Offer, generate the root Handoff ID, derive its stable root Partition ID, persist the validated immutable Context Bundle through ContextRepository, and obtain ContextReference
+decode command using the generated root ID and immutable ContextReference
 load and replay target stream
+for an existing Handoff, take its Partition ID from committed stream events and require every event to match the Envelope Tenant and that Partition
 check expected_version for existing resources
 check Context availability for Accept
 decide Domain events
@@ -1928,6 +1929,8 @@ map commit result to current request_message_id
 ```
 
 If validation or authentication fails, return a WFPP Operation Result without persistence. Domain rejections return `rejected`; expected-version conflicts return `conflict`; infrastructure exceptions return `temporarily_unavailable` with `retryable: true` and are not persisted.
+
+For a root Offer, derive `partition_id` as `"partition:" + sha256(canonicalJson({ tenant_id, root_handoff_id }))`. Generate no Handoff/Event/Receipt/Commit ID and persist no Context before the same-key idempotency lookup completes. Existing-resource commands reuse the Partition ID recorded on their stream; they never re-hash the Handoff ID. A deterministic Domain rejection may be stored as an eventless outcome in that resolved Partition.
 
 - [ ] **Step 5: Normalize replayed outcomes correctly**
 
@@ -2079,7 +2082,7 @@ export function acceptChildAndTransferParent(
 
 Add a dedicated `decodeHandoffTransfer(envelope, actor, generatedChildHandoffId, childContextReference)` application-boundary codec. It consumes only an already validated `workfabric.handoff.transfer.v1` Payload, returns `DecodedHandoffTransfer` with the parent ID, generated child ID, trusted Actor, and decoded child Package, and rejects every other message type. Do not add Transfer to the single-stream `HandoffCommand` union.
 
-Derive the root Partition ID once for a root Offer as `"partition:" + sha256(canonicalJson({ tenant_id, root_handoff_id }))`. Persist the stream-to-Partition assignment in the storage adapter. Every child Offer inherits the parent's Partition ID; never hash the child independently. Persist a validated Child Offer Context Bundle through Context Repository before creating the child event, using the same immutable/idempotent semantics as a root Offer.
+Task 9 already derives and persists the root Partition ID. Persist the stream-to-Partition assignment in the storage adapter. Every child Offer inherits the parent's recorded Partition ID; never hash the child independently. Persist a validated Child Offer Context Bundle through Context Repository before creating the child event, using the same immutable/idempotent semantics as a root Offer.
 
 On child Accept, load parent and child, encode each stream with its own expected version, and send both `StreamAppend` values in one `commitAtomically` request. The Receipt belongs to the child Accepted event; the parent Transferred event has no Receipt.
 
