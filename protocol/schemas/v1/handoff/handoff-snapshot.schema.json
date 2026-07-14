@@ -1,0 +1,142 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-snapshot",
+  "title": "Handoff Snapshot",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "handoff_id",
+    "thread_id",
+    "resource_version",
+    "lifecycle_state",
+    "current_responsible_actor",
+    "package",
+    "latest_status",
+    "result",
+    "parent_handoff_id",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "thread_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "resource_version": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+    },
+    "lifecycle_state": {
+      "enum": [
+        "offered",
+        "accepted",
+        "result_returned",
+        "verified",
+        "rework_requested",
+        "closed",
+        "declined",
+        "expired",
+        "cancelled",
+        "transferred"
+      ]
+    },
+    "current_responsible_actor": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:actor-ref" },
+        { "type": "null" }
+      ]
+    },
+    "package": {
+      "$ref": "#/$defs/handoff_package"
+    },
+    "latest_status": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:status-update" },
+        { "type": "null" }
+      ]
+    },
+    "result": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:result-submission" },
+        { "type": "null" }
+      ]
+    },
+    "parent_handoff_id": {
+      "oneOf": [
+        {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        },
+        { "type": "null" }
+      ]
+    },
+    "created_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "handoff_package": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "work_reference",
+        "target",
+        "intent",
+        "context_bundle_id",
+        "context_bundle_version",
+        "authority_scope_id",
+        "acceptance_criteria_ids",
+        "verifier_actor_id",
+        "accept_by",
+        "result_due_at"
+      ],
+      "properties": {
+        "work_reference": {
+          "$ref": "urn:work-fabric:schema:v1:resource-ref"
+        },
+        "target": {
+          "$ref": "urn:work-fabric:schema:v1:handoff-target"
+        },
+        "intent": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "urn:work-fabric:schema:v1:content-part"
+          }
+        },
+        "context_bundle_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        },
+        "context_bundle_version": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+        },
+        "authority_scope_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        },
+        "acceptance_criteria_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+          }
+        },
+        "verifier_actor_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        },
+        "accept_by": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+        },
+        "result_due_at": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+        }
+      }
+    }
+  }
+}

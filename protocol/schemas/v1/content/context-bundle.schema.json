@@ -58,7 +58,12 @@
       }
     },
     "digest": {
-      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/digest"
+      "oneOf": [
+        {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/digest"
+        },
+        { "type": "null" }
+      ]
     },
     "extensions": {
       "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"

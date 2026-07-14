@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:acceptance-criterion",
+  "title": "Acceptance Criterion",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "criterion_id",
+    "description",
+    "required",
+    "result_schema_ref",
+    "required_evidence_types"
+  ],
+  "properties": {
+    "criterion_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "required": {
+      "type": "boolean"
+    },
+    "result_schema_ref": {
+      "oneOf": [
+        {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+        },
+        { "type": "null" }
+      ]
+    },
+    "required_evidence_types": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "maxLength": 128
+      }
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

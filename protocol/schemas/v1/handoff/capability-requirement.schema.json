@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:capability-requirement",
+  "title": "Capability Requirement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["capability_id"],
+  "properties": {
+    "capability_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 128
+    },
+    "version_constraint": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "input_media_types": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[^/\\s]+/[^/\\s]+$",
+        "maxLength": 255
+      }
+    },
+    "output_media_types": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[^/\\s]+/[^/\\s]+$",
+        "maxLength": 255
+      }
+    },
+    "constraints": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/safe_json_value"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

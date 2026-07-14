@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-target",
+  "title": "Handoff Target",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_id"],
+      "properties": {
+        "actor_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["endpoint_id"],
+      "properties": {
+        "endpoint_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capability_requirement"],
+      "properties": {
+        "capability_requirement": {
+          "$ref": "urn:work-fabric:schema:v1:capability-requirement"
+        }
+      }
+    }
+  ]
+}
