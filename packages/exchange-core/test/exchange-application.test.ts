@@ -1033,6 +1033,7 @@ describe("ExchangeApplication", () => {
         receipt: null,
         error: null,
       },
+      version_checks: [],
       appends: [
         {
           stream_id: "handoff_1",
@@ -1417,46 +1418,22 @@ describe("ExchangeApplication", () => {
     expect(await persistence.readStream("handoff_1")).toHaveLength(1);
   });
 
-  it("refuses Transfer and internal child-accepted commands in Phase 1", async () => {
-    const transferRule: LocalAuthorityAllowRule = {
+  it("refuses internal child-accepted commands at the public Application boundary", async () => {
+    const childAcceptedRule: LocalAuthorityAllowRule = {
       tenant_id: "tenant_01",
       principal_id: "principal_agent",
       actor_id: "actor_agent",
       actor_type: "agent",
       endpoint_id: "endpoint_agent",
-      action: "workfabric.handoff.transfer.v1",
+      action: "workfabric.handoff.child_accepted.v1",
       resource_id: "handoff_1",
     };
-    const childAcceptedRule: LocalAuthorityAllowRule = {
-      ...transferRule,
-      action: "workfabric.handoff.child_accepted.v1",
-    };
-    const transfer: CommandEnvelope = {
+    const childAccepted: CommandEnvelope = {
       ...existingEnvelope(
         "accept",
-        { handoff_id: "handoff_1" },
+        { handoff_id: "handoff_2" },
         { actor: "agent", expectedVersion: 2 },
       ),
-      message_id: "message_transfer",
-      message_type: "workfabric.handoff.transfer.v1",
-      idempotency_key: "transfer-01",
-      payload: {
-        parent_handoff_id: "handoff_1",
-        child_offer: {
-          ...offerPayload,
-          target: { actor_id: "actor_child" },
-          authority_scope: {
-            delegation_id: "delegation_02",
-            scopes: ["work:read"],
-            resource_refs: ["urn:work:item:42"],
-            expires_at: "2026-07-15T08:00:00Z",
-            may_redelegate: false,
-          },
-        },
-      },
-    };
-    const childAccepted: CommandEnvelope = {
-      ...transfer,
       message_id: "message_child_accepted",
       message_type: "workfabric.handoff.child_accepted.v1",
       idempotency_key: "child-accepted-01",
@@ -1466,18 +1443,6 @@ describe("ExchangeApplication", () => {
       },
     };
 
-    const transferOrder: string[] = [];
-    const transferPersistence = new TrackingMemoryPersistence(transferOrder);
-    const transferContext = new TrackingContextRepository(transferOrder);
-    const transferHarness = harness({
-      persistence: transferPersistence,
-      context: transferContext,
-      allowRules: [...allowRules(), transferRule],
-      order: transferOrder,
-    });
-    const transferResult = await transferHarness.application.handle(transfer, {
-      token: "agent",
-    });
     const validInternalValidator: WfppCommandValidator = {
       validate() {
         return { valid: true };
@@ -1501,34 +1466,22 @@ describe("ExchangeApplication", () => {
       { token: "agent" },
     );
 
-    for (const result of [transferResult, childAcceptedResult]) {
-      expect(result).toMatchObject({
-        operation_status: "rejected",
-        resource: null,
-        receipt: null,
-        error: { code: "invalid_argument", retryable: false },
-      });
-    }
-    expect(transferOrder).toEqual([
-      "validator.validate",
-      "identity.resolve",
-      "authority.authorize",
-    ]);
+    expect(childAcceptedResult).toMatchObject({
+      operation_status: "rejected",
+      resource: null,
+      receipt: null,
+      error: { code: "invalid_argument", retryable: false },
+    });
     expect(childOrder).toEqual([
       "validator.validate",
       "identity.resolve",
       "authority.authorize",
     ]);
-    for (const [current, persistence, context] of [
-      [transferHarness, transferPersistence, transferContext],
-      [childHarness, childPersistence, childContext],
-    ] as const) {
-      expect(current.ids.calls).toEqual([]);
-      expect(persistence.findCommandCalls).toBe(0);
-      expect(persistence.readStreamCalls).toBe(0);
-      expect(persistence.commitCalls).toBe(0);
-      expect(context.putBundleCalls).toBe(0);
-      expect(context.checkAvailabilityCalls).toBe(0);
-    }
+    expect(childHarness.ids.calls).toEqual([]);
+    expect(childPersistence.findCommandCalls).toBe(0);
+    expect(childPersistence.readStreamCalls).toBe(0);
+    expect(childPersistence.commitCalls).toBe(0);
+    expect(childContext.putBundleCalls).toBe(0);
+    expect(childContext.checkAvailabilityCalls).toBe(0);
   });
 });

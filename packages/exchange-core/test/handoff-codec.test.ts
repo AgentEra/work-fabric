@@ -14,6 +14,7 @@ import {
 import {
   canonicalJson,
   decodeHandoffCommand,
+  decodeHandoffTransfer,
   encodeHandoffEvents,
   evolveHandoff,
   handoffEventToJson,
@@ -366,6 +367,58 @@ describe("Handoff Command decoding", () => {
         null,
       ),
     ).toThrow(/Unsupported single-stream Handoff message_type/);
+  });
+});
+
+describe("Handoff Transfer decoding", () => {
+  it("decodes only the validated public Transfer with generated child identity", () => {
+    const transferActor: ActorRef = {
+      actor_id: "actor_parent_recipient",
+      actor_type: "agent",
+    };
+    const childOffer: JsonObject = {
+      ...offerPayload,
+      target: { actor_id: "actor_child_recipient" },
+    };
+
+    expect(
+      decodeHandoffTransfer(
+        envelope("workfabric.handoff.transfer.v1", {
+          parent_handoff_id: "handoff_parent",
+          child_offer: childOffer,
+        }),
+        transferActor,
+        "handoff_generated_child",
+        contextReference,
+      ),
+    ).toEqual({
+      parent_handoff_id: "handoff_parent",
+      child_handoff_id: "handoff_generated_child",
+      actor: transferActor,
+      child_package: {
+        work_reference: childOffer.work_reference,
+        target: childOffer.target,
+        intent: childOffer.intent,
+        context: contextReference,
+        authority_scope: childOffer.authority_scope,
+        acceptance_criteria: childOffer.acceptance_criteria,
+        verifier,
+        priority: "normal",
+        accept_by: "2026-07-14T09:00:00Z",
+        result_due_at: "2026-07-15T08:00:00Z",
+      },
+    });
+  });
+
+  it("rejects every non-Transfer message type", () => {
+    expect(() =>
+      decodeHandoffTransfer(
+        envelope("workfabric.handoff.offer.v1", offerPayload),
+        actor,
+        "handoff_generated_child",
+        null,
+      ),
+    ).toThrow(/Unsupported Handoff Transfer message_type/);
   });
 });
 

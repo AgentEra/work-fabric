@@ -191,6 +191,39 @@ function handoffId(payload: JsonObject): string {
   return string(payload.handoff_id, "payload.handoff_id");
 }
 
+export interface DecodedHandoffTransfer {
+  readonly parent_handoff_id: string;
+  readonly child_handoff_id: string;
+  readonly actor: ActorRef;
+  readonly child_package: HandoffPackage;
+}
+
+export function decodeHandoffTransfer(
+  envelope: CommandEnvelope,
+  actor: ActorRef,
+  generatedChildHandoffId: string,
+  childContextReference: ContextReference | null,
+): DecodedHandoffTransfer {
+  if (envelope.message_type !== "workfabric.handoff.transfer.v1") {
+    throw new Error(
+      `Unsupported Handoff Transfer message_type: ${envelope.message_type}`,
+    );
+  }
+  const childOffer = object(
+    envelope.payload.child_offer,
+    "payload.child_offer",
+  );
+  return {
+    parent_handoff_id: string(
+      envelope.payload.parent_handoff_id,
+      "payload.parent_handoff_id",
+    ),
+    child_handoff_id: generatedChildHandoffId,
+    actor,
+    child_package: decodeOfferPackage(childOffer, childContextReference),
+  };
+}
+
 export function decodeHandoffCommand(
   envelope: CommandEnvelope,
   actor: ActorRef,

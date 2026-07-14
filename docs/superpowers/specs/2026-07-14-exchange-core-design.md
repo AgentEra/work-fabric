@@ -341,7 +341,7 @@ SPI 必须表达协作语义，不能退化为 `save(entity)`、`update(row)` �
 EventJournal
 ├── readStream(stream_id, from_version)
 ├── append(stream_id, expected_version, events)
-├── appendAtomically(partition_id, stream_appends, command_record)
+├── appendAtomically(partition_id, stream_version_checks, stream_appends, command_record)
 └── readPartition(partition_id, after_position, limit)
 
 CommandDeduplication
@@ -365,6 +365,8 @@ DeliveryStateStore
 ```
 
 `appendAtomically` 必须把 Command Deduplication 记录、规范化 Operation Outcome 和全部事件放在同一个原子事务中。Outcome 保存资源、Receipt 和错误等可重放语义，不固化响应 Envelope 的 `request_message_id`；Snapshot 不在该强制事务内。
+
+`stream_version_checks` 表达不追加事件的只读乐观并发前置条件，必须与所有 `stream_appends.expected_version` 在同一事务或锁内检查。同一流不得同时出现在只读检查和追加中，重复只读检查也必须拒绝。Transfer 创建子 Handoff 时使用父流版本检查加子流追加，以关闭父流读取到提交之间的竞态，不为此制造空的父流领域事件。
 
 ### 8.2 Event Record 元数据
 

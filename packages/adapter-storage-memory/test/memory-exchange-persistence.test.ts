@@ -53,6 +53,7 @@ function oneEventCommit(
     payload_digest: `sha256:${eventId}`,
     request_message_id: `message_${eventId}`,
     outcome: acceptedOutcome,
+    version_checks: [],
     appends: [
       {
         stream_id: `stream_${eventId}`,
@@ -134,6 +135,7 @@ describe("MemoryExchangePersistence", () => {
       payload_digest: "sha256:seed",
       request_message_id: "message_seed",
       outcome: acceptedOutcome,
+      version_checks: [],
       appends: [
         { stream_id: "parent", expected_version: 0, events: [parentCreated] },
         { stream_id: "child", expected_version: 0, events: [childCreated] },
@@ -148,6 +150,7 @@ describe("MemoryExchangePersistence", () => {
       payload_digest: "sha256:transfer",
       request_message_id: "message_01",
       outcome: acceptedOutcome,
+      version_checks: [],
       appends: [
         { stream_id: "parent", expected_version: 1, events: [parentTransferred] },
         { stream_id: "child", expected_version: 1, events: [childAccepted] },
@@ -169,6 +172,7 @@ describe("MemoryExchangePersistence", () => {
       payload_digest: "sha256:transfer-02",
       request_message_id: "message_02",
       outcome: acceptedOutcome,
+      version_checks: [],
       appends: [
         { stream_id: "parent", expected_version: 2, events: [proposedEvent("parent-2")] },
         { stream_id: "child", expected_version: 1, events: [proposedEvent("child-2")] },
@@ -182,6 +186,110 @@ describe("MemoryExchangePersistence", () => {
     expect(await store.readStream("parent")).toHaveLength(2);
     expect(await store.readStream("child")).toHaveLength(2);
     expect(await store.findCommand("tenant_01", "transfer-02")).toBeNull();
+  });
+
+  it("atomically evaluates read-only stream version checks with appends", async () => {
+    const store = new MemoryExchangePersistence();
+    await store.commitAtomically({
+      ...oneEventCommit("parent-created"),
+      appends: [
+        {
+          stream_id: "parent",
+          expected_version: 0,
+          events: [proposedEvent("parent-created")],
+        },
+      ],
+      version_checks: [],
+    });
+
+    const createdChild = await store.commitAtomically({
+      ...oneEventCommit("child-created"),
+      version_checks: [{ stream_id: "parent", expected_version: 1 }],
+      appends: [
+        {
+          stream_id: "child",
+          expected_version: 0,
+          events: [proposedEvent("child-created")],
+        },
+      ],
+    });
+    expect(createdChild.kind).toBe("committed");
+    expect(await store.readStream("parent")).toHaveLength(1);
+    expect(await store.readStream("child")).toHaveLength(1);
+
+    await store.commitAtomically({
+      ...oneEventCommit("parent-advanced"),
+      version_checks: [],
+      appends: [
+        {
+          stream_id: "parent",
+          expected_version: 1,
+          events: [proposedEvent("parent-advanced")],
+        },
+      ],
+    });
+    const conflict = await store.commitAtomically({
+      ...oneEventCommit("stale-child"),
+      version_checks: [{ stream_id: "parent", expected_version: 1 }],
+      appends: [
+        {
+          stream_id: "stale-child",
+          expected_version: 0,
+          events: [proposedEvent("stale-child")],
+        },
+      ],
+    });
+
+    expect(conflict).toEqual({
+      kind: "version_conflict",
+      current_versions: { parent: 2, "stale-child": 0 },
+    });
+    expect(await store.readStream("stale-child")).toEqual([]);
+    expect(await store.findCommand("tenant_01", "key_stale-child")).toBeNull();
+
+    await expect(
+      store.commitAtomically({
+        ...oneEventCommit("cross-partition-child"),
+        partition_id: "partition_02",
+        version_checks: [{ stream_id: "parent", expected_version: 2 }],
+        appends: [
+          {
+            stream_id: "cross-partition-child",
+            expected_version: 0,
+            events: [proposedEvent("cross-partition-child")],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/partition/i);
+    expect(await store.readStream("cross-partition-child")).toEqual([]);
+  });
+
+  it("rejects duplicate version checks and check/append overlap", async () => {
+    const store = new MemoryExchangePersistence();
+
+    await expect(
+      store.commitAtomically({
+        ...oneEventCommit("duplicate-check"),
+        version_checks: [
+          { stream_id: "parent", expected_version: 0 },
+          { stream_id: "parent", expected_version: 0 },
+        ],
+      }),
+    ).rejects.toThrow(/duplicate.*version check/i);
+    await expect(
+      store.commitAtomically({
+        ...oneEventCommit("overlap"),
+        version_checks: [
+          { stream_id: "stream_overlap", expected_version: 0 },
+        ],
+      }),
+    ).rejects.toThrow(/version check.*append/i);
+    await expect(
+      store.commitAtomically({
+        ...oneEventCommit("negative-check"),
+        version_checks: [{ stream_id: "parent", expected_version: -1 }],
+      }),
+    ).rejects.toThrow(/version/i);
   });
 
   it("replays equal tenant-scoped keys and rejects key reuse with a different digest", async () => {

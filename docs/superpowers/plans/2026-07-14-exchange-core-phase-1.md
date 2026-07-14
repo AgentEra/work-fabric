@@ -529,7 +529,7 @@ git commit -m "build: add exchange workspace foundation"
 **Interfaces:**
 
 - Consumes: `JsonObject`, `JsonValue`, and `CapabilityManifest` from Task 2.
-- Produces: `EventRecord`, `ProposedEvent`, `StreamAppend`, `AtomicCommitRequest`, `AtomicCommitResult`, `EventJournal`, `CommandDeduplication`, `ExchangeTransaction`, `SnapshotRepository`, `ProjectionCheckpointStore`, and `DeliveryStateStore`.
+- Produces: `EventRecord`, `ProposedEvent`, `StreamAppend`, `StreamVersionCheck`, `AtomicCommitRequest`, `AtomicCommitResult`, `EventJournal`, `CommandDeduplication`, `ExchangeTransaction`, `SnapshotRepository`, `ProjectionCheckpointStore`, and `DeliveryStateStore`.
 
 - [ ] **Step 1: Write failing contract-shape and capability tests**
 
@@ -631,6 +631,11 @@ export interface StreamAppend {
   readonly events: readonly ProposedEvent[];
 }
 
+export interface StreamVersionCheck {
+  readonly stream_id: string;
+  readonly expected_version: number;
+}
+
 export interface NormalizedOperationOutcome {
   readonly operation_status:
     | "accepted"
@@ -650,6 +655,7 @@ export interface AtomicCommitRequest {
   readonly payload_digest: string;
   readonly request_message_id: string;
   readonly outcome: NormalizedOperationOutcome;
+  readonly version_checks: readonly StreamVersionCheck[];
   readonly appends: readonly StreamAppend[];
 }
 
@@ -663,7 +669,7 @@ export type AtomicCommitResult =
     };
 ```
 
-Empty `appends` are allowed only for persisting deterministic eventless outcomes. A `temporarily_unavailable` outcome must never be persisted.
+Empty `appends` are allowed only for persisting deterministic eventless outcomes. `version_checks` are read-only optimistic preconditions evaluated atomically with every append; duplicate checks and overlap with `appends` are invalid. A `temporarily_unavailable` outcome must never be persisted.
 
 - [ ] **Step 4: Define semantic persistence ports**
 
@@ -1997,6 +2003,9 @@ git commit -m "feat(core): execute handoff commands"
 
 **Files:**
 
+- Modify: `packages/exchange-spi/src/persistence.ts`
+- Modify: `packages/adapter-storage-memory/src/memory-exchange-persistence.ts`
+- Modify: `packages/adapter-storage-memory/test/memory-exchange-persistence.test.ts`
 - Create: `packages/exchange-core/src/domain/handoff-transfer-coordinator.ts`
 - Modify: `packages/exchange-core/src/domain/index.ts`
 - Modify: `packages/exchange-core/src/application/handoff-codec.ts`
@@ -2084,6 +2093,8 @@ export function acceptChildAndTransferParent(
 Add a dedicated `decodeHandoffTransfer(envelope, actor, generatedChildHandoffId, childContextReference)` application-boundary codec. It consumes only an already validated `workfabric.handoff.transfer.v1` Payload, returns `DecodedHandoffTransfer` with the parent ID, generated child ID, trusted Actor, and decoded child Package, and rejects every other message type. Do not add Transfer to the single-stream `HandoffCommand` union.
 
 Task 9 already derives and persists the root Partition ID. Persist the stream-to-Partition assignment in the storage adapter. Every child Offer inherits the parent's recorded Partition ID; never hash the child independently. Persist a validated Child Offer Context Bundle through Context Repository before creating the child event, using the same immutable/idempotent semantics as a root Offer.
+
+Extend the technology-neutral atomic commit contract with explicit read-only stream-version preconditions. A Transfer commit that creates the child must atomically assert the parent stream version read by the coordinator while appending only the child Offered event; it must not create a no-op parent Domain Event. The storage adapter evaluates these preconditions and all append expected versions inside the same transaction/lock and returns their current versions on conflict. This closes the parent read-to-commit race while keeping the parent event stream unchanged.
 
 On child Accept, load parent and child, encode each stream with its own expected version, and send both `StreamAppend` values in one `commitAtomically` request. The Receipt belongs to the child Accepted event; the parent Transferred event has no Receipt.
 

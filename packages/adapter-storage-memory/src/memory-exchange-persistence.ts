@@ -11,6 +11,7 @@ import type {
   ProjectionCheckpointStore,
   SnapshotRecord,
   StreamAppend,
+  StreamVersionCheck,
 } from "@work-fabric/exchange-spi";
 
 const manifest: CapabilityManifest = {
@@ -137,27 +138,33 @@ export class MemoryExchangePersistence
       return { kind: "idempotency_key_reused" };
     }
 
-    this.validateAppends(request.appends);
+    this.validateCommitShape(request.appends, request.version_checks);
 
-    for (const append of request.appends) {
-      const existingRecords = this.streams.get(append.stream_id);
+    for (const condition of [
+      ...request.version_checks,
+      ...request.appends,
+    ]) {
+      const existingRecords = this.streams.get(condition.stream_id);
       const assignedPartition = existingRecords?.[0]?.partition_id;
       if (
         assignedPartition !== undefined &&
         assignedPartition !== request.partition_id
       ) {
         throw new Error(
-          `stream ${append.stream_id} is assigned to partition ${assignedPartition}`,
+          `stream ${condition.stream_id} is assigned to partition ${assignedPartition}`,
         );
       }
     }
 
     const currentVersions = new Map<string, number>();
     let hasVersionConflict = false;
-    for (const append of request.appends) {
-      const currentVersion = this.streams.get(append.stream_id)?.length ?? 0;
-      currentVersions.set(append.stream_id, currentVersion);
-      if (currentVersion !== append.expected_version) {
+    for (const condition of [
+      ...request.version_checks,
+      ...request.appends,
+    ]) {
+      const currentVersion = this.streams.get(condition.stream_id)?.length ?? 0;
+      currentVersions.set(condition.stream_id, currentVersion);
+      if (currentVersion !== condition.expected_version) {
         hasVersionConflict = true;
       }
     }
@@ -218,7 +225,10 @@ export class MemoryExchangePersistence
     return { kind: "committed", events: clone(committedEvents) };
   }
 
-  private validateAppends(appends: readonly StreamAppend[]): void {
+  private validateCommitShape(
+    appends: readonly StreamAppend[],
+    versionChecks: readonly StreamVersionCheck[],
+  ): void {
     const streamIds = new Set<string>();
     const eventIds = new Set<string>();
     for (const append of appends) {
@@ -236,6 +246,23 @@ export class MemoryExchangePersistence
         }
         eventIds.add(event.event_id);
       }
+    }
+
+    const checkedStreamIds = new Set<string>();
+    for (const check of versionChecks) {
+      assertNonNegativeInteger(
+        check.expected_version,
+        "version check expected version",
+      );
+      if (checkedStreamIds.has(check.stream_id)) {
+        throw new Error(`duplicate stream version check: ${check.stream_id}`);
+      }
+      if (streamIds.has(check.stream_id)) {
+        throw new Error(
+          `stream version check overlaps stream append: ${check.stream_id}`,
+        );
+      }
+      checkedStreamIds.add(check.stream_id);
     }
   }
 

@@ -8,6 +8,11 @@ export interface StreamAppend {
   readonly events: readonly ProposedEvent[];
 }
 
+export interface StreamVersionCheck {
+  readonly stream_id: string;
+  readonly expected_version: number;
+}
+
 export interface NormalizedOperationOutcome {
   readonly operation_status:
     | "accepted"
@@ -28,6 +33,8 @@ export interface AtomicCommitRequest {
   readonly request_message_id: string;
   /** A temporarily_unavailable outcome must never be persisted. */
   readonly outcome: NormalizedOperationOutcome;
+  /** Read-only optimistic preconditions evaluated atomically with appends. */
+  readonly version_checks: readonly StreamVersionCheck[];
   /** Empty only when persisting a deterministic eventless outcome. */
   readonly appends: readonly StreamAppend[];
 }

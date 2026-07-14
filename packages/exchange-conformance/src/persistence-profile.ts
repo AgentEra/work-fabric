@@ -61,6 +61,7 @@ function request(
     payload_digest: `sha256:${eventId}`,
     request_message_id: `message_${eventId}`,
     outcome: acceptedOutcome,
+    version_checks: [],
     appends: [
       {
         stream_id: `stream_${eventId}`,
@@ -124,6 +125,97 @@ const scenarios: readonly Scenario[] = [
         current_versions: { stream_event_01: 1 },
       });
       assert.equal((await store.readStream("stream_event_01")).length, 1);
+    },
+  },
+  {
+    name: "read-only version checks are atomic with appends",
+    async verify(store) {
+      await store.commitAtomically(
+        request("parent-1", {
+          appends: [
+            {
+              stream_id: "parent",
+              expected_version: 0,
+              events: [proposedEvent("parent-1")],
+            },
+          ],
+        }),
+      );
+      const firstChild = await store.commitAtomically(
+        request("child-1", {
+          version_checks: [{ stream_id: "parent", expected_version: 1 }],
+          appends: [
+            {
+              stream_id: "child",
+              expected_version: 0,
+              events: [proposedEvent("child-1")],
+            },
+          ],
+        }),
+      );
+      assert.equal(firstChild.kind, "committed");
+      await store.commitAtomically(
+        request("parent-2", {
+          appends: [
+            {
+              stream_id: "parent",
+              expected_version: 1,
+              events: [proposedEvent("parent-2")],
+            },
+          ],
+        }),
+      );
+
+      const stale = await store.commitAtomically(
+        request("stale-child", {
+          version_checks: [{ stream_id: "parent", expected_version: 1 }],
+          appends: [
+            {
+              stream_id: "stale-child",
+              expected_version: 0,
+              events: [proposedEvent("stale-child")],
+            },
+          ],
+        }),
+      );
+      assert.deepEqual(stale, {
+        kind: "version_conflict",
+        current_versions: { parent: 2, "stale-child": 0 },
+      });
+      assert.deepEqual(await store.readStream("stale-child"), []);
+      assert.equal(
+        await store.findCommand("tenant_01", "key_stale-child"),
+        null,
+      );
+
+      await assert.rejects(
+        store.commitAtomically(
+          request("cross-partition-child", {
+            partition_id: "partition_02",
+            version_checks: [{ stream_id: "parent", expected_version: 2 }],
+            appends: [
+              {
+                stream_id: "cross-partition-child",
+                expected_version: 0,
+                events: [proposedEvent("cross-partition-child")],
+              },
+            ],
+          }),
+        ),
+        /partition/i,
+      );
+      assert.deepEqual(await store.readStream("cross-partition-child"), []);
+
+      await assert.rejects(
+        store.commitAtomically(
+          request("overlap", {
+            version_checks: [
+              { stream_id: "stream_overlap", expected_version: 0 },
+            ],
+          }),
+        ),
+        /version check.*append/i,
+      );
     },
   },
   {

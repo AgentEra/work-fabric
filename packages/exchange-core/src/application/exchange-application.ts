@@ -14,10 +14,18 @@ import { decideHandoff } from "../domain/handoff-decider.js";
 import type { HandoffEvent } from "../domain/handoff-events.js";
 import { replayHandoff } from "../domain/handoff-reducer.js";
 import { handoffEventFromJson } from "../domain/handoff-state-codec.js";
+import {
+  acceptChildAndTransferParent,
+  offerChildHandoff,
+} from "../domain/handoff-transfer-coordinator.js";
 import type { ActorRef, HandoffState } from "../domain/handoff-types.js";
 import type { ExchangeApplicationDependencies } from "./application-dependencies.js";
 import { canonicalJson, idempotencyDigest } from "./canonical-json.js";
-import { decodeHandoffCommand, encodeHandoffEvents } from "./handoff-codec.js";
+import {
+  decodeHandoffCommand,
+  decodeHandoffTransfer,
+  encodeHandoffEvents,
+} from "./handoff-codec.js";
 import { protocolError } from "./protocol-error.js";
 import type { CommandEnvelope, OperationResult } from "./protocol-types.js";
 
@@ -161,20 +169,22 @@ function replayExistingStream(
       record.exchange_id !== envelope.exchange_id ||
       record.partition_id !== partitionId ||
       record.stream_id !== streamId ||
+      record.handoff_id !== streamId ||
       record.schema_version !== "1.0"
     ) {
       throw new StoredStreamScopeError();
     }
   }
-  return {
-    state: replayHandoff(
-      records.map((record) => ({
-        stream_version: record.stream_version,
-        event: handoffEventFromJson(record.domain_data),
-      })),
-    ),
-    partitionId,
-  };
+  const state = replayHandoff(
+    records.map((record) => ({
+      stream_version: record.stream_version,
+      event: handoffEventFromJson(record.domain_data),
+    })),
+  );
+  if (state?.handoff_id !== streamId) {
+    throw new StoredStreamScopeError();
+  }
+  return { state, partitionId };
 }
 
 function resultFromCommit(
@@ -197,7 +207,11 @@ function resultFromCommit(
         ),
       );
     case "version_conflict": {
-      const currentVersion = result.current_versions[streamId] ?? null;
+      const reportedVersion = result.current_versions[streamId];
+      const currentVersion =
+        reportedVersion === undefined || reportedVersion <= 0
+          ? null
+          : reportedVersion;
       return toOperationResult(
         requestMessageId,
         conflict("version_conflict", "The Handoff version has changed", {
@@ -270,7 +284,7 @@ export class ExchangeApplication {
         );
       }
 
-      if (MULTI_STREAM_MESSAGE_TYPES.has(envelope.message_type)) {
+      if (envelope.message_type === "workfabric.handoff.child_accepted.v1") {
         return toOperationResult(
           envelope.message_id,
           rejected(
@@ -295,6 +309,19 @@ export class ExchangeApplication {
             "idempotency_key_reused",
             "The same idempotency key was used with different command data",
           ),
+        );
+      }
+
+      if (envelope.message_type === "workfabric.handoff.transfer.v1") {
+        if (authorizedResourceId === null) {
+          throw new Error("Transfer has no parent Handoff ID");
+        }
+        return await this.handleTransfer(
+          envelope,
+          actor,
+          actorClaim.endpoint_ids,
+          payloadDigest,
+          authorizedResourceId,
         );
       }
 
@@ -365,6 +392,21 @@ export class ExchangeApplication {
           );
         }
       }
+      if (
+        command.kind === "accept" &&
+        currentState?.parent_handoff_id !== null &&
+        currentState?.parent_handoff_id !== undefined
+      ) {
+        return await this.handleChildAccept(
+          envelope,
+          actor,
+          actorClaim.endpoint_ids,
+          payloadDigest,
+          currentState,
+          replayed.partitionId,
+          contextAvailable,
+        );
+      }
       const now = this.dependencies.clock.now();
       const decision = decideHandoff(currentState, command, {
         now,
@@ -424,6 +466,15 @@ export class ExchangeApplication {
         payload_digest: payloadDigest,
         request_message_id: envelope.message_id,
         outcome,
+        version_checks:
+          appends.length === 0
+            ? [
+                {
+                  stream_id: handoffId,
+                  expected_version: currentState?.resource_version ?? 0,
+                },
+              ]
+            : [],
         appends,
       });
       return resultFromCommit(
@@ -441,5 +492,289 @@ export class ExchangeApplication {
       }
       return toOperationResult(envelope.message_id, temporaryFailure());
     }
+  }
+
+  private async handleTransfer(
+    envelope: CommandEnvelope,
+    actor: ActorRef,
+    authorizedEndpointIds: readonly string[],
+    payloadDigest: string,
+    parentHandoffId: string,
+  ): Promise<OperationResult> {
+    const childHandoffId = this.dependencies.ids.nextId("handoff");
+    const parentRecords = await this.dependencies.persistence.readStream(
+      parentHandoffId,
+    );
+    const parentReplay = replayExistingStream(
+      parentRecords,
+      envelope,
+      parentHandoffId,
+    );
+    const parentState = parentReplay.state;
+    if (envelope.expected_version !== parentState?.resource_version) {
+      return toOperationResult(
+        envelope.message_id,
+        conflict("version_conflict", "The Handoff version has changed", {
+          current_resource_version: parentState?.resource_version ?? null,
+          details: { expected_version: envelope.expected_version ?? null },
+        }),
+      );
+    }
+    if (parentState === null) {
+      throw new StoredStreamScopeError();
+    }
+
+    const childRecords =
+      childHandoffId === parentHandoffId
+        ? parentRecords
+        : await this.dependencies.persistence.readStream(childHandoffId);
+    if (childRecords.length > 0) {
+      const collisionOutcome = conflict(
+        "version_conflict",
+        "The generated child Handoff ID is unavailable",
+      );
+      const collisionCommit =
+        await this.dependencies.persistence.commitAtomically({
+          tenant_id: envelope.tenant_id,
+          partition_id: parentReplay.partitionId,
+          commit_id: this.dependencies.ids.nextId("commit"),
+          idempotency_key: envelope.idempotency_key,
+          payload_digest: payloadDigest,
+          request_message_id: envelope.message_id,
+          outcome: collisionOutcome,
+          version_checks: [
+            {
+              stream_id: parentHandoffId,
+              expected_version: parentState.resource_version,
+            },
+          ],
+          appends: [],
+        });
+      return resultFromCommit(
+        envelope.message_id,
+        parentHandoffId,
+        collisionOutcome,
+        collisionCommit,
+      );
+    }
+
+    const childOffer = jsonObject(
+      envelope.payload.child_offer,
+      "payload.child_offer",
+    );
+    let childContextReference: ContextReference | null = null;
+    const contextValue = childOffer.context_bundle;
+    if (contextValue !== undefined) {
+      childContextReference = await this.dependencies.context.putBundle(
+        envelope.tenant_id,
+        jsonObject(contextValue, "payload.child_offer.context_bundle"),
+      );
+    }
+    const transfer = decodeHandoffTransfer(
+      envelope,
+      actor,
+      childHandoffId,
+      childContextReference,
+    );
+    const now = this.dependencies.clock.now();
+    const decision = offerChildHandoff(
+      parentState,
+      transfer.child_handoff_id,
+      transfer.child_package,
+      transfer.actor,
+      now,
+    );
+
+    let outcome: NormalizedOperationOutcome;
+    let appends: readonly {
+      readonly stream_id: string;
+      readonly expected_version: number;
+      readonly events: readonly ProposedEvent[];
+    }[];
+    if (decision.kind === "rejected") {
+      outcome = domainRejection(decision.error);
+      appends = [];
+    } else {
+      const encoded = encodeHandoffEvents({
+        current_state: null,
+        events: decision.child_events,
+        current_stream_version: 0,
+        envelope,
+        event_ids: decision.child_events.map(() =>
+          this.dependencies.ids.nextId("event"),
+        ),
+        receipt_ids: decision.child_events.map(() => null),
+        authorized_endpoint_ids: authorizedEndpointIds,
+        now,
+      });
+      outcome = acceptedOutcome(
+        childHandoffId,
+        encoded.events.length,
+        encoded.receipt,
+      );
+      appends = [
+        {
+          stream_id: childHandoffId,
+          expected_version: 0,
+          events: encoded.events,
+        },
+      ];
+    }
+
+    const commitResult = await this.dependencies.persistence.commitAtomically({
+      tenant_id: envelope.tenant_id,
+      partition_id: parentReplay.partitionId,
+      commit_id: this.dependencies.ids.nextId("commit"),
+      idempotency_key: envelope.idempotency_key,
+      payload_digest: payloadDigest,
+      request_message_id: envelope.message_id,
+      outcome,
+      version_checks: [
+        {
+          stream_id: parentHandoffId,
+          expected_version: parentState.resource_version,
+        },
+      ],
+      appends,
+    });
+    return resultFromCommit(
+      envelope.message_id,
+      parentHandoffId,
+      outcome,
+      commitResult,
+    );
+  }
+
+  private async handleChildAccept(
+    envelope: CommandEnvelope,
+    actor: ActorRef,
+    authorizedEndpointIds: readonly string[],
+    payloadDigest: string,
+    childState: HandoffState,
+    childPartitionId: string,
+    contextAvailable: boolean,
+  ): Promise<OperationResult> {
+    const parentHandoffId = childState.parent_handoff_id;
+    if (parentHandoffId === null) {
+      throw new Error("Child Handoff has no parent ID");
+    }
+    const parentRecords = await this.dependencies.persistence.readStream(
+      parentHandoffId,
+    );
+    const parentReplay = replayExistingStream(
+      parentRecords,
+      envelope,
+      parentHandoffId,
+    );
+    const parentState = parentReplay.state;
+    if (
+      parentState === null ||
+      parentReplay.partitionId !== childPartitionId ||
+      parentState.thread_id !== childState.thread_id
+    ) {
+      throw new StoredStreamScopeError();
+    }
+
+    const now = this.dependencies.clock.now();
+    const decision = acceptChildAndTransferParent(
+      parentState,
+      childState,
+      actor,
+      {
+        now,
+        recipient_authorized: true,
+        verifier_authorized: true,
+        policy_allows_cancel: true,
+        context_available: contextAvailable,
+        authority_valid: true,
+      },
+    );
+
+    let outcome: NormalizedOperationOutcome;
+    let appends: readonly {
+      readonly stream_id: string;
+      readonly expected_version: number;
+      readonly events: readonly ProposedEvent[];
+    }[];
+    if (decision.kind === "rejected") {
+      outcome = domainRejection(decision.error);
+      appends = [];
+    } else {
+      const childEncoded = encodeHandoffEvents({
+        current_state: childState,
+        events: decision.child_events,
+        current_stream_version: childState.resource_version,
+        envelope,
+        event_ids: decision.child_events.map(() =>
+          this.dependencies.ids.nextId("event"),
+        ),
+        receipt_ids: decision.child_events.map((event) =>
+          receiptRequired(event)
+            ? this.dependencies.ids.nextId("receipt")
+            : null,
+        ),
+        authorized_endpoint_ids: authorizedEndpointIds,
+        now,
+      });
+      const parentEncoded = encodeHandoffEvents({
+        current_state: parentState,
+        events: decision.parent_events,
+        current_stream_version: parentState.resource_version,
+        envelope,
+        event_ids: decision.parent_events.map(() =>
+          this.dependencies.ids.nextId("event"),
+        ),
+        receipt_ids: decision.parent_events.map(() => null),
+        authorized_endpoint_ids: authorizedEndpointIds,
+        now,
+      });
+      outcome = acceptedOutcome(
+        childState.handoff_id,
+        childState.resource_version + childEncoded.events.length,
+        childEncoded.receipt,
+      );
+      appends = [
+        {
+          stream_id: childState.handoff_id,
+          expected_version: childState.resource_version,
+          events: childEncoded.events,
+        },
+        {
+          stream_id: parentState.handoff_id,
+          expected_version: parentState.resource_version,
+          events: parentEncoded.events,
+        },
+      ];
+    }
+
+    const commitResult = await this.dependencies.persistence.commitAtomically({
+      tenant_id: envelope.tenant_id,
+      partition_id: childPartitionId,
+      commit_id: this.dependencies.ids.nextId("commit"),
+      idempotency_key: envelope.idempotency_key,
+      payload_digest: payloadDigest,
+      request_message_id: envelope.message_id,
+      outcome,
+      version_checks:
+        appends.length === 0
+          ? [
+              {
+                stream_id: childState.handoff_id,
+                expected_version: childState.resource_version,
+              },
+              {
+                stream_id: parentState.handoff_id,
+                expected_version: parentState.resource_version,
+              },
+            ]
+          : [],
+      appends,
+    });
+    return resultFromCommit(
+      envelope.message_id,
+      childState.handoff_id,
+      outcome,
+      commitResult,
+    );
   }
 }
