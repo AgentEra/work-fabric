@@ -188,6 +188,197 @@ class PartialPositionConflictStore extends MemoryExchangePersistence {
   }
 }
 
+type AttemptIdentityMutation =
+  | "omit-subscription"
+  | "omit-event"
+  | "omit-attempt"
+  | "retain-write-reference";
+
+class IncompleteAttemptIdentityStore extends MemoryExchangePersistence {
+  private readonly mutatedAttempts = new Map<string, DeliveryAttempt>();
+
+  constructor(private readonly mutation: AttemptIdentityMutation) {
+    super();
+  }
+
+  override async recordDeliveryAttempt(attempt: DeliveryAttempt): Promise<void> {
+    await super.recordDeliveryAttempt(attempt);
+    const parts = [attempt.subscription_id, attempt.event_id, attempt.attempt];
+    const key = JSON.stringify(
+      parts.filter((_, index) =>
+        this.mutation === "omit-subscription"
+          ? index !== 0
+          : this.mutation === "omit-event"
+            ? index !== 1
+            : this.mutation === "omit-attempt"
+              ? index !== 2
+              : true,
+      ),
+    );
+    if (!this.mutatedAttempts.has(key)) {
+      this.mutatedAttempts.set(
+        key,
+        this.mutation === "retain-write-reference"
+          ? attempt
+          : structuredClone(attempt),
+      );
+    }
+  }
+
+  override async listDeliveryAttempts(
+    subscriptionId: string,
+    eventId: string,
+  ): Promise<readonly DeliveryAttempt[]> {
+    return structuredClone(
+      [...this.mutatedAttempts.values()]
+        .filter(
+          (attempt) =>
+            attempt.subscription_id === subscriptionId &&
+            attempt.event_id === eventId,
+        )
+        .sort((left, right) => left.attempt - right.attempt),
+    );
+  }
+}
+
+type DeadLetterIdentityMutation =
+  | "omit-subscription"
+  | "omit-event"
+  | "retain-write-reference";
+
+class IncompleteDeadLetterIdentityStore extends MemoryExchangePersistence {
+  private readonly mutatedDeadLetters = new Map<string, DeadLetterRecord>();
+
+  constructor(private readonly mutation: DeadLetterIdentityMutation) {
+    super();
+  }
+
+  override async putDeadLetter(record: DeadLetterRecord): Promise<void> {
+    await super.putDeadLetter(record);
+    const key = JSON.stringify(
+      this.mutation === "omit-subscription"
+        ? [record.event.event_id]
+        : this.mutation === "omit-event"
+          ? [record.subscription_id]
+          : [record.subscription_id, record.event.event_id],
+    );
+    if (!this.mutatedDeadLetters.has(key)) {
+      this.mutatedDeadLetters.set(
+        key,
+        this.mutation === "retain-write-reference"
+          ? record
+          : structuredClone(record),
+      );
+    }
+  }
+
+  override async listDeadLetters(
+    subscriptionId: string,
+    eventId?: string,
+  ): Promise<readonly DeadLetterRecord[]> {
+    return structuredClone(
+      [...this.mutatedDeadLetters.values()]
+        .filter(
+          (record) =>
+            record.subscription_id === subscriptionId &&
+            (eventId === undefined || record.event.event_id === eventId),
+        )
+        .sort((left, right) =>
+          left.event.partition_id < right.event.partition_id
+            ? -1
+            : left.event.partition_id > right.event.partition_id
+              ? 1
+              : left.event.partition_position - right.event.partition_position,
+        ),
+    );
+  }
+
+  override async settleDelivery(
+    deliveryId: string,
+    expectedOutcome: "pending",
+    settlement: DeliverySettlement,
+  ): Promise<DeliverySettlementResult> {
+    const result = await super.settleDelivery(
+      deliveryId,
+      expectedOutcome,
+      settlement,
+    );
+    if (
+      settlement.outcome === "rejected" &&
+      (result.kind === "completed" || result.kind === "replayed")
+    ) {
+      for (const event of result.delivery.events) {
+        await this.putDeadLetter({
+          subscription_id: result.delivery.subscription_id,
+          event,
+          attempts: result.delivery.attempt,
+          reason: settlement.reason ?? "delivery_rejected",
+          recorded_at: settlement.settled_at,
+        });
+      }
+    }
+    return result;
+  }
+}
+
+class DropsReplacedHistoryStore extends MemoryExchangePersistence {
+  private droppedDeliveryId: string | null = null;
+
+  override async claimPendingDelivery(
+    delivery: PendingDeliveryRecord,
+    expectedActiveDeliveryId: string | null,
+  ): Promise<DeliveryClaimResult> {
+    const result = await super.claimPendingDelivery(
+      delivery,
+      expectedActiveDeliveryId,
+    );
+    if (result.kind === "claimed" && expectedActiveDeliveryId !== null) {
+      this.droppedDeliveryId = expectedActiveDeliveryId;
+    }
+    return result;
+  }
+
+  override async getDelivery(
+    deliveryId: string,
+  ): Promise<PendingDeliveryRecord | null> {
+    return deliveryId === this.droppedDeliveryId
+      ? null
+      : super.getDelivery(deliveryId);
+  }
+}
+
+class DropsActiveOnPositionConflictStore extends MemoryExchangePersistence {
+  private droppedKey: string | null = null;
+
+  override async settleDelivery(
+    deliveryId: string,
+    expectedOutcome: "pending",
+    settlement: DeliverySettlement,
+  ): Promise<DeliverySettlementResult> {
+    const result = await super.settleDelivery(
+      deliveryId,
+      expectedOutcome,
+      settlement,
+    );
+    if (result.kind === "position_conflict") {
+      this.droppedKey = JSON.stringify([
+        result.delivery.subscription_id,
+        result.delivery.partition_id,
+      ]);
+    }
+    return result;
+  }
+
+  override async getActiveDelivery(
+    subscriptionId: string,
+    partitionId: string,
+  ): Promise<PendingDeliveryRecord | null> {
+    return this.droppedKey === JSON.stringify([subscriptionId, partitionId])
+      ? null
+      : super.getActiveDelivery(subscriptionId, partitionId);
+  }
+}
+
 describe("verifyPersistenceProfile", () => {
   it("rejects an Adapter missing checkpoint position guards", async () => {
     await expect(
@@ -208,6 +399,35 @@ describe("verifyPersistenceProfile", () => {
           () => new IncompleteFailureIdentityStore(mutation),
         ),
       ).rejects.toThrow(/Projection Failure.*four-part identity/i);
+    });
+  }
+
+  for (const mutation of [
+    "omit-subscription",
+    "omit-event",
+    "omit-attempt",
+    "retain-write-reference",
+  ] as const) {
+    it(`rejects a Delivery Attempt adapter mutation: ${mutation}`, async () => {
+      await expect(
+        verifyPersistenceProfile(
+          () => new IncompleteAttemptIdentityStore(mutation),
+        ),
+      ).rejects.toThrow(/delivery attempts/i);
+    });
+  }
+
+  for (const mutation of [
+    "omit-subscription",
+    "omit-event",
+    "retain-write-reference",
+  ] as const) {
+    it(`rejects a Dead Letter adapter mutation: ${mutation}`, async () => {
+      await expect(
+        verifyPersistenceProfile(
+          () => new IncompleteDeadLetterIdentityStore(mutation),
+        ),
+      ).rejects.toThrow(/dead letters/i);
     });
   }
 
@@ -235,6 +455,16 @@ describe("verifyPersistenceProfile", () => {
     [
       "partial position-conflict settlement",
       () => new PartialPositionConflictStore(),
+      /position conflict/i,
+    ],
+    [
+      "replacement that drops prior Delivery history",
+      () => new DropsReplacedHistoryStore(),
+      /pending Delivery claim/i,
+    ],
+    [
+      "position conflict that drops the active pointer",
+      () => new DropsActiveOnPositionConflictStore(),
       /position conflict/i,
     ],
   ] as const)("rejects %s", async (_name, factory, scenario) => {

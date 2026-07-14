@@ -91,6 +91,11 @@ export async function verifySubscriptionProfile(
       updated_at: "not-a-time",
     }),
     update(original, {
+      subscription_id: "subscription_invalid_mode",
+      delivery_mode:
+        "cursor-pul" as unknown as RuntimeSubscription["delivery_mode"],
+    }),
+    update(original, {
       subscription_id: "subscription_unknown_filter",
       filter: {
         ...original.filter,
@@ -146,6 +151,18 @@ export async function verifySubscriptionProfile(
     state: "suspended",
     updated_at: "2026-07-15T00:00:02.000Z",
   });
+
+  const nanosecondUpdate = update(original, {
+    max_attempts: 4,
+    updated_at: "2026-07-15T00:00:00.000000001Z",
+  });
+  await store.putSubscription(nanosecondUpdate);
+  assert.deepEqual(
+    await store.getSubscription(original.subscription_id),
+    nanosecondUpdate,
+    "Subscription updated_at must preserve one-nanosecond ordering",
+  );
+
   await store.putSubscription(suspended);
   assert.deepEqual(
     await store.listActiveSubscriptions(original.tenant_id),
@@ -230,6 +247,11 @@ export async function verifySubscriptionProfile(
     updated_at: "2026-07-15T00:00:05.000Z",
   });
   await store.putSubscription(closed);
+  assert.deepEqual(
+    await store.listActiveSubscriptions(original.tenant_id),
+    [],
+    "active Subscription listing must exclude closed records",
+  );
   await expectRejected(
     store.putSubscription(
       update(closed, {

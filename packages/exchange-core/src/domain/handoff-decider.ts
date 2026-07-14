@@ -1,3 +1,5 @@
+import { parseUtcTimestamp } from "@work-fabric/exchange-spi";
+
 import type { DomainDecision, DomainError } from "./domain-error.js";
 import type {
   HandoffCommand,
@@ -9,9 +11,6 @@ import type {
   HandoffLifecycleState,
   HandoffState,
 } from "./handoff-types.js";
-
-const CANONICAL_UTC_TIMESTAMP =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
 
 function accept(event: HandoffEvent): DomainDecision {
   return { kind: "accepted", events: [event] };
@@ -66,22 +65,13 @@ function isAllowedState(
   );
 }
 
-function timestamp(value: string, field: string): number {
-  if (!CANONICAL_UTC_TIMESTAMP.test(value)) {
+function timestamp(value: string, field: string): bigint {
+  try {
+    const parsed = parseUtcTimestamp(value, field);
+    return parsed.epoch_seconds * 1_000_000_000n + BigInt(parsed.nanoseconds);
+  } catch {
     throw new Error(`Invalid ${field} timestamp: ${value}`);
   }
-
-  const parsed = Date.parse(value);
-  const normalized = value.includes(".")
-    ? value
-    : `${value.slice(0, -1)}.000Z`;
-  if (
-    !Number.isFinite(parsed) ||
-    new Date(parsed).toISOString() !== normalized
-  ) {
-    throw new Error(`Invalid ${field} timestamp: ${value}`);
-  }
-  return parsed;
 }
 
 function validateCriterionIds(

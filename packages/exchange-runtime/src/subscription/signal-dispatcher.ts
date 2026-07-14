@@ -1,4 +1,5 @@
 import type { Clock } from "@work-fabric/exchange-core";
+import type { WfppSchemaValidator } from "@work-fabric/protocol-runtime";
 import type {
   DeadLetterRecord,
   DeliveryAttempt,
@@ -20,7 +21,7 @@ import {
   assertPositiveSafeInteger,
   assertTimestamp,
   assertRuntimeSubscription,
-  timestampMillis,
+  compareTimestamps,
 } from "./validation.js";
 
 export interface RetryPolicy {
@@ -41,6 +42,7 @@ export class SignalDispatcher {
     private readonly signal: SignalAdapter,
     private readonly clock: Clock,
     private readonly retry: RetryPolicy,
+    private readonly schemas: WfppSchemaValidator,
     private readonly observer?: DispatchObserver,
   ) {
     assertPositiveSafeInteger(retry.base_delay_seconds, "base retry delay");
@@ -64,7 +66,8 @@ export class SignalDispatcher {
         assertRuntimeSubscription(subscription);
         if (
           subscription.tenant_id !== tenantId ||
-          subscription.delivery_mode === "cursor_pull"
+          (subscription.delivery_mode !== "sse" &&
+            subscription.delivery_mode !== "webhook")
         ) {
           continue;
         }
@@ -96,6 +99,13 @@ export class SignalDispatcher {
       this.validateJournalEvent(event, partitionId, previousJournalPosition);
       previousJournalPosition = event.partition_position;
       const protocolEvent = buildProtocolEvent(event);
+      const eventValidation = this.schemas.validate(
+        "urn:work-fabric:schema:v1:protocol-event",
+        protocolEvent,
+      );
+      if (!eventValidation.valid) {
+        throw new Error("Journal Event is not a canonical Protocol Event");
+      }
       const filtered = matchesSubscription(subscription.filter, protocolEvent);
       const authorized = filtered
         ? await this.policy.authorizeDelivery(subscription, event)
@@ -126,8 +136,7 @@ export class SignalDispatcher {
       if (previous?.next_attempt_at !== null && previous?.next_attempt_at !== undefined) {
         assertTimestamp(previous.next_attempt_at, "next_attempt_at");
         if (
-          timestampMillis(now, "clock time") <
-          timestampMillis(previous.next_attempt_at, "next_attempt_at")
+          compareTimestamps(now, previous.next_attempt_at) < 0
         ) {
           return;
         }
@@ -242,14 +251,29 @@ export class SignalDispatcher {
           throw new Error("only retryable attempts may have next_attempt_at");
         }
         if (
-          timestampMillis(attempt.next_attempt_at, "next_attempt_at") <=
-          timestampMillis(attempt.attempted_at, "attempted_at")
+          compareTimestamps(attempt.next_attempt_at, attempt.attempted_at) <= 0
         ) {
           throw new Error("next_attempt_at must follow attempted_at");
         }
       }
-      if (attempt.detail !== null && typeof attempt.detail !== "string") {
-        throw new Error("Delivery Attempt detail is invalid");
+      if (attempt.outcome === "accepted") {
+        if (attempt.detail !== null || attempt.next_attempt_at !== null) {
+          throw new Error("accepted Delivery Attempt must be terminal and empty");
+        }
+      } else {
+        if (
+          typeof attempt.detail !== "string" ||
+          attempt.detail.length === 0 ||
+          attempt.detail.length > 512
+        ) {
+          throw new Error("failed Delivery Attempt detail is invalid");
+        }
+        if (
+          attempt.outcome === "permanent_failure" &&
+          attempt.next_attempt_at !== null
+        ) {
+          throw new Error("permanent Delivery Attempt must be terminal");
+        }
       }
       expectedAttempt += 1;
     }
@@ -281,7 +305,7 @@ export class SignalDispatcher {
     assertPositiveSafeInteger(event.partition_position, "event position");
     if (
       event.partition_id !== partitionId ||
-      event.partition_position <= afterPosition
+      event.partition_position !== afterPosition + 1
     ) {
       throw new Error("Journal returned an invalid Partition sequence");
     }

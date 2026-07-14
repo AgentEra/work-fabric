@@ -2407,7 +2407,7 @@ export interface RuntimeSubscription {
   readonly endpoint_id: string;
   readonly filter: SubscriptionFilter;
   readonly destination: SignalDestination;
-  readonly delivery_mode: "cursor_pull" | "sse" | "webhook" | string;
+  readonly delivery_mode: "cursor_pull" | "sse" | "webhook";
   readonly state: "active" | "suspended" | "closed";
   readonly max_attempts: number;
   readonly created_at: string;
@@ -2602,6 +2602,7 @@ export class SignalDispatcher {
     private readonly signal: SignalAdapter,
     private readonly clock: Clock,
     private readonly retry: RetryPolicy,
+    private readonly schemas: WfppSchemaValidator,
     private readonly observer?: DispatchObserver,
   ) {}
 
@@ -2609,7 +2610,7 @@ export class SignalDispatcher {
 }
 ```
 
-For each active non-`cursor_pull` Subscription, read from its own delivery position. Advance unmatched or unauthorized Events. For a matched and authorized Event, respect `next_attempt_at`, call Signal once, record the attempt, invoke `observer.afterDelivery` before advancing position, and then:
+For each active `sse` or `webhook` Subscription, read from its own delivery position. Require strict `position + 1` Journal continuity and validate every constructed Protocol Event with the injected WFPP Schema validator before filter, policy, or Signal use. Advance unmatched or unauthorized Events. For a matched and authorized Event, respect the exact nanosecond `next_attempt_at`, call Signal once, record the attempt, invoke `observer.afterDelivery` before advancing position, and then:
 
 ```text
 accepted -> advance

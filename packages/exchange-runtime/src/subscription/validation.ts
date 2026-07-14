@@ -1,5 +1,12 @@
-import type { RuntimeSubscription, SubscriptionFilter } from "@work-fabric/exchange-spi";
 import { isDeepStrictEqual } from "node:util";
+
+import {
+  addUtcTimestampSeconds,
+  compareUtcTimestamps,
+  parseUtcTimestamp,
+  type RuntimeSubscription,
+  type SubscriptionFilter,
+} from "@work-fabric/exchange-spi";
 
 const FILTER_KEYS = [
   "event_types",
@@ -24,6 +31,9 @@ const LIFECYCLE_STATES = new Set([
   "cancelled",
   "transferred",
 ]);
+const ACTOR_TYPES = new Set(["human", "agent", "system"]);
+const DELIVERY_MODES = new Set(["cursor_pull", "sse", "webhook"]);
+const SUBSCRIPTION_STATES = new Set(["active", "suspended", "closed"]);
 
 export function assertOpaqueId(value: unknown, label: string): asserts value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 128) {
@@ -49,33 +59,18 @@ export function assertNonNegativeSafeInteger(
   }
 }
 
-export function assertTimestamp(value: unknown, label: string): asserts value is string {
-  const match =
-    typeof value === "string"
-      ? /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/.exec(
-          value,
-        )
-      : null;
-  const parsed = typeof value === "string" ? Date.parse(value) : Number.NaN;
-  if (match === null || Number.isNaN(parsed)) {
-    throw new TypeError(`${label} must be a strict UTC ISO timestamp`);
-  }
-  const date = new Date(parsed);
-  if (
-    date.getUTCFullYear() !== Number(match[1]) ||
-    date.getUTCMonth() + 1 !== Number(match[2]) ||
-    date.getUTCDate() !== Number(match[3]) ||
-    date.getUTCHours() !== Number(match[4]) ||
-    date.getUTCMinutes() !== Number(match[5]) ||
-    date.getUTCSeconds() !== Number(match[6])
-  ) {
-    throw new TypeError(`${label} must be a strict UTC ISO timestamp`);
-  }
+export function assertTimestamp(
+  value: unknown,
+  label: string,
+): asserts value is string {
+  parseUtcTimestamp(value, label);
 }
 
-export function timestampMillis(value: string, label: string): number {
-  assertTimestamp(value, label);
-  return Date.parse(value);
+export function compareTimestamps(
+  left: string,
+  right: string,
+): -1 | 0 | 1 {
+  return compareUtcTimestamps(left, right);
 }
 
 function assertStringArray(
@@ -178,7 +173,7 @@ export function assertRuntimeSubscription(
     throw new TypeError("owner must contain only actor_id and actor_type");
   }
   assertOpaqueId(value.owner.actor_id, "owner.actor_id");
-  if (!new Set(["human", "agent", "system"]).has(value.owner.actor_type)) {
+  if (!ACTOR_TYPES.has(value.owner.actor_type)) {
     throw new TypeError("owner.actor_type is invalid");
   }
   assertSubscriptionFilter(value.filter);
@@ -206,35 +201,22 @@ export function assertRuntimeSubscription(
   ) {
     throw new TypeError("destination.configuration must be an object");
   }
-  if (
-    typeof value.delivery_mode !== "string" ||
-    value.delivery_mode.length === 0 ||
-    value.delivery_mode.length > 128
-  ) {
+  if (!DELIVERY_MODES.has(value.delivery_mode)) {
     throw new TypeError("delivery_mode is invalid");
   }
-  if (!new Set(["active", "suspended", "closed"]).has(value.state)) {
+  if (!SUBSCRIPTION_STATES.has(value.state)) {
     throw new TypeError("Subscription state is invalid");
   }
   assertPositiveSafeInteger(value.max_attempts, "max_attempts");
   assertTimestamp(value.created_at, "created_at");
   assertTimestamp(value.updated_at, "updated_at");
-  if (
-    timestampMillis(value.updated_at, "updated_at") <
-    timestampMillis(value.created_at, "created_at")
-  ) {
+  if (compareTimestamps(value.updated_at, value.created_at) < 0) {
     throw new TypeError("updated_at must not precede created_at");
   }
 }
 
 export function addSeconds(timestamp: string, seconds: number): string {
-  assertTimestamp(timestamp, "timestamp");
-  assertPositiveSafeInteger(seconds, "seconds");
-  const value = timestampMillis(timestamp, "timestamp") + seconds * 1_000;
-  if (!Number.isSafeInteger(value)) throw new RangeError("timestamp overflow");
-  const result = new Date(value).toISOString();
-  assertTimestamp(result, "calculated timestamp");
-  return result;
+  return addUtcTimestampSeconds(timestamp, seconds);
 }
 
 export function compareCodePoints(left: string, right: string): number {

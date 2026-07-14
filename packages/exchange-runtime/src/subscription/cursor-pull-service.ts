@@ -24,7 +24,7 @@ import {
   assertPositiveSafeInteger,
   assertTimestamp,
   assertRuntimeSubscription,
-  timestampMillis,
+  compareTimestamps,
 } from "./validation.js";
 
 export interface EventDeliveryDocument {
@@ -181,8 +181,7 @@ export class CursorPullService {
       if (active !== null) {
         if (
           active.outcome === "pending" &&
-          timestampMillis(active.visibility_expires_at, "visibility expiry") >
-            timestampMillis(now, "clock time")
+          compareTimestamps(active.visibility_expires_at, now) > 0
         ) {
           return { kind: "delivery", delivery: this.validatedDocument(active) };
         }
@@ -366,8 +365,7 @@ export class CursorPullService {
         }
         if (
           delivery.outcome === "pending" &&
-          timestampMillis(payload.expires_at, "Ack cursor expiry") <=
-            timestampMillis(now, "clock time")
+          compareTimestamps(payload.expires_at, now) <= 0
         ) {
           return ackError("cursor_expired", "cursor expired");
         }
@@ -378,8 +376,7 @@ export class CursorPullService {
       }
       if (
         delivery.outcome === "pending" &&
-        timestampMillis(delivery.visibility_expires_at, "visibility expiry") <=
-          timestampMillis(now, "clock time")
+        compareTimestamps(delivery.visibility_expires_at, now) <= 0
       ) {
         await this.deliveryState.settleDelivery(delivery.delivery_id, "pending", {
           outcome: "expired",
@@ -500,7 +497,7 @@ export class CursorPullService {
     assertPositiveSafeInteger(record.partition_position, "event position");
     if (
       record.partition_id !== partitionId ||
-      record.partition_position <= afterPosition
+      record.partition_position !== afterPosition + 1
     ) {
       throw new Error("Journal returned an invalid Partition sequence");
     }

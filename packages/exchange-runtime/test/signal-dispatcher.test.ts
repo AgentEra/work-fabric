@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import type { Clock } from "@work-fabric/exchange-core";
@@ -11,7 +11,12 @@ import type {
   SignalDeliveryResult,
   SignalDestination,
   SubscriptionFilter,
+  SubscriptionStore,
 } from "@work-fabric/exchange-spi";
+import {
+  loadWfppSchemaValidator,
+  type WfppSchemaValidator,
+} from "@work-fabric/protocol-runtime";
 
 import {
   DefaultSubscriptionDeliveryPolicy,
@@ -22,6 +27,11 @@ import {
 
 const tenantId = "tenant_01";
 const partitionId = "partition_push_01";
+let schemas: WfppSchemaValidator;
+
+beforeAll(async () => {
+  schemas = await loadWfppSchemaValidator("protocol/schemas/v1");
+});
 
 const emptyFilter = (): SubscriptionFilter => ({
   event_types: [],
@@ -204,12 +214,101 @@ async function fixture(
     signal,
     clock,
     { base_delay_seconds: 2, max_delay_seconds: 30 },
+    schemas,
     observer,
   );
   return { state, subscriptions, signal, clock, dispatcher };
 }
 
 describe("SignalDispatcher", () => {
+  it.each([
+    [
+      "event_type",
+      event(1, "workfabric.handoff.unknown.v1"),
+    ],
+    [
+      "protocol_data",
+      event(1, "workfabric.handoff.accepted.v1", {
+        protocol_data: {
+          resource_version: 0,
+          change: null,
+          receipt: null,
+        } as unknown as EventRecord["protocol_data"],
+      }),
+    ],
+  ])("does not deliver or advance a schema-invalid %s", async (_field, invalid) => {
+    const { dispatcher, state, signal } = await fixture([invalid]);
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+
+    expect(signal.observed).toEqual([]);
+    expect(
+      await state.loadDeliveryPosition("subscription_01", partitionId),
+    ).toBe(0);
+  });
+
+  it("does not send an unsupported delivery mode even from an unvalidated Store", async () => {
+    const malformed = subscription("subscription_typo", {
+      delivery_mode:
+        "cursor-pul" as unknown as RuntimeSubscription["delivery_mode"],
+    });
+    const store: SubscriptionStore = {
+      manifest: {
+        profile: "exchange.subscription.v1",
+        adapter: "malformed-test",
+        capabilities: {
+          tenant_isolation: true,
+          state_filtering: true,
+          immutable_reads: true,
+        },
+      },
+      async getSubscription() {
+        return structuredClone(malformed);
+      },
+      async listActiveSubscriptions() {
+        return [structuredClone(malformed)];
+      },
+      async putSubscription() {},
+    };
+    const signal = new ControlledSignal();
+    const dispatcher = new SignalDispatcher(
+      new StaticJournal([event(1)]),
+      new MemoryExchangePersistence(),
+      store,
+      new DefaultSubscriptionDeliveryPolicy(),
+      signal,
+      new MutableClock(),
+      { base_delay_seconds: 2, max_delay_seconds: 30 },
+      schemas,
+    );
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+
+    expect(signal.observed).toEqual([]);
+  });
+
+  it("does not deliver or advance across a Journal position gap", async () => {
+    const { dispatcher, state, signal } = await fixture([event(2)]);
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+
+    expect(signal.observed).toEqual([]);
+    expect(
+      await state.loadDeliveryPosition("subscription_01", partitionId),
+    ).toBe(0);
+  });
+
+  it("stops at a later Journal gap after committing only the contiguous prefix", async () => {
+    const { dispatcher, state, signal } = await fixture([event(1), event(3)]);
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+
+    expect(signal.observed.map(({ event: item }) => item.id)).toEqual(["event_1"]);
+    expect(
+      await state.loadDeliveryPosition("subscription_01", partitionId),
+    ).toBe(1);
+  });
+
   it("advances unmatched Events only for that Subscription and delivers matching Events", async () => {
     const first = subscription("only_accepted", {
       filter: {
@@ -290,6 +389,36 @@ describe("SignalDispatcher", () => {
     );
   });
 
+  it("preserves nanoseconds in retry timestamps and waits until the exact instant", async () => {
+    const configured = subscription("subscription_01", { max_attempts: 2 });
+    const { dispatcher, state, signal, clock } = await fixture(
+      [event(1)],
+      [configured],
+    );
+    signal.setOutcome(configured.destination.destination_id, {
+      kind: "retryable_failure",
+      detail: "offline",
+    });
+    clock.instant = "2026-07-15T08:00:10.123456789Z";
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+    expect(
+      await state.listDeliveryAttempts(configured.subscription_id, "event_1"),
+    ).toEqual([
+      expect.objectContaining({
+        next_attempt_at: "2026-07-15T08:00:12.123456789Z",
+      }),
+    ]);
+
+    clock.instant = "2026-07-15T08:00:12.123456788Z";
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+    expect(signal.observed).toHaveLength(1);
+
+    clock.instant = "2026-07-15T08:00:12.123456789Z";
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+    expect(signal.observed).toHaveLength(2);
+  });
+
   it("dead-letters a permanent failure once and advances the position", async () => {
     const { dispatcher, state, signal } = await fixture([event(1)]);
     signal.setOutcome("destination_subscription_01", {
@@ -359,6 +488,7 @@ describe("SignalDispatcher", () => {
       signal,
       clock,
       { base_delay_seconds: 2, max_delay_seconds: 30 },
+      schemas,
     );
     await restarted.dispatchPartition(partitionId, tenantId, 10);
 

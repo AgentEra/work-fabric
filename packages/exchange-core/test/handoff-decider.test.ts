@@ -671,6 +671,72 @@ describe("Handoff decision rejections", () => {
     );
   });
 
+  it("keeps a Handoff offered until the exact nanosecond accept_by boundary", () => {
+    const state = evolveHandoff(
+      null,
+      offeredEvent({
+        package: {
+          ...handoffPackage,
+          accept_by: "2026-07-14T08:00:00.000000001Z",
+        },
+      }),
+      1,
+    );
+    const command: HandoffCommand = {
+      kind: "expire",
+      handoff_id: "handoff_01",
+      actor: initiator,
+    };
+
+    expectRejected(
+      decideHandoff(state, command, {
+        ...allowedContext,
+        now: "2026-07-14T08:00:00.000000000Z",
+      }),
+      "precondition_failed",
+    );
+    requireAccepted(
+      decideHandoff(state, command, {
+        ...allowedContext,
+        now: "2026-07-14T08:00:00.000000001Z",
+      }),
+    );
+  });
+
+  it("keeps Authority valid through the nanosecond before expires_at", () => {
+    const state = evolveHandoff(
+      evolveHandoff(
+        null,
+        offeredEvent({
+          package: {
+            ...handoffPackage,
+            authority_scope: {
+              ...handoffPackage.authority_scope,
+              expires_at: "2026-07-15T00:00:00.000000001Z",
+            },
+          },
+        }),
+        1,
+      ),
+      acceptedEvent(),
+      2,
+    );
+
+    requireAccepted(
+      decideHandoff(state, resultCommand, {
+        ...allowedContext,
+        now: "2026-07-15T00:00:00.000000000Z",
+      }),
+    );
+    expectRejected(
+      decideHandoff(state, resultCommand, {
+        ...allowedContext,
+        now: "2026-07-15T00:00:00.000000001Z",
+      }),
+      "expired",
+    );
+  });
+
   it("rejects cancellation by policy", () => {
     expectRejected(
       decideHandoff(offeredState, cancelCommand, {

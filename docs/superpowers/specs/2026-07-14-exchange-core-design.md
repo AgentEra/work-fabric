@@ -425,6 +425,10 @@ Phase 1 的根 Handoff 在首次 Offer 时使用 `"partition:" + sha256(canonica
 
 `partition_position` 是 Exchange 内部的恢复位置，不等于 WFPP CloudEvent 的 `wfsequence`。`wfsequence` 继续表达单个协议资源的顺序，Handoff 事件通常映射其 Resource Version；Subscription Cursor 是不透明值，可以封装一个或多个 Partition Position，客户端不得解析其内部格式。
 
+Runtime 每次从已确认 Position 读取时，Journal 返回的首项必须严格为
+`position + 1`，后续项也必须逐一连续。Position gap 是存储/路由契约错误，Pull
+返回前置条件失败，Push 隔离该 Subscription；二者都不得跳位、发送或推进。
+
 ### 8.4 Capability Manifest
 
 Adapter 启动时暴露能力：
@@ -561,6 +565,10 @@ details
 
 - Dispatcher 从已提交 Journal 读取；
 - 每个订阅和 Partition 独立记录投递位置；
+- Push 仅接受 `sse` 与 `webhook`；`cursor_pull` 由 Pull Runtime 处理，未知
+  `delivery_mode` 在 Subscription 边界拒绝；
+- Push 在进入 Signal Adapter 前，必须把 Journal Event 构造成 Canonical WFPP
+  Protocol Event，并通过 `protocol-event` Schema；
 - 临时失败指数退避；
 - 超过策略阈值进入 dead-letter；
 - 消费方使用 `event_id` 去重；
@@ -589,10 +597,20 @@ Subscription 的 `subscription_id`、Tenant、Owner Actor/Type、Endpoint 和
 不同内容必须使用严格后移的 `updated_at`。`active` 与 `suspended` 可以互转，
 `closed` 是终态。Active Listing 按 Subscription ID 稳定排序并隔离 Tenant。
 
+所有 Subscription、Cursor、Visibility、Retry、Attempt 与 Pending Delivery
+时间比较使用严格 UTC 解析后的 `(epoch_seconds, nanoseconds)`，支持 1–9 位小数并
+将 `.1Z` 与 `.100000000Z` 视为同一时刻。整数秒运算保留输入的小数字面量，禁止
+以毫秒级 `Date.parse` 结果承载协议排序语义。
+
 Push Attempt 使用 `(subscription_id, event_id, attempt)` 作为稳定身份，矛盾
 重放必须拒绝；Dead Letter 使用 `(subscription_id, event_id)` First-write
 幂等。二者的查询结果都必须复制并确定性排序，使 Runtime 重启后仅依据持久化
 事实恢复 Attempt、退避时间和死信状态。
+
+Attempt 的联合约束是：`accepted` 的 detail 与 `next_attempt_at` 均为 null；
+`permanent_failure` 的 next time 为 null；`retryable_failure` 可在尚可重试时携带
+严格晚于 attempted time 的 next time，也可在耗尽时为 null；所有失败 detail
+必须为 1–512 字符。校验在写入前完成，非法记录不得污染历史。
 
 ### 10.6 事件演进
 

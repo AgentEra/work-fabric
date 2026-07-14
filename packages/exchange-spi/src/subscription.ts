@@ -35,7 +35,7 @@ export interface RuntimeSubscription {
   readonly endpoint_id: string;
   readonly filter: SubscriptionFilter;
   readonly destination: SignalDestination;
-  readonly delivery_mode: "cursor_pull" | "sse" | "webhook" | string;
+  readonly delivery_mode: "cursor_pull" | "sse" | "webhook";
   readonly state: "active" | "suspended" | "closed";
   readonly max_attempts: number;
   readonly created_at: string;

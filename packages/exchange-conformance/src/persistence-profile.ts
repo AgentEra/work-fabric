@@ -916,9 +916,21 @@ const scenarios: readonly Scenario[] = [
         detail: "temporary",
         next_attempt_at: "2026-07-15T01:00:01.000Z",
       };
+      const sameEventOtherSubscription: DeliveryAttempt = {
+        ...first,
+        subscription_id: "subscription_02",
+      };
+      const sameSubscriptionOtherEvent: DeliveryAttempt = {
+        ...first,
+        event_id: "event_attempt_other",
+      };
+      const firstInput = structuredClone(first);
       await store.recordDeliveryAttempt(second);
-      await store.recordDeliveryAttempt(first);
+      await store.recordDeliveryAttempt(firstInput);
       await store.recordDeliveryAttempt(structuredClone(first));
+      await store.recordDeliveryAttempt(sameEventOtherSubscription);
+      await store.recordDeliveryAttempt(sameSubscriptionOtherEvent);
+      (firstInput as { detail: string | null }).detail = "mutated-input";
       const listed = await store.listDeliveryAttempts(
         first.subscription_id,
         first.event_id,
@@ -929,11 +941,74 @@ const scenarios: readonly Scenario[] = [
         await store.listDeliveryAttempts(first.subscription_id, first.event_id),
         [first, second],
       );
+      assert.deepEqual(
+        await store.listDeliveryAttempts(
+          sameEventOtherSubscription.subscription_id,
+          sameEventOtherSubscription.event_id,
+        ),
+        [sameEventOtherSubscription],
+        "Delivery Attempt identity must include Subscription",
+      );
+      assert.deepEqual(
+        await store.listDeliveryAttempts(
+          sameSubscriptionOtherEvent.subscription_id,
+          sameSubscriptionOtherEvent.event_id,
+        ),
+        [sameSubscriptionOtherEvent],
+        "Delivery Attempt identity must include Event",
+      );
       await assert.rejects(
         store.recordDeliveryAttempt({ ...first, detail: "contradictory" }),
       );
       await assert.rejects(
         store.recordDeliveryAttempt({ ...first, attempt: 0 }),
+      );
+      for (const invalid of [
+        {
+          ...first,
+          attempt: 3,
+          outcome: "accepted" as const,
+          detail: "bad",
+          next_attempt_at: null,
+        },
+        {
+          ...first,
+          attempt: 4,
+          outcome: "accepted" as const,
+          detail: null,
+          next_attempt_at: "2026-07-15T01:00:02.000Z",
+        },
+        {
+          ...first,
+          attempt: 5,
+          outcome: "permanent_failure" as const,
+          next_attempt_at: "2026-07-15T01:00:02.000Z",
+        },
+        { ...first, attempt: 6, detail: "" },
+        { ...first, attempt: 7, detail: "x".repeat(513) },
+        {
+          ...first,
+          attempt: 8,
+          next_attempt_at: first.attempted_at,
+        },
+      ]) {
+        await assert.rejects(store.recordDeliveryAttempt(invalid));
+      }
+      assert.deepEqual(
+        await store.listDeliveryAttempts(first.subscription_id, first.event_id),
+        [first, second],
+        "invalid Delivery Attempts must not poison persisted history",
+      );
+      const exhaustedRetry: DeliveryAttempt = {
+        ...first,
+        attempt: 3,
+        attempted_at: "2026-07-15T01:00:03.000Z",
+        next_attempt_at: null,
+      };
+      await store.recordDeliveryAttempt(exhaustedRetry);
+      assert.deepEqual(
+        await store.listDeliveryAttempts(first.subscription_id, first.event_id),
+        [first, second, exhaustedRetry],
       );
     },
   },
@@ -1004,6 +1079,11 @@ const scenarios: readonly Scenario[] = [
       assert.deepEqual(
         await store.claimPendingDelivery(replacement, first.delivery_id),
         { kind: "claimed", delivery: replacement },
+      );
+      assert.deepEqual(
+        await store.getDelivery(first.delivery_id),
+        { ...first, outcome: "retry" },
+        "replacement must preserve the prior Delivery history by delivery_id",
       );
       assert.equal(
         (
@@ -1194,12 +1274,19 @@ const scenarios: readonly Scenario[] = [
         reason: "second reason",
         recorded_at: "2026-07-15T01:01:00.000Z",
       };
+      const sameEventOtherSubscription = {
+        ...firstRecord,
+        subscription_id: "subscription_02",
+      };
+      const firstInput = structuredClone(firstRecord);
       await store.putDeadLetter(secondRecord);
-      await store.putDeadLetter(firstRecord);
+      await store.putDeadLetter(firstInput);
       await store.putDeadLetter({
         ...firstRecord,
         reason: "contradictory later reason",
       });
+      await store.putDeadLetter(sameEventOtherSubscription);
+      (firstInput as { reason: string }).reason = "mutated-input";
       const listed = await store.listDeadLetters("subscription_01");
       assert.deepEqual(listed, [firstRecord, secondRecord]);
       (listed[0]?.event.domain_data as { state: string }).state = "mutated";
@@ -1210,6 +1297,11 @@ const scenarios: readonly Scenario[] = [
       assert.deepEqual(
         await store.listDeadLetters("subscription_01", first.event_id),
         [firstRecord],
+      );
+      assert.deepEqual(
+        await store.listDeadLetters("subscription_02", first.event_id),
+        [sameEventOtherSubscription],
+        "Dead Letter identity must include Subscription and Event",
       );
       await assert.rejects(
         store.putDeadLetter({ ...firstRecord, attempts: 0 }),
@@ -1242,6 +1334,14 @@ const scenarios: readonly Scenario[] = [
       );
       assert.equal(result.kind, "position_conflict");
       assert.equal((await store.getDelivery(delivery.delivery_id))?.outcome, "pending");
+      assert.deepEqual(
+        await store.getActiveDelivery(
+          delivery.subscription_id,
+          delivery.partition_id,
+        ),
+        delivery,
+        "position conflict must preserve the complete active pending Delivery",
+      );
       assert.deepEqual(
         await store.listDeadLetters(delivery.subscription_id, event.event_id),
         [],

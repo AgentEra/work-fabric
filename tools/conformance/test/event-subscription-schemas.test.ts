@@ -144,6 +144,28 @@ describe("SubscriptionFilter", () => {
       }),
     ).toBeNull();
   });
+
+  it("rejects an unsupported delivery mode", () => {
+    expect(
+      errors("subscription", {
+        subscription_id: "subscription_invalid_mode",
+        owner: {
+          actor_id: "actor_agent_01",
+          actor_type: "agent",
+        },
+        endpoint_id: "endpoint_runtime_01",
+        filter,
+        delivery: {
+          mode: "vendor.example/custom_push",
+        },
+        state: "active",
+        cursor: null,
+        created_at: "2026-07-13T07:59:00Z",
+        updated_at: "2026-07-13T07:59:00Z",
+        extensions: {},
+      }),
+    ).not.toBeNull();
+  });
 });
 
 describe("Delivery and acknowledgement", () => {

@@ -9,3 +9,4 @@ export * from "./projection.js";
 export * from "./runtime-state.js";
 export * from "./signal.js";
 export * from "./subscription.js";
+export * from "./utc-timestamp.js";

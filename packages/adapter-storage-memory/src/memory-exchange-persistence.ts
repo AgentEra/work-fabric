@@ -1,25 +1,27 @@
 import { isDeepStrictEqual } from "node:util";
 
-import type {
-  AtomicCommitRequest,
-  AtomicCommitResult,
-  CapabilityManifest,
-  CommandRecord,
-  DeadLetterRecord,
-  DeliveryClaimResult,
-  DeliveryAttempt,
-  DeliverySettlement,
-  DeliverySettlementResult,
-  DeliveryStateStore,
-  EventRecord,
-  ExchangePersistence,
-  PendingDeliveryRecord,
-  ProjectionFailureRecord,
-  ProjectionFailureStore,
-  ProjectionCheckpointStore,
-  SnapshotRecord,
-  StreamAppend,
-  StreamVersionCheck,
+import {
+  compareUtcTimestamps,
+  parseUtcTimestamp,
+  type AtomicCommitRequest,
+  type AtomicCommitResult,
+  type CapabilityManifest,
+  type CommandRecord,
+  type DeadLetterRecord,
+  type DeliveryClaimResult,
+  type DeliveryAttempt,
+  type DeliverySettlement,
+  type DeliverySettlementResult,
+  type DeliveryStateStore,
+  type EventRecord,
+  type ExchangePersistence,
+  type PendingDeliveryRecord,
+  type ProjectionFailureRecord,
+  type ProjectionFailureStore,
+  type ProjectionCheckpointStore,
+  type SnapshotRecord,
+  type StreamAppend,
+  type StreamVersionCheck,
 } from "@work-fabric/exchange-spi";
 
 const manifest: CapabilityManifest = {
@@ -75,26 +77,7 @@ function assertOpaqueId(value: string, label: string): void {
 }
 
 function assertTimestamp(value: string, label: string): void {
-  assertNonEmpty(value, label);
-  const match =
-    /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?Z$/.exec(
-      value,
-    );
-  const parsed = Date.parse(value);
-  if (match === null || Number.isNaN(parsed)) {
-    throw new Error(`${label} must be a strict UTC ISO timestamp`);
-  }
-  const date = new Date(parsed);
-  if (
-    date.getUTCFullYear() !== Number(match[1]) ||
-    date.getUTCMonth() + 1 !== Number(match[2]) ||
-    date.getUTCDate() !== Number(match[3]) ||
-    date.getUTCHours() !== Number(match[4]) ||
-    date.getUTCMinutes() !== Number(match[5]) ||
-    date.getUTCSeconds() !== Number(match[6])
-  ) {
-    throw new Error(`${label} must be a strict UTC ISO timestamp`);
-  }
+  parseUtcTimestamp(value, label);
 }
 
 function equalValue(left: unknown, right: unknown): boolean {
@@ -735,14 +718,35 @@ export class MemoryExchangePersistence
     ) {
       throw new Error("attempt outcome is invalid");
     }
+    if (attempt.outcome === "accepted") {
+      if (attempt.detail !== null) {
+        throw new Error("accepted attempt detail must be null");
+      }
+      if (attempt.next_attempt_at !== null) {
+        throw new Error("accepted attempt next_attempt_at must be null");
+      }
+      return;
+    }
+    if (
+      typeof attempt.detail !== "string" ||
+      attempt.detail.length === 0 ||
+      attempt.detail.length > 512
+    ) {
+      throw new Error("failed attempt detail must contain 1 to 512 characters");
+    }
+    if (
+      attempt.outcome === "permanent_failure" &&
+      attempt.next_attempt_at !== null
+    ) {
+      throw new Error("permanent failure next_attempt_at must be null");
+    }
     if (attempt.next_attempt_at !== null) {
       assertTimestamp(attempt.next_attempt_at, "next_attempt_at");
-      if (Date.parse(attempt.next_attempt_at) <= Date.parse(attempt.attempted_at)) {
+      if (
+        compareUtcTimestamps(attempt.next_attempt_at, attempt.attempted_at) <= 0
+      ) {
         throw new Error("next_attempt_at must be after attempted_at");
       }
-    }
-    if (attempt.detail !== null && typeof attempt.detail !== "string") {
-      throw new Error("attempt detail must be a string or null");
     }
   }
 
@@ -782,8 +786,10 @@ export class MemoryExchangePersistence
       "delivery visibility_expires_at",
     );
     if (
-      Date.parse(delivery.visibility_expires_at) <=
-      Date.parse(delivery.delivered_at)
+      compareUtcTimestamps(
+        delivery.visibility_expires_at,
+        delivery.delivered_at,
+      ) <= 0
     ) {
       throw new Error("delivery visibility expiry must be after delivery time");
     }

@@ -221,6 +221,49 @@ describe("OpaqueCursorCodec", () => {
     ).toThrow(/invalid cursor/i);
   });
 
+  it("rejects a non-canonical base64url signature alias even when it decodes to the same HMAC", () => {
+    const codec = new OpaqueCursorCodec(secret);
+    const cursor = codec.encode({
+      subscription_id: "subscription_01",
+      partition_id: partitionId,
+      position: 2,
+      expires_at: "2026-07-15T09:00:00.000Z",
+    });
+    const [payload, signature] = cursor.split(".") as [string, string];
+    const alphabet =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    const last = signature.at(-1);
+    if (last === undefined) throw new Error("expected cursor signature");
+    const index = alphabet.indexOf(last);
+    const aliasIndex = (index & 0b111100) | ((index + 1) & 0b11);
+    const alias = `${signature.slice(0, -1)}${alphabet[aliasIndex]}`;
+    expect(alias).not.toBe(signature);
+    expect(Buffer.from(alias, "base64url")).toEqual(
+      Buffer.from(signature, "base64url"),
+    );
+
+    expect(() => codec.decodeAuthenticated(`${payload}.${alias}`)).toThrow(
+      /invalid cursor/i,
+    );
+  });
+
+  it("compares expiry at nanosecond precision", () => {
+    const codec = new OpaqueCursorCodec(secret);
+    const cursor = codec.encode({
+      subscription_id: "subscription_01",
+      partition_id: partitionId,
+      position: 0,
+      expires_at: "2026-07-15T09:00:00.000000001Z",
+    });
+
+    expect(
+      codec.decode(cursor, "2026-07-15T09:00:00.000000000Z"),
+    ).toMatchObject({ position: 0 });
+    expect(() =>
+      codec.decode(cursor, "2026-07-15T09:00:00.000000001Z"),
+    ).toThrow(/expired/i);
+  });
+
   it("rejects weak secrets and invalid payload fields before encoding", () => {
     expect(() => new OpaqueCursorCodec(new Uint8Array(31))).toThrow(/32 bytes/i);
     const codec = new OpaqueCursorCodec(secret);
@@ -250,6 +293,59 @@ describe("OpaqueCursorCodec", () => {
 });
 
 describe("CursorPullService", () => {
+  it("returns a precondition error without state when the Journal has a gap", async () => {
+    const { service, state } = await fixture([record(2)]);
+
+    await expect(
+      service.pull("subscription_01", partitionId, null, 10),
+    ).resolves.toMatchObject({ kind: "error", code: "precondition_failed" });
+    expect(
+      await state.loadDeliveryPosition("subscription_01", partitionId),
+    ).toBe(0);
+    expect(
+      await state.getActiveDelivery("subscription_01", partitionId),
+    ).toBeNull();
+  });
+
+  it("rejects a gap after a contiguous Journal record without partial state", async () => {
+    const { service, state } = await fixture([record(1), record(3)]);
+
+    await expect(
+      service.pull("subscription_01", partitionId, null, 10),
+    ).resolves.toMatchObject({ kind: "error", code: "precondition_failed" });
+    expect(
+      await state.loadDeliveryPosition("subscription_01", partitionId),
+    ).toBe(0);
+    expect(
+      await state.getActiveDelivery("subscription_01", partitionId),
+    ).toBeNull();
+  });
+
+  it("preserves fractional precision and uses nanosecond visibility boundaries", async () => {
+    const { service, clock } = await fixture([record(1)]);
+    clock.instant = "2026-07-15T08:00:10.123456789Z";
+    const first = await service.pull("subscription_01", partitionId, null, 10);
+    if (first.kind !== "delivery") throw new Error("expected delivery");
+    expect(first.delivery.visibility_expires_at).toBe(
+      "2026-07-15T08:00:40.123456789Z",
+    );
+
+    clock.instant = "2026-07-15T08:00:40.123456788Z";
+    const before = await service.pull("subscription_01", partitionId, null, 10);
+    expect(before).toMatchObject({
+      kind: "delivery",
+      delivery: { delivery_id: first.delivery.delivery_id, attempt: 1 },
+    });
+
+    clock.instant = "2026-07-15T08:00:40.123456789Z";
+    const atExpiry = await service.pull(
+      "subscription_01",
+      partitionId,
+      null,
+      10,
+    );
+    expect(atExpiry).toMatchObject({ kind: "delivery", delivery: { attempt: 2 } });
+  });
   it("skips unmatched Events, returns a schema-valid public Delivery, and keeps position pending", async () => {
     const { service, state } = await fixture();
 

@@ -4,7 +4,7 @@ import {
   assertNonNegativeSafeInteger,
   assertOpaqueId,
   assertTimestamp,
-  timestampMillis,
+  compareTimestamps,
 } from "./validation.js";
 
 export interface CursorPayload {
@@ -93,8 +93,7 @@ export class OpaqueCursorCodec {
     }
     const decoded = this.decodeAuthenticated(cursor);
     if (
-      timestampMillis(decoded.expires_at, "cursor expires_at") <=
-      timestampMillis(now, "cursor current time")
+      compareTimestamps(decoded.expires_at, now) <= 0
     ) {
       throw new CursorCodecError("cursor_expired", "cursor expired");
     }
@@ -125,7 +124,11 @@ export class OpaqueCursorCodec {
       .update(encodedPayload)
       .digest();
     const actual = Buffer.from(encodedSignature, "base64url");
-    if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
+    if (
+      actual.toString("base64url") !== encodedSignature ||
+      actual.length !== expected.length ||
+      !timingSafeEqual(actual, expected)
+    ) {
       throw new CursorCodecError("invalid_cursor", "invalid cursor");
     }
 

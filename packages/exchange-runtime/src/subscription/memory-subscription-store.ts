@@ -7,9 +7,9 @@ import type {
 import {
   assertOpaqueId,
   assertRuntimeSubscription,
+  compareTimestamps,
   compareCodePoints,
   sameStructuredValue,
-  timestampMillis,
 } from "./validation.js";
 
 const manifest: CapabilityManifest = {
@@ -36,7 +36,7 @@ function sameIdentity(
     left.owner.actor_id === right.owner.actor_id &&
     left.owner.actor_type === right.owner.actor_type &&
     left.endpoint_id === right.endpoint_id &&
-    left.created_at === right.created_at
+    compareTimestamps(left.created_at, right.created_at) === 0
   );
 }
 
@@ -88,8 +88,7 @@ export class MemorySubscriptionStore implements SubscriptionStore {
       throw new Error("closed Subscription is terminal");
     }
     if (
-      timestampMillis(candidate.updated_at, "updated_at") <=
-      timestampMillis(existing.updated_at, "existing updated_at")
+      compareTimestamps(candidate.updated_at, existing.updated_at) <= 0
     ) {
       throw new Error("Subscription updated_at must increase");
     }

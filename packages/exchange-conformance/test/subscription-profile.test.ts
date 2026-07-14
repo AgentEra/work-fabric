@@ -130,6 +130,24 @@ class UnstableActiveOrderingStore extends MemorySubscriptionStore {
   }
 }
 
+class ListsClosedStore extends MemorySubscriptionStore {
+  private closed: RuntimeSubscription | null = null;
+
+  override async putSubscription(value: RuntimeSubscription): Promise<void> {
+    await super.putSubscription(value);
+    if (value.state === "closed") this.closed = structuredClone(value);
+  }
+
+  override async listActiveSubscriptions(
+    tenantId: string,
+  ): Promise<readonly RuntimeSubscription[]> {
+    const active = await super.listActiveSubscriptions(tenantId);
+    return this.closed?.tenant_id === tenantId
+      ? [...active, structuredClone(this.closed)]
+      : active;
+  }
+}
+
 class AllowEverythingPolicy implements SubscriptionDeliveryPolicy {
   readonly manifest = {
     profile: "exchange.subscription_delivery.v1",
@@ -159,6 +177,7 @@ describe("Subscription Conformance Profiles", () => {
     ["updated_at rollback", () => new AcceptsTimeRollbackStore(), /same-timestamp different-content/i],
     ["closed reopening", () => new ReopensClosedStore(), /closed Subscription reopening/i],
     ["unstable active ordering", () => new UnstableActiveOrderingStore(), /stable Subscription ID order/i],
+    ["closed records in active listing", () => new ListsClosedStore(), /exclude closed records/i],
   ] as const)("rejects a Store with %s", async (_name, factory, message) => {
     await expect(verifySubscriptionProfile(factory)).rejects.toThrow(message);
   });

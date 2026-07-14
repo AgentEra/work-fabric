@@ -612,6 +612,92 @@ describe("MemoryExchangePersistence", () => {
     ]);
   });
 
+  it("enforces the complete Delivery Attempt outcome contract before writing", async () => {
+    const store = new MemoryExchangePersistence();
+    const base: DeliveryAttempt = {
+      subscription_id: "subscription_01",
+      partition_id: "partition_01",
+      event_id: "event_01",
+      attempt: 1,
+      attempted_at: "2026-07-14T00:01:00.000000000Z",
+      outcome: "retryable_failure",
+      detail: "temporary",
+      next_attempt_at: "2026-07-14T00:01:00.000000001Z",
+    };
+
+    await expect(store.recordDeliveryAttempt(base)).resolves.toBeUndefined();
+    for (const invalid of [
+      {
+        ...base,
+        attempt: 2,
+        outcome: "accepted" as const,
+        detail: "unexpected",
+        next_attempt_at: null,
+      },
+      {
+        ...base,
+        attempt: 3,
+        outcome: "accepted" as const,
+        detail: null,
+        next_attempt_at: "2026-07-14T00:02:00Z",
+      },
+      {
+        ...base,
+        attempt: 4,
+        outcome: "permanent_failure" as const,
+        next_attempt_at: "2026-07-14T00:02:00Z",
+      },
+      { ...base, attempt: 5, detail: "" },
+      { ...base, attempt: 6, detail: "x".repeat(513) },
+      {
+        ...base,
+        attempt: 7,
+        next_attempt_at: "2026-07-14T00:01:00.000000000Z",
+      },
+    ]) {
+      await expect(store.recordDeliveryAttempt(invalid)).rejects.toThrow();
+    }
+    expect(store.getDeliveryAttempts()).toEqual([base]);
+
+    const exhausted: DeliveryAttempt = {
+      ...base,
+      attempt: 2,
+      next_attempt_at: null,
+    };
+    await expect(store.recordDeliveryAttempt(exhausted)).resolves.toBeUndefined();
+  });
+
+  it("compares pending Delivery visibility at one-nanosecond precision", async () => {
+    const store = new MemoryExchangePersistence();
+    const event = await committedRecord(store);
+    const valid = {
+      delivery_id: "delivery_ns",
+      subscription_id: "subscription_01",
+      partition_id: event.partition_id,
+      from_position: 0,
+      to_position: event.partition_position,
+      next_cursor: "cursor_ns",
+      events: [event],
+      attempt: 1,
+      delivered_at: "2026-07-14T00:01:00.000000000Z",
+      visibility_expires_at: "2026-07-14T00:01:00.000000001Z",
+      outcome: "pending" as const,
+    };
+
+    await expect(store.claimPendingDelivery(valid, null)).resolves.toMatchObject({
+      kind: "claimed",
+    });
+    await expect(
+      new MemoryExchangePersistence().claimPendingDelivery(
+        {
+          ...valid,
+          visibility_expires_at: valid.delivered_at,
+        },
+        null,
+      ),
+    ).rejects.toThrow(/visibility/i);
+  });
+
   it("clones every event and command value entering and leaving the adapter", async () => {
     const store = new MemoryExchangePersistence();
     const event = proposedEvent("event_01");
