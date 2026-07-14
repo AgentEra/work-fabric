@@ -245,6 +245,8 @@ WFPP `ContextBundle.digest` 在线上协议中保持 `{ algorithm, value } | nul
 
 `handoff.transfer` 创建状态为 `offered` 的子 Handoff。子 Handoff 被明确接受之前，父 Handoff 保持 `accepted`，原 Recipient 继续负责。
 
+通用 `decodeHandoffCommand` 只产生单流 `HandoffCommand`，因此必须显式拒绝 `handoff.transfer` 以及内部 `handoff.child_accepted`。公开 Transfer Envelope 和 Payload 仍由 WFPP Validator 校验；Task 10 的专用 `decodeHandoffTransfer` 在校验后构造跨流协调输入。该边界防止把两流原子语义伪装成普通单聚合命令。
+
 子 Handoff 接受时必须在一个原子提交中：
 
 1. 子 Handoff 进入 `accepted`；

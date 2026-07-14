@@ -1793,7 +1793,7 @@ Hash its canonical UTF-8 JSON with Node `createHash("sha256")` and prefix the lo
 
 - [ ] **Step 7: Implement command decoding and event encoding**
 
-`decodeHandoffCommand(envelope, actor, generatedHandoffId, contextReference)` maps every Task 1 message type to the Task 7 union. Offer uses `generatedHandoffId` and the immutable `contextReference` returned by Context Repository; existing-resource commands take their Handoff ID from Payload. It never accepts `handoff.child_accepted`.
+`decodeHandoffCommand(envelope, actor, generatedHandoffId, contextReference)` maps every Task 1 single-stream message type represented by the Task 7 union. Offer uses `generatedHandoffId` and the immutable `contextReference` returned by Context Repository; existing-resource commands take their Handoff ID from Payload. It explicitly rejects both `handoff.transfer` and internal `handoff.child_accepted`. The Validator still validates the public Transfer mapping; Task 10 adds the dedicated `decodeHandoffTransfer` boundary before invoking the multi-stream coordinator.
 
 `encodeHandoffEvents` receives Domain events, current stream version, Envelope metadata, generated Event IDs, generated Receipt IDs, and current time. Each Proposed Event stores `domain_data` for replay and separately stores Schema-valid `protocol_data` for public delivery. It must:
 
@@ -1842,7 +1842,7 @@ git commit -m "feat(core): add wfpp validation and codecs"
 **Interfaces:**
 
 - Consumes: protocol validator/codecs, pure Domain decisions, Persistence, Identity, Authority, Context, Clock, and ID sources.
-- Produces: `ExchangeApplication.handle(envelope, authenticationEvidence)` for every client Handoff interaction except Transfer's cross-stream acceptance, which Task 10 completes.
+- Produces: `ExchangeApplication.handle(envelope, authenticationEvidence)` for every single-stream client Handoff interaction. Task 10 adds the public Transfer command and the child-Accept cross-stream path.
 
 - [ ] **Step 1: Write failing end-to-end Application tests**
 
@@ -1993,6 +1993,7 @@ git commit -m "feat(core): execute handoff commands"
 
 - Create: `packages/exchange-core/src/domain/handoff-transfer-coordinator.ts`
 - Modify: `packages/exchange-core/src/domain/index.ts`
+- Modify: `packages/exchange-core/src/application/handoff-codec.ts`
 - Modify: `packages/exchange-core/src/application/exchange-application.ts`
 - Create: `packages/exchange-core/test/handoff-transfer-coordinator.test.ts`
 - Create: `packages/exchange-core/test/exchange-transfer.test.ts`
@@ -2000,7 +2001,7 @@ git commit -m "feat(core): execute handoff commands"
 **Interfaces:**
 
 - Consumes: Handoff Domain, Event codecs, Application pipeline, and atomic multi-stream persistence.
-- Produces: pure `offerChildHandoff`, pure `acceptChildAndTransferParent`, and complete handling of `workfabric.handoff.transfer.v1` plus child Accept.
+- Produces: `DecodedHandoffTransfer`, `decodeHandoffTransfer`, pure `offerChildHandoff`, pure `acceptChildAndTransferParent`, and complete handling of `workfabric.handoff.transfer.v1` plus child Accept.
 
 - [ ] **Step 1: Write failing pure coordinator tests**
 
@@ -2073,6 +2074,8 @@ export function acceptChildAndTransferParent(
 `offerChildHandoff` returns no parent event and one child Offered event. `acceptChildAndTransferParent` returns one parent Transferred event and one child Accepted event.
 
 - [ ] **Step 5: Enforce same-Partition lineage in the Application**
+
+Add a dedicated `decodeHandoffTransfer(envelope, actor, generatedChildHandoffId, childContextReference)` application-boundary codec. It consumes only an already validated `workfabric.handoff.transfer.v1` Payload, returns `DecodedHandoffTransfer` with the parent ID, generated child ID, trusted Actor, and decoded child Package, and rejects every other message type. Do not add Transfer to the single-stream `HandoffCommand` union.
 
 Derive the root Partition ID once for a root Offer as `"partition:" + sha256(canonicalJson({ tenant_id, root_handoff_id }))`. Persist the stream-to-Partition assignment in the storage adapter. Every child Offer inherits the parent's Partition ID; never hash the child independently. Persist a validated Child Offer Context Bundle through Context Repository before creating the child event, using the same immutable/idempotent semantics as a root Offer.
 
