@@ -5,5 +5,6 @@ export * from "./events.js";
 export * from "./identity.js";
 export * from "./json.js";
 export * from "./persistence.js";
+export * from "./projection.js";
 export * from "./runtime-state.js";
 export * from "./signal.js";

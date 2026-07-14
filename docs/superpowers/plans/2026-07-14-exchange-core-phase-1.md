@@ -2176,6 +2176,8 @@ Expected: FAIL because the Runtime package and projection contracts do not exist
 export interface HandoffReadModel {
   readonly tenant_id: string;
   readonly partition_id: string;
+  readonly handoff_id: string;
+  readonly stream_version: number;
   readonly state: JsonObject;
   readonly latest_status: JsonObject | null;
 }
@@ -2218,7 +2220,7 @@ export interface ProjectionFailureStore {
 
 `MemoryExchangePersistence` implements `ProjectionFailureStore`; `MemoryHandoffReadModelStore` implements the read-model contract with cloned values.
 
-The read-model store exposes Profile `exchange.projection.v1` with required capabilities `idempotent_upsert`, `partition_reset`, and `immutable_reads`. Export `verifyProjectionProfile(factory)` from `exchange-conformance`; it verifies repeated same-version writes, cloned reads, Partition isolation, list behavior, and clear/rebuild behavior against any third-party Projection Adapter.
+The read-model store exposes Profile `exchange.projection.v1` with required capabilities `idempotent_upsert`, `partition_reset`, and `immutable_reads`. `handoff_id` and `stream_version` are explicit Adapter fields; an Adapter must not inspect opaque Domain JSON to discover identity or ordering. Upserts are monotonic: an identical repeated version is an idempotent no-op, the same version with different content is rejected, and an older version must never overwrite a newer model. Export `verifyProjectionProfile(factory)` from `exchange-conformance`; it verifies repeated same-version writes, inconsistent/stale writes, cloned reads, Partition isolation, list behavior, and clear/rebuild behavior against any third-party Projection Adapter.
 
 - [ ] **Step 4: Implement the Projector one committed event at a time**
 

@@ -8,6 +8,8 @@ import type {
   DeliveryStateStore,
   EventRecord,
   ExchangePersistence,
+  ProjectionFailureRecord,
+  ProjectionFailureStore,
   ProjectionCheckpointStore,
   SnapshotRecord,
   StreamAppend,
@@ -39,25 +41,43 @@ function compoundKey(first: string, second: string): string {
 }
 
 function assertNonNegativeInteger(value: number, label: string): void {
-  if (!Number.isInteger(value) || value < 0) {
-    throw new RangeError(`${label} must be a non-negative integer`);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`${label} must be a non-negative safe integer`);
   }
 }
 
 function assertPositiveInteger(value: number, label: string): void {
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new RangeError(`${label} must be a positive integer`);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new RangeError(`${label} must be a positive safe integer`);
   }
 }
 
+function assertNonEmpty(value: string, label: string): void {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`${label} must not be empty`);
+  }
+}
+
+function compareCodePoints(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export class MemoryExchangePersistence
-  implements ExchangePersistence, ProjectionCheckpointStore, DeliveryStateStore
+  implements
+    ExchangePersistence,
+    ProjectionCheckpointStore,
+    ProjectionFailureStore,
+    DeliveryStateStore
 {
   private readonly streams = new Map<string, EventRecord[]>();
   private readonly partitions = new Map<string, EventRecord[]>();
   private readonly commands = new Map<string, CommandRecord>();
   private readonly snapshots = new Map<string, SnapshotRecord>();
   private readonly projectionCheckpoints = new Map<string, number>();
+  private readonly projectionFailures = new Map<
+    string,
+    ProjectionFailureRecord
+  >();
   private readonly deliveryPositions = new Map<string, number>();
   private readonly attempts = new Map<number, DeliveryAttempt>();
   private readonly deadLetters = new Map<number, DeadLetterRecord>();
@@ -310,6 +330,51 @@ export class MemoryExchangePersistence
     partitionId: string,
   ): Promise<void> {
     this.projectionCheckpoints.delete(compoundKey(projectorId, partitionId));
+  }
+
+  async putProjectionFailure(
+    failure: ProjectionFailureRecord,
+  ): Promise<void> {
+    const clonedFailure = clone(failure);
+    assertNonNegativeInteger(clonedFailure.position, "failure position");
+    assertNonEmpty(clonedFailure.projector_id, "projector_id");
+    assertNonEmpty(clonedFailure.partition_id, "partition_id");
+    assertNonEmpty(clonedFailure.event_id, "event_id");
+    assertNonEmpty(clonedFailure.reason, "reason");
+    assertNonEmpty(clonedFailure.recorded_at, "recorded_at");
+    if (clonedFailure.reason.length > 512) {
+      throw new Error("reason must not exceed 512 characters");
+    }
+    const key = JSON.stringify([
+      clonedFailure.projector_id,
+      clonedFailure.partition_id,
+      clonedFailure.event_id,
+      clonedFailure.position,
+    ]);
+    if (!this.projectionFailures.has(key)) {
+      this.projectionFailures.set(key, clonedFailure);
+    }
+  }
+
+  async listProjectionFailures(
+    projectorId: string,
+    partitionId: string,
+  ): Promise<readonly ProjectionFailureRecord[]> {
+    assertNonEmpty(projectorId, "projector_id");
+    assertNonEmpty(partitionId, "partition_id");
+    return clone(
+      [...this.projectionFailures.values()]
+        .filter(
+          (failure) =>
+            failure.projector_id === projectorId &&
+            failure.partition_id === partitionId,
+        )
+        .sort(
+          (left, right) =>
+            left.position - right.position ||
+            compareCodePoints(left.event_id, right.event_id),
+        ),
+    );
   }
 
   async loadDeliveryPosition(
