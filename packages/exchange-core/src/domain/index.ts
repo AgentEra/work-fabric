@@ -1,3 +1,6 @@
+export * from "./domain-error.js";
+export * from "./handoff-commands.js";
+export * from "./handoff-decider.js";
 export * from "./handoff-events.js";
 export * from "./handoff-reducer.js";
 export * from "./handoff-state-codec.js";
