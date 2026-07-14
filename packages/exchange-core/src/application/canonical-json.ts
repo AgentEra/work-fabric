@@ -43,10 +43,16 @@ function canonicalize(
 
       const items: string[] = [];
       for (let index = 0; index < value.length; index += 1) {
-        if (!Object.hasOwn(value, index)) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, index);
+        if (descriptor === undefined) {
           throw new TypeError(`Value at ${path} contains a sparse array`);
         }
-        items.push(canonicalize(value[index], `${path}[${index}]`, ancestors));
+        if (!descriptor.enumerable || !("value" in descriptor)) {
+          return invalidJson(`${path}[${index}]`);
+        }
+        items.push(
+          canonicalize(descriptor.value, `${path}[${index}]`, ancestors),
+        );
       }
       return `[${items.join(",")}]`;
     }

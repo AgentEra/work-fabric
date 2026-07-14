@@ -3,6 +3,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type {
   ContextReference,
   JsonObject,
+  JsonValue,
   ProposedEvent,
 } from "@work-fabric/exchange-spi";
 import {
@@ -220,6 +221,35 @@ describe("canonical idempotency material", () => {
     Reflect.set(value, "4294967295", "not an array element");
 
     expect(() => canonicalJson(value)).toThrow(/valid JSON value/);
+  });
+
+  it("rejects array accessors without executing nondeterministic getters", () => {
+    let arrayGetterCalls = 0;
+    const values: JsonValue[] = [null];
+    Object.defineProperty(values, "0", {
+      enumerable: true,
+      get: () => {
+        arrayGetterCalls += 1;
+        return arrayGetterCalls;
+      },
+    });
+    const command = envelope(undefined, { values });
+
+    expect(() => canonicalJson(values)).toThrow(/valid JSON value/);
+    expect(() => idempotencyDigest(command)).toThrow(/valid JSON value/);
+    expect(() => idempotencyDigest(command)).toThrow(/valid JSON value/);
+    expect(arrayGetterCalls).toBe(0);
+
+    let objectGetterCalls = 0;
+    const objectAccessor = Object.defineProperty({}, "value", {
+      enumerable: true,
+      get: () => {
+        objectGetterCalls += 1;
+        return objectGetterCalls;
+      },
+    });
+    expect(() => canonicalJson(objectAccessor)).toThrow(/valid JSON value/);
+    expect(objectGetterCalls).toBe(0);
   });
 });
 
@@ -498,6 +528,8 @@ describe("Handoff Event encoding", () => {
             "current_responsible_actor",
             "lifecycle_state",
             "recipient",
+            "resource_version",
+            "updated_at",
           ],
           details: {
             work_reference_uri: "urn:work:item:42",
@@ -561,7 +593,7 @@ describe("Handoff Event encoding", () => {
         change_type: "status_reported",
         from_state: "accepted",
         to_state: "accepted",
-        changed_fields: ["latest_status"],
+        changed_fields: ["latest_status", "resource_version", "updated_at"],
         details: {
           work_reference_uri: "urn:work:item:42",
           lifecycle_state: "accepted",
@@ -584,7 +616,13 @@ describe("Handoff Event encoding", () => {
       "result_returned",
       "result_returned",
       "result_received",
-      ["current_responsible_actor", "lifecycle_state", "result"],
+      [
+        "current_responsible_actor",
+        "lifecycle_state",
+        "result",
+        "resource_version",
+        "updated_at",
+      ],
     ],
     [
       "workfabric.handoff.verified.v1",
@@ -592,7 +630,7 @@ describe("Handoff Event encoding", () => {
       "verified",
       "verified",
       "result_verified",
-      ["lifecycle_state"],
+      ["lifecycle_state", "resource_version", "updated_at"],
     ],
   ] satisfies readonly [
     HandoffEvent["event_type"],
@@ -669,7 +707,13 @@ describe("Handoff Event encoding", () => {
         from: null,
         to: "offered",
         change: "created",
-        fields: ["current_responsible_actor", "lifecycle_state", "package"],
+        fields: [
+          "current_responsible_actor",
+          "lifecycle_state",
+          "package",
+          "resource_version",
+          "updated_at",
+        ],
       },
       {
         event: {
@@ -681,7 +725,12 @@ describe("Handoff Event encoding", () => {
         from: "offered",
         to: "declined",
         change: "declined",
-        fields: ["current_responsible_actor", "lifecycle_state"],
+        fields: [
+          "current_responsible_actor",
+          "lifecycle_state",
+          "resource_version",
+          "updated_at",
+        ],
       },
       {
         event: {
@@ -693,7 +742,12 @@ describe("Handoff Event encoding", () => {
         from: "offered",
         to: "expired",
         change: "expired",
-        fields: ["current_responsible_actor", "lifecycle_state"],
+        fields: [
+          "current_responsible_actor",
+          "lifecycle_state",
+          "resource_version",
+          "updated_at",
+        ],
       },
       {
         event: {
@@ -706,7 +760,12 @@ describe("Handoff Event encoding", () => {
         from: "accepted",
         to: "cancelled",
         change: "cancelled",
-        fields: ["current_responsible_actor", "lifecycle_state"],
+        fields: [
+          "current_responsible_actor",
+          "lifecycle_state",
+          "resource_version",
+          "updated_at",
+        ],
       },
       {
         event: {
@@ -723,7 +782,12 @@ describe("Handoff Event encoding", () => {
         from: "verified",
         to: "closed",
         change: "closed",
-        fields: ["current_responsible_actor", "lifecycle_state"],
+        fields: [
+          "current_responsible_actor",
+          "lifecycle_state",
+          "resource_version",
+          "updated_at",
+        ],
       },
       {
         event: {
@@ -741,7 +805,7 @@ describe("Handoff Event encoding", () => {
         from: "result_returned",
         to: "rework_requested",
         change: "rework_requested",
-        fields: ["current_responsible_actor", "lifecycle_state"],
+        fields: ["lifecycle_state", "resource_version", "updated_at"],
       },
       {
         event: {
@@ -758,6 +822,8 @@ describe("Handoff Event encoding", () => {
           "child_handoff_id",
           "current_responsible_actor",
           "lifecycle_state",
+          "resource_version",
+          "updated_at",
         ],
       },
     ];
@@ -885,6 +951,41 @@ describe("Handoff Event encoding", () => {
     ).toThrow(/current_stream_version.*current_state/i);
   });
 
+  it("omits unchanged responsibility from rework changed fields", () => {
+    const rework: HandoffEvent = {
+      event_type: "workfabric.handoff.rework_requested.v1",
+      handoff_id: "handoff_01",
+      criterion_ids: ["tests-pass"],
+      reason: [{ kind: "text", text: "Fix tests" }],
+      occurred_at: "2026-07-14T04:00:00Z",
+    };
+    const currentState = stateAfter(
+      offeredEvent(),
+      acceptedEvent(),
+      resultReturnedEvent(),
+    );
+
+    const encoded = encodeHandoffEvents(
+      encodingInput([rework], {
+        current_state: currentState,
+        current_stream_version: 3,
+        receipt_ids: [null],
+      }),
+    );
+
+    expect(encoded.events[0]?.protocol_data.change).toMatchObject({
+      from_state: "result_returned",
+      to_state: "rework_requested",
+      changed_fields: ["lifecycle_state", "resource_version", "updated_at"],
+    });
+    expect(
+      schemas.validate(
+        "urn:work-fabric:schema:v1:event-data",
+        encoded.events[0]?.protocol_data,
+      ),
+    ).toEqual({ valid: true });
+  });
+
   it("derives a repeated Accept transition from rework State", () => {
     const rework: HandoffEvent = {
       event_type: "workfabric.handoff.rework_requested.v1",
@@ -916,9 +1017,21 @@ describe("Handoff Event encoding", () => {
       change: {
         from_state: "rework_requested",
         to_state: "accepted",
+        changed_fields: [
+          "current_responsible_actor",
+          "lifecycle_state",
+          "resource_version",
+          "updated_at",
+        ],
         details: { lifecycle_state: "accepted" },
       },
     });
+    expect(
+      schemas.validate(
+        "urn:work-fabric:schema:v1:event-data",
+        encoded.events[0]?.protocol_data,
+      ),
+    ).toEqual({ valid: true });
   });
 
   it("evolves a multi-event batch in order and returns its final Receipt", () => {

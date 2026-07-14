@@ -18,6 +18,7 @@ import type {
   HandoffState,
   HandoffTarget,
 } from "../domain/handoff-types.js";
+import { canonicalJson } from "./canonical-json.js";
 import type { CommandEnvelope } from "./protocol-types.js";
 
 function invalidPayload(field: string): never {
@@ -297,9 +298,21 @@ type ReceiptType =
 
 interface EventProjection {
   readonly change_type: string;
-  readonly changed_fields: readonly string[];
+  readonly changed_fields: readonly ChangedField[];
   readonly receipt_type: ReceiptType | null;
 }
+
+type StateChangedField =
+  | "child_handoff_id"
+  | "current_responsible_actor"
+  | "lifecycle_state"
+  | "package"
+  | "recipient"
+  | "resource_version"
+  | "result"
+  | "updated_at";
+
+type ChangedField = StateChangedField | "latest_status";
 
 function projectEvent(event: HandoffEvent): EventProjection {
   switch (event.event_type) {
@@ -390,6 +403,31 @@ function projectEvent(event: HandoffEvent): EventProjection {
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)];
+}
+
+function stateFieldChanged(
+  before: HandoffState | null,
+  after: HandoffState,
+  field: StateChangedField,
+): boolean {
+  if (before === null) return true;
+  return canonicalJson(before[field]) !== canonicalJson(after[field]);
+}
+
+function changedFields(
+  projection: EventProjection,
+  before: HandoffState | null,
+  after: HandoffState,
+): readonly string[] {
+  const candidates: readonly ChangedField[] = [
+    ...projection.changed_fields,
+    "resource_version",
+    "updated_at",
+  ];
+  return candidates.filter(
+    (field) =>
+      field === "latest_status" || stateFieldChanged(before, after, field),
+  );
 }
 
 function visibleActorIds(state: HandoffState): readonly string[] {
@@ -483,8 +521,9 @@ export function encodeHandoffEvents(
     }
 
     const nextStreamVersion = input.current_stream_version + eventIndex + 1;
-    const fromState = state?.lifecycle_state ?? null;
-    const nextState = evolveHandoff(state, event, nextStreamVersion);
+    const beforeState = state;
+    const fromState = beforeState?.lifecycle_state ?? null;
+    const nextState = evolveHandoff(beforeState, event, nextStreamVersion);
     const resourceVersion = nextState.resource_version;
     state = nextState;
 
@@ -521,7 +560,7 @@ export function encodeHandoffEvents(
         change_type: projection.change_type,
         from_state: fromState,
         to_state: nextState.lifecycle_state,
-        changed_fields: projection.changed_fields,
+        changed_fields: changedFields(projection, beforeState, nextState),
         details: routingDetails(nextState),
       },
       receipt: receiptSummary,
