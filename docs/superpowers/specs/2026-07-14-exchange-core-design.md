@@ -271,6 +271,8 @@ WFPP `ContextBundle.digest` 在线上协议中保持 `{ algorithm, value } | nul
 9. 提交后 Projection 和 Signal Worker 异步消费事件；
 10. Binding 向调用方返回 Canonical Operation Result。
 
+所有 `accepted` Operation Result 都返回非空 Resource Version，但 Receipt 取决于领域迁移：Accept、Return Result 与 Verify 返回签发的 Receipt，其他成功交互显式返回 `receipt: null`。Application 不得为满足响应格式而虚构非领域 Receipt。
+
 同步强一致范围：
 
 - Schema 和权限校验；

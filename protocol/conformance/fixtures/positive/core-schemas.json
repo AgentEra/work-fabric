@@ -368,6 +368,23 @@
     }
   },
   {
+    "name": "valid accepted operation result without receipt",
+    "schema_id": "urn:work-fabric:schema:v1:operation-result",
+    "expected_valid": true,
+    "instance": {
+      "spec_version": "1.0",
+      "request_message_id": "message_offer_01",
+      "operation_status": "accepted",
+      "resource": {
+        "resource_type": "handoff",
+        "resource_id": "handoff_02",
+        "resource_version": 1
+      },
+      "receipt": null,
+      "error": null
+    }
+  },
+  {
     "name": "valid protocol error",
     "schema_id": "urn:work-fabric:schema:v1:protocol-error",
     "expected_valid": true,

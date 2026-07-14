@@ -108,6 +108,20 @@ describe("OperationResult", () => {
     ).toBeNull();
   });
 
+  it("accepts a successful operation whose transition issues no receipt", () => {
+    expect(
+      errors("operation-result", {
+        spec_version: "1.0",
+        request_message_id: "msg_01",
+        operation_status: "accepted",
+        resource,
+        receipt: null,
+        error: null,
+        extensions: {},
+      }),
+    ).toBeNull();
+  });
+
   it("rejects an accepted operation carrying a protocol error", () => {
     expect(
       errors("operation-result", {

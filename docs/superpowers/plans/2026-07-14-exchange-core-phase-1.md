@@ -1852,6 +1852,7 @@ Using Memory and local adapters, cover:
 
 ```text
 valid human Offer creates offered stream and Operation Result
+accepted Offer, Status, and Close results remain Schema-valid with receipt null
 Agent Accept moves responsibility and returns responsibility_accepted Receipt
 message_id can change on same-key replay while resource/Receipt remain identical
 same key with changed Payload returns idempotency_key_reused

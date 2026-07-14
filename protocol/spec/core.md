@@ -38,6 +38,8 @@ Offer 描述工作引用、唯一目标、Intent、可选 Context、AuthoritySco
 
 Canonical Receipt 只能由 Authoritative Exchange 签发。`delivered`、`received`、`responsibility_accepted`、`result_received` 与 `result_verified` 是不同事实。
 
+成功的 Operation Result 必须返回 Resource Version；只有生命周期明确签发 Receipt 的交互才返回非空 `receipt`。当前 Handoff Core 仅在 Accept、Return Result 与 Verify 成功时签发对应 Receipt，Offer、Status、Close、Cancel 等成功交互必须显式返回 `receipt: null`，不得虚构 Receipt。
+
 消息送达或 Delivery Ack MUST NOT 被解释为责任接受。责任只由成功的 `handoff.accept` 迁移。
 
 ## 7. 可靠性
