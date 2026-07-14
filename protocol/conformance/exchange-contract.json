@@ -1,0 +1,90 @@
+{
+  "spec_version": "1.0",
+  "profile": "exchange_core",
+  "behaviors": [
+    {
+      "id": "identity_presentation",
+      "description": "Binding-authenticated Principal identity is checked against Actor, Endpoint, and Delegation claims.",
+      "interactions": ["command.receive"],
+      "assertions": ["Client payload cannot self-authenticate a Principal.", "Authority is revalidated for every state mutation."]
+    },
+    {
+      "id": "endpoint_discovery",
+      "description": "Endpoints register discoverable protocol versions, bindings, capabilities, leases, and limits.",
+      "interactions": ["endpoint.register", "endpoint.renew", "endpoint.get", "capability.query"],
+      "assertions": ["Discovery does not expose credentials or executable implementation.", "Matching and scheduling algorithms are not prescribed."]
+    },
+    {
+      "id": "handoff_offer",
+      "description": "A valid offer creates an authoritative Handoff in offered state.",
+      "interactions": ["handoff.offer"],
+      "assertions": ["Exactly one target form is present.", "Initiator retains responsibility until acceptance."]
+    },
+    {
+      "id": "handoff_accept",
+      "description": "An authorized Recipient accepts responsibility for an offered or rework-requested Handoff.",
+      "interactions": ["handoff.accept"],
+      "assertions": ["State becomes accepted.", "A responsibility_accepted Receipt and accepted event are recorded."]
+    },
+    {
+      "id": "handoff_decline",
+      "description": "A Recipient can decline an offered Handoff without accepting responsibility.",
+      "interactions": ["handoff.decline"],
+      "assertions": ["State becomes declined.", "Declined is terminal."]
+    },
+    {
+      "id": "handoff_expire",
+      "description": "An unaccepted Handoff expires only after its acceptance deadline.",
+      "interactions": ["handoff.expire"],
+      "assertions": ["accept_by has elapsed.", "State becomes expired and cannot be mutated."]
+    },
+    {
+      "id": "handoff_cancel",
+      "description": "Policy-authorized cancellation ends an offered or accepted Handoff.",
+      "interactions": ["handoff.cancel"],
+      "assertions": ["State becomes cancelled.", "External side effects are not implicitly compensated."]
+    },
+    {
+      "id": "status_publish",
+      "description": "A Recipient publishes transparent external execution status.",
+      "interactions": ["handoff.report_status"],
+      "assertions": ["Lifecycle state remains accepted.", "Progress is informational and never a transition condition."]
+    },
+    {
+      "id": "result_return",
+      "description": "A Recipient returns structured summary, artifacts, and evidence.",
+      "interactions": ["handoff.return_result"],
+      "assertions": ["State becomes result_returned.", "Exchange validates schema and authority but not professional correctness."]
+    },
+    {
+      "id": "result_verify",
+      "description": "The designated Verifier evaluates returned results against acceptance criteria.",
+      "interactions": ["handoff.verify", "handoff.close"],
+      "assertions": ["Verification precedes close.", "Verified and closed events preserve resource ordering."]
+    },
+    {
+      "id": "rework",
+      "description": "The Verifier can request rework and the original Recipient explicitly reaccepts responsibility.",
+      "interactions": ["handoff.request_rework", "handoff.accept"],
+      "assertions": ["State becomes rework_requested before reacceptance.", "Reacceptance returns state to accepted."]
+    },
+    {
+      "id": "transfer",
+      "description": "Transfer creates a child offered Handoff while the parent remains accepted.",
+      "interactions": ["handoff.transfer", "handoff.child_accepted"],
+      "assertions": ["Parent remains accepted until child acceptance.", "Child acceptance atomically marks parent transferred."]
+    },
+    {
+      "id": "subscription_delivery_ack",
+      "description": "Durable subscriptions receive at-least-once CloudEvent deliveries and acknowledge delivery separately.",
+      "interactions": ["subscription.pull", "delivery.ack"],
+      "assertions": ["Consumers deduplicate by CloudEvent id.", "Delivery Ack never accepts Handoff responsibility."]
+    },
+    {
+      "id": "idempotent_retry_conflict",
+      "description": "State-changing commands are idempotent and use optimistic resource versions.",
+      "interactions": ["command.retry", "command.conflict"],
+      "assertions": ["Same key and payload replay the prior result.", "Same key with different payload returns idempotency_key_reused.", "Version mismatch returns version_conflict."]
+    }
+  ]
+}

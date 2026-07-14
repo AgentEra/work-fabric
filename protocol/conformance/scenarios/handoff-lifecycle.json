@@ -1,0 +1,98 @@
+[
+  {
+    "name": "happy path closes a verified handoff",
+    "initial_state": null,
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.offer", "conditions": [], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
+      { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" },
+      { "interaction": "handoff.return_result", "conditions": ["result_schema_valid", "authority_valid"], "expected_state": "result_returned", "expected_event_type": "workfabric.handoff.result_returned.v1" },
+      { "interaction": "handoff.verify", "conditions": ["verifier_authorized", "criteria_satisfied"], "expected_state": "verified", "expected_event_type": "workfabric.handoff.verified.v1" },
+      { "interaction": "handoff.close", "conditions": ["verifier_authorized"], "expected_state": "closed", "expected_event_type": "workfabric.handoff.closed.v1" }
+    ]
+  },
+  {
+    "name": "recipient declines an offered handoff",
+    "initial_state": "offered",
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.decline", "conditions": [], "expected_state": "declined", "expected_event_type": "workfabric.handoff.declined.v1" }
+    ]
+  },
+  {
+    "name": "unaccepted handoff expires",
+    "initial_state": "offered",
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.expire", "conditions": ["accept_by_elapsed"], "expected_state": "expired", "expected_event_type": "workfabric.handoff.expired.v1" }
+    ]
+  },
+  {
+    "name": "initiator cancels an offered handoff",
+    "initial_state": "offered",
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.cancel", "conditions": ["policy_allows_cancel"], "expected_state": "cancelled", "expected_event_type": "workfabric.handoff.cancelled.v1" }
+    ]
+  },
+  {
+    "name": "policy allows cancellation after acceptance",
+    "initial_state": "accepted",
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.cancel", "conditions": ["policy_allows_cancel"], "expected_state": "cancelled", "expected_event_type": "workfabric.handoff.cancelled.v1" }
+    ]
+  },
+  {
+    "name": "external status does not change lifecycle state",
+    "initial_state": "accepted",
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.report_status", "conditions": ["recipient_authorized"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.status_reported.v1" }
+    ]
+  },
+  {
+    "name": "verifier requests and recipient accepts rework",
+    "initial_state": "result_returned",
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.request_rework", "conditions": ["verifier_authorized", "rework_reason_provided"], "expected_state": "rework_requested", "expected_event_type": "workfabric.handoff.rework_requested.v1" },
+      { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" }
+    ]
+  },
+  {
+    "name": "transfer preserves parent until child acceptance",
+    "initial_state": "accepted",
+    "expected_valid": true,
+    "steps": [
+      {
+        "interaction": "handoff.transfer",
+        "conditions": ["recipient_authorized", "redelegation_allowed"],
+        "expected_state": "accepted",
+        "expected_event_type": "workfabric.handoff.offered.v1",
+        "expected_effects": [
+          { "type": "create_child_handoff", "child_initial_state": "offered" }
+        ]
+      },
+      { "interaction": "handoff.child_accepted", "conditions": ["child_handoff_accepted"], "expected_state": "transferred", "expected_event_type": "workfabric.handoff.transferred.v1" }
+    ]
+  },
+  {
+    "name": "cannot close before verification",
+    "initial_state": "result_returned",
+    "expected_valid": false,
+    "expected_error": "is not allowed from result_returned",
+    "steps": [
+      { "interaction": "handoff.close", "conditions": ["verifier_authorized"], "expected_state": "closed", "expected_event_type": "workfabric.handoff.closed.v1" }
+    ]
+  },
+  {
+    "name": "terminal handoff is immutable",
+    "initial_state": "closed",
+    "expected_valid": false,
+    "expected_error": "terminal state closed",
+    "steps": [
+      { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" }
+    ]
+  }
+]

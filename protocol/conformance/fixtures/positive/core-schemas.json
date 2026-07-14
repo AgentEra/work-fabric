@@ -1,0 +1,545 @@
+[
+  {
+    "name": "valid acceptance criterion",
+    "schema_id": "urn:work-fabric:schema:v1:acceptance-criterion",
+    "expected_valid": true,
+    "instance": {
+      "criterion_id": "tests-pass",
+      "description": "The repository test suite passes",
+      "required": true,
+      "result_schema_ref": null,
+      "required_evidence_types": ["test_report"]
+    }
+  },
+  {
+    "name": "valid actor reference",
+    "schema_id": "urn:work-fabric:schema:v1:actor-ref",
+    "expected_valid": true,
+    "instance": {
+      "actor_id": "actor_01",
+      "actor_type": "agent"
+    }
+  },
+  {
+    "name": "valid artifact",
+    "schema_id": "urn:work-fabric:schema:v1:artifact",
+    "expected_valid": true,
+    "instance": {
+      "artifact_id": "artifact_01",
+      "artifact_type": "source_commit",
+      "resource": {
+        "uri": "urn:git:commit:abc123",
+        "extensions": {}
+      }
+    }
+  },
+  {
+    "name": "valid authority scope",
+    "schema_id": "urn:work-fabric:schema:v1:authority-scope",
+    "expected_valid": true,
+    "instance": {
+      "delegation_id": "delegation_01",
+      "scopes": ["work:read"],
+      "resource_refs": ["urn:work:item:42"],
+      "expires_at": "2026-07-14T08:00:00Z",
+      "may_redelegate": false
+    }
+  },
+  {
+    "name": "valid binding descriptor",
+    "schema_id": "urn:work-fabric:schema:v1:binding-descriptor",
+    "expected_valid": true,
+    "instance": {
+      "binding_type": "local_process",
+      "uri": "urn:work-fabric:local:endpoint:runtime-01",
+      "security_schemes": ["local_process_identity"]
+    }
+  },
+  {
+    "name": "valid capability descriptor",
+    "schema_id": "urn:work-fabric:schema:v1:capability-descriptor",
+    "expected_valid": true,
+    "instance": {
+      "capability_id": "software.implementation",
+      "version": "1.0.0",
+      "name": "Software implementation",
+      "description": "Implements approved source changes",
+      "input_media_types": ["application/json"],
+      "output_media_types": ["application/json"],
+      "input_schema_refs": [],
+      "output_schema_refs": [],
+      "interaction_modes": ["asynchronous"],
+      "constraints": {}
+    }
+  },
+  {
+    "name": "valid capability requirement",
+    "schema_id": "urn:work-fabric:schema:v1:capability-requirement",
+    "expected_valid": true,
+    "instance": {
+      "capability_id": "software.implementation"
+    }
+  },
+  {
+    "name": "valid command envelope",
+    "schema_id": "urn:work-fabric:schema:v1:command-envelope",
+    "expected_valid": true,
+    "instance": {
+      "spec_version": "1.0",
+      "message_id": "message_01",
+      "message_type": "workfabric.handoff.accept.v1",
+      "sent_at": "2026-07-13T08:00:00Z",
+      "tenant_id": "tenant_01",
+      "exchange_id": "exchange_01",
+      "actor_id": "actor_01",
+      "endpoint_id": "endpoint_01",
+      "idempotency_key": "accept-42-1",
+      "payload": {}
+    }
+  },
+  {
+    "name": "valid text content part",
+    "schema_id": "urn:work-fabric:schema:v1:content-part",
+    "expected_valid": true,
+    "instance": {
+      "kind": "text",
+      "media_type": "text/plain",
+      "text": "Implement the approved change"
+    }
+  },
+  {
+    "name": "valid context bundle",
+    "schema_id": "urn:work-fabric:schema:v1:context-bundle",
+    "expected_valid": true,
+    "instance": {
+      "context_id": "context_01",
+      "version": 1,
+      "created_at": "2026-07-13T07:50:00Z",
+      "items": [],
+      "visibility_scope": {
+        "actor_ids": ["actor_01"],
+        "endpoint_ids": [],
+        "expires_at": "2026-07-14T08:00:00Z"
+      },
+      "digest": null,
+      "extensions": {}
+    }
+  },
+  {
+    "name": "valid delivery acknowledgement",
+    "schema_id": "urn:work-fabric:schema:v1:delivery-ack",
+    "expected_valid": true,
+    "instance": {
+      "delivery_id": "delivery_01",
+      "subscription_id": "subscription_01",
+      "outcome": "acknowledged",
+      "acknowledged_at": "2026-07-13T08:00:02Z"
+    }
+  },
+  {
+    "name": "valid endpoint descriptor",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-descriptor",
+    "expected_valid": true,
+    "instance": {
+      "endpoint_id": "endpoint_01",
+      "actor": {
+        "actor_id": "actor_01",
+        "actor_type": "agent"
+      },
+      "endpoint_type": "native_agent",
+      "display_name": "Local Agent Runtime",
+      "protocol_versions": ["1.0"],
+      "bindings": [
+        {
+          "binding_type": "local_process",
+          "uri": "urn:work-fabric:local:endpoint:runtime-01",
+          "security_schemes": ["local_process_identity"]
+        }
+      ],
+      "capabilities": [],
+      "lease": {
+        "expires_at": "2026-07-13T08:05:00Z",
+        "renew_after": "2026-07-13T08:03:00Z"
+      },
+      "limits": {
+        "max_inline_content_bytes": 65536
+      }
+    }
+  },
+  {
+    "name": "valid endpoint reference",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-ref",
+    "expected_valid": true,
+    "instance": {
+      "endpoint_id": "endpoint_01",
+      "actor_id": "actor_01"
+    }
+  },
+  {
+    "name": "valid event data",
+    "schema_id": "urn:work-fabric:schema:v1:event-data",
+    "expected_valid": true,
+    "instance": {
+      "resource_version": 1,
+      "change": {
+        "change_type": "created"
+      },
+      "receipt": null
+    }
+  },
+  {
+    "name": "valid event delivery",
+    "schema_id": "urn:work-fabric:schema:v1:event-delivery",
+    "expected_valid": true,
+    "instance": {
+      "delivery_id": "delivery_01",
+      "subscription_id": "subscription_01",
+      "attempt": 1,
+      "events": [
+        {
+          "specversion": "1.0",
+          "id": "event_01",
+          "source": "urn:work-fabric:exchange:exchange_01",
+          "type": "workfabric.handoff.offered.v1",
+          "subject": "handoff_01",
+          "time": "2026-07-13T08:00:00Z",
+          "datacontenttype": "application/json",
+          "dataschema": "urn:work-fabric:schema:v1:handoff-offered-event",
+          "wfsequence": 1,
+          "data": {
+            "resource_version": 1,
+            "change": {
+              "change_type": "created"
+            },
+            "receipt": null
+          }
+        }
+      ],
+      "next_cursor": "cursor_02",
+      "delivered_at": "2026-07-13T08:00:01Z",
+      "visibility_expires_at": "2026-07-13T08:01:01Z"
+    }
+  },
+  {
+    "name": "valid evidence",
+    "schema_id": "urn:work-fabric:schema:v1:evidence",
+    "expected_valid": true,
+    "instance": {
+      "evidence_id": "evidence_01",
+      "evidence_type": "test_report",
+      "content": {
+        "kind": "data",
+        "schema_ref": "urn:example:schema:test-report:v1",
+        "data": {
+          "passed": 42,
+          "failed": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "valid handoff offer",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-offer",
+    "expected_valid": true,
+    "instance": {
+      "work_reference": {
+        "uri": "urn:work:item:42",
+        "extensions": {}
+      },
+      "target": {
+        "actor_id": "actor_01"
+      },
+      "intent": [
+        {
+          "kind": "text",
+          "media_type": "text/plain",
+          "text": "Implement the approved change"
+        }
+      ],
+      "authority_scope": {
+        "delegation_id": "delegation_01",
+        "scopes": ["work:read"],
+        "resource_refs": ["urn:work:item:42"],
+        "expires_at": "2026-07-14T08:00:00Z",
+        "may_redelegate": false
+      },
+      "acceptance_criteria": [
+        {
+          "criterion_id": "tests-pass",
+          "description": "Tests pass",
+          "required": true,
+          "result_schema_ref": null,
+          "required_evidence_types": ["test_report"]
+        }
+      ],
+      "verifier": {
+        "actor_id": "verifier_01",
+        "actor_type": "human"
+      },
+      "priority": "normal",
+      "accept_by": "2026-07-13T09:00:00Z",
+      "result_due_at": "2026-07-14T08:00:00Z"
+    }
+  },
+  {
+    "name": "valid handoff snapshot",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-snapshot",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "thread_id": "thread_01",
+      "resource_version": 1,
+      "lifecycle_state": "offered",
+      "current_responsible_actor": {
+        "actor_id": "initiator_01",
+        "actor_type": "human"
+      },
+      "package": {
+        "work_reference": {
+          "uri": "urn:work:item:42",
+          "extensions": {}
+        },
+        "target": {
+          "actor_id": "actor_01"
+        },
+        "intent": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Implement the approved change"
+          }
+        ],
+        "context_bundle_id": "context_01",
+        "context_bundle_version": 1,
+        "authority_scope_id": "authority_01",
+        "acceptance_criteria_ids": ["tests-pass"],
+        "verifier_actor_id": "verifier_01",
+        "accept_by": "2026-07-13T09:00:00Z",
+        "result_due_at": "2026-07-14T08:00:00Z"
+      },
+      "latest_status": null,
+      "result": null,
+      "parent_handoff_id": null,
+      "created_at": "2026-07-13T08:00:00Z",
+      "updated_at": "2026-07-13T08:00:00Z"
+    }
+  },
+  {
+    "name": "valid handoff target",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-target",
+    "expected_valid": true,
+    "instance": {
+      "endpoint_id": "endpoint_01"
+    }
+  },
+  {
+    "name": "valid operation receipt",
+    "schema_id": "urn:work-fabric:schema:v1:operation-receipt",
+    "expected_valid": true,
+    "instance": {
+      "receipt_id": "receipt_01",
+      "receipt_type": "responsibility_accepted",
+      "handoff_id": "handoff_01",
+      "resource_version": 2,
+      "recorded_at": "2026-07-13T08:00:00Z"
+    }
+  },
+  {
+    "name": "valid operation result",
+    "schema_id": "urn:work-fabric:schema:v1:operation-result",
+    "expected_valid": true,
+    "instance": {
+      "spec_version": "1.0",
+      "request_message_id": "message_01",
+      "operation_status": "accepted",
+      "resource": {
+        "resource_type": "handoff",
+        "resource_id": "handoff_01",
+        "resource_version": 2
+      },
+      "receipt": {
+        "receipt_id": "receipt_01",
+        "receipt_type": "responsibility_accepted",
+        "handoff_id": "handoff_01",
+        "resource_version": 2,
+        "recorded_at": "2026-07-13T08:00:00Z"
+      },
+      "error": null
+    }
+  },
+  {
+    "name": "valid protocol error",
+    "schema_id": "urn:work-fabric:schema:v1:protocol-error",
+    "expected_valid": true,
+    "instance": {
+      "code": "version_conflict",
+      "message": "Version mismatch",
+      "retryable": true,
+      "retry_after_seconds": null,
+      "current_resource_version": 2,
+      "field_violations": [],
+      "details": {}
+    }
+  },
+  {
+    "name": "valid protocol event",
+    "schema_id": "urn:work-fabric:schema:v1:protocol-event",
+    "expected_valid": true,
+    "instance": {
+      "specversion": "1.0",
+      "id": "event_01",
+      "source": "urn:work-fabric:exchange:exchange_01",
+      "type": "workfabric.handoff.offered.v1",
+      "subject": "handoff_01",
+      "time": "2026-07-13T08:00:00Z",
+      "datacontenttype": "application/json",
+      "dataschema": "urn:work-fabric:schema:v1:handoff-offered-event",
+      "wfsequence": 1,
+      "data": {
+        "resource_version": 1,
+        "change": {
+          "change_type": "created"
+        },
+        "receipt": null
+      }
+    }
+  },
+  {
+    "name": "valid resource reference",
+    "schema_id": "urn:work-fabric:schema:v1:resource-ref",
+    "expected_valid": true,
+    "instance": {
+      "uri": "urn:work:item:42",
+      "extensions": {}
+    }
+  },
+  {
+    "name": "valid versioned resource reference",
+    "schema_id": "urn:work-fabric:schema:v1:resource-version-ref",
+    "expected_valid": true,
+    "instance": {
+      "resource_type": "handoff",
+      "resource_id": "handoff_01",
+      "resource_version": 1
+    }
+  },
+  {
+    "name": "valid result submission",
+    "schema_id": "urn:work-fabric:schema:v1:result-submission",
+    "expected_valid": true,
+    "instance": {
+      "summary": [
+        {
+          "kind": "text",
+          "media_type": "text/plain",
+          "text": "Implemented and tested"
+        }
+      ],
+      "artifacts": [],
+      "evidence": []
+    }
+  },
+  {
+    "name": "valid status update",
+    "schema_id": "urn:work-fabric:schema:v1:status-update",
+    "expected_valid": true,
+    "instance": {
+      "status_report_id": "status_01",
+      "execution_status": "in_progress",
+      "progress": 0.5,
+      "message": [],
+      "observed_at": "2026-07-13T08:30:00Z",
+      "blocked_on": []
+    }
+  },
+  {
+    "name": "valid subscription",
+    "schema_id": "urn:work-fabric:schema:v1:subscription",
+    "expected_valid": true,
+    "instance": {
+      "subscription_id": "subscription_01",
+      "owner": {
+        "actor_id": "actor_01",
+        "actor_type": "agent"
+      },
+      "endpoint_id": "endpoint_01",
+      "filter": {
+        "event_types": [],
+        "actor_ids": [],
+        "endpoint_ids": [],
+        "thread_ids": [],
+        "handoff_ids": [],
+        "work_reference_uris": [],
+        "capability_ids": [],
+        "lifecycle_states": []
+      },
+      "delivery": {
+        "mode": "cursor_pull"
+      },
+      "state": "active",
+      "cursor": null,
+      "created_at": "2026-07-13T08:00:00Z",
+      "updated_at": "2026-07-13T08:00:00Z"
+    }
+  },
+  {
+    "name": "valid subscription filter",
+    "schema_id": "urn:work-fabric:schema:v1:subscription-filter",
+    "expected_valid": true,
+    "instance": {
+      "event_types": ["workfabric.handoff.offered.v1"],
+      "actor_ids": [],
+      "endpoint_ids": [],
+      "thread_ids": [],
+      "handoff_ids": [],
+      "work_reference_uris": [],
+      "capability_ids": [],
+      "lifecycle_states": ["offered"]
+    }
+  },
+  {
+    "name": "valid trace context",
+    "schema_id": "urn:work-fabric:schema:v1:trace-context",
+    "expected_valid": true,
+    "instance": {
+      "traceparent": "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    }
+  },
+  {
+    "name": "valid version conflict operation result",
+    "schema_id": "urn:work-fabric:schema:v1:operation-result",
+    "expected_valid": true,
+    "instance": {
+      "spec_version": "1.0",
+      "request_message_id": "message_conflict_01",
+      "operation_status": "conflict",
+      "resource": null,
+      "receipt": null,
+      "error": {
+        "code": "version_conflict",
+        "message": "Expected version 3 but current version is 4",
+        "retryable": true,
+        "retry_after_seconds": null,
+        "current_resource_version": 4,
+        "field_violations": [],
+        "details": {
+          "expected_version": 3
+        }
+      }
+    }
+  },
+  {
+    "name": "valid idempotency key reuse error",
+    "schema_id": "urn:work-fabric:schema:v1:protocol-error",
+    "expected_valid": true,
+    "instance": {
+      "code": "idempotency_key_reused",
+      "message": "The same key was used with a different payload",
+      "retryable": false,
+      "retry_after_seconds": null,
+      "current_resource_version": null,
+      "field_violations": [],
+      "details": {}
+    }
+  }
+]
