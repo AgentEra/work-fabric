@@ -236,6 +236,7 @@ describe("Handoff lifecycle decisions", () => {
     readonly command: HandoffCommand;
     readonly context: HandoffDecisionContext;
     readonly eventType: HandoffEvent["event_type"];
+    readonly eventPayload: Readonly<Record<string, unknown>>;
     readonly nextState: HandoffLifecycleState;
   }[] = [
     {
@@ -251,6 +252,12 @@ describe("Handoff lifecycle decisions", () => {
       },
       context: allowedContext,
       eventType: "workfabric.handoff.offered.v1",
+      eventPayload: {
+        thread_id: "thread_01",
+        initiator,
+        package: handoffPackage,
+        parent_handoff_id: null,
+      },
       nextState: "offered",
     },
     {
@@ -259,6 +266,7 @@ describe("Handoff lifecycle decisions", () => {
       command: acceptCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.accepted.v1",
+      eventPayload: { recipient },
       nextState: "accepted",
     },
     {
@@ -267,6 +275,7 @@ describe("Handoff lifecycle decisions", () => {
       command: acceptCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.accepted.v1",
+      eventPayload: { recipient },
       nextState: "accepted",
     },
     {
@@ -275,6 +284,7 @@ describe("Handoff lifecycle decisions", () => {
       command: declineCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.declined.v1",
+      eventPayload: {},
       nextState: "declined",
     },
     {
@@ -287,6 +297,7 @@ describe("Handoff lifecycle decisions", () => {
       },
       context: { ...allowedContext, now: handoffPackage.accept_by },
       eventType: "workfabric.handoff.expired.v1",
+      eventPayload: {},
       nextState: "expired",
     },
     {
@@ -295,6 +306,7 @@ describe("Handoff lifecycle decisions", () => {
       command: cancelCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.cancelled.v1",
+      eventPayload: { reason: cancelCommand.reason },
       nextState: "cancelled",
     },
     {
@@ -303,6 +315,7 @@ describe("Handoff lifecycle decisions", () => {
       command: cancelCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.cancelled.v1",
+      eventPayload: { reason: cancelCommand.reason },
       nextState: "cancelled",
     },
     {
@@ -311,6 +324,7 @@ describe("Handoff lifecycle decisions", () => {
       command: statusCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.status_reported.v1",
+      eventPayload: { status: statusCommand.status },
       nextState: "accepted",
     },
     {
@@ -319,6 +333,7 @@ describe("Handoff lifecycle decisions", () => {
       command: resultCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.result_returned.v1",
+      eventPayload: { result: resultCommand.result },
       nextState: "result_returned",
     },
     {
@@ -327,6 +342,11 @@ describe("Handoff lifecycle decisions", () => {
       command: verifyCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.verified.v1",
+      eventPayload: {
+        satisfied_criterion_ids: verifyCommand.satisfied_criterion_ids,
+        summary: verifyCommand.summary,
+        evidence: verifyCommand.evidence,
+      },
       nextState: "verified",
     },
     {
@@ -335,6 +355,7 @@ describe("Handoff lifecycle decisions", () => {
       command: closeCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.closed.v1",
+      eventPayload: {},
       nextState: "closed",
     },
     {
@@ -343,20 +364,25 @@ describe("Handoff lifecycle decisions", () => {
       command: reworkCommand,
       context: allowedContext,
       eventType: "workfabric.handoff.rework_requested.v1",
+      eventPayload: {
+        criterion_ids: reworkCommand.criterion_ids,
+        reason: reworkCommand.reason,
+      },
       nextState: "rework_requested",
     },
   ];
 
   it.each(transitionCases)(
     "$label emits exactly one metadata-free event",
-    ({ state, command, context, eventType, nextState }) => {
+    ({ state, command, context, eventType, eventPayload, nextState }) => {
       const decision = decideHandoff(state, command, context);
       const event = requireAccepted(decision);
 
-      expect(event).toMatchObject({
+      expect(event).toEqual({
         event_type: eventType,
         handoff_id: command.handoff_id,
         occurred_at: context.now,
+        ...eventPayload,
       });
       expect(event).not.toHaveProperty("id");
       expect(event).not.toHaveProperty("receipt");
@@ -555,6 +581,96 @@ describe("Handoff decision rejections", () => {
     );
   });
 
+  it.each([
+    ["timezone-less", "2026-07-14T07:00:00"],
+    ["non-Z offset", "2026-07-14T07:00:00+08:00"],
+    ["unparseable", "not-a-timestamp"],
+  ])("throws for programmer-invalid %s decision time", (_label, now) => {
+    expect(() =>
+      decideHandoff(offeredState, acceptCommand, {
+        ...allowedContext,
+        now,
+      }),
+    ).toThrow("Invalid decision now timestamp");
+  });
+
+  it("throws for a timezone-less accept_by", () => {
+    const state = evolveHandoff(
+      null,
+      offeredEvent({
+        package: { ...handoffPackage, accept_by: "2026-07-14T08:00:00" },
+      }),
+      1,
+    );
+
+    expect(() =>
+      decideHandoff(
+        state,
+        {
+          kind: "expire",
+          handoff_id: "handoff_01",
+          actor: initiator,
+        },
+        allowedContext,
+      ),
+    ).toThrow("Invalid accept_by timestamp");
+  });
+
+  it("throws for a timezone-less Authority Scope expires_at", () => {
+    const state = evolveHandoff(
+      evolveHandoff(
+        null,
+        offeredEvent({
+          package: {
+            ...handoffPackage,
+            authority_scope: {
+              ...handoffPackage.authority_scope,
+              expires_at: "2026-07-15T00:00:00",
+            },
+          },
+        }),
+        1,
+      ),
+      acceptedEvent(),
+      2,
+    );
+
+    expect(() => decideHandoff(state, resultCommand, allowedContext)).toThrow(
+      "Invalid Authority Scope expires_at timestamp",
+    );
+  });
+
+  it("compares millisecond expiry boundaries exactly", () => {
+    const packageWithMillisecondDeadline: HandoffPackage = {
+      ...handoffPackage,
+      accept_by: "2026-07-14T08:00:00.123Z",
+    };
+    const state = evolveHandoff(
+      null,
+      offeredEvent({ package: packageWithMillisecondDeadline }),
+      1,
+    );
+    const command: HandoffCommand = {
+      kind: "expire",
+      handoff_id: "handoff_01",
+      actor: initiator,
+    };
+
+    expectRejected(
+      decideHandoff(state, command, {
+        ...allowedContext,
+        now: "2026-07-14T08:00:00.122Z",
+      }),
+      "precondition_failed",
+    );
+    requireAccepted(
+      decideHandoff(state, command, {
+        ...allowedContext,
+        now: "2026-07-14T08:00:00.123Z",
+      }),
+    );
+  });
+
   it("rejects cancellation by policy", () => {
     expectRejected(
       decideHandoff(offeredState, cancelCommand, {
@@ -576,6 +692,52 @@ describe("Handoff decision rejections", () => {
     );
   });
 
+  it.each([
+    ["empty", []],
+    ["duplicate", ["tests-pass", "tests-pass"]],
+    ["unknown", ["tests-pass", "unknown"]],
+  ] satisfies readonly (readonly [string, readonly string[]])[])(
+    "rejects %s verification criterion IDs",
+    (_label, satisfiedCriterionIds) => {
+      expectRejected(
+        decideHandoff(
+          resultReturnedState,
+          {
+            ...verifyCommand,
+            satisfied_criterion_ids: satisfiedCriterionIds,
+          },
+          allowedContext,
+        ),
+        "invalid_argument",
+      );
+    },
+  );
+
+  it.each([
+    ["omitted", ["tests-pass"]],
+    ["included", ["tests-pass", "reviewed"]],
+  ] satisfies readonly (readonly [string, readonly string[]])[])(
+    "accepts verification with a known optional criterion %s",
+    (_label, satisfiedCriterionIds) => {
+      const command: HandoffCommand = {
+        ...verifyCommand,
+        satisfied_criterion_ids: satisfiedCriterionIds,
+      };
+      expect(
+        requireAccepted(
+          decideHandoff(resultReturnedState, command, allowedContext),
+        ),
+      ).toEqual({
+        event_type: "workfabric.handoff.verified.v1",
+        handoff_id: "handoff_01",
+        satisfied_criterion_ids: satisfiedCriterionIds,
+        summary: verifyCommand.summary,
+        evidence: verifyCommand.evidence,
+        occurred_at: allowedContext.now,
+      });
+    },
+  );
+
   it("rejects a rework request containing an unknown criterion", () => {
     expectRejected(
       decideHandoff(
@@ -585,6 +747,42 @@ describe("Handoff decision rejections", () => {
       ),
       "invalid_argument",
     );
+  });
+
+  it.each([
+    ["empty", []],
+    ["duplicate", ["tests-pass", "tests-pass"]],
+  ] satisfies readonly (readonly [string, readonly string[]])[])(
+    "rejects %s rework criterion IDs",
+    (_label, criterionIds) => {
+      expectRejected(
+        decideHandoff(
+          resultReturnedState,
+          { ...reworkCommand, criterion_ids: criterionIds },
+          allowedContext,
+        ),
+        "invalid_argument",
+      );
+    },
+  );
+
+  it("accepts rework for a known optional criterion and preserves values", () => {
+    const command: HandoffCommand = {
+      ...reworkCommand,
+      criterion_ids: ["reviewed"],
+    };
+
+    expect(
+      requireAccepted(
+        decideHandoff(resultReturnedState, command, allowedContext),
+      ),
+    ).toEqual({
+      event_type: "workfabric.handoff.rework_requested.v1",
+      handoff_id: "handoff_01",
+      criterion_ids: ["reviewed"],
+      reason: reworkCommand.reason,
+      occurred_at: allowedContext.now,
+    });
   });
 
   it("rejects a rework request without a reason", () => {

@@ -10,6 +10,9 @@ import type {
   HandoffState,
 } from "./handoff-types.js";
 
+const CANONICAL_UTC_TIMESTAMP =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
 function accept(event: HandoffEvent): DomainDecision {
   return { kind: "accepted", events: [event] };
 }
@@ -64,11 +67,49 @@ function isAllowedState(
 }
 
 function timestamp(value: string, field: string): number {
+  if (!CANONICAL_UTC_TIMESTAMP.test(value)) {
+    throw new Error(`Invalid ${field} timestamp: ${value}`);
+  }
+
   const parsed = Date.parse(value);
-  if (!Number.isFinite(parsed)) {
+  const normalized = value.includes(".")
+    ? value
+    : `${value.slice(0, -1)}.000Z`;
+  if (
+    !Number.isFinite(parsed) ||
+    new Date(parsed).toISOString() !== normalized
+  ) {
     throw new Error(`Invalid ${field} timestamp: ${value}`);
   }
   return parsed;
+}
+
+function validateCriterionIds(
+  state: HandoffState,
+  criterionIds: readonly string[],
+  field: string,
+): DomainDecision | null {
+  if (criterionIds.length === 0) {
+    return reject("invalid_argument", `${field} must not be empty`);
+  }
+
+  const uniqueCriterionIds = new Set(criterionIds);
+  if (uniqueCriterionIds.size !== criterionIds.length) {
+    return reject("invalid_argument", `${field} must be unique`);
+  }
+
+  const packageCriterionIds = new Set(
+    state.package.acceptance_criteria.map((criterion) => criterion.criterion_id),
+  );
+  if (
+    criterionIds.some((criterionId) => !packageCriterionIds.has(criterionId))
+  ) {
+    return reject(
+      "invalid_argument",
+      `${field} must belong to the Handoff Package`,
+    );
+  }
+  return null;
 }
 
 function rejectUnauthorized(action: string): DomainDecision {
@@ -244,6 +285,13 @@ function decideVerify(
   );
   if (unauthorized !== null) return unauthorized;
 
+  const invalidCriterionIds = validateCriterionIds(
+    state,
+    command.satisfied_criterion_ids,
+    "Verification criterion IDs",
+  );
+  if (invalidCriterionIds !== null) return invalidCriterionIds;
+
   const satisfied = new Set(command.satisfied_criterion_ids);
   const missingRequired = state.package.acceptance_criteria.some(
     (criterion) => criterion.required && !satisfied.has(criterion.criterion_id),
@@ -305,15 +353,12 @@ function decideRework(
     return reject("precondition_failed", "A rework reason is required");
   }
 
-  const criterionIds = new Set(
-    state.package.acceptance_criteria.map((criterion) => criterion.criterion_id),
+  const invalidCriterionIds = validateCriterionIds(
+    state,
+    command.criterion_ids,
+    "Rework criterion IDs",
   );
-  if (command.criterion_ids.some((criterionId) => !criterionIds.has(criterionId))) {
-    return reject(
-      "invalid_argument",
-      "Rework criterion IDs must belong to the Handoff Package",
-    );
-  }
+  if (invalidCriterionIds !== null) return invalidCriterionIds;
   return accept({
     event_type: "workfabric.handoff.rework_requested.v1",
     handoff_id: command.handoff_id,
