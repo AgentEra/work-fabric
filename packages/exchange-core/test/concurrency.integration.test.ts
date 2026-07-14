@@ -419,6 +419,11 @@ describe("Exchange concurrency and application recovery", () => {
         ? "workfabric.handoff.accepted.v1"
         : "workfabric.handoff.cancelled.v1",
     );
+    expect(records[1]?.actor_id).toBe(
+      outcomes[0]?.operation_status === "accepted"
+        ? "actor_agent_a"
+        : "actor_human",
+    );
   });
 
   it("commits exactly one of two Result Returns at one expected version", async () => {
