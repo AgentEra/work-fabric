@@ -98,14 +98,68 @@ function importSpecifiers(source: string): readonly string[] {
   return specifiers;
 }
 
+function implementationMatches(
+  packageRoot: (typeof packageRoots)[number],
+  candidate: string,
+): readonly string[] {
+  const normalized = candidate.toLowerCase();
+  const isBoundaryPackage = packageRoots.includes(packageRoot);
+  return [
+    ...(isBoundaryPackage && normalized.includes("@work-fabric/adapter-")
+      ? ["adapter-package"]
+      : []),
+    ...forbidden.filter((token) => normalized.includes(token)),
+  ];
+}
+
+function packageDependencyViolations(
+  packageRoot: (typeof packageRoots)[number],
+  manifest: Readonly<Record<string, unknown>>,
+): readonly string[] {
+  const violations: string[] = [];
+  for (const section of [
+    "dependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ]) {
+    const dependencies = manifest[section];
+    if (
+      dependencies === null ||
+      typeof dependencies !== "object" ||
+      Array.isArray(dependencies)
+    ) {
+      continue;
+    }
+    for (const dependency of Object.keys(dependencies)) {
+      const declared = (dependencies as Record<string, unknown>)[dependency];
+      const candidates = [
+        dependency,
+        ...(typeof declared === "string" ? [declared] : []),
+      ];
+      for (const candidate of candidates) {
+        for (const match of implementationMatches(packageRoot, candidate)) {
+          violations.push(
+            `${packageRoot}/package.json ${section} includes ${dependency} as ${candidate} (${match})`,
+          );
+        }
+      }
+    }
+  }
+  return violations;
+}
+
 describe("Exchange Core dependency boundaries", () => {
   it("extracts module specifiers without treating comments or strings as imports", () => {
     expect(
       importSpecifiers(`
         // import "postgres-comment";
         const documentation = 'import "feishu-doc-example"';
-        import type { Clock } from "@work-fabric/exchange-core";
-        export * from "./public.js";
+        import type {
+          Clock as RenamedClock,
+        } from "@work-fabric/exchange-core";
+        export {
+          publicValue as renamedPublicValue,
+        } from "./public.js";
         const lazy = import("./lazy.js");
         const legacy = require("./legacy.cjs");
       `),
@@ -117,19 +171,55 @@ describe("Exchange Core dependency boundaries", () => {
     ]);
   });
 
+  it("rejects every Core or SPI Adapter package and implementation aliases", () => {
+    const genericImport = importSpecifiers(`
+      import {
+        Cache as RenamedCache,
+      } from "@work-fabric/adapter-cache-redis";
+    `)[0];
+    expect(genericImport).toBe("@work-fabric/adapter-cache-redis");
+    expect(
+      implementationMatches(
+        "packages/exchange-core",
+        genericImport!,
+      ),
+    ).toContain("adapter-package");
+    expect(
+      implementationMatches(
+        "packages/exchange-spi",
+        "@work-fabric/adapter-future-implementation",
+      ),
+    ).toContain("adapter-package");
+    const dependencyViolations = packageDependencyViolations(
+      "packages/exchange-spi",
+      {
+        dependencies: {
+          "@work-fabric/adapter-cache-redis": "1.0.0",
+          "neutral-name":
+            "npm:@work-fabric/adapter-storage-memory@0.1.0",
+        },
+      },
+    ).join("\n");
+    expect(dependencyViolations).toContain(
+      "@work-fabric/adapter-cache-redis as @work-fabric/adapter-cache-redis",
+    );
+    expect(dependencyViolations).toContain(
+      "neutral-name as npm:@work-fabric/adapter-storage-memory@0.1.0",
+    );
+    expect(dependencyViolations).toContain("adapter-package");
+    expect(dependencyViolations).toContain("adapter-storage");
+  });
+
   it("keeps SPI and Core imports and package dependencies technology-neutral", async () => {
     const violations: string[] = [];
     for (const packageRoot of packageRoots) {
       for (const file of await sourceFiles(join(packageRoot, "src"))) {
         const source = await readFile(file, "utf8");
         for (const specifier of importSpecifiers(source)) {
-          const normalized = specifier.toLowerCase();
-          for (const token of forbidden) {
-            if (normalized.includes(token)) {
-              violations.push(
-                `${relative(process.cwd(), file)} imports ${specifier} (${token})`,
-              );
-            }
+          for (const match of implementationMatches(packageRoot, specifier)) {
+            violations.push(
+              `${relative(process.cwd(), file)} imports ${specifier} (${match})`,
+            );
           }
         }
       }
@@ -137,30 +227,7 @@ describe("Exchange Core dependency boundaries", () => {
       const manifest = JSON.parse(
         await readFile(join(packageRoot, "package.json"), "utf8"),
       ) as Record<string, unknown>;
-      for (const section of [
-        "dependencies",
-        "optionalDependencies",
-        "peerDependencies",
-      ]) {
-        const dependencies = manifest[section];
-        if (
-          dependencies === null ||
-          typeof dependencies !== "object" ||
-          Array.isArray(dependencies)
-        ) {
-          continue;
-        }
-        for (const dependency of Object.keys(dependencies)) {
-          const normalized = dependency.toLowerCase();
-          for (const token of forbidden) {
-            if (normalized.includes(token)) {
-              violations.push(
-                `${packageRoot}/package.json ${section} includes ${dependency} (${token})`,
-              );
-            }
-          }
-        }
-      }
+      violations.push(...packageDependencyViolations(packageRoot, manifest));
     }
 
     expect(violations).toEqual([]);

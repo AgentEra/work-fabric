@@ -46,6 +46,14 @@ const clock: Clock = {
   now: () => "2026-07-15T09:00:10Z",
 };
 
+class MutableClock implements Clock {
+  constructor(public instant: string) {}
+
+  now(): string {
+    return this.instant;
+  }
+}
+
 class StaticJournal implements EventJournal {
   constructor(private readonly records: readonly EventRecord[]) {}
 
@@ -358,6 +366,78 @@ describe("projection recovery", () => {
 });
 
 describe("Signal and Cursor recovery", () => {
+  it("backs off an actual retryable Signal failure and later accepts it", async () => {
+    const record = signalRecord(1);
+    const persistence = new MemoryExchangePersistence();
+    const subscriptions = new MemorySubscriptionStore();
+    await subscriptions.putSubscription(subscription());
+    const signal = new InProcessSignalAdapter();
+    signal.setOutcome(record.event_id, {
+      kind: "retryable_failure",
+      detail: "temporarily offline",
+    });
+    const retryClock = new MutableClock("2026-07-15T09:00:10Z");
+    const dispatcher = new SignalDispatcher(
+      new StaticJournal([record]),
+      persistence,
+      subscriptions,
+      new DefaultSubscriptionDeliveryPolicy(),
+      signal,
+      retryClock,
+      { base_delay_seconds: 1, max_delay_seconds: 8 },
+      schemas,
+    );
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+    expect(
+      await persistence.listDeliveryAttempts(
+        "subscription_recovery",
+        record.event_id,
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        attempt: 1,
+        outcome: "retryable_failure",
+        next_attempt_at: "2026-07-15T09:00:11Z",
+      }),
+    ]);
+    expect(
+      await persistence.loadDeliveryPosition(
+        "subscription_recovery",
+        partitionId,
+      ),
+    ).toBe(0);
+
+    signal.setOutcome(record.event_id, { kind: "accepted" });
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+    expect(signal.deliveries()).toHaveLength(1);
+
+    retryClock.instant = "2026-07-15T09:00:11Z";
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+
+    expect(
+      (
+        await persistence.listDeliveryAttempts(
+          "subscription_recovery",
+          record.event_id,
+        )
+      ).map(({ outcome }) => outcome),
+    ).toEqual(["retryable_failure", "accepted"]);
+    expect(signal.deliveries()).toHaveLength(2);
+    expect(
+      await persistence.loadDeliveryPosition(
+        "subscription_recovery",
+        partitionId,
+      ),
+    ).toBe(1);
+    expect(
+      await persistence.listDeadLetters(
+        "subscription_recovery",
+        record.event_id,
+      ),
+    ).toEqual([]);
+  });
+
   it("redelivers the same Event ID after acceptance and a crash before position", async () => {
     const record = signalRecord(1);
     const persistence = new MemoryExchangePersistence();

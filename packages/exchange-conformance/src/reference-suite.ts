@@ -485,7 +485,11 @@ export async function verifyExchangeReferenceSuite(
     scenario.signal_subscription_id,
     firstEvent.event_id,
   );
-  assert.equal(attempts.length, 2, "Signal retry must append attempt 2");
+  assert.equal(
+    attempts.length,
+    2,
+    "durable retry-state recovery must append attempt 2",
+  );
   assert.equal(attempts[1]?.outcome, "accepted");
   assert.equal(
     await persistence.loadDeliveryPosition(

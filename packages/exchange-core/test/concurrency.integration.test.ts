@@ -10,6 +10,7 @@ import type {
   AtomicCommitRequest,
   AtomicCommitResult,
   AuthorityPolicy,
+  EventRecord,
   ExchangePersistence,
   JsonObject,
   ResolvedPrincipal,
@@ -22,6 +23,7 @@ import {
 
 import {
   ExchangeApplication,
+  handoffEventFromJson,
   type Clock,
   type CommandEnvelope,
   type IdGenerator,
@@ -87,21 +89,106 @@ class TestIds implements IdGenerator {
   }
 }
 
-class ConflictOnChildAcceptPersistence extends MemoryExchangePersistence {
-  conflictNextMulti = false;
+class ParentRacePersistence extends MemoryExchangePersistence {
+  private nextMultiCommitBarrier: {
+    readonly reached: () => void;
+    readonly released: Promise<void>;
+  } | null = null;
+
+  pauseNextMultiCommit(): {
+    readonly reached: Promise<void>;
+    readonly release: () => void;
+  } {
+    let markReached = () => {};
+    const reached = new Promise<void>((resolve) => {
+      markReached = resolve;
+    });
+    let release = () => {};
+    const released = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.nextMultiCommitBarrier = { reached: markReached, released };
+    return { reached, release };
+  }
 
   override async commitAtomically(
     request: AtomicCommitRequest,
   ): Promise<AtomicCommitResult> {
-    if (this.conflictNextMulti && request.appends.length === 2) {
-      this.conflictNextMulti = false;
-      return {
-        kind: "version_conflict",
-        current_versions: { handoff_1: 3, handoff_2: 1 },
-      };
+    const barrier = this.nextMultiCommitBarrier;
+    if (barrier !== null && request.appends.length === 2) {
+      this.nextMultiCommitBarrier = null;
+      barrier.reached();
+      await barrier.released;
     }
     return super.commitAtomically(request);
   }
+}
+
+function parentStatusCommit(current: EventRecord): AtomicCommitRequest {
+  return {
+    tenant_id: tenantId,
+    partition_id: current.partition_id,
+    commit_id: "commit_parent_race",
+    idempotency_key: "parent-race",
+    payload_digest: "sha256:parent-race",
+    request_message_id: "message_parent_race",
+    outcome: {
+      operation_status: "accepted",
+      resource: {
+        resource_type: "handoff",
+        resource_id: "handoff_1",
+        resource_version: current.stream_version + 1,
+      },
+      receipt: null,
+      error: null,
+    },
+    version_checks: [],
+    appends: [
+      {
+        stream_id: "handoff_1",
+        expected_version: current.stream_version,
+        events: [
+          {
+            event_id: "event_parent_race",
+            event_type: "workfabric.handoff.status_reported.v1",
+            schema_version: "1.0",
+            exchange_id: current.exchange_id,
+            request_message_id: "message_parent_race",
+            idempotency_key: "parent-race",
+            thread_id: current.thread_id,
+            handoff_id: current.handoff_id,
+            actor_id: "actor_agent_a",
+            endpoint_id: "endpoint_agent_a",
+            visibility: current.visibility,
+            visible_actor_ids: current.visible_actor_ids,
+            visible_endpoint_ids: current.visible_endpoint_ids,
+            occurred_at: "2026-07-15T09:00:01Z",
+            domain_data: {
+              event_type: "workfabric.handoff.status_reported.v1",
+              handoff_id: "handoff_1",
+              status: { execution_status: "in_progress" },
+              occurred_at: "2026-07-15T09:00:01Z",
+            },
+            protocol_data: {
+              resource_version: current.stream_version + 1,
+              change: {
+                change_type: "status_reported",
+                from_state: "accepted",
+                to_state: "accepted",
+                changed_fields: [
+                  "latest_status",
+                  "resource_version",
+                  "updated_at",
+                ],
+                details: { lifecycle_state: "accepted" },
+              },
+              receipt: null,
+            },
+          },
+        ],
+      },
+    ],
+  };
 }
 
 class FailOncePersistence extends MemoryExchangePersistence {
@@ -254,16 +341,6 @@ function result(key: string): CommandEnvelope {
   );
 }
 
-async function streamLengths(
-  persistence: MemoryExchangePersistence,
-): Promise<readonly number[]> {
-  return Promise.all(
-    ["handoff_1", "handoff_2"].map(async (id) =>
-      (await persistence.readStream(id)).length,
-    ),
-  );
-}
-
 describe("Exchange concurrency and application recovery", () => {
   it("commits exactly one of two concurrent capability-target Accepts", async () => {
     const persistence = new MemoryExchangePersistence();
@@ -291,7 +368,20 @@ describe("Exchange concurrency and application recovery", () => {
       "accepted",
       "conflict",
     ]);
-    expect(await persistence.readStream("handoff_1")).toHaveLength(2);
+    expect(
+      outcomes.find(({ operation_status }) => operation_status === "conflict"),
+    ).toMatchObject({ error: { code: "version_conflict" } });
+    const records = await persistence.readStream("handoff_1");
+    expect(records).toHaveLength(2);
+    const acceptedEvent = handoffEventFromJson(records[1]!.domain_data);
+    const winningActor =
+      outcomes[0]?.operation_status === "accepted"
+        ? "actor_agent_a"
+        : "actor_agent_b";
+    expect(acceptedEvent).toMatchObject({
+      event_type: "workfabric.handoff.accepted.v1",
+      recipient: { actor_id: winningActor, actor_type: "agent" },
+    });
   });
 
   it("commits only one valid next state in an Accept and Cancel race", async () => {
@@ -319,12 +409,16 @@ describe("Exchange concurrency and application recovery", () => {
       "accepted",
       "conflict",
     ]);
+    expect(
+      outcomes.find(({ operation_status }) => operation_status === "conflict"),
+    ).toMatchObject({ error: { code: "version_conflict" } });
     const records = await persistence.readStream("handoff_1");
     expect(records).toHaveLength(2);
-    expect([
-      "workfabric.handoff.accepted.v1",
-      "workfabric.handoff.cancelled.v1",
-    ]).toContain(records[1]?.event_type);
+    expect(records[1]?.event_type).toBe(
+      outcomes[0]?.operation_status === "accepted"
+        ? "workfabric.handoff.accepted.v1"
+        : "workfabric.handoff.cancelled.v1",
+    );
   });
 
   it("commits exactly one of two Result Returns at one expected version", async () => {
@@ -344,11 +438,19 @@ describe("Exchange concurrency and application recovery", () => {
       "accepted",
       "conflict",
     ]);
-    expect(await persistence.readStream("handoff_1")).toHaveLength(3);
+    expect(
+      outcomes.find(({ operation_status }) => operation_status === "conflict"),
+    ).toMatchObject({ error: { code: "version_conflict" } });
+    const records = await persistence.readStream("handoff_1");
+    expect(records).toHaveLength(3);
+    expect(records[2]).toMatchObject({
+      event_type: "workfabric.handoff.result_returned.v1",
+      actor_id: "actor_agent_a",
+    });
   });
 
-  it("changes neither stream when child Accept sees a stale parent", async () => {
-    const persistence = new ConflictOnChildAcceptPersistence();
+  it("does not partially transfer when child Accept sees a genuinely stale parent", async () => {
+    const persistence = new ParentRacePersistence();
     const app = application(persistence);
     await app.handle(
       offer("offer-parent", offerPayload({ actor_id: "actor_agent_a" }, true)),
@@ -374,19 +476,46 @@ describe("Exchange concurrency and application recovery", () => {
       operation_status: "accepted",
       resource: { resource_id: "handoff_2" },
     });
-    const before = await streamLengths(persistence);
-    persistence.conflictNextMulti = true;
+    const parentBefore = await persistence.readStream("handoff_1");
+    const childBefore = await persistence.readStream("handoff_2");
+    const barrier = persistence.pauseNextMultiCommit();
 
-    const accepted = await app.handle(
+    const pendingAccept = app.handle(
       accept("child", "handoff_2", "accept-child"),
       { token: "child" },
     );
+    await barrier.reached;
+    const currentParent = parentBefore.at(-1);
+    if (currentParent === undefined) throw new Error("Parent stream is missing");
+    let raced: AtomicCommitResult;
+    try {
+      raced = await persistence.commitAtomically(
+        parentStatusCommit(currentParent),
+      );
+    } finally {
+      barrier.release();
+    }
+    expect(raced!).toMatchObject({ kind: "committed" });
+    const accepted = await pendingAccept;
 
     expect(accepted).toMatchObject({
       operation_status: "conflict",
       error: { code: "version_conflict" },
     });
-    expect(await streamLengths(persistence)).toEqual(before);
+    const parentAfter = await persistence.readStream("handoff_1");
+    const childAfter = await persistence.readStream("handoff_2");
+    expect(childAfter).toEqual(childBefore);
+    expect(parentAfter.slice(0, parentBefore.length)).toEqual(parentBefore);
+    expect(parentAfter).toHaveLength(parentBefore.length + 1);
+    expect(parentAfter.at(-1)?.event_type).toBe(
+      "workfabric.handoff.status_reported.v1",
+    );
+    expect(
+      parentAfter.some(
+        ({ event_type }) =>
+          event_type === "workfabric.handoff.transferred.v1",
+      ),
+    ).toBe(false);
     expect(
       await persistence.findCommand(tenantId, "accept-child"),
     ).toBeNull();
