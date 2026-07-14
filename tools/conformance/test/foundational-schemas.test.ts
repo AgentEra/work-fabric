@@ -21,6 +21,15 @@ function validate(schemaName: string, value: unknown): ErrorObject[] | null {
 }
 
 describe("ActorRef", () => {
+  it("accepts the minimal reference used by nested protocol objects", () => {
+    expect(
+      validate("actor-ref", {
+        actor_id: "actor_01",
+        actor_type: "agent",
+      }),
+    ).toBeNull();
+  });
+
   it.each(["human", "agent", "system"])(
     "accepts the %s actor type",
     (actorType) => {
@@ -92,6 +101,17 @@ describe("ContentPart", () => {
   });
 });
 
+describe("EndpointRef", () => {
+  it("accepts the minimal endpoint reference", () => {
+    expect(
+      validate("endpoint-ref", {
+        endpoint_id: "endpoint_01",
+        actor_id: "actor_01",
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("ContextBundle", () => {
   const context = {
     context_id: "context_01",
@@ -128,6 +148,18 @@ describe("ContextBundle", () => {
 });
 
 describe("AuthorityScope", () => {
+  it("accepts the approved minimal authority example", () => {
+    expect(
+      validate("authority-scope", {
+        delegation_id: "dlg_01",
+        scopes: ["work:read", "artifact:write"],
+        resource_refs: ["urn:work:project:42"],
+        expires_at: "2026-07-14T08:00:00Z",
+        may_redelegate: false,
+      }),
+    ).toBeNull();
+  });
+
   it("accepts a bounded delegation scope", () => {
     expect(
       validate("authority-scope", {

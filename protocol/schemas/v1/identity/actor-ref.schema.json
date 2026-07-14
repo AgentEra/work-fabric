@@ -4,7 +4,7 @@
   "title": "Actor Reference",
   "type": "object",
   "additionalProperties": false,
-  "required": ["actor_id", "actor_type", "extensions"],
+  "required": ["actor_id", "actor_type"],
   "properties": {
     "actor_id": {
       "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"

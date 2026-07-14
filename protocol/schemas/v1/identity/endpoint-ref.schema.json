@@ -4,7 +4,7 @@
   "title": "Endpoint Reference",
   "type": "object",
   "additionalProperties": false,
-  "required": ["endpoint_id", "actor_id", "extensions"],
+  "required": ["endpoint_id", "actor_id"],
   "properties": {
     "endpoint_id": {
       "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"

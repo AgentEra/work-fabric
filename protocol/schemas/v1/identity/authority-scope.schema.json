@@ -9,8 +9,7 @@
     "scopes",
     "resource_refs",
     "expires_at",
-    "may_redelegate",
-    "extensions"
+    "may_redelegate"
   ],
   "properties": {
     "delegation_id": {
