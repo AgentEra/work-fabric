@@ -582,6 +582,7 @@ describe("MemoryExchangePersistence", () => {
       attempted_at: "2026-07-14T00:01:00.000Z",
       outcome: "retryable_failure",
       detail: "temporary",
+      next_attempt_at: "2026-07-14T00:02:00.000Z",
     };
     const deadLetter: DeadLetterRecord = {
       subscription_id: "subscription_01",

@@ -55,6 +55,9 @@ export const PERSISTENCE_REQUIRED_CAPABILITIES = [
   "transactional_idempotency",
   "partitioned_journal",
   "immutable_events",
+  "active_delivery_cas",
+  "atomic_delivery_settlement",
+  "idempotent_dead_letters",
 ] as const;
 
 export interface CommandRecord {

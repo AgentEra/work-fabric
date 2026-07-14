@@ -14,6 +14,9 @@ describe("persistence contract", () => {
       "transactional_idempotency",
       "partitioned_journal",
       "immutable_events",
+      "active_delivery_cas",
+      "atomic_delivery_settlement",
+      "idempotent_dead_letters",
     ]);
   });
 

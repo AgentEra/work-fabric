@@ -363,6 +363,8 @@ DeliveryStateStore
 ├── load(subscription_id, partition_id)
 ├── recordAttempt(delivery)
 ├── advance(subscription_id, partition_id, position)
+├── claimPending(delivery, expected_active_delivery_id)
+├── settle(delivery_id, expected_outcome, outcome)
 └── deadLetter(delivery, reason)
 ```
 
@@ -436,7 +438,10 @@ Adapter 启动时暴露能力：
     "partitioned_journal": true,
     "snapshots": true,
     "batch_read": true,
-    "tenant_isolation": true
+    "tenant_isolation": true,
+    "active_delivery_cas": true,
+    "atomic_delivery_settlement": true,
+    "idempotent_dead_letters": true
   }
 }
 ```
@@ -450,6 +455,9 @@ Adapter 启动时暴露能力：
 - Partition 内可恢复游标；
 - 已提交事件不可修改；
 - 失败事务不遗留部分事件。
+- 每个 Subscription/Partition 只有一个活动 Delivery，并支持 CAS 替换；
+- Cursor Ack 的 Outcome、Position 和 Rejected Dead Letter 原子结算；
+- Dead Letter 使用稳定 Subscription/Event 身份幂等写入。
 
 可选能力包括 Snapshot、批量读取、原生租户隔离、只读副本、压缩归档、冷热分层和原生变更通知。Core 可以基于可选能力优化，但不能依赖它们维持正确性。
 
@@ -559,6 +567,32 @@ details
 - 一个订阅失败不阻塞其他订阅。
 
 即使进程在事件提交后、通知发送前崩溃，Dispatcher 也可以从持久化位置恢复。
+
+Cursor Pull 对每个 `(subscription_id, partition_id)` 只保留一个活动
+Delivery 指针。重启或重复 Pull 返回同一个未过期 Delivery；过期后通过
+Delivery ID 的 Compare-and-Set 结束旧 Attempt 并建立下一 Attempt，不产生
+重叠 Pending Delivery。旧 Delivery 仍可按 ID 审计，但过期 Ack 不能推进位置。
+
+Cursor Ack 的结算是一个存储语义事务：`acknowledged` 在同一原子边界内
+检查 `from_position`、推进到 `to_position`、标记 Delivery 并清除活动指针；
+`rejected` 还在同一边界内按 `(subscription_id, event_id)` 幂等写入死信。
+`retry` 和 `expired` 不推进位置，保留活动指针供下一 Attempt 原子替换。
+同 Outcome 重放必须返回已有结果，不同 Outcome 冲突和 Position 冲突都不得
+留下部分状态。
+已结算 Delivery 的同 Outcome Ack 仍先认证 Cursor 签名并核对
+Subscription/Partition/Position，但不因该 Cursor 后续过期而破坏幂等收敛；篡改
+Cursor 始终拒绝。Ack 返回按服务端当前时间重新签发的位置 Cursor，因此 `retry`
+不会把旧 Visibility Expiry 带入下一次 Pull。
+
+Subscription 的 `subscription_id`、Tenant、Owner Actor/Type、Endpoint 和
+`created_at` 构成不可替换身份；相同内容与相同 `updated_at` 可以幂等重放，
+不同内容必须使用严格后移的 `updated_at`。`active` 与 `suspended` 可以互转，
+`closed` 是终态。Active Listing 按 Subscription ID 稳定排序并隔离 Tenant。
+
+Push Attempt 使用 `(subscription_id, event_id, attempt)` 作为稳定身份，矛盾
+重放必须拒绝；Dead Letter 使用 `(subscription_id, event_id)` First-write
+幂等。二者的查询结果都必须复制并确定性排序，使 Runtime 重启后仅依据持久化
+事实恢复 Attempt、退避时间和死信状态。
 
 ### 10.6 事件演进
 

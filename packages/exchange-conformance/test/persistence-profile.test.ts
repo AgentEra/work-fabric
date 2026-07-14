@@ -6,9 +6,13 @@ import type {
   CapabilityManifest,
   CommandRecord,
   DeadLetterRecord,
+  DeliveryClaimResult,
   DeliveryAttempt,
+  DeliverySettlement,
+  DeliverySettlementResult,
   EventRecord,
   ProjectionFailureRecord,
+  PendingDeliveryRecord,
   SnapshotRecord,
 } from "@work-fabric/exchange-spi";
 
@@ -102,6 +106,88 @@ class IncompleteFailureIdentityStore extends MemoryExchangePersistence {
   }
 }
 
+class AcceptsContradictoryAttemptStore extends MemoryExchangePersistence {
+  override async recordDeliveryAttempt(attempt: DeliveryAttempt): Promise<void> {
+    try {
+      await super.recordDeliveryAttempt(attempt);
+    } catch (error: unknown) {
+      if (!(error instanceof Error && /contradictory/i.test(error.message))) {
+        throw error;
+      }
+    }
+  }
+}
+
+class ClaimsOverlappingDeliveryStore extends MemoryExchangePersistence {
+  override async claimPendingDelivery(
+    delivery: PendingDeliveryRecord,
+    expectedActiveDeliveryId: string | null,
+  ): Promise<DeliveryClaimResult> {
+    const result = await super.claimPendingDelivery(
+      delivery,
+      expectedActiveDeliveryId,
+    );
+    return result.kind === "conflict"
+      ? { kind: "claimed", delivery: structuredClone(delivery) }
+      : result;
+  }
+}
+
+class MutableDeliveryReadStore extends MemoryExchangePersistence {
+  private readonly cached = new Map<string, PendingDeliveryRecord | null>();
+
+  override async getDelivery(
+    deliveryId: string,
+  ): Promise<PendingDeliveryRecord | null> {
+    if (!this.cached.has(deliveryId)) {
+      this.cached.set(deliveryId, await super.getDelivery(deliveryId));
+    }
+    return this.cached.get(deliveryId) ?? null;
+  }
+}
+
+class NonAtomicRejectedSettlementStore extends MemoryExchangePersistence {
+  override async settleDelivery(
+    deliveryId: string,
+    expectedOutcome: "pending",
+    settlement: DeliverySettlement,
+  ): Promise<DeliverySettlementResult> {
+    return super.settleDelivery(
+      deliveryId,
+      expectedOutcome,
+      settlement.outcome === "rejected"
+        ? { ...settlement, outcome: "acknowledged", reason: null }
+        : settlement,
+    );
+  }
+}
+
+class PartialPositionConflictStore extends MemoryExchangePersistence {
+  override async settleDelivery(
+    deliveryId: string,
+    expectedOutcome: "pending",
+    settlement: DeliverySettlement,
+  ): Promise<DeliverySettlementResult> {
+    const result = await super.settleDelivery(
+      deliveryId,
+      expectedOutcome,
+      settlement,
+    );
+    if (result.kind === "position_conflict" && settlement.outcome === "rejected") {
+      for (const event of result.delivery.events) {
+        await super.putDeadLetter({
+          subscription_id: result.delivery.subscription_id,
+          event,
+          attempts: result.delivery.attempt,
+          reason: settlement.reason ?? "rejected",
+          recorded_at: settlement.settled_at,
+        });
+      }
+    }
+    return result;
+  }
+}
+
 describe("verifyPersistenceProfile", () => {
   it("rejects an Adapter missing checkpoint position guards", async () => {
     await expect(
@@ -124,6 +210,36 @@ describe("verifyPersistenceProfile", () => {
       ).rejects.toThrow(/Projection Failure.*four-part identity/i);
     });
   }
+
+  it.each([
+    [
+      "contradictory Delivery Attempt replay",
+      () => new AcceptsContradictoryAttemptStore(),
+      /delivery attempts/i,
+    ],
+    [
+      "overlapping pending Delivery",
+      () => new ClaimsOverlappingDeliveryStore(),
+      /pending Delivery claim/i,
+    ],
+    [
+      "mutable Delivery read",
+      () => new MutableDeliveryReadStore(),
+      /pending Delivery claim/i,
+    ],
+    [
+      "non-atomic rejected settlement",
+      () => new NonAtomicRejectedSettlementStore(),
+      /rejected Delivery settlement/i,
+    ],
+    [
+      "partial position-conflict settlement",
+      () => new PartialPositionConflictStore(),
+      /position conflict/i,
+    ],
+  ] as const)("rejects %s", async (_name, factory, scenario) => {
+    await expect(verifyPersistenceProfile(factory)).rejects.toThrow(scenario);
+  });
 
   it("names the scenario when creating a fresh store fails", async () => {
     const factory = (): never => {
@@ -201,10 +317,32 @@ describe("verifyPersistenceProfile", () => {
       async recordDeliveryAttempt(_attempt: DeliveryAttempt): Promise<void> {
         return behaviorFailure();
       },
+      async listDeliveryAttempts(): Promise<readonly DeliveryAttempt[]> {
+        return behaviorFailure();
+      },
       async advanceDeliveryPosition(): Promise<boolean> {
         return behaviorFailure();
       },
       async putDeadLetter(_record: DeadLetterRecord): Promise<void> {
+        return behaviorFailure();
+      },
+      async listDeadLetters(): Promise<readonly DeadLetterRecord[]> {
+        return behaviorFailure();
+      },
+      async getActiveDelivery(): Promise<PendingDeliveryRecord | null> {
+        return behaviorFailure();
+      },
+      async claimPendingDelivery(): Promise<DeliveryClaimResult> {
+        return behaviorFailure();
+      },
+      async getDelivery(): Promise<PendingDeliveryRecord | null> {
+        return behaviorFailure();
+      },
+      async settleDelivery(
+        _deliveryId: string,
+        _expectedOutcome: "pending",
+        _settlement: DeliverySettlement,
+      ): Promise<DeliverySettlementResult> {
         return behaviorFailure();
       },
     });

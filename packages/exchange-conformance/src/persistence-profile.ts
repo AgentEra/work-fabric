@@ -3,13 +3,16 @@ import assert from "node:assert/strict";
 import {
   PERSISTENCE_REQUIRED_CAPABILITIES,
   type AtomicCommitRequest,
+  type DeliveryAttempt,
   type DeliveryStateStore,
+  type EventRecord,
   type ExchangePersistence,
   type NormalizedOperationOutcome,
   type ProjectionFailureRecord,
   type ProjectionFailureStore,
   type ProjectionCheckpointStore,
   type ProposedEvent,
+  type PendingDeliveryRecord,
 } from "@work-fabric/exchange-spi";
 
 export type PersistenceConformanceAdapter = ExchangePersistence &
@@ -80,6 +83,38 @@ function request(
 
 function failureMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function committedEvent(
+  store: PersistenceStore,
+  eventId: string,
+): Promise<EventRecord> {
+  const result = await store.commitAtomically(request(eventId));
+  assert.equal(result.kind, "committed");
+  if (result.kind !== "committed" || result.events[0] === undefined) {
+    throw new Error("expected one committed Event fixture");
+  }
+  return result.events[0];
+}
+
+function pendingDelivery(
+  event: EventRecord,
+  overrides: Partial<PendingDeliveryRecord> = {},
+): PendingDeliveryRecord {
+  return {
+    delivery_id: "delivery_01",
+    subscription_id: "subscription_01",
+    partition_id: event.partition_id,
+    from_position: 0,
+    to_position: event.partition_position,
+    next_cursor: "opaque_cursor_01",
+    events: [event],
+    attempt: 1,
+    delivered_at: "2026-07-15T01:00:00.000Z",
+    visibility_expires_at: "2026-07-15T01:01:00.000Z",
+    outcome: "pending",
+    ...overrides,
+  };
 }
 
 const scenarios: readonly Scenario[] = [
@@ -856,6 +891,360 @@ const scenarios: readonly Scenario[] = [
       assert.equal(
         await store.loadDeliveryPosition("subscription_01", "partition_01"),
         5,
+      );
+    },
+  },
+  {
+    name: "delivery attempts are validated, idempotent, cloned, and ordered",
+    async verify(store) {
+      const event = await committedEvent(store, "event_attempt");
+      const second: DeliveryAttempt = {
+        subscription_id: "subscription_01",
+        partition_id: event.partition_id,
+        event_id: event.event_id,
+        attempt: 2,
+        attempted_at: "2026-07-15T01:00:02.000Z",
+        outcome: "accepted",
+        detail: null,
+        next_attempt_at: null,
+      };
+      const first: DeliveryAttempt = {
+        ...second,
+        attempt: 1,
+        attempted_at: "2026-07-15T01:00:00.000Z",
+        outcome: "retryable_failure",
+        detail: "temporary",
+        next_attempt_at: "2026-07-15T01:00:01.000Z",
+      };
+      await store.recordDeliveryAttempt(second);
+      await store.recordDeliveryAttempt(first);
+      await store.recordDeliveryAttempt(structuredClone(first));
+      const listed = await store.listDeliveryAttempts(
+        first.subscription_id,
+        first.event_id,
+      );
+      assert.deepEqual(listed, [first, second]);
+      (listed[0] as { detail: string | null }).detail = "mutated";
+      assert.deepEqual(
+        await store.listDeliveryAttempts(first.subscription_id, first.event_id),
+        [first, second],
+      );
+      await assert.rejects(
+        store.recordDeliveryAttempt({ ...first, detail: "contradictory" }),
+      );
+      await assert.rejects(
+        store.recordDeliveryAttempt({ ...first, attempt: 0 }),
+      );
+    },
+  },
+  {
+    name: "pending Delivery claim, replacement, settlement, and immutable reads",
+    async verify(store) {
+      const event = await committedEvent(store, "event_pending");
+      const first = pendingDelivery(event);
+      assert.deepEqual(await store.claimPendingDelivery(first, null), {
+        kind: "claimed",
+        delivery: first,
+      });
+      const read = await store.getDelivery(first.delivery_id);
+      assert.deepEqual(read, first);
+      if (read !== null) {
+        (read.events[0]?.domain_data as { state: string }).state = "mutated";
+      }
+      assert.deepEqual(await store.getDelivery(first.delivery_id), first);
+
+      const overlap = pendingDelivery(event, { delivery_id: "delivery_overlap" });
+      assert.deepEqual(await store.claimPendingDelivery(overlap, null), {
+        kind: "conflict",
+        delivery: first,
+      });
+      const retried = await store.settleDelivery(first.delivery_id, "pending", {
+        outcome: "retry",
+        settled_at: "2026-07-15T01:00:30.000Z",
+        reason: "consumer retry",
+      });
+      assert.equal(retried.kind, "completed");
+      assert.equal(retried.delivery.outcome, "retry");
+      assert.equal(
+        (
+          await store.getActiveDelivery(
+            first.subscription_id,
+            first.partition_id,
+          )
+        )?.outcome,
+        "retry",
+      );
+      assert.equal(
+        (
+          await store.settleDelivery(first.delivery_id, "pending", {
+            outcome: "retry",
+            settled_at: "2026-07-15T01:00:30.000Z",
+            reason: "consumer retry",
+          })
+        ).kind,
+        "replayed",
+      );
+      assert.equal(
+        (
+          await store.settleDelivery(first.delivery_id, "pending", {
+            outcome: "acknowledged",
+            settled_at: "2026-07-15T01:00:31.000Z",
+            reason: null,
+          })
+        ).kind,
+        "conflict",
+      );
+
+      const replacement = pendingDelivery(event, {
+        delivery_id: "delivery_02",
+        attempt: 2,
+        delivered_at: "2026-07-15T01:00:31.000Z",
+        visibility_expires_at: "2026-07-15T01:01:31.000Z",
+      });
+      assert.deepEqual(
+        await store.claimPendingDelivery(replacement, first.delivery_id),
+        { kind: "claimed", delivery: replacement },
+      );
+      assert.equal(
+        (
+          await store.settleDelivery(replacement.delivery_id, "pending", {
+            outcome: "retry",
+            settled_at: "2026-07-15T01:00:35.000Z",
+            reason: "retry replacement",
+          })
+        ).kind,
+        "completed",
+      );
+      await assert.rejects(
+        store.claimPendingDelivery(
+          pendingDelivery(event, {
+            delivery_id: "delivery_bad_attempt",
+            attempt: 4,
+          }),
+          replacement.delivery_id,
+        ),
+      );
+      await assert.rejects(
+        store.claimPendingDelivery(
+          pendingDelivery(event, {
+            delivery_id: "delivery_changed_event",
+            attempt: 3,
+            events: [{ ...event, event_id: "event_changed" }],
+          }),
+          replacement.delivery_id,
+        ),
+      );
+      const finalDelivery = pendingDelivery(event, {
+        delivery_id: "delivery_03",
+        attempt: 3,
+        delivered_at: "2026-07-15T01:00:36.000Z",
+        visibility_expires_at: "2026-07-15T01:01:36.000Z",
+      });
+      assert.deepEqual(
+        await store.claimPendingDelivery(
+          finalDelivery,
+          replacement.delivery_id,
+        ),
+        { kind: "claimed", delivery: finalDelivery },
+      );
+      const acknowledged = await store.settleDelivery(
+        finalDelivery.delivery_id,
+        "pending",
+        {
+          outcome: "acknowledged",
+          settled_at: "2026-07-15T01:00:40.000Z",
+          reason: null,
+        },
+      );
+      assert.equal(acknowledged.kind, "completed");
+      assert.equal(
+        await store.loadDeliveryPosition(first.subscription_id, first.partition_id),
+        first.to_position,
+      );
+      assert.equal(
+        await store.getActiveDelivery(first.subscription_id, first.partition_id),
+        null,
+      );
+    },
+  },
+  {
+    name: "expired Delivery remains active for one-attempt CAS replacement",
+    async verify(store) {
+      const event = await committedEvent(store, "event_expired");
+      const first = pendingDelivery(event);
+      await store.claimPendingDelivery(first, null);
+      const expired = await store.settleDelivery(first.delivery_id, "pending", {
+        outcome: "expired",
+        settled_at: "2026-07-15T01:02:00.000Z",
+        reason: "visibility_expired",
+      });
+      assert.equal(expired.kind, "completed");
+      assert.equal(
+        (
+          await store.getActiveDelivery(
+            first.subscription_id,
+            first.partition_id,
+          )
+        )?.outcome,
+        "expired",
+      );
+      const replacement = pendingDelivery(event, {
+        delivery_id: "delivery_expired_replacement",
+        attempt: 2,
+        delivered_at: "2026-07-15T01:02:01.000Z",
+        visibility_expires_at: "2026-07-15T01:03:01.000Z",
+      });
+      assert.deepEqual(
+        await store.claimPendingDelivery(replacement, first.delivery_id),
+        { kind: "claimed", delivery: replacement },
+      );
+      assert.deepEqual(
+        await store.getActiveDelivery(
+          replacement.subscription_id,
+          replacement.partition_id,
+        ),
+        replacement,
+      );
+    },
+  },
+  {
+    name: "rejected Delivery settlement atomically dead-letters and advances",
+    async verify(store) {
+      const event = await committedEvent(store, "event_rejected");
+      const delivery = pendingDelivery(event);
+      await store.claimPendingDelivery(delivery, null);
+      const settlement = {
+        outcome: "rejected" as const,
+        settled_at: "2026-07-15T01:00:30.000Z",
+        reason: "consumer rejected payload",
+      };
+      assert.equal(
+        (await store.settleDelivery(delivery.delivery_id, "pending", settlement))
+          .kind,
+        "completed",
+      );
+      assert.equal(
+        (await store.settleDelivery(delivery.delivery_id, "pending", settlement))
+          .kind,
+        "replayed",
+      );
+      assert.equal(
+        (
+          await store.settleDelivery(delivery.delivery_id, "pending", {
+            ...settlement,
+            settled_at: "2026-07-15T01:00:31.000Z",
+            reason: "contradictory replay reason",
+          })
+        ).kind,
+        "replayed",
+      );
+      assert.equal(
+        await store.loadDeliveryPosition(
+          delivery.subscription_id,
+          delivery.partition_id,
+        ),
+        delivery.to_position,
+      );
+      assert.deepEqual(
+        await store.listDeadLetters(delivery.subscription_id, event.event_id),
+        [
+          {
+            subscription_id: delivery.subscription_id,
+            event,
+            attempts: delivery.attempt,
+            reason: settlement.reason,
+            recorded_at: settlement.settled_at,
+          },
+        ],
+      );
+      assert.equal(
+        await store.getActiveDelivery(
+          delivery.subscription_id,
+          delivery.partition_id,
+        ),
+        null,
+      );
+    },
+  },
+  {
+    name: "dead letters are idempotent, cloned, validated, and ordered",
+    async verify(store) {
+      const first = await committedEvent(store, "event_dead_first");
+      const secondResult = await store.commitAtomically(
+        request("event_dead_second", {
+          partition_id: "partition_02",
+        }),
+      );
+      assert.equal(secondResult.kind, "committed");
+      if (secondResult.kind !== "committed" || secondResult.events[0] === undefined) {
+        throw new Error("expected second dead-letter Event fixture");
+      }
+      const second = secondResult.events[0];
+      const firstRecord = {
+        subscription_id: "subscription_01",
+        event: first,
+        attempts: 2,
+        reason: "first reason",
+        recorded_at: "2026-07-15T01:00:00.000Z",
+      };
+      const secondRecord = {
+        subscription_id: "subscription_01",
+        event: second,
+        attempts: 3,
+        reason: "second reason",
+        recorded_at: "2026-07-15T01:01:00.000Z",
+      };
+      await store.putDeadLetter(secondRecord);
+      await store.putDeadLetter(firstRecord);
+      await store.putDeadLetter({
+        ...firstRecord,
+        reason: "contradictory later reason",
+      });
+      const listed = await store.listDeadLetters("subscription_01");
+      assert.deepEqual(listed, [firstRecord, secondRecord]);
+      (listed[0]?.event.domain_data as { state: string }).state = "mutated";
+      assert.deepEqual(await store.listDeadLetters("subscription_01"), [
+        firstRecord,
+        secondRecord,
+      ]);
+      assert.deepEqual(
+        await store.listDeadLetters("subscription_01", first.event_id),
+        [firstRecord],
+      );
+      await assert.rejects(
+        store.putDeadLetter({ ...firstRecord, attempts: 0 }),
+      );
+    },
+  },
+  {
+    name: "Delivery settlement position conflict leaves no partial state",
+    async verify(store) {
+      const event = await committedEvent(store, "event_position_conflict");
+      const delivery = pendingDelivery(event);
+      await store.claimPendingDelivery(delivery, null);
+      assert.equal(
+        await store.advanceDeliveryPosition(
+          delivery.subscription_id,
+          delivery.partition_id,
+          0,
+          delivery.to_position,
+        ),
+        true,
+      );
+      const result = await store.settleDelivery(
+        delivery.delivery_id,
+        "pending",
+        {
+          outcome: "rejected",
+          settled_at: "2026-07-15T01:00:30.000Z",
+          reason: "must not persist",
+        },
+      );
+      assert.equal(result.kind, "position_conflict");
+      assert.equal((await store.getDelivery(delivery.delivery_id))?.outcome, "pending");
+      assert.deepEqual(
+        await store.listDeadLetters(delivery.subscription_id, event.event_id),
+        [],
       );
     },
   },

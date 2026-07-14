@@ -8,3 +8,4 @@ export * from "./persistence.js";
 export * from "./projection.js";
 export * from "./runtime-state.js";
 export * from "./signal.js";
+export * from "./subscription.js";
