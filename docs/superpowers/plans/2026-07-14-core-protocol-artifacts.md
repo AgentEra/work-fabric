@@ -156,7 +156,7 @@ git commit -m "build: add protocol conformance toolchain"
 
 - [ ] **Step 1: Write failing validation cases**
 
-Cover every Actor type (`human`, `agent`, `system`, `group`), an unknown Actor type, an overlength identifier, a valid text/data/resource content bundle, a context item without visibility, a binary-like content part, and suspicious secret fields such as `access_token`.
+Cover every Actor type (`human`, `agent`, `system`), an unknown Actor type, an overlength identifier, a valid text/data/resource content bundle, a context item without visibility, a binary-like content part, and suspicious secret fields such as `access_token`.
 
 - [ ] **Step 2: Confirm schemas are missing**
 
@@ -269,11 +269,11 @@ Cover command correlation, Actor/Endpoint identity, authority scope, trace conte
 
 - [ ] **Step 2: Implement the command envelope**
 
-The envelope carries `message_id`, `protocol_version`, `interaction`, `sent_at`, sender/endpoint identity, optional acting authority, idempotency, expected resource version, trace context, and a JSON payload. It remains transport-neutral.
+The envelope carries `spec_version`, `message_id`, `message_type`, `sent_at`, tenant/exchange identity, Actor/Endpoint identity, optional delegation, correlation/causation identity, idempotency, expected resource version, trace context, and a JSON payload. It remains transport-neutral.
 
 - [ ] **Step 3: Implement conditional operation results and errors**
 
-When `accepted` is true, an operation reference/receipt is required and error is forbidden. When false, `ProtocolError` is required. Include at least `invalid_message`, `unsupported_version`, `unauthorized`, `forbidden`, `not_found`, `conflict`, `invalid_transition`, `idempotency_key_reused`, `precondition_failed`, `rate_limited`, `temporarily_unavailable`, and `cursor_expired`.
+`operation_status` is one of `accepted`, `rejected`, `conflict`, or `temporarily_unavailable`. An accepted result requires resource/receipt information and no error; every non-accepted result requires `ProtocolError`. Use exactly the approved codes: `invalid_argument`, `unauthenticated`, `permission_denied`, `not_found`, `version_conflict`, `invalid_state_transition`, `idempotency_key_reused`, `precondition_failed`, `expired`, `unsupported_version`, `capability_unavailable`, `context_unavailable`, `cursor_expired`, `rate_limited`, `temporarily_unavailable`, and `internal`.
 
 - [ ] **Step 4: Verify and commit**
 
