@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:subscription",
+  "title": "Durable Subscription",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "subscription_id",
+    "owner",
+    "endpoint_id",
+    "filter",
+    "delivery",
+    "state",
+    "cursor",
+    "created_at",
+    "updated_at"
+  ],
+  "properties": {
+    "subscription_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "owner": {
+      "$ref": "urn:work-fabric:schema:v1:actor-ref"
+    },
+    "endpoint_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "filter": {
+      "$ref": "urn:work-fabric:schema:v1:subscription-filter"
+    },
+    "delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "oneOf": [
+            { "enum": ["cursor_pull", "sse", "webhook"] },
+            {
+              "type": "string",
+              "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*\\.[a-z0-9]+(?:[.-][a-z0-9]+)*/[a-z][a-z0-9_]*$"
+            }
+          ]
+        },
+        "binding_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        }
+      }
+    },
+    "state": {
+      "enum": ["active", "suspended", "closed"]
+    },
+    "cursor": {
+      "oneOf": [
+        { "type": "string", "minLength": 1, "maxLength": 2048 },
+        { "type": "null" }
+      ]
+    },
+    "created_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "updated_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

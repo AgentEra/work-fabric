@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:protocol-event",
+  "title": "WFPP CloudEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "specversion",
+    "id",
+    "source",
+    "type",
+    "subject",
+    "time",
+    "datacontenttype",
+    "dataschema",
+    "wfsequence",
+    "data"
+  ],
+  "properties": {
+    "specversion": { "const": "1.0" },
+    "id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "source": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+    },
+    "type": {
+      "enum": [
+        "workfabric.endpoint.registered.v1",
+        "workfabric.endpoint.renewed.v1",
+        "workfabric.endpoint.withdrawn.v1",
+        "workfabric.capability.changed.v1",
+        "workfabric.handoff.offered.v1",
+        "workfabric.handoff.accepted.v1",
+        "workfabric.handoff.declined.v1",
+        "workfabric.handoff.cancelled.v1",
+        "workfabric.handoff.expired.v1",
+        "workfabric.handoff.status_reported.v1",
+        "workfabric.handoff.result_returned.v1",
+        "workfabric.handoff.verified.v1",
+        "workfabric.handoff.closed.v1",
+        "workfabric.handoff.rework_requested.v1",
+        "workfabric.handoff.transferred.v1",
+        "workfabric.receipt.recorded.v1",
+        "workfabric.delivery.failed.v1",
+        "workfabric.subscription.suspended.v1"
+      ]
+    },
+    "subject": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "time": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "datacontenttype": { "const": "application/json" },
+    "dataschema": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+    },
+    "wftenant": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfexchange": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfthread": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfhandoff": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfactor": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfendpoint": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfcorrelation": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfcausation": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "wfsequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "wfvisibility": {
+      "enum": ["tenant", "participants", "restricted", "public"]
+    },
+    "data": {
+      "$ref": "urn:work-fabric:schema:v1:event-data"
+    }
+  }
+}

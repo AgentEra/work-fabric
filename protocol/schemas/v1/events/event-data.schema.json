@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:event-data",
+  "title": "Protocol Event Data",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resource_version", "change", "receipt"],
+  "properties": {
+    "resource_version": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+    },
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "change_type": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 128
+        },
+        "from_state": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 128 },
+            { "type": "null" }
+          ]
+        },
+        "to_state": {
+          "oneOf": [
+            { "type": "string", "minLength": 1, "maxLength": 128 },
+            { "type": "null" }
+          ]
+        },
+        "changed_fields": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "details": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/safe_json_value"
+        }
+      }
+    },
+    "receipt": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["receipt_id", "receipt_type"],
+          "properties": {
+            "receipt_id": {
+              "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+            },
+            "receipt_type": {
+              "enum": ["delivered", "received", "responsibility_accepted", "result_received", "result_verified"]
+            }
+          }
+        },
+        { "type": "null" }
+      ]
+    },
+    "snapshot": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:handoff-snapshot" },
+        { "$ref": "urn:work-fabric:schema:v1:endpoint-descriptor" },
+        { "$ref": "urn:work-fabric:schema:v1:resource-version-ref" }
+      ]
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:delivery-ack",
+  "title": "Delivery Acknowledgement",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "delivery_id",
+    "subscription_id",
+    "outcome",
+    "acknowledged_at"
+  ],
+  "properties": {
+    "delivery_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "subscription_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "outcome": {
+      "enum": ["acknowledged", "retry", "rejected"]
+    },
+    "acknowledged_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "last_event_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    },
+    "details": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/safe_json_value"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

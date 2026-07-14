@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:subscription-filter",
+  "title": "Subscription Filter",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_types",
+    "actor_ids",
+    "endpoint_ids",
+    "thread_ids",
+    "handoff_ids",
+    "work_reference_uris",
+    "capability_ids",
+    "lifecycle_states"
+  ],
+  "properties": {
+    "event_types": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^workfabric\\.[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*\\.v1$"
+      }
+    },
+    "actor_ids": {
+      "$ref": "#/$defs/opaque_ids"
+    },
+    "endpoint_ids": {
+      "$ref": "#/$defs/opaque_ids"
+    },
+    "thread_ids": {
+      "$ref": "#/$defs/opaque_ids"
+    },
+    "handoff_ids": {
+      "$ref": "#/$defs/opaque_ids"
+    },
+    "work_reference_uris": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+      }
+    },
+    "capability_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
+        "maxLength": 128
+      }
+    },
+    "lifecycle_states": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "offered",
+          "accepted",
+          "result_returned",
+          "verified",
+          "rework_requested",
+          "closed",
+          "declined",
+          "expired",
+          "cancelled",
+          "transferred"
+        ]
+      }
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "opaque_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+      }
+    }
+  }
+}
