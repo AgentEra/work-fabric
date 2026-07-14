@@ -219,6 +219,101 @@ const scenarios: readonly Scenario[] = [
     },
   },
   {
+    name: "version checks reject duplicates and preserve special stream keys",
+    async verify(store) {
+      const duplicate = request("duplicate-check", {
+        version_checks: [
+          { stream_id: "checked", expected_version: 0 },
+          { stream_id: "checked", expected_version: 0 },
+        ],
+        appends: [
+          {
+            stream_id: "duplicate-child",
+            expected_version: 0,
+            events: [proposedEvent("duplicate-check")],
+          },
+        ],
+      });
+      await assert.rejects(
+        store.commitAtomically(duplicate),
+        /duplicate.*version check/i,
+      );
+      assert.deepEqual(await store.readStream("duplicate-child"), []);
+      assert.equal(
+        await store.findCommand(
+          duplicate.tenant_id,
+          duplicate.idempotency_key,
+        ),
+        null,
+      );
+
+      await store.commitAtomically(
+        request("special-seed", {
+          appends: [
+            {
+              stream_id: "__proto__",
+              expected_version: 0,
+              events: [proposedEvent("special-proto")],
+            },
+            {
+              stream_id: "constructor",
+              expected_version: 0,
+              events: [proposedEvent("special-constructor")],
+            },
+          ],
+        }),
+      );
+      const specialConflictRequest = request("special-conflict", {
+        version_checks: [
+          { stream_id: "__proto__", expected_version: 0 },
+          { stream_id: "constructor", expected_version: 0 },
+        ],
+        appends: [
+          {
+            stream_id: "special-child",
+            expected_version: 0,
+            events: [proposedEvent("special-conflict")],
+          },
+        ],
+      });
+      const specialConflict = await store.commitAtomically(
+        specialConflictRequest,
+      );
+      assert.equal(specialConflict.kind, "version_conflict");
+      if (specialConflict.kind !== "version_conflict") return;
+      assert.equal(
+        Object.hasOwn(specialConflict.current_versions, "__proto__"),
+        true,
+      );
+      assert.equal(
+        Object.hasOwn(specialConflict.current_versions, "constructor"),
+        true,
+      );
+      assert.equal(specialConflict.current_versions["__proto__"], 1);
+      assert.equal(specialConflict.current_versions.constructor, 1);
+      assert.equal(
+        Object.hasOwn(specialConflict.current_versions, "special-child"),
+        true,
+      );
+      assert.equal(specialConflict.current_versions["special-child"], 0);
+      const versionsPrototype = Object.getPrototypeOf(
+        specialConflict.current_versions,
+      );
+      assert.equal(
+        versionsPrototype === null || versionsPrototype === Object.prototype,
+        true,
+      );
+      assert.deepEqual(await store.readStream("special-child"), []);
+      assert.equal(
+        await store.findCommand(
+          specialConflictRequest.tenant_id,
+          specialConflictRequest.idempotency_key,
+        ),
+        null,
+      );
+    },
+  },
+  {
     name: "same stream concurrent append has one winner",
     async verify(store) {
       const first = request("event_01", {

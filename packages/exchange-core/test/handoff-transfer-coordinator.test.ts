@@ -274,6 +274,63 @@ describe("Handoff Transfer coordinator", () => {
     );
   });
 
+  it("rejects a child whose thread differs from the parent thread", () => {
+    const parent = acceptedParent();
+    const child = {
+      ...offeredState(
+        "handoff_child",
+        packageFor(childRecipient, false),
+        parent.handoff_id,
+        parentRecipient,
+      ),
+      thread_id: "thread_unrelated",
+    };
+
+    expectRejected(
+      acceptChildAndTransferParent(
+        parent,
+        child,
+        childRecipient,
+        decisionContext,
+      ),
+      "precondition_failed",
+    );
+  });
+
+  it("rechecks parent redelegation authority when the child is accepted", () => {
+    const offered = offeredState(
+      "handoff_parent",
+      packageFor(parentRecipient, false),
+      null,
+    );
+    const parent = evolveHandoff(
+      offered,
+      {
+        event_type: "workfabric.handoff.accepted.v1",
+        handoff_id: offered.handoff_id,
+        recipient: parentRecipient,
+        occurred_at: "2026-07-15T02:00:00Z",
+      },
+      2,
+    );
+    const child = offeredState(
+      "handoff_child",
+      packageFor(childRecipient, false),
+      parent.handoff_id,
+      parentRecipient,
+    );
+
+    expectRejected(
+      acceptChildAndTransferParent(
+        parent,
+        child,
+        childRecipient,
+        decisionContext,
+      ),
+      "permission_denied",
+    );
+  });
+
   it("rejects a child that was not offered by the parent Recipient", () => {
     const parent = acceptedParent();
     const child = offeredState(

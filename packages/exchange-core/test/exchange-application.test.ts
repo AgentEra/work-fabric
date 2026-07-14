@@ -196,13 +196,20 @@ class TestIds implements IdGenerator {
   private readonly counts = new Map<string, number>();
   readonly calls: string[] = [];
 
-  constructor(private readonly order?: string[]) {}
+  constructor(
+    private readonly order?: string[],
+    private readonly handoffIds: readonly string[] = [],
+  ) {}
 
   nextId(kind: "handoff" | "event" | "commit" | "receipt" | "delivery") {
     this.order?.push(`ids.${kind}`);
     this.calls.push(kind);
     const count = (this.counts.get(kind) ?? 0) + 1;
     this.counts.set(kind, count);
+    const configuredHandoffId = this.handoffIds[count - 1];
+    if (kind === "handoff" && configuredHandoffId !== undefined) {
+      return configuredHandoffId;
+    }
     return `${kind}_${count}`;
   }
 
@@ -350,6 +357,21 @@ class RaceConflictPersistence extends MemoryExchangePersistence {
   }
 }
 
+class BoundaryConflictPersistence extends MemoryExchangePersistence {
+  constructor(
+    private readonly currentVersions: Readonly<Record<string, number>>,
+  ) {
+    super();
+  }
+
+  override async commitAtomically(): Promise<AtomicCommitResult> {
+    return {
+      kind: "version_conflict",
+      current_versions: this.currentVersions,
+    };
+  }
+}
+
 function proposedEvent(record: EventRecord): ProposedEvent {
   const {
     tenant_id: _tenantId,
@@ -439,12 +461,13 @@ function harness(options: {
   readonly allowRules?: readonly LocalAuthorityAllowRule[];
   readonly validator?: WfppCommandValidator;
   readonly order?: string[];
+  readonly ids?: TestIds;
 } = {}): Harness {
   const persistence =
     options.persistence ?? new TrackingMemoryPersistence(options.order);
   const context =
     options.context ?? new TrackingContextRepository(options.order);
-  const ids = new TestIds(options.order);
+  const ids = options.ids ?? new TestIds(options.order);
   const identity = new TrackingIdentityProvider(
     options.identityRecords ?? identityRecords(),
     options.order,
@@ -999,6 +1022,54 @@ describe("ExchangeApplication", () => {
     expect(
       await persistence.findCommand("tenant_01", "accept-race"),
     ).toBeNull();
+  });
+
+  it.each([
+    ["a missing own key", {}],
+    ["NaN", { constructor: Number.NaN }],
+    ["infinity", { constructor: Number.POSITIVE_INFINITY }],
+    ["a fractional value", { constructor: 1.5 }],
+    ["an unsafe integer", { constructor: Number.MAX_SAFE_INTEGER + 1 }],
+  ] satisfies readonly [string, Readonly<Record<string, number>>][])(
+    "normalizes %s from Adapter current_versions for a prototype-named stream",
+    async (_label, currentVersions) => {
+      const current = harness({
+        persistence: new BoundaryConflictPersistence(currentVersions),
+        ids: new TestIds(undefined, ["constructor"]),
+      });
+
+      const result = await current.application.handle(offerEnvelope(), {
+        token: "human",
+      });
+
+      expect(result).toMatchObject({
+        operation_status: "conflict",
+        resource: null,
+        receipt: null,
+        error: {
+          code: "version_conflict",
+          current_resource_version: null,
+        },
+      });
+      expectSchemaValid(result);
+    },
+  );
+
+  it("accepts an own positive safe version for a prototype-named stream", async () => {
+    const current = harness({
+      persistence: new BoundaryConflictPersistence({ constructor: 7 }),
+      ids: new TestIds(undefined, ["constructor"]),
+    });
+
+    const result = await current.application.handle(offerEnvelope(), {
+      token: "human",
+    });
+
+    expect(result).toMatchObject({
+      operation_status: "conflict",
+      error: { current_resource_version: 7 },
+    });
+    expectSchemaValid(result);
   });
 
   it("reuses a recorded non-hash Partition for an existing Handoff", async () => {

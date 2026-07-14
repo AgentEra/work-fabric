@@ -245,6 +245,8 @@ WFPP `ContextBundle.digest` 在线上协议中保持 `{ algorithm, value } | nul
 
 `handoff.transfer` 创建状态为 `offered` 的子 Handoff。子 Handoff 被明确接受之前，父 Handoff 保持 `accepted`，原 Recipient 继续负责。
 
+Transfer 纯协调器在子 Offer 和子 Accept 两个边界都必须确认父 Handoff 仍允许 `may_redelegate`。子 Accept 还必须重新核对 `parent_handoff_id`、Thread 以及“子 Initiator 等于父 Recipient”的谱系；Application 的 Partition、Tenant 和 Exchange 检查不能代替这些纯领域不变量。
+
 通用 `decodeHandoffCommand` 只产生单流 `HandoffCommand`，因此必须显式拒绝 `handoff.transfer` 以及内部 `handoff.child_accepted`。公开 Transfer Envelope 和 Payload 仍由 WFPP Validator 校验；Task 10 的专用 `decodeHandoffTransfer` 在校验后构造跨流协调输入。该边界防止把两流原子语义伪装成普通单聚合命令。
 
 子 Handoff 接受时必须在一个原子提交中：
@@ -592,6 +594,7 @@ details
 所有权威存储 Adapter 使用同一测试套件验证：
 
 - expected version；
+- 只读 stream version check 与 append 的原子性、重复/同流拒绝，以及 `__proto__` / `constructor` 等特殊 Stream ID 的 own-key 冲突结果；
 - 流内顺序；
 - 多流原子追加；
 - Tenant 内 Idempotency Key 唯一性；

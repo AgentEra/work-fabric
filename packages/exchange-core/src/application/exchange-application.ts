@@ -207,9 +207,13 @@ function resultFromCommit(
         ),
       );
     case "version_conflict": {
-      const reportedVersion = result.current_versions[streamId];
+      const reportedVersion = Object.hasOwn(result.current_versions, streamId)
+        ? result.current_versions[streamId]
+        : undefined;
       const currentVersion =
-        reportedVersion === undefined || reportedVersion <= 0
+        reportedVersion === undefined ||
+        !Number.isSafeInteger(reportedVersion) ||
+        reportedVersion <= 0
           ? null
           : reportedVersion;
       return toOperationResult(

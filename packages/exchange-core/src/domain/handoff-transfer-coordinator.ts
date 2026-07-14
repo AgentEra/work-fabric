@@ -85,10 +85,22 @@ export function acceptChildAndTransferParent(
       `transfer is not allowed from ${parent.lifecycle_state}`,
     );
   }
+  if (!parent.package.authority_scope.may_redelegate) {
+    return reject(
+      "permission_denied",
+      "The parent Handoff Authority Scope no longer allows redelegation",
+    );
+  }
   if (child.parent_handoff_id !== parent.handoff_id) {
     return reject(
       "precondition_failed",
       "Child Handoff does not belong to the supplied parent",
+    );
+  }
+  if (child.thread_id !== parent.thread_id) {
+    return reject(
+      "precondition_failed",
+      "Child Handoff thread does not match its parent",
     );
   }
   if (!actorEquals(parent.recipient, child.initiator)) {
