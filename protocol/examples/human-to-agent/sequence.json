@@ -1,0 +1,161 @@
+{
+  "name": "Human project manager hands implementation to a local Agent Runtime",
+  "description": "A human offers an approved implementation item, the Agent accepts, reports external progress, returns a Git artifact and test evidence, and the human verifies and closes the Handoff.",
+  "messages": [
+    {
+      "schema_id": "urn:work-fabric:schema:v1:command-envelope",
+      "instance": {
+        "spec_version": "1.0",
+        "message_id": "message_offer_01",
+        "message_type": "workfabric.handoff.offer.v1",
+        "sent_at": "2026-07-13T08:00:00Z",
+        "tenant_id": "tenant_01",
+        "exchange_id": "exchange_01",
+        "actor_id": "actor_pm_01",
+        "endpoint_id": "endpoint_feishu_01",
+        "idempotency_key": "project-42-offer-1",
+        "payload": {
+          "work_reference_uri": "urn:work:item:requirement-42",
+          "target_endpoint_id": "endpoint_runtime_01"
+        }
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:handoff-offer",
+      "instance": {
+        "thread_id": "thread_project_42",
+        "work_reference": {
+          "uri": "urn:work:item:requirement-42",
+          "media_type": "application/vnd.work-item+json",
+          "version": "12",
+          "digest": null,
+          "extensions": {}
+        },
+        "target": {
+          "endpoint_id": "endpoint_runtime_01"
+        },
+        "intent": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Implement the approved change and return code and test evidence",
+            "language": "en"
+          }
+        ],
+        "context_bundle": {
+          "context_id": "context_01",
+          "version": 3,
+          "created_at": "2026-07-13T07:50:00Z",
+          "summary": "Approved requirement and implementation constraints",
+          "items": [
+            {
+              "kind": "resource",
+              "resource": {
+                "uri": "urn:feishu:document:requirement-42",
+                "media_type": "text/markdown",
+                "version": "17",
+                "digest": null,
+                "extensions": {}
+              }
+            }
+          ],
+          "visibility_scope": {
+            "actor_ids": ["actor_agent_01"],
+            "endpoint_ids": ["endpoint_runtime_01"],
+            "expires_at": "2026-07-14T08:00:00Z"
+          },
+          "digest": null,
+          "extensions": {}
+        },
+        "authority_scope": {
+          "delegation_id": "delegation_01",
+          "scopes": ["work:read", "artifact:write"],
+          "resource_refs": ["urn:work:item:requirement-42"],
+          "expires_at": "2026-07-14T08:00:00Z",
+          "may_redelegate": false
+        },
+        "acceptance_criteria": [
+          {
+            "criterion_id": "tests-pass",
+            "description": "The repository test suite passes",
+            "required": true,
+            "result_schema_ref": null,
+            "required_evidence_types": ["test_report"]
+          }
+        ],
+        "verifier": {
+          "actor_id": "actor_pm_01",
+          "actor_type": "human"
+        },
+        "priority": "normal",
+        "accept_by": "2026-07-13T09:00:00Z",
+        "result_due_at": "2026-07-14T08:00:00Z"
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:status-update",
+      "instance": {
+        "status_report_id": "status_01",
+        "execution_status": "in_progress",
+        "progress": 0.5,
+        "message": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Codex is implementing the approved change"
+          }
+        ],
+        "observed_at": "2026-07-13T08:30:00Z",
+        "next_update_at": "2026-07-13T09:00:00Z",
+        "blocked_on": []
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:result-submission",
+      "instance": {
+        "summary": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Implemented the change and verified the test suite"
+          }
+        ],
+        "artifacts": [
+          {
+            "artifact_id": "artifact_commit_01",
+            "artifact_type": "source_commit",
+            "resource": {
+              "uri": "urn:git:repo:project:commit:abc123",
+              "media_type": "application/vnd.git.commit",
+              "version": "abc123",
+              "digest": null,
+              "extensions": {}
+            }
+          }
+        ],
+        "evidence": [
+          {
+            "evidence_id": "evidence_test_01",
+            "evidence_type": "test_report",
+            "content": {
+              "kind": "data",
+              "schema_ref": "urn:example:schema:test-report:v1",
+              "data": {
+                "passed": 42,
+                "failed": 0
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "lifecycle": [
+    { "interaction": "handoff.offer", "conditions": [], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
+    { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" },
+    { "interaction": "handoff.report_status", "conditions": ["recipient_authorized"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.status_reported.v1" },
+    { "interaction": "handoff.return_result", "conditions": ["result_schema_valid", "authority_valid"], "expected_state": "result_returned", "expected_event_type": "workfabric.handoff.result_returned.v1" },
+    { "interaction": "handoff.verify", "conditions": ["verifier_authorized", "criteria_satisfied"], "expected_state": "verified", "expected_event_type": "workfabric.handoff.verified.v1" },
+    { "interaction": "handoff.close", "conditions": ["verifier_authorized"], "expected_state": "closed", "expected_event_type": "workfabric.handoff.closed.v1" }
+  ]
+}

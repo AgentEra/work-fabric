@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:actor-ref",
+  "title": "Actor Reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["actor_id", "actor_type"],
+  "properties": {
+    "actor_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "actor_type": {
+      "enum": ["human", "agent", "system"]
+    },
+    "display_name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

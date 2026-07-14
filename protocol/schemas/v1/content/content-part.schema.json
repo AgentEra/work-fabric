@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:content-part",
+  "title": "Content Part",
+  "oneOf": [
+    {
+      "title": "Text Part",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "media_type", "text"],
+      "properties": {
+        "kind": { "const": "text" },
+        "media_type": {
+          "type": "string",
+          "pattern": "^text/[^/\\s]+$",
+          "maxLength": 255
+        },
+        "text": { "type": "string" },
+        "language": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 35
+        },
+        "extensions": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+        }
+      }
+    },
+    {
+      "title": "Data Part",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "schema_ref", "data"],
+      "properties": {
+        "kind": { "const": "data" },
+        "schema_ref": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+        },
+        "data": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/safe_json_value"
+        },
+        "extensions": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+        }
+      }
+    },
+    {
+      "title": "Resource Part",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "resource"],
+      "properties": {
+        "kind": { "const": "resource" },
+        "resource": {
+          "$ref": "urn:work-fabric:schema:v1:resource-ref"
+        },
+        "extensions": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+{
+  "name": "Planning Agent transfers a bounded implementation subtask to a Coding Agent",
+  "description": "The first Agent accepts the parent Handoff, creates a child offer under narrowed authority, and retains responsibility until the Coding Agent accepts the child.",
+  "messages": [
+    {
+      "schema_id": "urn:work-fabric:schema:v1:endpoint-descriptor",
+      "instance": {
+        "endpoint_id": "endpoint_planner_01",
+        "actor": {
+          "actor_id": "actor_planner_01",
+          "actor_type": "agent"
+        },
+        "endpoint_type": "native_agent",
+        "display_name": "Planning Agent",
+        "protocol_versions": ["1.0"],
+        "bindings": [
+          {
+            "binding_type": "local_process",
+            "uri": "urn:work-fabric:local:endpoint:planner-01",
+            "security_schemes": ["local_process_identity"]
+          }
+        ],
+        "capabilities": [
+          {
+            "capability_id": "project.planning",
+            "version": "1.0.0",
+            "name": "Project planning",
+            "description": "Plans and delegates bounded project work",
+            "input_media_types": ["application/json"],
+            "output_media_types": ["application/json"],
+            "input_schema_refs": [],
+            "output_schema_refs": [],
+            "interaction_modes": ["asynchronous", "status_updates"],
+            "constraints": {
+              "max_concurrent_handoffs": 2
+            }
+          }
+        ],
+        "lease": {
+          "expires_at": "2026-07-13T09:05:00Z",
+          "renew_after": "2026-07-13T09:03:00Z"
+        },
+        "limits": {
+          "max_inline_content_bytes": 65536
+        }
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:endpoint-descriptor",
+      "instance": {
+        "endpoint_id": "endpoint_coder_01",
+        "actor": {
+          "actor_id": "actor_coder_01",
+          "actor_type": "agent"
+        },
+        "endpoint_type": "native_agent",
+        "display_name": "Coding Agent",
+        "protocol_versions": ["1.0"],
+        "bindings": [
+          {
+            "binding_type": "local_process",
+            "uri": "urn:work-fabric:local:endpoint:coder-01",
+            "security_schemes": ["local_process_identity"]
+          }
+        ],
+        "capabilities": [
+          {
+            "capability_id": "software.implementation",
+            "version": "1.0.0",
+            "name": "Software implementation",
+            "description": "Implements approved source changes",
+            "input_media_types": ["application/json", "text/markdown"],
+            "output_media_types": ["application/json"],
+            "input_schema_refs": [],
+            "output_schema_refs": [],
+            "interaction_modes": ["asynchronous", "status_updates"],
+            "constraints": {
+              "max_concurrent_handoffs": 4
+            }
+          }
+        ],
+        "lease": {
+          "expires_at": "2026-07-13T09:05:00Z",
+          "renew_after": "2026-07-13T09:03:00Z"
+        },
+        "limits": {
+          "max_inline_content_bytes": 65536
+        }
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:handoff-offer",
+      "instance": {
+        "thread_id": "thread_project_42",
+        "work_reference": {
+          "uri": "urn:work:item:implementation-42",
+          "extensions": {}
+        },
+        "target": {
+          "capability_requirement": {
+            "capability_id": "software.implementation",
+            "version_constraint": ">=1.0.0 <2.0.0",
+            "input_media_types": ["text/markdown"]
+          }
+        },
+        "intent": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Implement only the approved API module"
+          }
+        ],
+        "authority_scope": {
+          "delegation_id": "delegation_child_01",
+          "scopes": ["work:read", "artifact:write"],
+          "resource_refs": ["urn:work:item:implementation-42"],
+          "expires_at": "2026-07-14T08:00:00Z",
+          "may_redelegate": false
+        },
+        "acceptance_criteria": [
+          {
+            "criterion_id": "module-tests-pass",
+            "description": "The target module test suite passes",
+            "required": true,
+            "result_schema_ref": null,
+            "required_evidence_types": ["test_report"]
+          }
+        ],
+        "verifier": {
+          "actor_id": "actor_planner_01",
+          "actor_type": "agent"
+        },
+        "priority": "normal",
+        "accept_by": "2026-07-13T10:00:00Z",
+        "result_due_at": "2026-07-14T08:00:00Z"
+      }
+    },
+    {
+      "schema_id": "urn:work-fabric:schema:v1:operation-receipt",
+      "instance": {
+        "receipt_id": "receipt_child_accept_01",
+        "receipt_type": "responsibility_accepted",
+        "handoff_id": "handoff_child_01",
+        "actor_id": "actor_coder_01",
+        "endpoint_id": "endpoint_coder_01",
+        "resource_version": 2,
+        "recorded_at": "2026-07-13T09:10:00Z"
+      }
+    }
+  ],
+  "lifecycle": [
+    { "interaction": "handoff.offer", "conditions": [], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
+    { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" },
+    { "interaction": "handoff.transfer", "conditions": ["recipient_authorized", "redelegation_allowed"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.offered.v1" },
+    { "interaction": "handoff.child_accepted", "conditions": ["child_handoff_accepted"], "expected_state": "transferred", "expected_event_type": "workfabric.handoff.transferred.v1" }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:result-submission",
+  "title": "Result Submission",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "artifacts", "evidence"],
+  "properties": {
+    "summary": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:content-part"
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:artifact"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:evidence"
+      }
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

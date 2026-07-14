@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:authority-scope",
+  "title": "Authority Scope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "delegation_id",
+    "scopes",
+    "resource_refs",
+    "expires_at",
+    "may_redelegate"
+  ],
+  "properties": {
+    "delegation_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "scopes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$",
+        "maxLength": 128
+      }
+    },
+    "resource_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+      }
+    },
+    "expires_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "may_redelegate": {
+      "type": "boolean"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

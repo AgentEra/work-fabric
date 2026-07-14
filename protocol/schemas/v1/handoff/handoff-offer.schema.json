@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-offer",
+  "title": "Handoff Offer Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "work_reference",
+    "target",
+    "intent",
+    "authority_scope",
+    "acceptance_criteria",
+    "verifier",
+    "priority",
+    "accept_by",
+    "result_due_at"
+  ],
+  "properties": {
+    "thread_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "work_reference": {
+      "$ref": "urn:work-fabric:schema:v1:resource-ref"
+    },
+    "target": {
+      "$ref": "urn:work-fabric:schema:v1:handoff-target"
+    },
+    "intent": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:content-part"
+      }
+    },
+    "context_bundle": {
+      "$ref": "urn:work-fabric:schema:v1:context-bundle"
+    },
+    "authority_scope": {
+      "$ref": "urn:work-fabric:schema:v1:authority-scope"
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:acceptance-criterion"
+      }
+    },
+    "verifier": {
+      "$ref": "urn:work-fabric:schema:v1:actor-ref"
+    },
+    "priority": {
+      "enum": ["low", "normal", "high", "critical"]
+    },
+    "accept_by": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "result_due_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

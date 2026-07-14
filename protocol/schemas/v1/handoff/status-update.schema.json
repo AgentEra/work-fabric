@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:status-update",
+  "title": "External Execution Status Update",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status_report_id",
+    "execution_status",
+    "message",
+    "observed_at",
+    "blocked_on"
+  ],
+  "properties": {
+    "status_report_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "execution_status": {
+      "enum": ["not_started", "in_progress", "waiting", "blocked", "completed", "failed"]
+    },
+    "progress": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "message": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:content-part"
+      }
+    },
+    "observed_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "next_update_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "blocked_on": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:resource-ref"
+      }
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

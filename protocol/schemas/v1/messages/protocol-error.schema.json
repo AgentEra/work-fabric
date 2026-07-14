@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:protocol-error",
+  "title": "Protocol Error",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "code",
+    "message",
+    "retryable",
+    "retry_after_seconds",
+    "current_resource_version",
+    "field_violations",
+    "details"
+  ],
+  "properties": {
+    "code": {
+      "enum": [
+        "invalid_argument",
+        "unauthenticated",
+        "permission_denied",
+        "not_found",
+        "version_conflict",
+        "invalid_state_transition",
+        "idempotency_key_reused",
+        "precondition_failed",
+        "expired",
+        "unsupported_version",
+        "capability_unavailable",
+        "context_unavailable",
+        "cursor_expired",
+        "rate_limited",
+        "temporarily_unavailable",
+        "internal"
+      ]
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "retryable": {
+      "type": "boolean"
+    },
+    "retry_after_seconds": {
+      "oneOf": [
+        { "type": "integer", "minimum": 0 },
+        { "type": "null" }
+      ]
+    },
+    "current_resource_version": {
+      "oneOf": [
+        {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+        },
+        { "type": "null" }
+      ]
+    },
+    "field_violations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["field", "description"],
+        "properties": {
+          "field": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2048
+          }
+        }
+      }
+    },
+    "details": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/safe_json_value"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

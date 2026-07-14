@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:capability-descriptor",
+  "title": "Capability Descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "capability_id",
+    "version",
+    "name",
+    "description",
+    "input_media_types",
+    "output_media_types",
+    "input_schema_refs",
+    "output_schema_refs",
+    "interaction_modes",
+    "constraints"
+  ],
+  "properties": {
+    "capability_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 128
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$",
+      "maxLength": 64
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "input_media_types": {
+      "$ref": "#/$defs/media_types"
+    },
+    "output_media_types": {
+      "$ref": "#/$defs/media_types"
+    },
+    "input_schema_refs": {
+      "$ref": "#/$defs/schema_refs"
+    },
+    "output_schema_refs": {
+      "$ref": "#/$defs/schema_refs"
+    },
+    "interaction_modes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["synchronous", "asynchronous", "status_updates"]
+      }
+    },
+    "constraints": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/safe_json_value"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "media_types": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[^/\\s]+/[^/\\s]+$",
+        "maxLength": 255
+      }
+    },
+    "schema_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+      }
+    }
+  }
+}

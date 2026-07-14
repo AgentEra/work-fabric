@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:resource-version-ref",
+  "title": "Versioned Protocol Resource Reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["resource_type", "resource_id", "resource_version"],
+  "properties": {
+    "resource_type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "maxLength": 128
+    },
+    "resource_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "resource_version": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+    }
+  }
+}

@@ -269,24 +269,25 @@ extension_fields
 
 ### 6.4 Handoff 生命周期
 
-Handoff 生命周期只表达交接边界，不试图镜像接收方内部工作流：
+Handoff 生命周期只表达交接边界，不试图镜像接收方内部工作流。Protocol v1 的互操作生命周期从 `OFFERED` 开始：
 
 ```text
-DRAFT
-  → OFFERED
-      → ACCEPTED
-          → RESULT_RETURNED
-              → VERIFIED
-                  → CLOSED
+OFFERED
+  → ACCEPTED
+      → RESULT_RETURNED
+          → VERIFIED
+              → CLOSED
 ```
+
+`DRAFT` 只属于客户端或 Exchange 实现扩展，不产生权威 Handoff、责任或领域事件。
 
 分支状态：
 
 - `OFFERED → DECLINED`：接收方拒绝承担责任。
 - `OFFERED → EXPIRED`：在有效期内未被接收。
-- `DRAFT/OFFERED/ACCEPTED → CANCELLED`：发起方在策略允许时取消。
-- `RESULT_RETURNED → REWORK_REQUESTED → ACCEPTED`：验收未通过，返回原接收方继续处理。
-- `ACCEPTED → TRANSFERRED`：接收方通过新的 Handoff 将责任移交给另一参与方；原 Handoff 保留完整因果关系。
+- `OFFERED/ACCEPTED → CANCELLED`：发起方在策略允许时取消。
+- `RESULT_RETURNED → REWORK_REQUESTED → ACCEPTED`：验收未通过，原接收方重新接受后继续处理。
+- `ACCEPTED → TRANSFERRED`：接收方创建子 Handoff；只有子 Handoff 被接受后，父 Handoff 才进入 `TRANSFERRED`。
 
 外部执行状态与 Handoff 生命周期分开建模。`StatusReport` 可以报告 `NOT_STARTED`、`IN_PROGRESS`、`WAITING`、`BLOCKED`、`COMPLETED` 或 `FAILED`，但这些是参与方的声明，不代表 Work Fabric 执行了工作。
 
@@ -295,7 +296,7 @@ DRAFT
 - 在 `OFFERED` 被接受前，发起方仍承担责任。
 - 进入 `ACCEPTED` 后，责任转移给接收方。
 - 进入 `RESULT_RETURNED` 后，执行责任已回传，验收责任转移给指定验收方。
-- `REWORK_REQUESTED` 使执行责任重新回到原接收方。
+- `REWORK_REQUESTED` 后验收方等待原接收方重新接受；重新接受后执行责任才回到原接收方。
 - `TRANSFERRED` 本身不代表新接收方已承担责任；只有子 Handoff 被接受后，责任才转移成功。
 - 所有责任变化都必须生成独立 Receipt 和领域事件，不能仅根据通知送达推断。
 
