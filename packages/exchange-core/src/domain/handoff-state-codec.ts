@@ -420,9 +420,15 @@ function decodeAcceptanceCriteria(
   path: string,
   invalid: InvalidStoredValue,
 ): readonly AcceptanceCriterion[] {
-  return requireArray(value, path, invalid).map((criterion, index) =>
-    decodeAcceptanceCriterion(criterion, `${path}[${index}]`, invalid),
-  );
+  const array = requireArray(value, path, invalid);
+  const decoded: AcceptanceCriterion[] = [];
+  for (let index = 0; index < array.length; index += 1) {
+    if (!Object.hasOwn(array, index)) invalid(`${path}[${index}]`);
+    decoded.push(
+      decodeAcceptanceCriterion(array[index], `${path}[${index}]`, invalid),
+    );
+  }
+  return decoded;
 }
 
 function decodePackage(

@@ -685,6 +685,39 @@ describe("Handoff stored JSON boundary", () => {
     );
   });
 
+  it("rejects sparse acceptance_criteria at the State boundary", () => {
+    const sparseCriteria: JsonObject[] = [];
+    sparseCriteria.length = 1;
+    const state = evolveHandoff(null, offered(), 1);
+    const stored: JsonObject = {
+      ...handoffStateToJson(state),
+      package: {
+        ...storedHandoffPackage,
+        acceptance_criteria: sparseCriteria,
+      },
+    };
+
+    expect(() => handoffStateFromJson(stored)).toThrow(
+      "Invalid stored Handoff state: package.acceptance_criteria[0]",
+    );
+  });
+
+  it("rejects sparse acceptance_criteria at the Event Package boundary", () => {
+    const sparseCriteria: JsonObject[] = [];
+    sparseCriteria.length = 1;
+    const stored: JsonObject = {
+      ...handoffEventToJson(offered()),
+      package: {
+        ...storedHandoffPackage,
+        acceptance_criteria: sparseCriteria,
+      },
+    };
+
+    expect(() => handoffEventFromJson(stored)).toThrow(
+      "Invalid stored Handoff event: package.acceptance_criteria[0]",
+    );
+  });
+
   it.each([
     [
       "AuthorityScope",
