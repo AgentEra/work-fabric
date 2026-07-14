@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:definitions",
+  "title": "WFPP v1 Common Definitions",
+  "$defs": {
+    "opaque_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "non_empty_string": {
+      "type": "string",
+      "minLength": 1
+    },
+    "spec_version": {
+      "const": "1.0"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "resource_version": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "absolute_uri": {
+      "type": "string",
+      "format": "uri",
+      "minLength": 1
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "value"],
+      "properties": {
+        "algorithm": {
+          "enum": ["sha-256", "sha-384", "sha-512"]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "safe_json_value": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/safe_json_value"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "not": {
+              "pattern": "(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|client[_-]?secret|private[_-]?key|api[_-]?key)"
+            }
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/safe_json_value"
+          }
+        }
+      ]
+    },
+    "metadata": {
+      "type": "object",
+      "propertyNames": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 128
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/safe_json_value"
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "propertyNames": {
+        "allOf": [
+          {
+            "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*\\.[a-z0-9]+(?:[.-][a-z0-9]+)*/[a-z][a-z0-9_]*$"
+          },
+          {
+            "not": {
+              "pattern": "(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|client[_-]?secret|private[_-]?key|api[_-]?key)"
+            }
+          }
+        ]
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/safe_json_value"
+      }
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:resource-ref",
+  "title": "Resource Reference",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["uri", "extensions"],
+  "properties": {
+    "uri": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "media_type": {
+      "type": "string",
+      "pattern": "^[^/\\s]+/[^/\\s]+$",
+      "maxLength": 255
+    },
+    "schema_ref": {
+      "oneOf": [
+        {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/absolute_uri"
+        },
+        { "type": "null" }
+      ]
+    },
+    "version": {
+      "oneOf": [
+        {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        { "type": "null" }
+      ]
+    },
+    "digest": {
+      "oneOf": [
+        {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/digest"
+        },
+        { "type": "null" }
+      ]
+    },
+    "access_hint": {
+      "enum": ["public", "delegated", "exchange_mediated", "binding_managed"]
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

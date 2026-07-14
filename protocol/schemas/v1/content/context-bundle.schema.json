@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:context-bundle",
+  "title": "Context Bundle",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "context_id",
+    "version",
+    "created_at",
+    "items",
+    "visibility_scope",
+    "digest",
+    "extensions"
+  ],
+  "properties": {
+    "context_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "version": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+    },
+    "created_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 4096
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:content-part"
+      }
+    },
+    "visibility_scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actor_ids", "endpoint_ids", "expires_at"],
+      "properties": {
+        "actor_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+          }
+        },
+        "endpoint_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+          }
+        },
+        "expires_at": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+        }
+      }
+    },
+    "digest": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/digest"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}
