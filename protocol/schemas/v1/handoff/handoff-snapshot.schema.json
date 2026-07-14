@@ -84,6 +84,24 @@
     "handoff_package": {
       "type": "object",
       "additionalProperties": false,
+      "oneOf": [
+        {
+          "properties": {
+            "context_bundle_id": { "type": "null" },
+            "context_bundle_version": { "type": "null" }
+          }
+        },
+        {
+          "properties": {
+            "context_bundle_id": {
+              "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+            },
+            "context_bundle_version": {
+              "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+            }
+          }
+        }
+      ],
       "required": [
         "work_reference",
         "target",
@@ -111,10 +129,20 @@
           }
         },
         "context_bundle_id": {
-          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+          "oneOf": [
+            {
+              "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+            },
+            { "type": "null" }
+          ]
         },
         "context_bundle_version": {
-          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+          "oneOf": [
+            {
+              "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+            },
+            { "type": "null" }
+          ]
         },
         "authority_scope_id": {
           "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"

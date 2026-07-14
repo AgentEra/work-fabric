@@ -1,0 +1,16 @@
+{
+  "spec_version": "1.0",
+  "mappings": {
+    "workfabric.handoff.offer.v1": "urn:work-fabric:schema:v1:handoff-offer",
+    "workfabric.handoff.accept.v1": "urn:work-fabric:schema:v1:handoff-reference",
+    "workfabric.handoff.decline.v1": "urn:work-fabric:schema:v1:handoff-reference",
+    "workfabric.handoff.expire.v1": "urn:work-fabric:schema:v1:handoff-reference",
+    "workfabric.handoff.cancel.v1": "urn:work-fabric:schema:v1:handoff-cancel-command",
+    "workfabric.handoff.report_status.v1": "urn:work-fabric:schema:v1:handoff-status-command",
+    "workfabric.handoff.return_result.v1": "urn:work-fabric:schema:v1:handoff-result-command",
+    "workfabric.handoff.verify.v1": "urn:work-fabric:schema:v1:handoff-verification-command",
+    "workfabric.handoff.close.v1": "urn:work-fabric:schema:v1:handoff-reference",
+    "workfabric.handoff.request_rework.v1": "urn:work-fabric:schema:v1:handoff-rework-command",
+    "workfabric.handoff.transfer.v1": "urn:work-fabric:schema:v1:handoff-transfer-command"
+  }
+}

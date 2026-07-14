@@ -14,6 +14,7 @@ WFPP v1 是 Work Fabric 的语言无关核心协议。它定义人、Agent 与�
 - [安全与授权](spec/security.md)
 - [版本与兼容](spec/versioning.md)
 - [机器可读 Handoff 生命周期](spec/handoff-lifecycle.json)
+- [机器可读交互 Payload 映射](spec/interaction-payloads.json)
 - [一致性用例](conformance/)
 - [参考序列](examples/)
 
@@ -54,6 +55,13 @@ Authoritative Exchange 是逻辑角色，不限制单体、集群、嵌入式或
 - `urn:work-fabric:schema:v1:capability-requirement`
 - `urn:work-fabric:schema:v1:handoff-target`
 - `urn:work-fabric:schema:v1:handoff-offer`
+- `urn:work-fabric:schema:v1:handoff-reference`
+- `urn:work-fabric:schema:v1:handoff-cancel-command`
+- `urn:work-fabric:schema:v1:handoff-status-command`
+- `urn:work-fabric:schema:v1:handoff-result-command`
+- `urn:work-fabric:schema:v1:handoff-verification-command`
+- `urn:work-fabric:schema:v1:handoff-rework-command`
+- `urn:work-fabric:schema:v1:handoff-transfer-command`
 - `urn:work-fabric:schema:v1:handoff-snapshot`
 - `urn:work-fabric:schema:v1:status-update`
 - `urn:work-fabric:schema:v1:artifact`

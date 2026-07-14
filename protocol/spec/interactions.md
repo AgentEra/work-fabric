@@ -1,6 +1,6 @@
 # WFPP v1 Interactions and Handoff Lifecycle
 
-机器可读权威定义位于 [handoff-lifecycle.json](handoff-lifecycle.json)。本文件给出规范语义；实现 MUST 同时满足状态机和 Canonical Schema。
+机器可读权威生命周期定义位于 [handoff-lifecycle.json](handoff-lifecycle.json)，公开命令的 `message_type` 到 Payload Schema ID 映射位于 [interaction-payloads.json](interaction-payloads.json)。本文件给出规范语义；实现 MUST 同时满足状态机、交互 Payload 映射和 Canonical Schema。
 
 ## Endpoint 与发现
 
@@ -54,7 +54,7 @@
 
 ### `handoff.child_accepted`
 
-这是 Exchange 在子 Handoff 成功接受时执行的关联迁移，不是独立客户端命令。子 Handoff 进入 `accepted` 的同一事务中，父 Handoff 从 `accepted` 进入终态 `transferred`。
+这是 Exchange 在子 Handoff 成功接受时执行的关联迁移，不是独立客户端命令，也不得出现在公开交互 Payload 映射中。子 Handoff 进入 `accepted` 的同一事务中，父 Handoff 从 `accepted` 进入终态 `transferred`。
 
 ## 非规范草稿
 

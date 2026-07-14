@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-rework-command",
+  "title": "Handoff Rework Command Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_id", "criterion_ids", "reason"],
+  "properties": {
+    "handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "criterion_ids": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+      }
+    },
+    "reason": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:content-part"
+      }
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

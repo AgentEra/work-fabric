@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-status-command",
+  "title": "Handoff Status Command Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_id", "status"],
+  "properties": {
+    "handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "status": {
+      "$ref": "urn:work-fabric:schema:v1:status-update"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}
