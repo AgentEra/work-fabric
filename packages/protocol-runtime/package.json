@@ -1,5 +1,5 @@
 {
-  "name": "@work-fabric/exchange-core",
+  "name": "@work-fabric/protocol-runtime",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,7 +8,7 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
-    "@work-fabric/protocol-runtime": "0.1.0",
-    "@work-fabric/exchange-spi": "0.1.0"
+    "ajv": "8.20.0",
+    "ajv-formats": "3.0.1"
   }
 }

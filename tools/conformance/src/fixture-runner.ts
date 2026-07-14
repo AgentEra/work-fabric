@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 
-import type { ErrorObject } from "ajv";
-import type { Ajv2020 } from "ajv/dist/2020.js";
-
-import { findJsonFiles } from "./schema-registry.js";
+import {
+  findJsonFiles,
+  type SchemaRegistryError,
+  type WfppSchemaRegistry,
+} from "./schema-registry.js";
 
 export interface ConformanceFixture {
   readonly name: string;
@@ -32,7 +33,7 @@ export interface FixtureResult {
 }
 
 function normalizeErrors(
-  errors: readonly ErrorObject[] | null | undefined,
+  errors: readonly SchemaRegistryError[] | null | undefined,
 ): NormalizedValidationError[] {
   return (errors ?? [])
     .map((error) => ({
@@ -62,7 +63,7 @@ function unknownSchemaError(schemaId: string): NormalizedValidationError {
 }
 
 export function runFixture(
-  registry: Ajv2020,
+  registry: WfppSchemaRegistry,
   fixture: ConformanceFixture,
   source: string,
 ): FixtureResult {
@@ -123,7 +124,7 @@ function assertFixture(value: unknown, source: string): ConformanceFixture {
 }
 
 export async function runFixtureDirectory(
-  registry: Ajv2020,
+  registry: WfppSchemaRegistry,
   root: string,
 ): Promise<FixtureResult[]> {
   const results: FixtureResult[] = [];

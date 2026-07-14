@@ -1,9 +1,12 @@
 import { readFile } from "node:fs/promises";
 
-import type { ErrorObject, ValidateFunction } from "ajv";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { loadSchemaRegistry } from "../src/schema-registry.js";
+import {
+  loadSchemaRegistry,
+  type SchemaRegistryError,
+  type SchemaRegistryValidator,
+} from "../src/schema-registry.js";
 
 interface NamedFixture {
   readonly name: string;
@@ -91,7 +94,7 @@ beforeAll(async () => {
   ) as InteractionPayloadRegistry;
 });
 
-function validatorFor(messageType: string): ValidateFunction {
+function validatorFor(messageType: string): SchemaRegistryValidator {
   const schemaId = payloadRegistry.mappings[messageType];
   if (schemaId === undefined) {
     throw new Error(`Unmapped message type: ${messageType}`);
@@ -103,7 +106,10 @@ function validatorFor(messageType: string): ValidateFunction {
   return validator;
 }
 
-function errors(messageType: string, value: unknown): ErrorObject[] | null {
+function errors(
+  messageType: string,
+  value: unknown,
+): readonly SchemaRegistryError[] | null {
   const validator = validatorFor(messageType);
   validator(value);
   return validator.errors ?? null;

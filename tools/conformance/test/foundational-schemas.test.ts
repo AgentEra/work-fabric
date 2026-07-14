@@ -1,7 +1,9 @@
-import type { ErrorObject } from "ajv";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { loadSchemaRegistry } from "../src/schema-registry.js";
+import {
+  loadSchemaRegistry,
+  type SchemaRegistryError,
+} from "../src/schema-registry.js";
 
 const schemaRoot = "protocol/schemas/v1";
 let registry: Awaited<ReturnType<typeof loadSchemaRegistry>>;
@@ -10,7 +12,10 @@ beforeAll(async () => {
   registry = await loadSchemaRegistry(schemaRoot);
 });
 
-function validate(schemaName: string, value: unknown): ErrorObject[] | null {
+function validate(
+  schemaName: string,
+  value: unknown,
+): readonly SchemaRegistryError[] | null {
   const schemaId = `urn:work-fabric:schema:v1:${schemaName}`;
   const validator = registry.getSchema(schemaId);
   if (validator === undefined) {
