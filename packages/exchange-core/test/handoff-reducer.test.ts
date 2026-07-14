@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { JsonObject } from "@work-fabric/exchange-spi";
+import type { JsonObject, JsonValue } from "@work-fabric/exchange-spi";
 
 import {
   evolveHandoff,
@@ -97,6 +97,70 @@ const storedHandoffPackage: JsonObject = {
   accept_by: "2026-07-14T08:00:00Z",
   result_due_at: "2026-07-15T08:00:00Z",
 };
+
+const handoffPackageWithoutExtensions: HandoffPackage = {
+  ...handoffPackage,
+  authority_scope: {
+    delegation_id: "delegation_01",
+    scopes: ["repo:write"],
+    resource_refs: ["repo_01"],
+    expires_at: "2026-07-15T00:00:00Z",
+    may_redelegate: false,
+  },
+  acceptance_criteria: [
+    {
+      criterion_id: "tests-pass",
+      description: "All tests pass",
+      required: true,
+      result_schema_ref: null,
+      required_evidence_types: ["test-report"],
+    },
+  ],
+};
+
+const storedAuthorityScopeWithoutExtensions: JsonObject = {
+  delegation_id: "delegation_01",
+  scopes: ["repo:write"],
+  resource_refs: ["repo_01"],
+  expires_at: "2026-07-15T00:00:00Z",
+  may_redelegate: false,
+};
+
+const storedAcceptanceCriterionWithoutExtensions: JsonObject = {
+  criterion_id: "tests-pass",
+  description: "All tests pass",
+  required: true,
+  result_schema_ref: null,
+  required_evidence_types: ["test-report"],
+};
+
+const storedHandoffPackageWithoutExtensions: JsonObject = {
+  ...storedHandoffPackage,
+  authority_scope: storedAuthorityScopeWithoutExtensions,
+  acceptance_criteria: [storedAcceptanceCriterionWithoutExtensions],
+};
+
+function packageWithUndefinedAuthorityExtensions(): JsonObject {
+  const authorityScope: JsonObject = {
+    ...storedAuthorityScopeWithoutExtensions,
+  };
+  Reflect.set(authorityScope, "extensions", undefined);
+  return {
+    ...storedHandoffPackageWithoutExtensions,
+    authority_scope: authorityScope,
+  };
+}
+
+function packageWithUndefinedCriterionExtensions(): JsonObject {
+  const criterion: JsonObject = {
+    ...storedAcceptanceCriterionWithoutExtensions,
+  };
+  Reflect.set(criterion, "extensions", undefined);
+  return {
+    ...storedHandoffPackageWithoutExtensions,
+    acceptance_criteria: [criterion],
+  };
+}
 
 function offered(
   overrides: Partial<Extract<HandoffEvent, { event_type: "workfabric.handoff.offered.v1" }>> = {},
@@ -579,6 +643,105 @@ describe("Handoff stored JSON boundary", () => {
       "Invalid stored Handoff event: status",
     );
   });
+
+  it("rejects sparse status.values in deep JSON", () => {
+    const sparseValues: JsonValue[] = [];
+    sparseValues.length = 1;
+    const stored = handoffEventToJson({
+      event_type: "workfabric.handoff.status_reported.v1",
+      handoff_id: "handoff_01",
+      status: { values: sparseValues },
+      occurred_at: "2026-07-14T03:00:00Z",
+    });
+
+    expect(() => handoffEventFromJson(stored)).toThrow(
+      "Invalid stored Handoff event: status",
+    );
+  });
+
+  it("rejects sparse satisfied_criterion_ids", () => {
+    const sparseCriterionIds: string[] = [];
+    sparseCriterionIds.length = 1;
+    const stored: JsonObject = {
+      ...handoffEventToJson(verified()),
+      satisfied_criterion_ids: sparseCriterionIds,
+    };
+
+    expect(() => handoffEventFromJson(stored)).toThrow(
+      "Invalid stored Handoff event: satisfied_criterion_ids[0]",
+    );
+  });
+
+  it("rejects sparse evidence", () => {
+    const sparseEvidence: JsonObject[] = [];
+    sparseEvidence.length = 1;
+    const stored: JsonObject = {
+      ...handoffEventToJson(verified()),
+      evidence: sparseEvidence,
+    };
+
+    expect(() => handoffEventFromJson(stored)).toThrow(
+      "Invalid stored Handoff event: evidence[0]",
+    );
+  });
+
+  it.each([
+    [
+      "AuthorityScope",
+      packageWithUndefinedAuthorityExtensions(),
+      "package.authority_scope.extensions",
+    ],
+    [
+      "AcceptanceCriterion",
+      packageWithUndefinedCriterionExtensions(),
+      "package.acceptance_criteria[0].extensions",
+    ],
+  ] satisfies readonly (readonly [string, JsonObject, string])[])(
+    "distinguishes absent from present-undefined %s extensions at the State boundary",
+    (_label, corruptPackage, corruptField) => {
+      const state = evolveHandoff(
+        null,
+        offered({ package: handoffPackageWithoutExtensions }),
+        1,
+      );
+      expect(handoffStateFromJson(handoffStateToJson(state))).toEqual(state);
+
+      const stored: JsonObject = {
+        ...handoffStateToJson(state),
+        package: corruptPackage,
+      };
+      expect(() => handoffStateFromJson(stored)).toThrow(
+        `Invalid stored Handoff state: ${corruptField}`,
+      );
+    },
+  );
+
+  it.each([
+    [
+      "AuthorityScope",
+      packageWithUndefinedAuthorityExtensions(),
+      "package.authority_scope.extensions",
+    ],
+    [
+      "AcceptanceCriterion",
+      packageWithUndefinedCriterionExtensions(),
+      "package.acceptance_criteria[0].extensions",
+    ],
+  ] satisfies readonly (readonly [string, JsonObject, string])[])(
+    "distinguishes absent from present-undefined %s extensions at the Event Package boundary",
+    (_label, corruptPackage, corruptField) => {
+      const event = offered({ package: handoffPackageWithoutExtensions });
+      expect(handoffEventFromJson(handoffEventToJson(event))).toEqual(event);
+
+      const stored: JsonObject = {
+        ...handoffEventToJson(event),
+        package: corruptPackage,
+      };
+      expect(() => handoffEventFromJson(stored)).toThrow(
+        `Invalid stored Handoff event: ${corruptField}`,
+      );
+    },
+  );
 
   it.each([
     [

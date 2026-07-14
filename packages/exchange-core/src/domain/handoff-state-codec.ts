@@ -44,10 +44,20 @@ function isJsonValue(
   }
   if (typeof value === "number") return Number.isFinite(value);
   if (Array.isArray(value)) {
-    if (ancestors.has(value)) return false;
-    ancestors.add(value);
-    const valid = value.every((item) => isJsonValue(item, ancestors));
-    ancestors.delete(value);
+    const array: readonly unknown[] = value;
+    if (ancestors.has(array)) return false;
+    ancestors.add(array);
+    let valid = true;
+    for (let index = 0; index < array.length; index += 1) {
+      if (
+        !Object.hasOwn(array, index) ||
+        !isJsonValue(array[index], ancestors)
+      ) {
+        valid = false;
+        break;
+      }
+    }
+    ancestors.delete(array);
     return valid;
   }
   if (!isUnknownRecord(value) || ancestors.has(value)) return false;
@@ -145,9 +155,13 @@ function requireStringArray(
   path: string,
   invalid: InvalidStoredValue,
 ): readonly string[] {
-  return requireArray(value, path, invalid).map((item, index) =>
-    requireString(item, `${path}[${index}]`, invalid),
-  );
+  const array = requireArray(value, path, invalid);
+  const decoded: string[] = [];
+  for (let index = 0; index < array.length; index += 1) {
+    if (!Object.hasOwn(array, index)) invalid(`${path}[${index}]`);
+    decoded.push(requireString(array[index], `${path}[${index}]`, invalid));
+  }
+  return decoded;
 }
 
 function requireObjectArray(
@@ -155,9 +169,15 @@ function requireObjectArray(
   path: string,
   invalid: InvalidStoredValue,
 ): readonly JsonObject[] {
-  return requireArray(value, path, invalid).map((item, index) =>
-    requireJsonObject(item, `${path}[${index}]`, invalid),
-  );
+  const array = requireArray(value, path, invalid);
+  const decoded: JsonObject[] = [];
+  for (let index = 0; index < array.length; index += 1) {
+    if (!Object.hasOwn(array, index)) invalid(`${path}[${index}]`);
+    decoded.push(
+      requireJsonObject(array[index], `${path}[${index}]`, invalid),
+    );
+  }
+  return decoded;
 }
 
 function decodeActorType(
@@ -331,7 +351,7 @@ function decodeAuthorityScope(
       invalid,
     ),
   };
-  if (authority.extensions === undefined) return base;
+  if (!Object.hasOwn(authority, "extensions")) return base;
   return {
     ...base,
     extensions: requireJsonObject(
@@ -384,7 +404,7 @@ function decodeAcceptanceCriterion(
       invalid,
     ),
   };
-  if (criterion.extensions === undefined) return base;
+  if (!Object.hasOwn(criterion, "extensions")) return base;
   return {
     ...base,
     extensions: requireJsonObject(
