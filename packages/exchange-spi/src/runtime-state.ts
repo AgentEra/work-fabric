@@ -1,6 +1,7 @@
 import type { EventRecord } from "./events.js";
 
 export interface ProjectionCheckpointStore {
+  /** Returns a non-negative safe integer; zero is the initial checkpoint. */
   loadProjectionCheckpoint(
     projectorId: string,
     partitionId: string,
@@ -8,7 +9,9 @@ export interface ProjectionCheckpointStore {
   advanceProjectionCheckpoint(
     projectorId: string,
     partitionId: string,
+    /** Non-negative safe integer; zero is valid. */
     expectedPosition: number,
+    /** Non-negative safe integer; zero is valid. */
     newPosition: number,
   ): Promise<boolean>;
   resetProjectionCheckpoint(
@@ -21,6 +24,7 @@ export interface ProjectionFailureRecord {
   readonly projector_id: string;
   readonly partition_id: string;
   readonly event_id: string;
+  /** Positive safe integer Partition Position of the failed Event. */
   readonly position: number;
   readonly reason: string;
   readonly recorded_at: string;

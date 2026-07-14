@@ -15,6 +15,7 @@ type Mutation =
   | "stale-overwrite"
   | "identity-change"
   | "non-string-identity"
+  | "invalid-stream-version"
   | "mutable-values"
   | "clear-all"
   | "reverse-list";
@@ -58,7 +59,11 @@ class MutatedProjectionStore implements HandoffReadModelStore {
     ) {
       throw new Error("invalid identity");
     }
-    if (!Number.isSafeInteger(candidate.stream_version)) {
+    if (
+      (!Number.isSafeInteger(candidate.stream_version) ||
+        candidate.stream_version <= 0) &&
+      this.mutation !== "invalid-stream-version"
+    ) {
       throw new Error("unsafe stream version");
     }
     const existing = this.models.get(candidate.handoff_id);
@@ -151,6 +156,7 @@ describe("verifyProjectionProfile", () => {
     ["stale-overwrite", "stale write"],
     ["identity-change", "identity"],
     ["non-string-identity", "invalid identity"],
+    ["invalid-stream-version", "positive safe stream version"],
     ["mutable-values", "immutable"],
     ["clear-all", "Partition isolation"],
     ["reverse-list", "deterministic list"],

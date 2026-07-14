@@ -59,10 +59,24 @@ function requirePositiveInteger(value: number, label: string): void {
   }
 }
 
+function requireNonNegativeInteger(value: number, label: string): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} must be a non-negative safe integer`);
+  }
+}
+
 function requireNonEmptyString(value: string, label: string): void {
   if (typeof value !== "string" || value.length === 0) {
     throw new Error(`${label} must not be empty`);
   }
+}
+
+function requireTrustedCursorMetadata(record: EventRecord): void {
+  requireNonEmptyString(record.event_id, "Journal record event_id");
+  requirePositiveInteger(
+    record.partition_position,
+    "Journal record partition_position",
+  );
 }
 
 function requireRecordIdentity(
@@ -134,6 +148,7 @@ export class HandoffProjector {
       HANDOFF_PROJECTOR_ID,
       partitionId,
     );
+    requireNonNegativeInteger(position, "loaded checkpoint position");
     let records: readonly EventRecord[];
     try {
       records = await this.journal.readPartition(partitionId, position, limit);
@@ -144,6 +159,7 @@ export class HandoffProjector {
 
     let processed = 0;
     for (const record of records) {
+      requireTrustedCursorMetadata(record);
       if (record.partition_position !== position + 1) {
         return this.block(
           partitionId,

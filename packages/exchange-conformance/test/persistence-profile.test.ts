@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import type {
   AtomicCommitResult,
   CapabilityManifest,
@@ -7,6 +8,7 @@ import type {
   DeadLetterRecord,
   DeliveryAttempt,
   EventRecord,
+  ProjectionFailureRecord,
   SnapshotRecord,
 } from "@work-fabric/exchange-spi";
 
@@ -15,7 +17,54 @@ import {
   verifyPersistenceProfile,
 } from "../src/index.js";
 
+class MissingCheckpointPositionGuards extends MemoryExchangePersistence {
+  override async advanceProjectionCheckpoint(
+    projectorId: string,
+    partitionId: string,
+    expectedPosition: number,
+    newPosition: number,
+  ): Promise<boolean> {
+    if (
+      !Number.isSafeInteger(expectedPosition) ||
+      expectedPosition < 0 ||
+      !Number.isSafeInteger(newPosition) ||
+      newPosition < 0
+    ) {
+      return false;
+    }
+    return super.advanceProjectionCheckpoint(
+      projectorId,
+      partitionId,
+      expectedPosition,
+      newPosition,
+    );
+  }
+}
+
+class MissingFailurePositionGuards extends MemoryExchangePersistence {
+  override async putProjectionFailure(
+    failure: ProjectionFailureRecord,
+  ): Promise<void> {
+    if (!Number.isSafeInteger(failure.position) || failure.position <= 0) {
+      return;
+    }
+    return super.putProjectionFailure(failure);
+  }
+}
+
 describe("verifyPersistenceProfile", () => {
+  it("rejects an Adapter missing checkpoint position guards", async () => {
+    await expect(
+      verifyPersistenceProfile(() => new MissingCheckpointPositionGuards()),
+    ).rejects.toThrow(/checkpoint position validation/i);
+  });
+
+  it("rejects an Adapter missing Projection Failure position guards", async () => {
+    await expect(
+      verifyPersistenceProfile(() => new MissingFailurePositionGuards()),
+    ).rejects.toThrow(/Projection Failure position validation/i);
+  });
+
   it("names the scenario when creating a fresh store fails", async () => {
     const factory = (): never => {
       throw new Error("factory failed");
@@ -74,6 +123,16 @@ describe("verifyPersistenceProfile", () => {
         return behaviorFailure();
       },
       async resetProjectionCheckpoint(): Promise<void> {
+        return behaviorFailure();
+      },
+      async putProjectionFailure(
+        _failure: ProjectionFailureRecord,
+      ): Promise<void> {
+        return behaviorFailure();
+      },
+      async listProjectionFailures(): Promise<
+        readonly ProjectionFailureRecord[]
+      > {
         return behaviorFailure();
       },
       async loadDeliveryPosition(): Promise<number> {

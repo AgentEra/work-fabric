@@ -336,7 +336,7 @@ export class MemoryExchangePersistence
     failure: ProjectionFailureRecord,
   ): Promise<void> {
     const clonedFailure = clone(failure);
-    assertNonNegativeInteger(clonedFailure.position, "failure position");
+    assertPositiveInteger(clonedFailure.position, "failure position");
     assertNonEmpty(clonedFailure.projector_id, "projector_id");
     assertNonEmpty(clonedFailure.partition_id, "partition_id");
     assertNonEmpty(clonedFailure.event_id, "event_id");

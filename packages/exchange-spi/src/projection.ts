@@ -11,6 +11,7 @@ export interface HandoffReadModel {
   readonly tenant_id: string;
   readonly partition_id: string;
   readonly handoff_id: string;
+  /** Positive safe integer version of the projected Handoff stream. */
   readonly stream_version: number;
   readonly state: JsonObject;
   readonly latest_status: JsonObject | null;

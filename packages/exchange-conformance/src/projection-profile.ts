@@ -100,18 +100,28 @@ const scenarios: readonly Scenario[] = [
     },
   },
   {
-    name: "unsafe stream version rejection",
+    name: "positive safe stream version rejection",
     async verify(store) {
-      await assert.rejects(
-        store.putHandoff(
-          model(
-            "handoff_unsafe",
-            "partition_01",
-            Number.MAX_SAFE_INTEGER + 1,
-          ),
-        ),
-      );
-      assert.equal(await store.getHandoff("handoff_unsafe"), null);
+      const invalidVersions = [
+        0,
+        -1,
+        1.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.MAX_SAFE_INTEGER + 1,
+      ];
+      for (const [index, invalidVersion] of invalidVersions.entries()) {
+        const handoffId = `handoff_invalid_version_${index}`;
+        const invalidModel: HandoffReadModel = {
+          ...model(handoffId, "partition_01", invalidVersion),
+          latest_status: { progress: 1 },
+        };
+        await assert.rejects(
+          store.putHandoff(invalidModel),
+        );
+        assert.equal(await store.getHandoff(handoffId), null);
+      }
     },
   },
   {

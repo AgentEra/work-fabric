@@ -6,13 +6,18 @@ import {
   type DeliveryStateStore,
   type ExchangePersistence,
   type NormalizedOperationOutcome,
+  type ProjectionFailureRecord,
+  type ProjectionFailureStore,
   type ProjectionCheckpointStore,
   type ProposedEvent,
 } from "@work-fabric/exchange-spi";
 
-export type ExchangePersistenceFactory = () => ExchangePersistence &
+export type PersistenceConformanceAdapter = ExchangePersistence &
   ProjectionCheckpointStore &
+  ProjectionFailureStore &
   DeliveryStateStore;
+
+export type ExchangePersistenceFactory = () => PersistenceConformanceAdapter;
 
 type PersistenceStore = ReturnType<ExchangePersistenceFactory>;
 
@@ -600,6 +605,154 @@ const scenarios: readonly Scenario[] = [
       });
       await store.deleteSnapshot("stream_01");
       assert.equal(await store.loadSnapshot("stream_01"), null);
+    },
+  },
+  {
+    name: "checkpoint position validation",
+    async verify(store) {
+      assert.equal(
+        await store.advanceProjectionCheckpoint(
+          "projector_zero_checkpoint",
+          "partition_zero_checkpoint",
+          0,
+          0,
+        ),
+        true,
+      );
+      assert.equal(
+        await store.loadProjectionCheckpoint(
+          "projector_zero_checkpoint",
+          "partition_zero_checkpoint",
+        ),
+        0,
+      );
+      const invalidPositions = [
+        -1,
+        1.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.MAX_SAFE_INTEGER + 1,
+      ];
+      for (const invalidPosition of invalidPositions) {
+        await assert.rejects(
+          store.advanceProjectionCheckpoint(
+            "projector_invalid_checkpoint",
+            "partition_invalid_checkpoint",
+            invalidPosition,
+            1,
+          ),
+        );
+        await assert.rejects(
+          store.advanceProjectionCheckpoint(
+            "projector_invalid_checkpoint",
+            "partition_invalid_checkpoint",
+            0,
+            invalidPosition,
+          ),
+        );
+      }
+      assert.equal(
+        await store.loadProjectionCheckpoint(
+          "projector_invalid_checkpoint",
+          "partition_invalid_checkpoint",
+        ),
+        0,
+      );
+    },
+  },
+  {
+    name: "Projection Failure position validation",
+    async verify(store) {
+      const invalidPositions = [
+        0,
+        -1,
+        1.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.MAX_SAFE_INTEGER + 1,
+      ];
+      for (const [index, invalidPosition] of invalidPositions.entries()) {
+        await assert.rejects(
+          store.putProjectionFailure({
+            projector_id: "projector_invalid_failure",
+            partition_id: "partition_invalid_failure",
+            event_id: `event_invalid_failure_${index}`,
+            position: invalidPosition,
+            reason: "invalid position",
+            recorded_at: "2026-07-15T00:00:00.000Z",
+          }),
+        );
+      }
+      assert.deepEqual(
+        await store.listProjectionFailures(
+          "projector_invalid_failure",
+          "partition_invalid_failure",
+        ),
+        [],
+      );
+    },
+  },
+  {
+    name: "Projection Failure immutable first-record semantics",
+    async verify(store) {
+      const first: ProjectionFailureRecord = {
+        projector_id: "projector_failure",
+        partition_id: "partition_failure",
+        event_id: "event_failure",
+        position: 7,
+        reason: "first reason",
+        recorded_at: "2026-07-15T01:00:00.000Z",
+      };
+      const expected = structuredClone(first);
+      await store.putProjectionFailure(first);
+      (first as { reason: string }).reason = "mutated input";
+      await store.putProjectionFailure({
+        ...expected,
+        reason: "later reason",
+        recorded_at: "2026-07-15T02:00:00.000Z",
+      });
+      await store.putProjectionFailure({
+        ...expected,
+        projector_id: "projector_other",
+      });
+      await store.putProjectionFailure({
+        ...expected,
+        partition_id: "partition_other",
+      });
+
+      const listed = await store.listProjectionFailures(
+        expected.projector_id,
+        expected.partition_id,
+      );
+      assert.deepEqual(listed, [expected]);
+      const listedFailure = listed[0];
+      assert.notEqual(listedFailure, undefined);
+      if (listedFailure !== undefined) {
+        (listedFailure as { reason: string }).reason = "mutated output";
+      }
+      assert.deepEqual(
+        await store.listProjectionFailures(
+          expected.projector_id,
+          expected.partition_id,
+        ),
+        [expected],
+      );
+      assert.deepEqual(
+        await store.listProjectionFailures(
+          "projector_other",
+          expected.partition_id,
+        ),
+        [{ ...expected, projector_id: "projector_other" }],
+      );
+      assert.deepEqual(
+        await store.listProjectionFailures(
+          expected.projector_id,
+          "partition_other",
+        ),
+        [{ ...expected, partition_id: "partition_other" }],
+      );
     },
   },
   {

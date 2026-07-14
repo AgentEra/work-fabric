@@ -494,6 +494,70 @@ describe("MemoryExchangePersistence", () => {
     expect(await store.loadProjectionCheckpoint("projector_01", "partition_01")).toBe(0);
   });
 
+  it("rejects every invalid checkpoint and Projection Failure position without writing", async () => {
+    const store = new MemoryExchangePersistence();
+    const invalidCheckpointPositions = [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+    ];
+    for (const invalid of invalidCheckpointPositions) {
+      await expect(
+        store.advanceProjectionCheckpoint(
+          "projector_checkpoint",
+          "partition_checkpoint",
+          invalid,
+          1,
+        ),
+      ).rejects.toThrow(/position/i);
+      await expect(
+        store.advanceProjectionCheckpoint(
+          "projector_checkpoint",
+          "partition_checkpoint",
+          0,
+          invalid,
+        ),
+      ).rejects.toThrow(/position/i);
+    }
+    expect(
+      await store.loadProjectionCheckpoint(
+        "projector_checkpoint",
+        "partition_checkpoint",
+      ),
+    ).toBe(0);
+
+    const invalidFailurePositions = [
+      0,
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+    ];
+    for (const [index, invalid] of invalidFailurePositions.entries()) {
+      await expect(
+        store.putProjectionFailure({
+          projector_id: "projector_failure",
+          partition_id: "partition_failure",
+          event_id: `event_invalid_${index}`,
+          position: invalid,
+          reason: "invalid position",
+          recorded_at: "2026-07-15T00:00:00.000Z",
+        }),
+      ).rejects.toThrow(/position/i);
+    }
+    expect(
+      await store.listProjectionFailures(
+        "projector_failure",
+        "partition_failure",
+      ),
+    ).toEqual([]);
+  });
+
   it("compare-and-advances delivery positions without moving backwards", async () => {
     const store = new MemoryExchangePersistence();
 

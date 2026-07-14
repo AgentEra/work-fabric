@@ -224,6 +224,74 @@ function fixture(records: readonly EventRecord[]) {
 }
 
 describe("HandoffProjector", () => {
+  it("rejects an invalid loaded checkpoint before Journal or model access", async () => {
+    const invalidCheckpoints = [
+      -1,
+      1.5,
+      Number.NaN,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.MAX_SAFE_INTEGER + 1,
+    ];
+    for (const invalidCheckpoint of invalidCheckpoints) {
+      let journalReads = 0;
+      let modelReads = 0;
+      const journal: EventJournal = {
+        async readStream() {
+          journalReads += 1;
+          return [];
+        },
+        async readPartition() {
+          journalReads += 1;
+          return [];
+        },
+      };
+      const delegate = new MemoryHandoffReadModelStore();
+      const models: HandoffReadModelStore = {
+        get manifest() {
+          return delegate.manifest;
+        },
+        async getHandoff(...args) {
+          modelReads += 1;
+          return delegate.getHandoff(...args);
+        },
+        putHandoff: (...args) => delegate.putHandoff(...args),
+        listHandoffs: (...args) => delegate.listHandoffs(...args),
+        clearPartition: (...args) => delegate.clearPartition(...args),
+      };
+      const checkpoints: ProjectionCheckpointStore = {
+        async loadProjectionCheckpoint() {
+          return invalidCheckpoint;
+        },
+        async advanceProjectionCheckpoint() {
+          throw new Error("advance must not be called");
+        },
+        async resetProjectionCheckpoint() {},
+      };
+      const persistence = new MemoryExchangePersistence();
+      const projector = new HandoffProjector(
+        journal,
+        checkpoints,
+        persistence,
+        models,
+        clock,
+      );
+
+      await expect(projector.runPartition(partitionId, 10)).rejects.toThrow(
+        /checkpoint.*non-negative safe integer/i,
+      );
+      expect(journalReads).toBe(0);
+      expect(modelReads).toBe(0);
+      expect(await models.listHandoffs(partitionId)).toEqual([]);
+      expect(
+        await persistence.listProjectionFailures(
+          HANDOFF_PROJECTOR_ID,
+          partitionId,
+        ),
+      ).toEqual([]);
+    }
+  });
+
   it("returns idle without changing an empty Partition", async () => {
     const { persistence, models, projector } = fixture([]);
 
@@ -591,6 +659,93 @@ describe("HandoffProjector", () => {
         wrongPartition.partition_id,
       ),
     ).toEqual([]);
+  });
+
+  it("rejects untrusted Event identity and cursor positions before mutation", async () => {
+    const invalidRecords = [
+      record(offered(), 1, 1, { event_id: "" }),
+      record(offered(), 1, 1, {
+        event_id: 42 as unknown as string,
+      }),
+      ...[
+        0,
+        -1,
+        1.5,
+        Number.NaN,
+        Number.POSITIVE_INFINITY,
+        Number.NEGATIVE_INFINITY,
+        Number.MAX_SAFE_INTEGER + 1,
+      ].map((invalidPosition) =>
+        record(offered(), invalidPosition, 1),
+      ),
+    ];
+    for (const invalidRecord of invalidRecords) {
+      let modelReads = 0;
+      let modelWrites = 0;
+      let checkpointAdvances = 0;
+      const persistence = new MemoryExchangePersistence();
+      const delegate = new MemoryHandoffReadModelStore();
+      const models: HandoffReadModelStore = {
+        get manifest() {
+          return delegate.manifest;
+        },
+        async getHandoff(...args) {
+          modelReads += 1;
+          return delegate.getHandoff(...args);
+        },
+        async putHandoff(...args) {
+          modelWrites += 1;
+          await delegate.putHandoff(...args);
+        },
+        listHandoffs: (...args) => delegate.listHandoffs(...args),
+        clearPartition: (...args) => delegate.clearPartition(...args),
+      };
+      const checkpoints: ProjectionCheckpointStore = {
+        loadProjectionCheckpoint: (...args) =>
+          persistence.loadProjectionCheckpoint(...args),
+        resetProjectionCheckpoint: (...args) =>
+          persistence.resetProjectionCheckpoint(...args),
+        async advanceProjectionCheckpoint(...args) {
+          checkpointAdvances += 1;
+          return persistence.advanceProjectionCheckpoint(...args);
+        },
+      };
+      const journal: EventJournal = {
+        async readStream() {
+          return [];
+        },
+        async readPartition() {
+          return [invalidRecord];
+        },
+      };
+      const projector = new HandoffProjector(
+        journal,
+        checkpoints,
+        persistence,
+        models,
+        clock,
+      );
+
+      await expect(projector.runPartition(partitionId, 10)).rejects.toThrow(
+        /Journal record.*(event_id|partition_position)/i,
+      );
+      expect(modelReads).toBe(0);
+      expect(modelWrites).toBe(0);
+      expect(checkpointAdvances).toBe(0);
+      expect(await delegate.getHandoff(parentId)).toBeNull();
+      expect(
+        await persistence.loadProjectionCheckpoint(
+          HANDOFF_PROJECTOR_ID,
+          partitionId,
+        ),
+      ).toBe(0);
+      expect(
+        await persistence.listProjectionFailures(
+          HANDOFF_PROJECTOR_ID,
+          partitionId,
+        ),
+      ).toEqual([]);
+    }
   });
 
   it("rejects an unsupported Journal schema version before evolving state", async () => {
