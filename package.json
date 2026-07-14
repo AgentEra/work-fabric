@@ -12,7 +12,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "conformance": "tsx tools/conformance/src/cli.ts",
-    "verify": "npm run typecheck && npm test && npm run conformance"
+    "verify": "npm run typecheck && npm test && npm run conformance",
+    "verify:exchange": "npm run typecheck && vitest run packages && npm run conformance"
   },
   "dependencies": {
     "ajv": "8.20.0",

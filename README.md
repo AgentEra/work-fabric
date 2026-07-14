@@ -105,13 +105,25 @@ Work Fabric 由以下逻辑能力组成：
 
 ## 当前状态
 
-项目已经完成 WFPP v1 Core Protocol Artifacts：协议正文、30 个公共 JSON Schema、机器可读 Handoff 生命周期、事件与订阅契约、Golden Fixtures、一致性 CLI 和三类参考序列。下一里程碑将以这些产物为唯一语义基线实现 Exchange Server 与独立 Binding：
+项目已经完成 WFPP v1 Core Protocol Artifacts 和 Exchange Core Phase 1 参考实现。Phase 1 是 **transport-free** 的：Application 直接消费协议命令，HTTP、SSE、Webhook、A2A、MCP、飞书与 Agent Runtime 均通过后续 Binding 或 Adapter 接入；参与方的专业工作与 Agent 执行始终在 Core 之外。
 
-1. Exchange Core 的权威状态、幂等、并发与 Outbox。
-2. 独立 HTTP/JSON、SSE 与 Webhook Binding。
-3. Agent Endpoint Gateway 与本地 Agent Runtime 参考接入。
-4. 飞书通知/交互 Adapter 和文档 Connector。
-5. 基础协作审计时间线与 Inbox Projection。
+当前实现边界如下：
+
+- `Handoff` 是责任与生命周期的权威事实；`Assignment` 只能从 Handoff 读模型投影得到，不能独立写入。
+- Journal、幂等记录、投影检查点、投递位置、重试和死信具有技术中立 SPI。
+- Memory Adapter 是可执行参考和一致性测试载体，不是生产存储。
+- PostgreSQL 是下一生产 Storage Adapter，不是 Exchange Core 或 SPI 的依赖，也不会改变公共接口。
+- “全局订阅”是跨逻辑 Partition 的查询与消费视图；恢复、确认和重放位置始终按 Subscription × Partition 独立保存，不承诺全局顺序。
+- 公共 WFPP Protocol Event 只包含协议字段，不暴露内部 `domain_data`、Partition position、Commit ID 或其他存储游标元数据。
+
+可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
+
+```bash
+npm run verify
+npm run verify:exchange
+```
+
+下一阶段将首先实现可插拔的 PostgreSQL 生产 Adapter，再在同一协议边界上增加独立 Transport Binding、Agent Endpoint 与外部系统 Connector。
 
 ## 文档
 

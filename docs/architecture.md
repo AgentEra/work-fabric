@@ -17,6 +17,8 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
+Exchange Core Phase 1 是 **transport-free** 的参考实现：它没有 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。Binding 与 Adapter 把外部参与方接到统一命令和事件契约上，Core 只完成授权后的分派、状态移交和权威记录。
+
 ### Work Fabric 原生负责
 
 - 统一参与协议和版本化契约。
@@ -152,7 +154,7 @@ Exchange 是 Work Fabric 的事务核心，持久化框架真正拥有的协作�
 - 维护 Participant、Endpoint、Capability 和 Delegation。
 - 将外部需求、任务、文档、代码和事件登记为 WorkReference。
 - 创建和维护 CollaborationThread。
-- 保存 Assignment、Handoff、StatusReport、Result 和 Receipt。
+- 以 Handoff 保存权威责任与生命周期事实，并从中投影 Assignment、Status、Result 和 Receipt 视图。
 - 根据 Receipt 明确当前责任，而不是根据消息送达推断责任。
 - 维护 Handoff 之间的父子关系、Correlation 和 Causation。
 - 在状态变化时原子写入 Outbox Event。
@@ -210,6 +212,8 @@ extension_fields
 | `Receipt` | 投递、接收、责任承担、结果接收或验收确认 |
 
 `Principal`、`Actor` 和 `Endpoint` 必须分离。飞书机器人可以用自己的 Principal 调用系统，但代表某个 Human Actor；一个 Agent Runtime Principal 也可以代表多个独立 Agent Actor。
+
+`Handoff` 是唯一可写的责任事实；`Assignment` 是从 Handoff 当前责任人派生的读模型。投影可以清空并由 Journal 重建，任何组件都不能绕过 Handoff 独立修改 Assignment。
 
 Receipt 至少区分：
 
@@ -296,9 +300,11 @@ payload
 - 事件按 Tenant 和 Handoff 或 Thread 分区。
 - 只保证单个 Handoff 或 Thread 内的顺序，不提供全局顺序。
 - 外部投递采用 at-least-once；消费者使用 `event_id` 或业务幂等键去重。
-- Subscription 保存独立 Cursor，可以暂停、恢复和重放。
+- Subscription 按 Subscription × Partition 保存独立 Cursor，可以暂停、恢复和重放。
+- “全局订阅”只表示跨逻辑 Partition 聚合消费，不提供单一全局 Cursor 或跨 Partition 顺序；恢复时分别推进每个 Partition 的位置。
 - Notification 分别记录已投递、已读取和责任已接受。
 - 永久失败进入死信队列并产生可订阅的失败事件。
+- 公共 Protocol Event 不包含内部 `domain_data`、Partition position、Commit ID、幂等记录或其他存储 Cursor 元数据。
 
 ### 8.4 订阅条件
 
@@ -430,6 +436,8 @@ Work Graph 是逻辑查询视图，不是架构中心，也不要求使用图数
 
 权威 Handoff 状态和 Outbox 使用本地事务保证一致；对象、索引和投影通过事件异步更新。
 
+Phase 1 的 Memory Storage Adapter 只用于参考行为、集成测试和一致性验证，不具备生产持久性声明。下一生产实现是通过既有 SPI 接入的 PostgreSQL Adapter；PostgreSQL 不进入 Core/SPI 依赖，其他符合相同行为 Profile 的存储实现可以等价替换。
+
 ## 13. 可靠性与失败处理
 
 | 场景 | 策略 |
@@ -534,16 +542,14 @@ Agent Endpoint 使用 Capability Descriptor 声明输入、结果、限制、交
 
 该示例验证的是跨参与方、跨阶段和跨系统的协作对接，而不是在 Work Fabric 内部实现销售、合同、研发、部署和运维流程。
 
-## 19. 实施边界
+## 19. Phase 1 实施边界
 
-第一里程碑只建立统一参与与交接的最小闭环：
+Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 
-- 基础 Protocol 与 Schema。
-- Participant、Endpoint、WorkReference、Thread、Handoff 和 Receipt。
-- Handoff 状态机与 Outbox Event。
-- Agent Endpoint Gateway。
-- 飞书通知/交互 Adapter。
-- 本地 Agent Runtime 参考接入。
-- 基础协作审计时间线。
+- WFPP Protocol、Schema、命令验证与公共 Event。
+- Handoff 权威生命周期、幂等、乐观并发和父子原子责任转移。
+- 技术中立的 Identity、Authority、Context、Persistence、Projection、Subscription 和 Signal SPI。
+- 可重建 Handoff/Assignment 读模型、at-least-once Signal、Cursor Pull/Ack、重试和死信参考行为。
+- Memory 参考 Adapters、复用型 Conformance Profiles 和端到端公共 Reference Suite。
 
-Subscription、完整 Context Exchange、更多 Connector、关系投影和智能路由在后续里程碑演进。每个里程碑都增强协作互联能力，不把执行职责吸收到 Work Fabric 内部。
+PostgreSQL Production Adapter、Transport Binding、飞书 Connector、Agent Endpoint Gateway 与本地 Agent Runtime 接入属于后续独立模块。它们增强参与方接入和运行能力，不会把外部执行职责吸收到 Work Fabric Core 内部。
