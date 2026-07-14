@@ -1,7 +1,7 @@
 # Work Fabric Exchange Core 架构设计
 
 - 日期：2026-07-14
-- 状态：已完成方案确认，等待书面规格最终审阅
+- 状态：已批准；规划阶段已补充协议 Payload 闭环与内外事件数据隔离
 - 范围：Exchange Core、Exchange Runtime、稳定 SPI、参考 Adapter 与 Conformance
 - 前置规范：WFPP v1 Core Protocol
 
@@ -380,11 +380,17 @@ idempotency_key
 correlation_id
 causation_id
 actor
+visibility
+visible_actor_ids
+visible_endpoint_ids
 occurred_at
-event_data
+domain_data
+protocol_data
 ```
 
 客户端时间不决定权威顺序。流内顺序由 `stream_version` 决定，消费顺序由 `partition_position` 决定，同一原子提交内由 `commit_id + commit_ordinal` 表达事件顺序。
+
+`domain_data` 保存确定性聚合重放所需的完整领域事实，只能由受信任的 Core 和 Projection Runtime 消费。`protocol_data` 必须满足 WFPP Event Data Schema，是唯一允许进入 Canonical Protocol Event 和外部 Signal Adapter 的数据。Signal 路径不得暴露 `domain_data`、内部可见受众列表、Partition Position、Commit ID 或 Idempotency Key。
 
 ### 8.3 Partition 语义
 
@@ -620,6 +626,7 @@ protocol/
 └── conformance
 
 packages/
+├── protocol-runtime
 ├── exchange-spi
 ├── exchange-core
 ├── exchange-runtime
@@ -635,7 +642,8 @@ packages/
 
 依赖规则：
 
-- `exchange-core` 依赖 WFPP 和 `exchange-spi`；
+- `protocol-runtime` 只负责加载 WFPP Schema、交互映射和执行协议校验；
+- `exchange-core` 依赖 WFPP、`protocol-runtime` 和 `exchange-spi`；
 - `exchange-runtime` 依赖 `exchange-core` 与 `exchange-spi`；
 - Adapter 只依赖 WFPP 公共类型和 `exchange-spi`；
 - `exchange-conformance` 依赖 WFPP 与 `exchange-spi`；
@@ -687,15 +695,16 @@ Feishu / Agent / Webhook Adapters
 ### 14.1 必须实现
 
 1. 修正 WFPP Context 可选性的 Schema 不一致；
-2. `exchange-spi` 的 Persistence、Identity、Authority、Context、Signal 和 Capability Manifest；
-3. Handoff Aggregate 和完整 WFPP 生命周期命令；
-4. Handoff Transfer Coordinator；
-5. Idempotency Key、Resource Version 和乐观并发；
-6. Receipt、Canonical Event 和确定性重放；
-7. Projection、Subscription Filter、Signal Dispatcher、checkpoint、Retry 和 Dead-letter 核心模型；
-8. 支持原子多流追加和 Partition Journal 的 Memory Storage Adapter；
-9. Local Identity/Authority、Memory Context 和 In-process Signal 参考 Adapter；
-10. Domain、SPI、重放、并发、Transfer 原子性和 Runtime 故障恢复测试。
+2. 补齐 Handoff Interaction Payload Schema 和 `message_type -> payload_schema_id` 映射；
+3. `exchange-spi` 的 Persistence、Identity、Authority、Context、Signal 和 Capability Manifest；
+4. Handoff Aggregate 和完整 WFPP 生命周期命令；
+5. Handoff Transfer Coordinator；
+6. Idempotency Key、Resource Version 和乐观并发；
+7. Receipt、Canonical Event 和确定性重放；
+8. Projection、Subscription Filter、Tenant/Visibility Policy、Cursor Pull/Ack、Signal Dispatcher、checkpoint、Retry 和 Dead-letter 核心模型；
+9. 支持原子多流追加和 Partition Journal 的 Memory Storage Adapter；
+10. Local Identity/Authority、Memory Context 和 In-process Signal 参考 Adapter；
+11. Domain、SPI、重放、并发、Transfer 原子性和 Runtime 故障恢复测试。
 
 ### 14.2 不实现
 
@@ -723,6 +732,8 @@ Feishu / Agent / Webhook Adapters
 
 ## 15. 实施前协议修订
 
+### 15.1 Context 可选性
+
 当前 WFPP v1 存在一处需先消歧的 Schema：
 
 - `handoff-offer.schema.json` 中 `context_bundle` 可选；
@@ -736,6 +747,22 @@ Feishu / Agent / Webhook Adapters
 - 不允许只出现其中一个。
 
 该修订应与正负 Conformance Fixture 同步完成，并保持 Core 文档、Schema 和 Snapshot 语义一致。
+
+### 15.2 Handoff Interaction Payload
+
+当前 WFPP 已定义 Command Envelope、Handoff 生命周期以及 Offer、Status、Result 的数据 Schema，但 `handoff.accept`、`handoff.decline`、`handoff.expire`、`handoff.cancel`、`handoff.verify`、`handoff.close`、`handoff.request_rework` 和 `handoff.transfer` 尚无逐交互的机器可读 Payload Schema。
+
+Exchange 实现不得用内部 TypeScript DTO 替代公开协议契约。第一阶段应补齐：
+
+- 每个客户端 Handoff Interaction 的 Payload Schema；
+- `message_type -> payload_schema_id` 的机器可读映射；
+- Status 和 Result 命令对现有 `StatusUpdate`、`ResultSubmission` Schema 的组合引用；
+- Verify 的验收条件声明、摘要和证据；
+- Rework 的原因与相关验收条件；
+- Transfer 的 Parent Handoff ID 与完整 Child Offer；
+- 对所有 Payload 的正负 Conformance Fixture。
+
+`handoff.child_accepted` 仍是 Exchange 内部关联迁移，不暴露为客户端命令。
 
 ## 16. 第一阶段验收标准
 
