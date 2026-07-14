@@ -12,9 +12,12 @@ import {
 import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import type {
   AtomicCommitRequest,
+  AtomicCommitResult,
   ContextRepository,
+  EventRecord,
   ExchangePersistence,
   JsonObject,
+  ProposedEvent,
   ResolvedPrincipal,
 } from "@work-fabric/exchange-spi";
 import {
@@ -181,7 +184,10 @@ function existingEnvelope(
 class TestClock implements Clock {
   value = "2026-07-15T02:00:00Z";
 
+  constructor(private readonly order?: string[]) {}
+
   now(): string {
+    this.order?.push("clock.now");
     return this.value;
   }
 }
@@ -190,7 +196,10 @@ class TestIds implements IdGenerator {
   private readonly counts = new Map<string, number>();
   readonly calls: string[] = [];
 
+  constructor(private readonly order?: string[]) {}
+
   nextId(kind: "handoff" | "event" | "commit" | "receipt" | "delivery") {
+    this.order?.push(`ids.${kind}`);
     this.calls.push(kind);
     const count = (this.counts.get(kind) ?? 0) + 1;
     this.counts.set(kind, count);
@@ -202,27 +211,111 @@ class TestIds implements IdGenerator {
   }
 }
 
+class TrackingIdentityProvider extends LocalIdentityProvider {
+  resolveCalls = 0;
+
+  constructor(
+    records: readonly LocalIdentityRecord[],
+    private readonly order?: string[],
+  ) {
+    super(records);
+  }
+
+  override async resolve(authenticationEvidence: JsonObject) {
+    this.resolveCalls += 1;
+    this.order?.push("identity.resolve");
+    return super.resolve(authenticationEvidence);
+  }
+}
+
+class TrackingAuthorityPolicy extends LocalAuthorityPolicy {
+  authorizeCalls = 0;
+
+  constructor(
+    rules: readonly LocalAuthorityAllowRule[],
+    private readonly order?: string[],
+  ) {
+    super(rules);
+  }
+
+  override async authorize(
+    request: Parameters<LocalAuthorityPolicy["authorize"]>[0],
+  ) {
+    this.authorizeCalls += 1;
+    this.order?.push("authority.authorize");
+    return super.authorize(request);
+  }
+}
+
 class TrackingMemoryPersistence extends MemoryExchangePersistence {
+  findCommandCalls = 0;
   readStreamCalls = 0;
   commitCalls = 0;
+  readonly commitRequests: AtomicCommitRequest[] = [];
+
+  constructor(private readonly order?: string[]) {
+    super();
+  }
+
+  override async findCommand(tenantId: string, idempotencyKey: string) {
+    this.findCommandCalls += 1;
+    this.order?.push("persistence.findCommand");
+    return super.findCommand(tenantId, idempotencyKey);
+  }
 
   override async readStream(streamId: string, fromVersion?: number) {
     this.readStreamCalls += 1;
+    this.order?.push("persistence.readStream");
     return super.readStream(streamId, fromVersion);
   }
 
   override async commitAtomically(request: AtomicCommitRequest) {
     this.commitCalls += 1;
+    this.order?.push("persistence.commitAtomically");
+    this.commitRequests.push(structuredClone(request));
     return super.commitAtomically(request);
   }
 }
 
 class TrackingContextRepository extends MemoryContextRepository {
   putBundleCalls = 0;
+  checkAvailabilityCalls = 0;
+
+  constructor(private readonly order?: string[]) {
+    super();
+  }
 
   override async putBundle(tenantId: string, bundle: JsonObject) {
     this.putBundleCalls += 1;
+    this.order?.push("context.putBundle");
     return super.putBundle(tenantId, bundle);
+  }
+
+  override async checkAvailability(
+    request: Parameters<MemoryContextRepository["checkAvailability"]>[0],
+  ) {
+    this.checkAvailabilityCalls += 1;
+    this.order?.push("context.checkAvailability");
+    return super.checkAvailability(request);
+  }
+}
+
+class TrackingValidator implements WfppCommandValidator {
+  validateCalls = 0;
+
+  constructor(
+    private readonly delegate: WfppCommandValidator,
+    private readonly order?: string[],
+  ) {}
+
+  validate(envelope: unknown) {
+    this.validateCalls += 1;
+    this.order?.push("validator.validate");
+    return this.delegate.validate(envelope);
+  }
+
+  payloadSchemaId(messageType: string): string | null {
+    return this.delegate.payloadSchemaId(messageType);
   }
 }
 
@@ -236,6 +329,39 @@ class FailOnceMemoryPersistence extends MemoryExchangePersistence {
     }
     return super.commitAtomically(request);
   }
+}
+
+class RaceConflictPersistence extends MemoryExchangePersistence {
+  failNextCommit = false;
+  conflictedRequest: AtomicCommitRequest | null = null;
+
+  override async commitAtomically(
+    request: AtomicCommitRequest,
+  ): Promise<AtomicCommitResult> {
+    if (!this.failNextCommit) {
+      return super.commitAtomically(request);
+    }
+    this.failNextCommit = false;
+    this.conflictedRequest = structuredClone(request);
+    return {
+      kind: "version_conflict",
+      current_versions: { handoff_1: 7 },
+    };
+  }
+}
+
+function proposedEvent(record: EventRecord): ProposedEvent {
+  const {
+    tenant_id: _tenantId,
+    partition_id: _partitionId,
+    partition_position: _partitionPosition,
+    stream_id: _streamId,
+    stream_version: _streamVersion,
+    commit_id: _commitId,
+    commit_ordinal: _commitOrdinal,
+    ...proposed
+  } = record;
+  return proposed;
 }
 
 let validator: WfppCommandValidator;
@@ -301,6 +427,9 @@ interface Harness {
   readonly persistence: ExchangePersistence;
   readonly context: ContextRepository;
   readonly ids: TestIds;
+  readonly identity: TrackingIdentityProvider;
+  readonly authority: TrackingAuthorityPolicy;
+  readonly validator: TrackingValidator;
 }
 
 function harness(options: {
@@ -308,25 +437,42 @@ function harness(options: {
   readonly context?: ContextRepository;
   readonly identityRecords?: readonly LocalIdentityRecord[];
   readonly allowRules?: readonly LocalAuthorityAllowRule[];
+  readonly validator?: WfppCommandValidator;
+  readonly order?: string[];
 } = {}): Harness {
-  const persistence = options.persistence ?? new MemoryExchangePersistence();
-  const context = options.context ?? new MemoryContextRepository();
-  const ids = new TestIds();
+  const persistence =
+    options.persistence ?? new TrackingMemoryPersistence(options.order);
+  const context =
+    options.context ?? new TrackingContextRepository(options.order);
+  const ids = new TestIds(options.order);
+  const identity = new TrackingIdentityProvider(
+    options.identityRecords ?? identityRecords(),
+    options.order,
+  );
+  const authority = new TrackingAuthorityPolicy(
+    options.allowRules ?? allowRules(),
+    options.order,
+  );
+  const commandValidator = new TrackingValidator(
+    options.validator ?? validator,
+    options.order,
+  );
   return {
     application: new ExchangeApplication({
       persistence,
-      identity: new LocalIdentityProvider(
-        options.identityRecords ?? identityRecords(),
-      ),
-      authority: new LocalAuthorityPolicy(options.allowRules ?? allowRules()),
+      identity,
+      authority,
       context,
-      validator,
-      clock: new TestClock(),
+      validator: commandValidator,
+      clock: new TestClock(options.order),
       ids,
     }),
     persistence,
     context,
     ids,
+    identity,
+    authority,
+    validator: commandValidator,
   };
 }
 
@@ -337,6 +483,48 @@ function expectSchemaValid(value: unknown): void {
 }
 
 describe("ExchangeApplication", () => {
+  it("normalizes a Validator exception before any downstream side effects", async () => {
+    const order: string[] = [];
+    const persistence = new TrackingMemoryPersistence(order);
+    const context = new TrackingContextRepository(order);
+    const throwingValidator: WfppCommandValidator = {
+      validate() {
+        throw new Error("schema registry password=validator-secret failed");
+      },
+      payloadSchemaId() {
+        return null;
+      },
+    };
+    const current = harness({
+      persistence,
+      context,
+      validator: throwingValidator,
+      order,
+    });
+
+    const result = await current.application.handle(offerEnvelope(), {
+      token: "human",
+    });
+
+    expect(result).toMatchObject({
+      operation_status: "temporarily_unavailable",
+      resource: null,
+      receipt: null,
+      error: { code: "temporarily_unavailable", retryable: true },
+    });
+    expectSchemaValid(result);
+    expect(JSON.stringify(result)).not.toContain("validator-secret");
+    expect(order).toEqual(["validator.validate"]);
+    expect(current.identity.resolveCalls).toBe(0);
+    expect(current.authority.authorizeCalls).toBe(0);
+    expect(persistence.findCommandCalls).toBe(0);
+    expect(persistence.readStreamCalls).toBe(0);
+    expect(persistence.commitCalls).toBe(0);
+    expect(context.putBundleCalls).toBe(0);
+    expect(context.checkAvailabilityCalls).toBe(0);
+    expect(current.ids.calls).toEqual([]);
+  });
+
   it("creates a Schema-valid offered root stream in its stable Partition", async () => {
     const { application, persistence } = harness();
 
@@ -407,6 +595,182 @@ describe("ExchangeApplication", () => {
     expect(persistence.readStreamCalls).toBe(1);
     expect(persistence.commitCalls).toBe(1);
     expect(context.putBundleCalls).toBe(1);
+  });
+
+  it("runs validation, Identity, trusted Actor, and Authority before replay lookup", async () => {
+    const order: string[] = [];
+    const persistence = new TrackingMemoryPersistence(order);
+    const context = new TrackingContextRepository(order);
+    const seed = harness({ persistence, context, order });
+    const command = offerEnvelope();
+    const first = await seed.application.handle(command, { token: "human" });
+    const readsAfterSeed = persistence.readStreamCalls;
+    const commitsAfterSeed = persistence.commitCalls;
+    order.length = 0;
+    const replayHarness = harness({ persistence, context, order });
+
+    const replay = await replayHarness.application.handle(
+      { ...command, message_id: "message_secure_replay" },
+      { token: "human" },
+    );
+
+    expect(replay).toEqual({
+      ...first,
+      request_message_id: "message_secure_replay",
+    });
+    expect(order).toEqual([
+      "validator.validate",
+      "identity.resolve",
+      "authority.authorize",
+      "persistence.findCommand",
+    ]);
+    expect(replayHarness.identity.resolveCalls).toBe(1);
+    expect(replayHarness.authority.authorizeCalls).toBe(1);
+    expect(persistence.readStreamCalls).toBe(readsAfterSeed);
+    expect(persistence.commitCalls).toBe(commitsAfterSeed);
+    expect(context.putBundleCalls).toBe(0);
+    expect(context.checkAvailabilityCalls).toBe(0);
+    expect(replayHarness.ids.calls).toEqual([]);
+  });
+
+  it("stops invalid and untrusted retries before deduplication or side effects", async () => {
+    const order: string[] = [];
+    const persistence = new TrackingMemoryPersistence(order);
+    const context = new TrackingContextRepository(order);
+    const command = offerEnvelope();
+    await harness({ persistence, context, order }).application.handle(command, {
+      token: "human",
+    });
+    const baseline = {
+      find: persistence.findCommandCalls,
+      read: persistence.readStreamCalls,
+      commit: persistence.commitCalls,
+      put: context.putBundleCalls,
+      check: context.checkAvailabilityCalls,
+    };
+
+    const assertNoLateSideEffects = (current: Harness): void => {
+      expect(persistence.findCommandCalls).toBe(baseline.find);
+      expect(persistence.readStreamCalls).toBe(baseline.read);
+      expect(persistence.commitCalls).toBe(baseline.commit);
+      expect(context.putBundleCalls).toBe(baseline.put);
+      expect(context.checkAvailabilityCalls).toBe(baseline.check);
+      expect(current.ids.calls).toEqual([]);
+    };
+
+    order.length = 0;
+    const invalid = harness({ persistence, context, order });
+    const invalidResult = await invalid.application.handle(
+      { ...command, payload: { target: { actor_id: "actor_agent" } } },
+      { token: "human" },
+    );
+    expect(invalidResult).toMatchObject({
+      operation_status: "rejected",
+      error: { code: "invalid_argument" },
+    });
+    expect(order).toEqual(["validator.validate"]);
+    expect(invalid.identity.resolveCalls).toBe(0);
+    expect(invalid.authority.authorizeCalls).toBe(0);
+    assertNoLateSideEffects(invalid);
+
+    order.length = 0;
+    const unauthenticated = harness({ persistence, context, order });
+    const unauthenticatedResult = await unauthenticated.application.handle(
+      { ...command, message_id: "message_unauthenticated_retry" },
+      { token: "unknown" },
+    );
+    expect(unauthenticatedResult).toMatchObject({
+      operation_status: "rejected",
+      error: { code: "unauthenticated" },
+    });
+    expect(order).toEqual(["validator.validate", "identity.resolve"]);
+    expect(unauthenticated.authority.authorizeCalls).toBe(0);
+    assertNoLateSideEffects(unauthenticated);
+
+    const unrepresentedPrincipal: ResolvedPrincipal = {
+      ...humanPrincipal,
+      actor_claims: [
+        {
+          actor_id: "actor_other",
+          actor_type: "human",
+          endpoint_ids: ["endpoint_human"],
+        },
+      ],
+    };
+    order.length = 0;
+    const unrepresented = harness({
+      persistence,
+      context,
+      order,
+      identityRecords: [
+        {
+          authentication_evidence: { token: "unrepresented" },
+          principal: unrepresentedPrincipal,
+        },
+      ],
+    });
+    const unrepresentedResult = await unrepresented.application.handle(
+      { ...command, message_id: "message_unrepresented_retry" },
+      { token: "unrepresented" },
+    );
+    expect(unrepresentedResult).toMatchObject({
+      operation_status: "rejected",
+      error: { code: "permission_denied" },
+    });
+    expect(order).toEqual(["validator.validate", "identity.resolve"]);
+    expect(unrepresented.authority.authorizeCalls).toBe(0);
+    assertNoLateSideEffects(unrepresented);
+
+    order.length = 0;
+    const unauthorized = harness({
+      persistence,
+      context,
+      order,
+      allowRules: [],
+    });
+    const unauthorizedResult = await unauthorized.application.handle(
+      { ...command, message_id: "message_unauthorized_retry" },
+      { token: "human" },
+    );
+    expect(unauthorizedResult).toMatchObject({
+      operation_status: "rejected",
+      error: { code: "permission_denied" },
+    });
+    expect(order).toEqual([
+      "validator.validate",
+      "identity.resolve",
+      "authority.authorize",
+    ]);
+    assertNoLateSideEffects(unauthorized);
+  });
+
+  it("executes a Context-bearing root Offer in the exact dependency order", async () => {
+    const order: string[] = [];
+    const persistence = new TrackingMemoryPersistence(order);
+    const context = new TrackingContextRepository(order);
+    const current = harness({ persistence, context, order });
+
+    const result = await current.application.handle(
+      offerEnvelope({
+        payload: { ...offerPayload, context_bundle: contextBundle },
+      }),
+      { token: "human" },
+    );
+
+    expect(result.operation_status).toBe("accepted");
+    expect(order).toEqual([
+      "validator.validate",
+      "identity.resolve",
+      "authority.authorize",
+      "persistence.findCommand",
+      "ids.handoff",
+      "context.putBundle",
+      "persistence.readStream",
+      "clock.now",
+      "ids.event",
+      "ids.commit",
+      "persistence.commitAtomically",
+    ]);
   });
 
   it("returns idempotency_key_reused for changed Payload before side effects", async () => {
@@ -593,6 +957,124 @@ describe("ExchangeApplication", () => {
       event_type: "workfabric.handoff.accepted.v1",
       partition_id: events[0]?.partition_id,
     });
+  });
+
+  it("maps a commit-time version race without persisting the proposed Event", async () => {
+    const persistence = new RaceConflictPersistence();
+    const current = harness({ persistence });
+    await current.application.handle(offerEnvelope(), { token: "human" });
+    persistence.failNextCommit = true;
+
+    const result = await current.application.handle(
+      existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 1, idempotencyKey: "accept-race" },
+      ),
+      { token: "agent" },
+    );
+
+    expect(result).toMatchObject({
+      operation_status: "conflict",
+      resource: null,
+      receipt: null,
+      error: {
+        code: "version_conflict",
+        retryable: true,
+        current_resource_version: 7,
+      },
+    });
+    expectSchemaValid(result);
+    expect(persistence.conflictedRequest).toMatchObject({
+      partition_id: expect.stringMatching(/^partition:/),
+      appends: [
+        {
+          stream_id: "handoff_1",
+          expected_version: 1,
+          events: [{ event_type: "workfabric.handoff.accepted.v1" }],
+        },
+      ],
+    });
+    expect(await persistence.readStream("handoff_1")).toHaveLength(1);
+    expect(
+      await persistence.findCommand("tenant_01", "accept-race"),
+    ).toBeNull();
+  });
+
+  it("reuses a recorded non-hash Partition for an existing Handoff", async () => {
+    const source = harness();
+    await source.application.handle(offerEnvelope(), { token: "human" });
+    const sourceEvent = (await source.persistence.readStream("handoff_1"))[0];
+    if (sourceEvent === undefined) {
+      throw new Error("Expected source offered Event");
+    }
+    const persistence = new TrackingMemoryPersistence();
+    const recordedPartition = "partition:recorded-root-lineage";
+    const seededEvent: ProposedEvent = {
+      ...proposedEvent(sourceEvent),
+      event_id: "event_seed_recorded",
+      request_message_id: "message_seed_recorded",
+      idempotency_key: "seed-recorded",
+    };
+    const seeded = await persistence.commitAtomically({
+      tenant_id: "tenant_01",
+      partition_id: recordedPartition,
+      commit_id: "commit_seed_recorded",
+      idempotency_key: "seed-recorded",
+      payload_digest: "digest-seed-recorded",
+      request_message_id: "message_seed_recorded",
+      outcome: {
+        operation_status: "accepted",
+        resource: {
+          resource_type: "handoff",
+          resource_id: "handoff_1",
+          resource_version: 1,
+        },
+        receipt: null,
+        error: null,
+      },
+      appends: [
+        {
+          stream_id: "handoff_1",
+          expected_version: 0,
+          events: [seededEvent],
+        },
+      ],
+    });
+    expect(seeded.kind).toBe("committed");
+    const current = harness({ persistence });
+
+    const result = await current.application.handle(
+      existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        {
+          actor: "agent",
+          expectedVersion: 1,
+          idempotencyKey: "accept-recorded-partition",
+        },
+      ),
+      { token: "agent" },
+    );
+
+    expect(result.operation_status).toBe("accepted");
+    const request = persistence.commitRequests.at(-1);
+    expect(request?.partition_id).toBe(recordedPartition);
+    const hashedPartition = `partition:${createHash("sha256")
+      .update(
+        canonicalJson({
+          tenant_id: "tenant_01",
+          root_handoff_id: "handoff_1",
+        }),
+        "utf8",
+      )
+      .digest("hex")}`;
+    expect(request?.partition_id).not.toBe(hashedPartition);
+    expect(
+      (await persistence.readStream("handoff_1")).map(
+        ({ partition_id }) => partition_id,
+      ),
+    ).toEqual([recordedPartition, recordedPartition]);
   });
 
   it("returns context_unavailable before committing when Accept cannot access Context", async () => {
@@ -945,9 +1427,10 @@ describe("ExchangeApplication", () => {
       action: "workfabric.handoff.transfer.v1",
       resource_id: "handoff_1",
     };
-    const { application, ids } = harness({
-      allowRules: [...allowRules(), transferRule],
-    });
+    const childAcceptedRule: LocalAuthorityAllowRule = {
+      ...transferRule,
+      action: "workfabric.handoff.child_accepted.v1",
+    };
     const transfer: CommandEnvelope = {
       ...existingEnvelope(
         "accept",
@@ -983,10 +1466,40 @@ describe("ExchangeApplication", () => {
       },
     };
 
-    const transferResult = await application.handle(transfer, { token: "agent" });
-    const childAcceptedResult = await application.handle(childAccepted, {
+    const transferOrder: string[] = [];
+    const transferPersistence = new TrackingMemoryPersistence(transferOrder);
+    const transferContext = new TrackingContextRepository(transferOrder);
+    const transferHarness = harness({
+      persistence: transferPersistence,
+      context: transferContext,
+      allowRules: [...allowRules(), transferRule],
+      order: transferOrder,
+    });
+    const transferResult = await transferHarness.application.handle(transfer, {
       token: "agent",
     });
+    const validInternalValidator: WfppCommandValidator = {
+      validate() {
+        return { valid: true };
+      },
+      payloadSchemaId() {
+        return null;
+      },
+    };
+    const childOrder: string[] = [];
+    const childPersistence = new TrackingMemoryPersistence(childOrder);
+    const childContext = new TrackingContextRepository(childOrder);
+    const childHarness = harness({
+      persistence: childPersistence,
+      context: childContext,
+      allowRules: [...allowRules(), childAcceptedRule],
+      validator: validInternalValidator,
+      order: childOrder,
+    });
+    const childAcceptedResult = await childHarness.application.handle(
+      childAccepted,
+      { token: "agent" },
+    );
 
     for (const result of [transferResult, childAcceptedResult]) {
       expect(result).toMatchObject({
@@ -996,6 +1509,26 @@ describe("ExchangeApplication", () => {
         error: { code: "invalid_argument", retryable: false },
       });
     }
-    expect(ids.calls).toEqual([]);
+    expect(transferOrder).toEqual([
+      "validator.validate",
+      "identity.resolve",
+      "authority.authorize",
+    ]);
+    expect(childOrder).toEqual([
+      "validator.validate",
+      "identity.resolve",
+      "authority.authorize",
+    ]);
+    for (const [current, persistence, context] of [
+      [transferHarness, transferPersistence, transferContext],
+      [childHarness, childPersistence, childContext],
+    ] as const) {
+      expect(current.ids.calls).toEqual([]);
+      expect(persistence.findCommandCalls).toBe(0);
+      expect(persistence.readStreamCalls).toBe(0);
+      expect(persistence.commitCalls).toBe(0);
+      expect(context.putBundleCalls).toBe(0);
+      expect(context.checkAvailabilityCalls).toBe(0);
+    }
   });
 });

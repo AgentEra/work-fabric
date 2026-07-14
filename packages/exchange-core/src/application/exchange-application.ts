@@ -215,17 +215,17 @@ export class ExchangeApplication {
     envelope: CommandEnvelope,
     authenticationEvidence: JsonObject,
   ): Promise<OperationResult> {
-    const validation = this.dependencies.validator.validate(envelope);
-    if (!validation.valid) {
-      return toOperationResult(
-        envelope.message_id,
-        rejected("invalid_argument", "The command is invalid", {
-          field_violations: validation.errors,
-        }),
-      );
-    }
-
     try {
+      const validation = this.dependencies.validator.validate(envelope);
+      if (!validation.valid) {
+        return toOperationResult(
+          envelope.message_id,
+          rejected("invalid_argument", "The command is invalid", {
+            field_violations: validation.errors,
+          }),
+        );
+      }
+
       const principal = await this.dependencies.identity.resolve(
         authenticationEvidence,
       );
