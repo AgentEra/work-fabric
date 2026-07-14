@@ -1797,6 +1797,8 @@ Hash its canonical UTF-8 JSON with Node `createHash("sha256")` and prefix the lo
 
 `encodeHandoffEvents` receives Domain events, current stream version, Envelope metadata, generated Event IDs, generated Receipt IDs, and current time. Each Proposed Event stores `domain_data` for replay and separately stores Schema-valid `protocol_data` for public delivery. It must:
 
+Use one closed input object containing `current_state: HandoffState | null`, the Domain events, `current_stream_version`, Envelope metadata, Event IDs, event-aligned nullable Receipt IDs, trusted `authorized_endpoint_ids`, and `now`. Require the ID arrays to align with the events and the supplied current version to match the current State. Starting from `current_state`, call `evolveHandoff` for every Event and derive all before/after lifecycle values, visible Actor IDs, routing-safe Details, and resulting resource versions from those states. The caller must not provide Actor audiences or public change Details directly.
+
 - assign Event Data `resource_version = currentVersion + eventIndex + 1`;
 - map Domain event type to `change_type`, `from_state`, `to_state`, and changed fields;
 - place only routing-safe `work_reference_uri`, `capability_ids`, and resulting `lifecycle_state` in `change.details` when available;

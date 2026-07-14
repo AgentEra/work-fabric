@@ -396,6 +396,8 @@ protocol_data
 
 `domain_data` 保存确定性聚合重放所需的完整领域事实，只能由受信任的 Core 和 Projection Runtime 消费。`protocol_data` 必须满足 WFPP Event Data Schema，是唯一允许进入 Canonical Protocol Event 和外部 Signal Adapter 的数据。Signal 路径不得暴露 `domain_data`、内部可见受众列表、Partition Position、Commit ID 或 Idempotency Key。
 
+协议 Event Encoder 必须接收编码前的 `HandoffState | null`，按事件顺序调用领域 Reducer 得到每个事件的前后状态，再派生 `from_state`、`to_state`、参与 Actor、路由安全 Details 和 Resource Version。调用方只能额外提供已认证的 Endpoint 可见列表，不能手工传入 Actor Audience 或公开 Details；这样 rework 后再次 Accept 等同型事件也不会丢失真实前态。
+
 ### 8.3 Partition 语义
 
 终态架构不要求所有租户共享一个永久串行的数据库序号。
