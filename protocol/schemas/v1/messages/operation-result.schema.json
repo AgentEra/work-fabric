@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:operation-result",
+  "title": "Operation Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "spec_version",
+    "request_message_id",
+    "operation_status",
+    "resource",
+    "receipt",
+    "error"
+  ],
+  "properties": {
+    "spec_version": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/spec_version"
+    },
+    "request_message_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "operation_status": {
+      "enum": ["accepted", "rejected", "conflict", "temporarily_unavailable"]
+    },
+    "resource": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:resource-version-ref" },
+        { "type": "null" }
+      ]
+    },
+    "receipt": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:operation-receipt" },
+        { "type": "null" }
+      ]
+    },
+    "error": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:protocol-error" },
+        { "type": "null" }
+      ]
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "operation_status": { "const": "accepted" }
+        },
+        "required": ["operation_status"]
+      },
+      "then": {
+        "properties": {
+          "resource": {
+            "$ref": "urn:work-fabric:schema:v1:resource-version-ref"
+          },
+          "receipt": {
+            "$ref": "urn:work-fabric:schema:v1:operation-receipt"
+          },
+          "error": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "error": {
+            "$ref": "urn:work-fabric:schema:v1:protocol-error"
+          }
+        }
+      }
+    }
+  ]
+}
