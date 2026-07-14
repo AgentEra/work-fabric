@@ -1,0 +1,142 @@
+{
+  "spec_version": "1.0",
+  "name": "WFPP v1 Handoff Lifecycle",
+  "initial_state": "offered",
+  "states": [
+    "offered",
+    "accepted",
+    "result_returned",
+    "verified",
+    "rework_requested",
+    "closed",
+    "declined",
+    "expired",
+    "cancelled",
+    "transferred"
+  ],
+  "terminal_states": [
+    "closed",
+    "declined",
+    "expired",
+    "cancelled",
+    "transferred"
+  ],
+  "transitions": [
+    {
+      "interaction": "handoff.offer",
+      "from": [null],
+      "to": "offered",
+      "required_conditions": [],
+      "event_type": "workfabric.handoff.offered.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.accept",
+      "from": ["offered", "rework_requested"],
+      "to": "accepted",
+      "required_conditions": ["recipient_authorized", "context_available"],
+      "event_type": "workfabric.handoff.accepted.v1",
+      "effects": [
+        {
+          "type": "issue_receipt",
+          "receipt_type": "responsibility_accepted"
+        }
+      ]
+    },
+    {
+      "interaction": "handoff.decline",
+      "from": ["offered"],
+      "to": "declined",
+      "required_conditions": [],
+      "event_type": "workfabric.handoff.declined.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.expire",
+      "from": ["offered"],
+      "to": "expired",
+      "required_conditions": ["accept_by_elapsed"],
+      "event_type": "workfabric.handoff.expired.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.cancel",
+      "from": ["offered", "accepted"],
+      "to": "cancelled",
+      "required_conditions": ["policy_allows_cancel"],
+      "event_type": "workfabric.handoff.cancelled.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.report_status",
+      "from": ["accepted"],
+      "to": "accepted",
+      "required_conditions": ["recipient_authorized"],
+      "event_type": "workfabric.handoff.status_reported.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.return_result",
+      "from": ["accepted"],
+      "to": "result_returned",
+      "required_conditions": ["result_schema_valid", "authority_valid"],
+      "event_type": "workfabric.handoff.result_returned.v1",
+      "effects": [
+        {
+          "type": "issue_receipt",
+          "receipt_type": "result_received"
+        }
+      ]
+    },
+    {
+      "interaction": "handoff.verify",
+      "from": ["result_returned"],
+      "to": "verified",
+      "required_conditions": ["verifier_authorized", "criteria_satisfied"],
+      "event_type": "workfabric.handoff.verified.v1",
+      "effects": [
+        {
+          "type": "issue_receipt",
+          "receipt_type": "result_verified"
+        }
+      ]
+    },
+    {
+      "interaction": "handoff.close",
+      "from": ["verified"],
+      "to": "closed",
+      "required_conditions": ["verifier_authorized"],
+      "event_type": "workfabric.handoff.closed.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.request_rework",
+      "from": ["result_returned"],
+      "to": "rework_requested",
+      "required_conditions": ["verifier_authorized", "rework_reason_provided"],
+      "event_type": "workfabric.handoff.rework_requested.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.transfer",
+      "from": ["accepted"],
+      "to": "accepted",
+      "required_conditions": ["recipient_authorized", "redelegation_allowed"],
+      "event_type": "workfabric.handoff.offered.v1",
+      "effects": [
+        {
+          "type": "create_child_handoff",
+          "child_initial_state": "offered"
+        }
+      ]
+    },
+    {
+      "interaction": "handoff.child_accepted",
+      "from": ["accepted"],
+      "to": "transferred",
+      "required_conditions": ["child_handoff_accepted"],
+      "event_type": "workfabric.handoff.transferred.v1",
+      "effects": []
+    }
+  ]
+}
