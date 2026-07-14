@@ -52,6 +52,56 @@ class MissingFailurePositionGuards extends MemoryExchangePersistence {
   }
 }
 
+type FailureIdentityMutation = "omit-position" | "omit-event-id";
+
+class IncompleteFailureIdentityStore extends MemoryExchangePersistence {
+  private readonly mutatedFailures = new Map<string, ProjectionFailureRecord>();
+
+  constructor(private readonly mutation: FailureIdentityMutation) {
+    super();
+  }
+
+  override async putProjectionFailure(
+    failure: ProjectionFailureRecord,
+  ): Promise<void> {
+    if (!Number.isSafeInteger(failure.position) || failure.position <= 0) {
+      throw new Error("failure position must be a positive safe integer");
+    }
+    const cloned = structuredClone(failure);
+    const key = JSON.stringify(
+      this.mutation === "omit-position"
+        ? [cloned.projector_id, cloned.partition_id, cloned.event_id]
+        : [cloned.projector_id, cloned.partition_id, cloned.position],
+    );
+    if (!this.mutatedFailures.has(key)) {
+      this.mutatedFailures.set(key, cloned);
+    }
+  }
+
+  override async listProjectionFailures(
+    projectorId: string,
+    partitionId: string,
+  ): Promise<readonly ProjectionFailureRecord[]> {
+    return structuredClone(
+      [...this.mutatedFailures.values()]
+        .filter(
+          (failure) =>
+            failure.projector_id === projectorId &&
+            failure.partition_id === partitionId,
+        )
+        .sort(
+          (left, right) =>
+            left.position - right.position ||
+            (left.event_id < right.event_id
+              ? -1
+              : left.event_id > right.event_id
+                ? 1
+                : 0),
+        ),
+    );
+  }
+}
+
 describe("verifyPersistenceProfile", () => {
   it("rejects an Adapter missing checkpoint position guards", async () => {
     await expect(
@@ -64,6 +114,16 @@ describe("verifyPersistenceProfile", () => {
       verifyPersistenceProfile(() => new MissingFailurePositionGuards()),
     ).rejects.toThrow(/Projection Failure position validation/i);
   });
+
+  for (const mutation of ["omit-position", "omit-event-id"] as const) {
+    it(`rejects a Projection Failure key that ${mutation}`, async () => {
+      await expect(
+        verifyPersistenceProfile(
+          () => new IncompleteFailureIdentityStore(mutation),
+        ),
+      ).rejects.toThrow(/Projection Failure.*four-part identity/i);
+    });
+  }
 
   it("names the scenario when creating a fresh store fails", async () => {
     const factory = (): never => {

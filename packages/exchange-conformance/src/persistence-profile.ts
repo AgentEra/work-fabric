@@ -695,7 +695,7 @@ const scenarios: readonly Scenario[] = [
     },
   },
   {
-    name: "Projection Failure immutable first-record semantics",
+    name: "Projection Failure four-part identity and immutable first-record semantics",
     async verify(store) {
       const first: ProjectionFailureRecord = {
         projector_id: "projector_failure",
@@ -706,6 +706,23 @@ const scenarios: readonly Scenario[] = [
         recorded_at: "2026-07-15T01:00:00.000Z",
       };
       const expected = structuredClone(first);
+      const sameEventDifferentPosition: ProjectionFailureRecord = {
+        ...expected,
+        position: 8,
+        reason: "independent position",
+        recorded_at: "2026-07-15T03:00:00.000Z",
+      };
+      const samePositionDifferentEvent: ProjectionFailureRecord = {
+        ...expected,
+        event_id: "event_failure_other",
+        reason: "independent event",
+        recorded_at: "2026-07-15T04:00:00.000Z",
+      };
+      const expectedPrimaryList = [
+        expected,
+        samePositionDifferentEvent,
+        sameEventDifferentPosition,
+      ];
       await store.putProjectionFailure(first);
       (first as { reason: string }).reason = "mutated input";
       await store.putProjectionFailure({
@@ -713,6 +730,8 @@ const scenarios: readonly Scenario[] = [
         reason: "later reason",
         recorded_at: "2026-07-15T02:00:00.000Z",
       });
+      await store.putProjectionFailure(sameEventDifferentPosition);
+      await store.putProjectionFailure(samePositionDifferentEvent);
       await store.putProjectionFailure({
         ...expected,
         projector_id: "projector_other",
@@ -726,7 +745,7 @@ const scenarios: readonly Scenario[] = [
         expected.projector_id,
         expected.partition_id,
       );
-      assert.deepEqual(listed, [expected]);
+      assert.deepEqual(listed, expectedPrimaryList);
       const listedFailure = listed[0];
       assert.notEqual(listedFailure, undefined);
       if (listedFailure !== undefined) {
@@ -737,7 +756,7 @@ const scenarios: readonly Scenario[] = [
           expected.projector_id,
           expected.partition_id,
         ),
-        [expected],
+        expectedPrimaryList,
       );
       assert.deepEqual(
         await store.listProjectionFailures(
