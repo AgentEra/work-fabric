@@ -460,6 +460,44 @@ class ReclaimsUnexpired extends MemoryDurabilityAdapter {
   }
 }
 
+class MutatesClaimEvent extends MemoryDurabilityAdapter {
+  override async claim(request: OutboxClaim): Promise<readonly OutboxRecord[]> {
+    const result = await super.claim(request);
+    if (request.owner !== "worker_profile_a") return result;
+    return result.map((record) => ({
+      ...record,
+      event: {
+        ...record.event,
+        domain_data: { ...record.event.domain_data, position: 777 },
+        protocol_data: { ...record.event.protocol_data, position: 777 },
+      },
+    }));
+  }
+}
+
+class MutatesEventTimestamp extends MemoryDurabilityAdapter {
+  override async claim(request: OutboxClaim): Promise<readonly OutboxRecord[]> {
+    const result = await super.claim(request);
+    return result.map((record) => ({
+      ...record,
+      event: { ...record.event, occurred_at: "2026-02-29T00:00:00Z" },
+    }));
+  }
+}
+
+class ReturnsWrongRecoveryIdentity extends MemoryDurabilityAdapter {
+  override async acquire(
+    leaseKey: string,
+    owner: string,
+    now: string,
+    leaseSeconds: number,
+  ): Promise<WorkerLease | null> {
+    const lease = await super.acquire(leaseKey, owner, now, leaseSeconds);
+    if (lease === null || !leaseKey.startsWith("worker:recovery:")) return lease;
+    return { ...lease, lease_key: "wrong-key", owner: "wrong-owner" };
+  }
+}
+
 const profile = (factory: () => DurabilityConformanceAdapter) =>
   verifyDurabilityProfile(factory);
 
@@ -479,6 +517,9 @@ describe("durability profile", () => {
     ["nested JSON clone", () => new SharesJsonBodies()],
     ["stale release fencing", () => new AllowsStaleRelease()],
     ["same-owner claim fencing", () => new ReclaimsUnexpired()],
+    ["claim event snapshot", () => new MutatesClaimEvent()],
+    ["event timestamp validation", () => new MutatesEventTimestamp()],
+    ["recovery lease identity", () => new ReturnsWrongRecoveryIdentity()],
   ])("rejects an adapter that violates %s", async (_name, factory) => {
     await expect(profile(factory)).rejects.toThrow();
   });

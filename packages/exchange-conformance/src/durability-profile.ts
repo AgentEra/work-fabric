@@ -25,6 +25,8 @@ export interface DurabilityProfileFixtures {
   readonly partition_id: string;
   readonly other_partition_id: string;
   readonly outbox_ids: readonly [string, string, string];
+  readonly other_tenant_outbox_id: string;
+  readonly other_partition_outbox_id: string;
   readonly now: string;
 }
 
@@ -34,6 +36,8 @@ export const DEFAULT_DURABILITY_PROFILE_FIXTURES: DurabilityProfileFixtures = {
   partition_id: "partition_01",
   other_partition_id: "partition_02",
   outbox_ids: ["outbox_01", "outbox_02", "outbox_03"],
+  other_tenant_outbox_id: "outbox_other_tenant",
+  other_partition_outbox_id: "outbox_other_partition",
   now: "2026-07-15T00:00:00.123456789Z",
 };
 
@@ -75,6 +79,17 @@ const INVALID_UTC_TIMESTAMPS = [
   "2026-02-29T00:00:00Z",
 ] as const;
 
+const VALID_FRACTIONAL_UTC_TIMESTAMPS = [
+  "2026-07-15T00:00:00.1Z",
+  "2026-07-15T00:00:00.12Z",
+  "2026-07-15T00:00:00.123Z",
+  "2026-07-15T00:00:00.1234Z",
+  "2026-07-15T00:00:00.12345Z",
+  "2026-07-15T00:00:00.123456Z",
+  "2026-07-15T00:00:00.1234567Z",
+  "2026-07-15T00:00:00.12345678Z",
+] as const;
+
 function assertRecordShape(
   record: OutboxRecord,
   request: OutboxClaim,
@@ -91,6 +106,7 @@ function assertRecordShape(
   assert.equal(record.event.tenant_id, record.tenant_id);
   assert.equal(record.event.partition_id, record.partition_id);
   assert.equal(record.event.partition_position, record.position);
+  requireTimestamp(record.event.occurred_at, "event.occurred_at");
   if (record.next_attempt_at !== null) {
     requireTimestamp(record.next_attempt_at, "next_attempt_at");
   }
@@ -158,6 +174,14 @@ async function mustReject(operation: Promise<unknown>, reason: string): Promise<
   assert.fail(reason);
 }
 
+async function mustAccept<T>(operation: Promise<T>, reason: string): Promise<T> {
+  try {
+    return await operation;
+  } catch (error: unknown) {
+    assert.fail(`${reason}: ${errorMessage(error)}`);
+  }
+}
+
 async function verifyCapabilities(store: DurabilityConformanceAdapter): Promise<void> {
   assert.equal(store.manifest.profile, "exchange.durability.v1");
   assertCapabilities(store.manifest, DURABILITY_REQUIRED_CAPABILITIES);
@@ -191,6 +215,63 @@ async function verifyStrictInputs(
     await mustReject(
       store.claim({ ...claim, now: timestamp }),
       `claim must reject invalid UTC timestamp ${timestamp}`,
+    );
+  }
+  for (const [index, timestamp] of VALID_FRACTIONAL_UTC_TIMESTAMPS.entries()) {
+    const fractionOwner = `worker_fraction_${index}`;
+    const fractionLeaseKey = `lease:fraction:${index}`;
+    const lease = await store.acquire(
+      fractionLeaseKey,
+      fractionOwner,
+      timestamp,
+      30,
+    );
+    assert.ok(lease !== null, `lease acquire must accept valid UTC fraction ${timestamp}`);
+    if (lease !== null) {
+      assert.equal(
+        await mustAccept(
+          store.renew(
+            fractionLeaseKey,
+            fractionOwner,
+            lease.fencing_token,
+            timestamp,
+            30,
+          ),
+          `lease renewal must accept valid UTC fraction ${timestamp}`,
+        ),
+        true,
+        `lease renewal must succeed for valid UTC fraction ${timestamp}`,
+      );
+    }
+
+    // Reuse one real outbox row as a due retry so recordFailure is exercised
+    // against a valid owner/token pair rather than an unknown-row fast path.
+    const fractionClaim = await store.claim({
+      ...claim,
+      owner: fractionOwner,
+      now: timestamp,
+      limit: 1,
+    });
+    assert.equal(
+      fractionClaim.length,
+      1,
+      `claim must accept valid UTC fraction ${timestamp}`,
+    );
+    const fractionRecord = fractionClaim[0];
+    assert.ok(fractionRecord !== undefined);
+    if (fractionRecord === undefined || fractionRecord.lease_owner === null) return;
+    assert.equal(
+      await mustAccept(
+        store.recordFailure(
+          fractionRecord.outbox_id,
+          fractionRecord.lease_owner,
+          fractionRecord.fencing_token,
+          timestamp,
+        ),
+        `failure recording must accept valid UTC fraction ${timestamp}`,
+      ),
+      true,
+      `failure recording must succeed for valid UTC fraction ${timestamp}`,
     );
   }
   for (const value of INVALID_POSITIVE_INTEGERS) {
@@ -469,6 +550,8 @@ async function verifyExpiredRecovery(
   const first = await store.acquire(key, "worker_profile_a", fixtures.now, 10);
   assert.ok(first !== null);
   if (first === null) return;
+  assert.equal(first.lease_key, key);
+  assert.equal(first.owner, "worker_profile_a");
   const expiredAt = addUtcTimestampSeconds(fixtures.now, 10);
   requirePositiveInteger(first.fencing_token, "recovery fencing_token");
   requireTimestamp(first.expires_at, "recovery expires_at");
@@ -476,6 +559,8 @@ async function verifyExpiredRecovery(
   const recovered = await store.acquire(key, "worker_profile_b", expiredAt, 10);
   assert.ok(recovered !== null, "an expired owner lease must be recoverable");
   if (recovered === null) return;
+  assert.equal(recovered.lease_key, key);
+  assert.equal(recovered.owner, "worker_profile_b");
   requirePositiveInteger(recovered.fencing_token, "recovered fencing_token");
   assert.ok(recovered.fencing_token > first.fencing_token);
   requireTimestamp(recovered.expires_at, "recovered expires_at");
@@ -512,6 +597,9 @@ async function verifyOutbox(
   assertOrderedUnique(initial);
   const initialIdentity = new Map(
     initial.map((record) => [record.outbox_id, identity(record)]),
+  );
+  const initialEvents = new Map(
+    initial.map((record) => [record.outbox_id, structuredClone(record.event)]),
   );
   for (const record of initial) {
     assertRecordShape(record, {
@@ -561,7 +649,7 @@ async function verifyOutbox(
   );
   assert.deepEqual(
     otherTenantPending.map((record) => record.outbox_id),
-    ["outbox_other_tenant"],
+    [fixtures.other_tenant_outbox_id],
   );
   assert.ok(otherTenantPending.length > 0, "profile requires an other-tenant fixture row");
   for (const record of otherTenantPending) {
@@ -583,7 +671,7 @@ async function verifyOutbox(
   );
   assert.deepEqual(
     otherPartitionPending.map((record) => record.outbox_id),
-    ["outbox_other_partition"],
+    [fixtures.other_partition_outbox_id],
   );
   for (const record of otherPartitionPending) {
     assert.equal(record.tenant_id, fixtures.tenant_id);
@@ -599,6 +687,9 @@ async function verifyOutbox(
       partition_id: fixtures.other_partition_id,
     });
   }
+  const otherPartitionEvents = new Map(
+    otherPartitionPending.map((record) => [record.outbox_id, structuredClone(record.event)]),
+  );
 
   const claim = {
     owner: "worker_profile_a",
@@ -622,6 +713,9 @@ async function verifyOutbox(
     const expected = initialIdentity.get(record.outbox_id);
     assert.ok(expected !== undefined, "claim must return a known pending row");
     if (expected !== undefined) assertStableIdentity(record, expected);
+    const expectedEvent = initialEvents.get(record.outbox_id);
+    assert.ok(expectedEvent !== undefined, "claim must return a known event");
+    if (expectedEvent !== undefined) assert.deepEqual(record.event, expectedEvent);
   }
   assertOrderedUnique(firstClaim);
   const first = firstClaim[0];
@@ -633,8 +727,11 @@ async function verifyOutbox(
   const firstOwner = first.lease_owner;
   const firstToken = first.fencing_token;
   assert.ok(firstOwner !== null);
-  const firstClaimSnapshot = structuredClone(first);
-  const secondEventSnapshot = structuredClone(second.event);
+  const firstEventSnapshot = initialEvents.get(first.outbox_id);
+  const secondEventSnapshot = initialEvents.get(second.outbox_id);
+  assert.ok(firstEventSnapshot !== undefined);
+  assert.ok(secondEventSnapshot !== undefined);
+  if (firstEventSnapshot === undefined || secondEventSnapshot === undefined) return;
   const mutableFirst = first as unknown as {
     event: {
       event_id: string;
@@ -648,8 +745,8 @@ async function verifyOutbox(
   assert.deepEqual(
     (
       await store.listPending(fixtures.tenant_id, fixtures.partition_id)
-    ).find((record) => record.outbox_id === firstClaimSnapshot.outbox_id)?.event,
-    firstClaimSnapshot.event,
+    ).find((record) => record.outbox_id === first.outbox_id)?.event,
+    firstEventSnapshot,
     "claim must return deep-cloned outbox records",
   );
 
@@ -701,7 +798,10 @@ async function verifyOutbox(
     tenant_id: fixtures.tenant_id,
     partition_id: fixtures.other_partition_id,
   });
-  assert.deepEqual(staleClaim.map((record) => record.outbox_id), ["outbox_other_partition"]);
+  assert.deepEqual(
+    staleClaim.map((record) => record.outbox_id),
+    [fixtures.other_partition_outbox_id],
+  );
   const stale = staleClaim[0];
   assert.ok(stale !== undefined);
   if (stale === undefined) return;
@@ -721,7 +821,11 @@ async function verifyOutbox(
     addUtcTimestampSeconds(staleClaimRequest.now, staleClaimRequest.lease_seconds),
   );
   const staleIdentity = identity(stale);
-  const staleEvent = structuredClone(stale.event);
+  const staleEventSnapshot = otherPartitionEvents.get(stale.outbox_id);
+  assert.ok(staleEventSnapshot !== undefined);
+  if (staleEventSnapshot === undefined) return;
+  const staleEvent = staleEventSnapshot;
+  assert.deepEqual(stale.event, staleEvent, "stale claim event must match its original snapshot");
   const recovered = await store.claim({
     owner: "worker_stale_b",
     now: addUtcTimestampSeconds(claim.now, 10),
