@@ -50,9 +50,9 @@ CREATE OR REPLACE FUNCTION work_fabric_timestamp_key(value text)
 RETURNS text LANGUAGE plpgsql IMMUTABLE STRICT AS $$
 DECLARE fraction text;
 BEGIN
-  IF value ~ '\\.[0-9]+Z$' THEN
-    fraction := substring(value FROM '\\.([0-9]+)Z$');
-    RETURN regexp_replace(value, '\\.[0-9]+Z$', '.' || rpad(fraction, 9, '0') || 'Z');
+  IF value ~ '\.[0-9]+Z$' THEN
+    fraction := substring(value FROM '\.([0-9]+)Z$');
+    RETURN regexp_replace(value, '\.[0-9]+Z$', '.' || rpad(fraction, 9, '0') || 'Z');
   END IF;
   RETURN replace(value, 'Z', '.000000000Z');
 END $$;
