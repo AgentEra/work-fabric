@@ -34,16 +34,21 @@ describe("migration runner", () => {
   it("orders numeric migration IDs and records applied sources", async () => {
     const client = new MigrationClient();
     const applied = await runMigrations(client, [
-      source("010_later", "CREATE TABLE later_probe (id integer);"),
+      source("10_later", "CREATE TABLE later_probe (id integer);"),
+      source("2_middle", "CREATE TABLE middle_probe (id integer);"),
       source("001_first", "CREATE TABLE first_probe (id integer);"),
     ]);
 
-    expect(applied).toBe(2);
-    const sqlCalls = client.calls.map(({ text }) => text);
-    expect(sqlCalls.indexOf("CREATE TABLE first_probe (id integer);")).toBeLessThan(
-      sqlCalls.indexOf("CREATE TABLE later_probe (id integer);")
-    );
-    expect(client.applied).toEqual(new Set(["001_first", "010_later"]));
+    expect(applied).toBe(3);
+    const migrationSql = client.calls
+      .map(({ text }) => text)
+      .filter((text) => text.startsWith("CREATE TABLE"));
+    expect(migrationSql).toEqual([
+      "CREATE TABLE first_probe (id integer);",
+      "CREATE TABLE middle_probe (id integer);",
+      "CREATE TABLE later_probe (id integer);",
+    ]);
+    expect(client.applied).toEqual(new Set(["001_first", "2_middle", "10_later"]));
   });
 
   it("skips already applied sources and rejects duplicate IDs", async () => {
@@ -60,7 +65,16 @@ describe("migration runner", () => {
     expect(TENANT_CONTEXT_MIGRATION.id).toBe("001_tenant_context");
     expect(TENANT_CONTEXT_MIGRATION.sql).toContain("current_setting('app.tenant_id', true)");
     expect(TENANT_CONTEXT_MIGRATION.sql).toContain("ENABLE ROW LEVEL SECURITY");
+    expect(TENANT_CONTEXT_MIGRATION.sql).toContain("FORCE ROW LEVEL SECURITY");
     expect(TENANT_CONTEXT_MIGRATION.sql).toContain("CREATE POLICY");
-    expect(TENANT_CONTEXT_MIGRATION.sql).toContain("tenant_id");
+    expect(TENANT_CONTEXT_MIGRATION.sql).toContain(
+      "nullif(current_setting('app.tenant_id', true), '')",
+    );
+    expect(TENANT_CONTEXT_MIGRATION.sql).toContain(
+      "USING (tenant_id = work_fabric_current_tenant())",
+    );
+    expect(TENANT_CONTEXT_MIGRATION.sql).toContain(
+      "WITH CHECK (tenant_id = work_fabric_current_tenant())",
+    );
   });
 });

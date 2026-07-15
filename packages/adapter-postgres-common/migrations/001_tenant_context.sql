@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS work_fabric_tenant_probe (
 );
 
 ALTER TABLE work_fabric_tenant_probe ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_tenant_probe FORCE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS work_fabric_tenant_probe_isolation ON work_fabric_tenant_probe;
 CREATE POLICY work_fabric_tenant_probe_isolation ON work_fabric_tenant_probe
   USING (tenant_id = work_fabric_current_tenant())
