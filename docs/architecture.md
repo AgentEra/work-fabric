@@ -436,7 +436,7 @@ Work Graph 是逻辑查询视图，不是架构中心，也不要求使用图数
 
 权威 Handoff 状态和 Outbox 使用本地事务保证一致；对象、索引和投影通过事件异步更新。
 
-Phase 1 的 Memory Storage Adapter 只用于参考行为、集成测试和一致性验证，不具备生产持久性声明。下一生产实现是通过既有 SPI 接入的 PostgreSQL Adapter；PostgreSQL 不进入 Core/SPI 依赖，其他符合相同行为 Profile 的存储实现可以等价替换。
+Phase 1 的 Memory Storage Adapter 只用于参考行为、集成测试和一致性验证，不具备生产持久性声明。当前 PostgreSQL Adapter 已通过既有 SPI 提供 authority、outbox、runtime state、delivery/lease 与 Context 元数据持久化；PostgreSQL 不进入 Core/SPI 依赖，其他符合相同行为 Profile 的存储实现可以等价替换。迁移、RLS 和运维边界见 [PostgreSQL 部署文档](postgresql-deployment.md)。
 
 ## 13. 可靠性与失败处理
 
@@ -552,4 +552,4 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - 可重建 Handoff/Assignment 读模型、at-least-once Signal、Cursor Pull/Ack、重试和死信参考行为。
 - Memory 参考 Adapters、复用型 Conformance Profiles 和端到端公共 Reference Suite。
 
-PostgreSQL Production Adapter、Transport Binding、飞书 Connector、Agent Endpoint Gateway 与本地 Agent Runtime 接入属于后续独立模块。它们增强参与方接入和运行能力，不会把外部执行职责吸收到 Work Fabric Core 内部。
+Transport Binding、飞书 Connector、Agent Endpoint Gateway 与本地 Agent Runtime 接入仍属于后续独立模块；PostgreSQL Production Adapter 与 Context Adapter 已作为 SPI 实现落地。它们增强参与方接入和运行能力，不会把外部执行职责吸收到 Work Fabric Core 内部。

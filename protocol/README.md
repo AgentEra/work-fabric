@@ -28,6 +28,8 @@ Authoritative Exchange 是逻辑角色，不限制单体、集群、嵌入式或
 
 Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身份、授权、上下文可用性和 Handoff 命令，原子记录状态移交并生成协作事件；人、Agent 与系统的实际执行不发生在 Core 或 Runtime 内。`Handoff` 是权威事实，`Assignment` 是可重建投影。
 
+持久化同样属于可替换 Adapter：Memory 实现承载参考行为，PostgreSQL 实现通过既有 SPI 提供生产持久化、RLS、CAS、outbox 和 Context 元数据；协议语义不依赖 PostgreSQL。
+
 ## Schema 索引
 
 所有 Schema 使用 JSON Schema Draft 2020-12，稳定对象默认拒绝未知字段。扩展只能进入命名空间化 `extensions`。

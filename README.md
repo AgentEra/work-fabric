@@ -113,6 +113,8 @@ Work Fabric 由以下逻辑能力组成：
 - Journal、幂等记录、投影检查点、投递位置、重试和死信具有技术中立 SPI。
 - Memory Adapter 是可执行参考和一致性测试载体，不是生产存储。
 - PostgreSQL 是下一生产 Storage Adapter，不是 Exchange Core 或 SPI 的依赖，也不会改变公共接口。
+- PostgreSQL 适配器已覆盖 authority、outbox、projection、subscription、delivery、lease 和 Context 元数据；部署与迁移说明见 [PostgreSQL 部署文档](docs/postgresql-deployment.md)。
+- `npm run postgres:migrate -- --dry-run` 可预览迁移，`npm run postgres:smoke` 在设置 `PG_TEST_URL` 后执行租户 RLS 烟测。
 - “全局订阅”是跨逻辑 Partition 的查询与消费视图；恢复、确认和重放位置始终按 Subscription × Partition 独立保存，不承诺全局顺序。
 - 公共 WFPP Protocol Event 只包含协议字段，不暴露内部 `domain_data`、Partition position、Commit ID 或其他存储游标元数据。
 

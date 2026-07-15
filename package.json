@@ -12,6 +12,9 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "conformance": "tsx tools/conformance/src/cli.ts",
+    "postgres:migrate": "tsx tools/postgres-migrate.ts",
+    "postgres:smoke": "tsx tools/postgres-smoke.ts",
+    "verify:postgres": "npm run typecheck && vitest run packages/adapter-postgres-common/test packages/adapter-storage-postgres/test packages/adapter-context-postgres/test && npm run conformance",
     "verify": "npm run typecheck && npm test && npm run conformance",
     "verify:exchange": "npm run typecheck && vitest run packages && npm run conformance"
   },
