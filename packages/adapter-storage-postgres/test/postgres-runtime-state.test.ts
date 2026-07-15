@@ -32,7 +32,7 @@ describe("PostgresRuntimeState", () => {
   it("maps and clones outbox claims", async () => {
     const event = { event_id: "event_01", event_type: "test", schema_version: "1.0", exchange_id: "exchange", request_message_id: "message", idempotency_key: "key", thread_id: "thread", handoff_id: "handoff", actor_id: "actor", endpoint_id: "endpoint", visibility: "public", visible_actor_ids: [], visible_endpoint_ids: [], occurred_at: "2026-07-15T00:00:00.000Z", domain_data: { state: "new" }, protocol_data: { state: "new" }, tenant_id: "tenant_01", partition_id: "partition_01", partition_position: 1, stream_id: "stream", stream_version: 1, commit_id: "commit", commit_ordinal: 0 };
     const client = new FakeClient();
-    client.responses = [{ rows: [{ outbox_id: "outbox", tenant_id: "tenant_01", partition_id: "partition_01", position: 1, event, attempt: 0, next_attempt_at: null, lease_owner: null, lease_expires_at: null, fencing_token: 0 }], rowCount: 1 }, { rows: [], rowCount: 1 }];
+    client.responses = [{ rows: [{ outbox_id: "outbox", tenant_id: "tenant_01", partition_id: "partition_01", position: 1, event, attempt: 1, next_attempt_at: null, lease_owner: null, lease_expires_at: null, fencing_token: 0 }], rowCount: 1 }, { rows: [], rowCount: 1 }];
     const state = new PostgresRuntimeState(() => new Session(client), "tenant_01");
     const rows = await state.claim({ owner: "worker", now: "2026-07-15T00:00:00.000Z", lease_seconds: 10, limit: 1, tenant_id: "tenant_01", partition_id: "partition_01" });
     expect(rows[0]?.fencing_token).toBe(1);

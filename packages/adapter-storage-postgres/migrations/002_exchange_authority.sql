@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS work_fabric_outbox (
   partition_id text NOT NULL,
   position bigint NOT NULL,
   event jsonb NOT NULL,
-  attempt bigint NOT NULL DEFAULT 0,
+  attempt bigint NOT NULL DEFAULT 1,
   next_attempt_at text,
   lease_owner text,
   lease_expires_at text,
@@ -89,3 +89,5 @@ DROP POLICY IF EXISTS work_fabric_outbox_tenant_isolation ON work_fabric_outbox;
 CREATE POLICY work_fabric_outbox_tenant_isolation ON work_fabric_outbox
   USING (tenant_id = work_fabric_current_tenant())
   WITH CHECK (tenant_id = work_fabric_current_tenant());
+
+ALTER TABLE work_fabric_outbox ALTER COLUMN attempt SET DEFAULT 1;
