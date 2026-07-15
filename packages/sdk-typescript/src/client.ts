@@ -9,6 +9,7 @@ import {
 import { HandoffClient } from "./handoff-client.js";
 import { OperationsClient } from "./operations-client.js";
 import { QueryClient } from "./query-client.js";
+import { SubscriptionClient } from "./subscription-client.js";
 import { SdkTransport } from "./transport.js";
 
 export class WorkFabricClient {
@@ -16,6 +17,7 @@ export class WorkFabricClient {
   readonly handoffs!: HandoffClient;
   readonly queries!: QueryClient;
   readonly operations!: OperationsClient;
+  readonly subscriptions!: SubscriptionClient;
   private readonly config!: NormalizedClientOptions;
   private readonly transport!: SdkTransport;
   private readonly representation!: Readonly<RepresentationContext>;
@@ -52,6 +54,7 @@ export class WorkFabricClient {
       handoffs: { value: Object.freeze(new HandoffClient(config, commands, representation)), enumerable: true },
       queries: { value: Object.freeze(new QueryClient(transport, representation)), enumerable: true },
       operations: { value: Object.freeze(new OperationsClient(transport, representation)), enumerable: true },
+      subscriptions: { value: Object.freeze(new SubscriptionClient(config, transport, representation)), enumerable: true },
     });
     return Object.freeze(client) as WorkFabricClient;
   }

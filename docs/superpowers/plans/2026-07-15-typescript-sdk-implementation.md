@@ -215,25 +215,25 @@ git commit -m "feat(sdk): add Query and operations clients"
 
 **Interfaces:** Produces Subscription get/put, Pull, canonical Ack, `acknowledgeDelivery`, and the parser used by `stream(): AsyncIterable<EventDelivery>`.
 
-- [ ] **Step 1: Write failing parser tests**
+- [x] **Step 1: Write failing parser tests**
 
 Cover UTF-8 split chunks, CRLF/LF, BOM, comments, heartbeat-only input, multiple data lines, multiple frames, EOF, maximum bytes, required `workfabric.delivery`, opaque ID, exactly one Event, and cursor equality.
 
-- [ ] **Step 2: Write failing Pull/Ack tests**
+- [x] **Step 2: Write failing Pull/Ack tests**
 
 Assert endpoints, public Subscription shape, Pull defaults, idle/delivery mapping, no retries, canonical Ack, explicit outcome, last Event ID, cursor propagation, and Ack replay.
 
-- [ ] **Step 3: Run and verify RED**
+- [x] **Step 3: Run and verify RED**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/sse-parser.test.ts packages/sdk-typescript/test/subscription-client.test.ts
 ```
 
-- [ ] **Step 4: Implement parser and APIs**
+- [x] **Step 4: Implement parser and APIs**
 
 Malformed frames throw `stream_protocol_error` without data. `acknowledgeDelivery` requires Events and builds a complete Ack timestamp with the injected clock.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/sse-parser.test.ts packages/sdk-typescript/test/subscription-client.test.ts

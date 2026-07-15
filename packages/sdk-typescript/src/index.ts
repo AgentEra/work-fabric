@@ -7,4 +7,6 @@ export * from "./handoff-client.js";
 export * from "./operations-client.js";
 export * from "./protocol-types.js";
 export * from "./query-client.js";
+export * from "./sse-parser.js";
+export * from "./subscription-client.js";
 export * from "./transport.js";

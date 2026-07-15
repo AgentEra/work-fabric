@@ -1,4 +1,5 @@
 import type { JsonObject, ProtocolEvent } from "@work-fabric/exchange-spi";
+import type { EventDeliveryDocument } from "@work-fabric/exchange-runtime";
 
 export type {
   CommandEnvelope,
@@ -38,7 +39,7 @@ export interface SubscriptionDocument {
   readonly delivery: {
     readonly mode: "cursor_pull" | "sse" | "webhook";
   };
-  readonly state: "active" | "paused" | "closed";
+  readonly state: "active" | "suspended" | "closed";
   readonly cursor: string | null;
   readonly created_at: string;
   readonly updated_at: string;
@@ -59,14 +60,5 @@ export interface DeliveryAck {
 export interface SseDeliveryFrame {
   readonly id: string;
   readonly event: "workfabric.delivery";
-  readonly data: {
-    readonly delivery_id: string;
-    readonly subscription_id: string;
-    readonly attempt: number;
-    readonly events: readonly ProtocolEvent[];
-    readonly next_cursor: string;
-    readonly delivered_at: string;
-    readonly visibility_expires_at: string;
-    readonly extensions?: JsonObject;
-  };
+  readonly data: EventDeliveryDocument;
 }
