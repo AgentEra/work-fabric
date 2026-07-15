@@ -30,6 +30,8 @@ Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身
 
 持久化同样属于可替换 Adapter：Memory 实现承载参考行为，PostgreSQL 实现通过既有 SPI 提供生产持久化、RLS、CAS、outbox 和 Context 元数据；协议语义不依赖 PostgreSQL。
 
+Phase 4A 已实现 Endpoint Participation Binding：管理员 Provision 注册事实，外部 Runtime 通过带 fencing 的 Session/Heartbeat 声明在线能力，Resolver 读取未排序 Discovery 事实并显式提交 Target Resolution，Endpoint Inbox 从 committed Handoff Event 重建分区路由，Agent Gateway 再通过公共 SDK 和 Durable SSE 接收 Delivery。该 Binding 不改变 WFPP 生命周期，也不包含目标选择、自动 Ack、自动 Accept 或工作执行。运行说明见[Endpoint 与外部 Agent Runtime 接入](../docs/endpoint-agent-boundary.md)。
+
 ## Schema 索引
 
 所有 Schema 使用 JSON Schema Draft 2020-12，稳定对象默认拒绝未知字段。扩展只能进入命名空间化 `extensions`。
@@ -102,6 +104,8 @@ Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身
 `definitions` 是内部共享 Schema，不作为独立消息声明兼容性。
 
 公共 `protocol-event` 是存储事件的隔离视图，不得包含内部 `domain_data`、Partition position、Commit ID、幂等记录或存储 Cursor 元数据。协议中的全局 Subscription 是逻辑消费视图；实现必须为每个 Subscription × Partition 保存独立恢复位置，因此不产生跨 Partition 的全局有序承诺。
+
+Capability Target 的 `target_resolution_requested`、`target_resolved` 和 `target_unavailable` 都是正式公共 Protocol Event。解析成功事件必须把明确的 Actor/Endpoint 目标加入 participant audience，使对应 Endpoint 能通过同一个 Durable Subscription 收到 Handoff；事件只公开路由安全的 Target Binding 摘要，不公开候选、评分、私有约束证据或 Resolver 内部判断。
 
 ## 一致性验证
 

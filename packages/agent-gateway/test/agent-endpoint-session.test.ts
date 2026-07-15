@@ -91,7 +91,10 @@ function waitForAbort(signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
 }
 
-function fakeClient(options: { readonly fencedHeartbeat?: boolean } = {}) {
+function fakeClient(options: {
+  readonly fencedHeartbeat?: boolean;
+  readonly streamFailure?: boolean;
+} = {}) {
   const acknowledge = vi.fn(async (): Promise<AckResult> => ({ kind: "acknowledged", cursor: "cursor_01" }));
   const heartbeat = vi.fn(async () => {
     if (options.fencedHeartbeat) {
@@ -117,6 +120,7 @@ function fakeClient(options: { readonly fencedHeartbeat?: boolean } = {}) {
       put: vi.fn(async () => structuredClone(subscription)),
       acknowledgeDelivery: acknowledge,
       async *stream(_id: string, _input: unknown, request?: { signal?: AbortSignal }) {
+        if (options.streamFailure) throw new Error("stream failed");
         yield structuredClone(delivery);
         await waitForAbort(request?.signal);
       },
@@ -176,6 +180,16 @@ describe("AgentGateway", () => {
 
     await expect(session.closed).resolves.toEqual({ reason: "fenced" });
     expect(fake.heartbeat).toHaveBeenCalledOnce();
+  });
+
+  it("closes the session when a partition stream fails", async () => {
+    const fake = fakeClient({ streamFailure: true });
+    const gateway = new AgentGateway(fake.client, config(), {
+      now: () => "2026-07-15T00:00:00Z",
+    });
+    const session = await gateway.start();
+
+    await expect(session.closed).resolves.toEqual({ reason: "failed" });
   });
 });
 

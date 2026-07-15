@@ -1,0 +1,51 @@
+[
+  {
+    "name": "invalid endpoint registration",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-registration",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "invalid endpoint session open",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-session-open",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "invalid endpoint session",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-session",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "invalid endpoint heartbeat",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-heartbeat",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "invalid endpoint session close",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-session-close",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "invalid endpoint discovery page",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-discovery-page",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "invalid endpoint inbox partition page",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-inbox-partition-page",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  }
+]

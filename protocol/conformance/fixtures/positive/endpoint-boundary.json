@@ -1,0 +1,93 @@
+[
+  {
+    "name": "valid endpoint registration",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-registration",
+    "expected_valid": true,
+    "instance": {
+      "endpoint_id": "endpoint_agent",
+      "actor": { "actor_id": "actor_agent", "actor_type": "agent" },
+      "endpoint_type": "native_agent",
+      "display_name": "External Agent Runtime",
+      "protocol_versions": ["1.0"],
+      "bindings": [{
+        "binding_type": "http_sse",
+        "uri": "https://runtime.example.test/work-fabric",
+        "security_schemes": ["oauth2"],
+        "extensions": {}
+      }],
+      "allowed_capability_ids": [],
+      "limits": { "max_inline_content_bytes": 65536 },
+      "administrative_state": "enabled",
+      "registration_version": 1,
+      "extensions": {}
+    }
+  },
+  {
+    "name": "valid endpoint session open",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-session-open",
+    "expected_valid": true,
+    "instance": {
+      "client_session_id": "client_session_01",
+      "protocol_version": "1.0",
+      "capabilities": [],
+      "availability": "available",
+      "requested_lease_seconds": 60,
+      "expected_registration_version": 1
+    }
+  },
+  {
+    "name": "valid endpoint session",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-session",
+    "expected_valid": true,
+    "instance": {
+      "endpoint_id": "endpoint_agent",
+      "actor": { "actor_id": "actor_agent", "actor_type": "agent" },
+      "session_id": "session_01",
+      "client_session_id": "client_session_01",
+      "protocol_version": "1.0",
+      "capabilities": [],
+      "availability": "available",
+      "accepted_lease_seconds": 60,
+      "fencing_token": 1,
+      "heartbeat_sequence": 0,
+      "state": "active",
+      "expires_at": "2026-07-15T09:01:00Z",
+      "renew_after": "2026-07-15T09:00:50Z",
+      "registration_version": 1
+    }
+  },
+  {
+    "name": "valid endpoint heartbeat",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-heartbeat",
+    "expected_valid": true,
+    "instance": {
+      "fencing_token": 1,
+      "heartbeat_sequence": 1,
+      "availability": "busy",
+      "capabilities": [],
+      "expected_registration_version": 1
+    }
+  },
+  {
+    "name": "valid endpoint session close",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-session-close",
+    "expected_valid": true,
+    "instance": {
+      "fencing_token": 1,
+      "heartbeat_sequence": 2,
+      "expected_registration_version": 1
+    }
+  },
+  {
+    "name": "valid empty endpoint discovery page",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-discovery-page",
+    "expected_valid": true,
+    "instance": { "items": [] }
+  },
+  {
+    "name": "valid empty endpoint inbox partition page",
+    "schema_id": "urn:work-fabric:schema:v1:endpoint-inbox-partition-page",
+    "expected_valid": true,
+    "instance": { "items": [] }
+  }
+]

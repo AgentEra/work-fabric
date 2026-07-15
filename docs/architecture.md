@@ -17,7 +17,7 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
-Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B 已在 Core 之外增加 HTTP Service Binding，阶段 3C 又以统一 TypeScript SDK 把外部参与方接到同一命令、查询、订阅和事件契约；Core 仍只完成授权后的目标校验、责任移交和权威记录。
+Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B 已在 Core 之外增加 HTTP Service Binding，阶段 3C 又以统一 TypeScript SDK 把外部参与方接到同一命令、查询、订阅和事件契约；阶段 4A 在这些公共边界上增加 Endpoint Directory、Inbox 和只依赖 SDK 的 Agent Gateway。Core 仍只完成授权后的目标校验、责任移交和权威记录，外部 Runtime 仍拥有决策与执行。
 
 ### Work Fabric 原生负责
 
@@ -69,7 +69,8 @@ flowchart TB
 
     subgraph Fabric["Work Fabric：协作对接与交接边界"]
         HumanAdapter["Human Channel Adapter"]
-        AgentEndpoint["Native Agent Endpoint"]
+        AgentGateway["Agent Gateway<br/>Session / Inbox / SSE"]
+        Directory["Endpoint Directory<br/>Facts / Lease / Discovery"]
         Connector["System Connector Adapter"]
         Protocol["Unified Participation Protocol"]
         Exchange["Collaboration & Handoff Exchange"]
@@ -78,11 +79,13 @@ flowchart TB
     end
 
     Human <--> HumanAdapter
-    Agent <--> AgentEndpoint
+    Agent <--> AgentGateway
     System <--> Connector
     Resolver <--> Protocol
     HumanAdapter <--> Protocol
-    AgentEndpoint <--> Protocol
+    AgentGateway <--> Protocol
+    AgentGateway <--> Directory
+    Directory <--> Protocol
     Connector <--> Protocol
     Protocol <--> Exchange
     Exchange <--> Signal
@@ -95,7 +98,7 @@ flowchart TB
 
 ### Agent Brains & Runtimes
 
-Agent Endpoint 声明身份、能力、协议版本、可用性和回调方式。它接收 Handoff、读取受限 Context、回报状态并返回结果。
+Agent Endpoint 声明身份、能力、协议版本、可用性和回调方式。阶段 4A 的 Endpoint Directory 保存这些可验证事实和单活 fenced Session；Agent Gateway 只通过统一 TypeScript SDK 维护租约、发现收件分区并接收 Durable SSE。Runtime 自己持久化 Delivery、显式 Ack，再自行决定是否接受责任、如何执行、何时报告状态和返回结果。
 
 Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具备独立身份、交接状态和回调能力时作为独立 Endpoint。无论采用哪种模式，代码执行过程都不进入 Work Fabric。
 
@@ -139,7 +142,7 @@ L0  Transport Bindings
     HTTP / gRPC / WebSocket / Webhook / Broker / Local IPC / SDK
 ```
 
-当前已实现 L0 的 HTTP 命令/查询绑定、复用 Durable Subscription 的 Cursor Pull/Ack 和 SSE 呈现，以及覆盖这些公共 Contract 的统一 TypeScript SDK。WebSocket、Webhook Worker 与其他 Binding 仍是独立后续模块；它们必须复用同一 WFPP 语义和交付位置，不能成为旁路状态通道。
+当前已实现 L0 的 HTTP 命令/查询绑定、复用 Durable Subscription 的 Cursor Pull/Ack 和 SSE 呈现，以及覆盖这些公共 Contract 的统一 TypeScript SDK。Phase 4A 的 Agent Gateway 是 SDK 上的外部 Runtime 连接库，不是新的协议层，也不形成旁路状态。WebSocket、Webhook Worker 与其他 Binding 仍是独立后续模块；它们必须复用同一 WFPP 语义和交付位置。
 
 不同传输绑定必须保持相同的领域语义和状态机。例如，飞书卡片点击和 Agent 的流式 `accept` 消息都可以表达 `RESPONSIBILITY_ACCEPTED`，但交互方式不同。
 
@@ -208,7 +211,7 @@ extension_fields
 
 Capability Target 表达尚未解析的能力需求。未得到经过授权的解析结果前，Work Fabric 不得把并发抢占或“首个响应者”当作默认分派策略。底层乐观并发只用于保证同一 Handoff 的权威状态不会被多个写入同时提交，不代表业务调度决策。
 
-当前 3A 实现已经提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析 fail-closed 且不产生权威写入。Endpoint Directory、候选事实查询和具体 Resolver 实现仍属于后续接入层。
+3A 已提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容；4A 已补齐 Endpoint Directory、未排序事实查询和基于 Directory 的显式目标资格校验。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析 fail-closed 且不产生权威写入。具体 Resolver 仍是外部参与方，不进入 Work Fabric。
 
 ```mermaid
 flowchart LR
@@ -607,7 +610,17 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - Command、Pull 和 Ack 不自动重试；Query 与 SSE 只使用各自有界策略，SSE 不自动 Ack 或去重。
 - SDK 运行时代码不依赖 Fastify、数据库 Adapter、Exchange Decider 或 Node 专用模块。
 
-飞书 Connector、Agent Endpoint Gateway、本地 Agent Runtime、Webhook Worker 与生产身份 Adapter 仍属于后续独立模块。PostgreSQL Production Adapter 与 Context Adapter 已作为 SPI 实现落地；所有这些模块只增强接入和运行能力，不改变 Core 的职责边界。
+阶段 4A 完成 Endpoint 与外部 Agent Runtime 连接边界：
+
+- Endpoint Directory 以技术中立 SPI 保存 Actor 绑定、Capability、Binding、注册版本和单活 fenced Session。
+- Discovery 只返回确定分页、未评分的 Endpoint 事实；外部 Resolver 比较候选并通过 `resolve_target` 提交唯一明确目标。
+- `DirectoryTargetEligibilityVerifier` 对外部提交的 Actor/Endpoint 做 fail-closed 资格校验，不选择、不推荐、不写入候选排序。
+- Endpoint Inbox 从已提交 Handoff Event 重建路由事实，只保存受众、Partition/Handoff ID、版本、生命周期和位置。
+- HTTP 与 `client.endpoints` 使用与其他参与方相同的身份、表示和 Authority 链，没有 Runtime 或 Admin 旁路。
+- `@work-fabric/agent-gateway` 只依赖公开 SDK，负责租约续期、Inbox 刷新、多分区 SSE 汇聚和有界背压；它不自动 Ack、Accept 或执行。
+- Memory Endpoint Adapter 用于本地参考；PostgreSQL Endpoint Directory/Inbox 通过同一 SPI 提供 RLS、CAS/fencing、索引和持久恢复。
+
+详细边界、序列、配置和错误模型见 [Endpoint 与外部 Agent Runtime 接入](endpoint-agent-boundary.md)。飞书 Connector、Webhook Worker、生产身份 Adapter 和真正的本地 Agent Runtime 仍是外部或后续独立模块；所有模块只增强接入和运行能力，不改变 Core 的职责边界。
 
 ## 20. 阶段路线与执行状态
 
@@ -618,9 +631,10 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 | 3A | Target Resolution Protocol / Core | 已完成 |
 | 3B | HTTP Service Binding | 已完成 |
 | 3C | TypeScript SDK | 已完成 |
-| 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
+| 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
+| 4B | 飞书 Connector | 下一步 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B 已建立可监听、可关闭、可通过 Canonical API 使用的 HTTP Service Binding；3C 已基于同一 Contract 提供统一 TypeScript SDK，并以真实服务黑盒流验证 Direct Offer、幂等与冲突、Capability Resolve、查询、Pull/Ack、SSE 重放/继续和健康检查。阶段 4 下一步接入飞书与本地 Agent Runtime，仍不改变 Core 或把执行搬入 Work Fabric。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。
+实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B 已建立可监听、可关闭、可通过 Canonical API 使用的 HTTP Service Binding；3C 已基于同一 Contract 提供统一 TypeScript SDK。4A 又以真实 HTTP + SDK + Gateway 黑盒流验证 Provision、Session、未排序 Discovery、显式 Resolve、Inbox、SSE、Ack 与外部 Accept/Status/Result，并证明执行回调不进入 Work Fabric。4B 下一步接入飞书，仍复用同一 Contract。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。

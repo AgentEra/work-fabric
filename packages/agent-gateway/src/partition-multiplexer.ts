@@ -96,10 +96,16 @@ export class PartitionMultiplexer {
       const controller = new AbortController();
       const abort = () => controller.abort(this.controller.signal.reason);
       this.controller.signal.addEventListener("abort", abort, { once: true });
-      const running = this.runStream(partition, controller.signal).finally(() => {
-        this.controller.signal.removeEventListener("abort", abort);
-        this.streams.delete(partition);
-      });
+      const running = this.runStream(partition, controller.signal)
+        .catch((error) => {
+          if (!controller.signal.aborted && !this.controller.signal.aborted) {
+            this.dependencies.failed(error);
+          }
+        })
+        .finally(() => {
+          this.controller.signal.removeEventListener("abort", abort);
+          this.streams.delete(partition);
+        });
       this.streams.set(partition, { controller, running });
     }
     for (const [partition, stream] of this.streams) {

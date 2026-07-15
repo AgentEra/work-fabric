@@ -1062,6 +1062,27 @@ describe("Handoff Event encoding", () => {
     expect(
       canonicalJson(resolvedEncoding.events[0]?.protocol_data),
     ).not.toMatch(/private_policy_hint|private_score|evidence/);
+    expect(resolvedEncoding.events[0]?.visible_endpoint_ids).toContain(
+      "endpoint_agent",
+    );
+
+    const actorResolved: HandoffEvent = {
+      ...resolved,
+      binding: {
+        ...resolved.binding,
+        target: { actor_id: "actor_agent" },
+      },
+    };
+    const actorResolvedEncoding = encodeHandoffEvents(
+      encodingInput([actorResolved], {
+        current_state: pending,
+        current_stream_version: 1,
+        receipt_ids: [null],
+      }),
+    );
+    expect(actorResolvedEncoding.events[0]?.visible_actor_ids).toContain(
+      "actor_agent",
+    );
 
     const unavailable: HandoffEvent = {
       event_type: "workfabric.handoff.target_unavailable.v1",

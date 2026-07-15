@@ -189,9 +189,27 @@ await fabric.handoffs.accept(
 
 SDK 提供 Canonical Command、完整 Handoff 便捷方法、Query、Operations、Subscription Put/Pull/Ack 和认证 SSE。写请求不自动重试；查询只有有界重试；SSE 保留至少一次、显式 Ack 和未确认重放语义。SDK 不缓存权威状态、不选择目标、不执行工作，也不替调用方处理或确认事件。完整 API、浏览器约束和错误模型见 [TypeScript SDK 文档](packages/sdk-typescript/README.md)。
 
+## Endpoint 与外部 Agent Runtime
+
+阶段 4A 已提供生产形态的原生 Agent 连接边界：管理员注册绑定 Actor 的 Endpoint；外部 Runtime 通过单活 fenced Session 声明 Capability 和可用性；外部 Resolver 读取未排序、未评分的事实并用标准命令提交明确目标；Endpoint Inbox 把已提交 Handoff Event 投影为可重建的路由事实；`@work-fabric/agent-gateway` 通过公开 TypeScript SDK 维护租约、发现分区并汇聚 Durable SSE。
+
+```text
+Admin provision
+  -> Runtime session + heartbeat
+  -> Resolver discovers facts and explicitly resolves target
+  -> Endpoint inbox exposes Handoff partition
+  -> Gateway receives Delivery
+  -> External Runtime persists + Ack
+  -> External Runtime explicitly accepts/declines and performs work
+```
+
+Gateway 只处理连接机械：它不比较候选、不安排任务、不调用模型或 Codex、不自动 Ack，也不自动接受 Handoff。Delivery Ack 仅表示信号已持久接收；Handoff Accept 才表示责任移交，两者必须分别显式提交。每个 Subscription × Partition 独立保存游标和 Ack 位置，不承诺跨分区全局顺序；有界队列通过背压等待，不丢弃信号。
+
+本地评估可使用 Memory Endpoint Adapter；持久部署可使用 PostgreSQL Endpoint Directory/Inbox Adapter，公共 SPI、HTTP 和 SDK 不绑定数据库。完整接入顺序、配置上限、错误模型和外部 Runtime 示例见 [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)。
+
 ## 当前状态
 
-项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation，以及阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK。Canonical 命令、授权查询、运维可见性、Durable Pull/Ack、认证 SSE 和统一 SDK 已经可以通过同一个公共 Contract 使用；Webhook Worker、A2A、MCP、飞书、Agent Runtime 和 Console 仍属于后续阶段，参与方的专业工作与 Agent 执行始终在 Core 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK，以及阶段 4A 的 Endpoint Directory、Inbox、HTTP/SDK 与外部 Agent Gateway。Canonical 命令、授权查询、Durable Pull/Ack、认证 SSE、统一 SDK 和原生 Agent 连接边界已经可以通过同一个公共 Contract 使用；飞书 Connector、Webhook Worker、A2A、MCP、Agent Brain 和 Console 仍属于后续阶段，参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
 
 当前阶段路线：
 
@@ -202,7 +220,8 @@ SDK 提供 Canonical Command、完整 Handoff 便捷方法、Query、Operations�
 | 3A | Target Resolution Protocol / Core | 已完成 |
 | 3B | HTTP Service Binding | 已完成 |
 | 3C | TypeScript SDK | 已完成 |
-| 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
+| 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
+| 4B | 飞书 Connector | 下一步 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
@@ -224,6 +243,9 @@ SDK 提供 Canonical Command、完整 Handoff 便捷方法、Query、Operations�
 - HTTP Route 只做传输映射、身份/代表关系校验、Authority 调用和有界序列化；它不调用 Decider、不选择目标、不直接访问数据库。
 - Pull 与 SSE 是同一个 Durable Subscription 的两种呈现，复用交付位置、Pending Delivery、Ack、重放和至少一次语义；WebSocket 未进入 3B。
 - TypeScript SDK 只封装公共 HTTP Contract；Human、Agent、Connector 与 Operations 调用共享认证、表示和 Authority 链，不创建第二套状态、Admin 旁路或自动执行层。
+- Endpoint Directory 保存注册、Capability、Binding、租约和 availability 事实；Discovery 只返回确定分页的事实，不包含 score、rank、recommendation 或 selected target。
+- Agent Gateway 只依赖公开 TypeScript SDK，处理 Session 续租、Inbox Partition 刷新、SSE 汇聚和有界背压；Agent Runtime、Resolver、模型、工具与执行回调都在包外。
+- Endpoint Inbox 是可重建的路由投影，不复制 Context、Prompt、结果正文、凭据或外部执行状态；Delivery Ack 与 Handoff Accept 保持独立。
 - `/health/live` 与 `/health/ready` 只返回有界进程状态；受保护的 `/v1/admin/health` 才返回不含错误文本的依赖摘要。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
@@ -233,7 +255,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一步严格进入阶段 4 的飞书与本地 Agent Runtime 接入，复用既有 WFPP、HTTP 和 TypeScript SDK，不把外部执行逻辑引入 Exchange。阶段 3 不包含 Console UI；Webhook Worker、OIDC Adapter、Agent Gateway、Endpoint Directory、Console 和生产部署组合也不因 3C 完成而被宣称就绪。
+下一步进入阶段 4B 的飞书 Connector，复用既有 WFPP、Endpoint、HTTP、Subscription 和 TypeScript SDK，不创建飞书专用状态机，也不把外部执行逻辑引入 Exchange。Console UI 仍属于阶段 5；Webhook Worker、OIDC Adapter、Agent Brain、A2A/MCP 和生产部署组合不因 4A 完成而被宣称就绪。
 
 ## 文档
 
@@ -246,6 +268,7 @@ npm run verify:exchange
 - [Work Fabric Participation Protocol v1 设计](docs/superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)
 - [HTTP Service Binding 设计](docs/superpowers/specs/2026-07-15-http-service-binding-design.md)
 - [TypeScript SDK](packages/sdk-typescript/README.md)
+- [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)
 - [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)
