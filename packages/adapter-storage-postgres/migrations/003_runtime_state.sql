@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS work_fabric_worker_leases (
 
 ALTER TABLE work_fabric_outbox ALTER COLUMN attempt SET DEFAULT 1;
 
+CREATE OR REPLACE FUNCTION work_fabric_timestamp_key(value text)
+RETURNS text LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE fraction text;
+BEGIN
+  IF value ~ '\\.[0-9]+Z$' THEN
+    fraction := substring(value FROM '\\.([0-9]+)Z$');
+    RETURN regexp_replace(value, '\\.[0-9]+Z$', '.' || rpad(fraction, 9, '0') || 'Z');
+  END IF;
+  RETURN replace(value, 'Z', '.000000000Z');
+END $$;
+
 DO $$ DECLARE table_name text; BEGIN
   FOREACH table_name IN ARRAY ARRAY[
     'work_fabric_projection_checkpoints','work_fabric_projection_failures',

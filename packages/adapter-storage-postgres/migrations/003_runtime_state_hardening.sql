@@ -3,6 +3,18 @@ ALTER TABLE work_fabric_delivery_attempts NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_delivery_attempts DISABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_outbox NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_outbox DISABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_worker_leases NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_worker_leases DISABLE ROW LEVEL SECURITY;
+CREATE OR REPLACE FUNCTION work_fabric_timestamp_key(value text)
+RETURNS text LANGUAGE plpgsql IMMUTABLE STRICT AS $$
+DECLARE fraction text;
+BEGIN
+  IF value ~ '\\.[0-9]+Z$' THEN
+    fraction := substring(value FROM '\\.([0-9]+)Z$');
+    RETURN regexp_replace(value, '\\.[0-9]+Z$', '.' || rpad(fraction, 9, '0') || 'Z');
+  END IF;
+  RETURN replace(value, 'Z', '.000000000Z');
+END $$;
 ALTER TABLE work_fabric_projection_failures
   DROP CONSTRAINT IF EXISTS work_fabric_projection_failures_pkey;
 ALTER TABLE work_fabric_projection_failures
@@ -22,11 +34,15 @@ ALTER TABLE work_fabric_delivery_attempts
 
 ALTER TABLE work_fabric_outbox ALTER COLUMN attempt SET DEFAULT 1;
 UPDATE work_fabric_outbox SET attempt = 1 WHERE attempt = 0;
+UPDATE work_fabric_outbox SET next_attempt_at = work_fabric_timestamp_key(next_attempt_at), lease_expires_at = work_fabric_timestamp_key(lease_expires_at);
+UPDATE work_fabric_worker_leases SET expires_at = work_fabric_timestamp_key(expires_at);
 
 ALTER TABLE work_fabric_delivery_attempts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_delivery_attempts FORCE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_outbox FORCE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_worker_leases ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_worker_leases FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE IF NOT EXISTS work_fabric_delivery_active (
   tenant_id text NOT NULL, subscription_id text NOT NULL, partition_id text NOT NULL,
