@@ -253,13 +253,22 @@ is required so the next decision remains explicit and auditable.
 
 ## 9. Phase boundaries
 
-### Phase 3: HTTP and TypeScript SDK Binding
+Implementation status: **3A Target Resolution Protocol/Core is complete.**
+The next work is 3B HTTP Service Binding, followed by 3C TypeScript SDK. This
+status does not mean the whole of Phase 3 is complete.
 
-Phase 3 implements the protocol Schemas, lifecycle artifacts, Exchange Core
-transitions, `TargetEligibilityVerifier` SPI, generic HTTP Command carriage,
-and TypeScript SDK methods for both resolution outcomes. Capability-targeted
-HTTP offers are enabled only when a verifier is configured; otherwise the
-service fails closed instead of accepting an unresolvable public workflow.
+### Phase 3A: Target Resolution Protocol/Core
+
+Phase 3A implements the protocol Schemas, lifecycle artifacts, Exchange Core
+transitions, `TargetEligibilityVerifier` SPI, public events, projections, and
+persistence compatibility for both resolution outcomes.
+
+### Phase 3B and 3C: HTTP and TypeScript SDK Binding
+
+Phase 3B adds generic HTTP Command carriage and service composition. Phase 3C
+adds TypeScript SDK methods. Capability-targeted HTTP offers are enabled only
+when a verifier is configured; otherwise the service fails closed instead of
+accepting an unresolvable public workflow.
 
 ### Phase 4: Endpoint and Agent participation
 

@@ -206,6 +206,8 @@ extension_fields
 
 Capability Target 表达尚未解析的能力需求。未得到经过授权的解析结果前，Work Fabric 不得把并发抢占或“首个响应者”当作默认分派策略。底层乐观并发只用于保证同一 Handoff 的权威状态不会被多个写入同时提交，不代表业务调度决策。
 
+当前 3A 实现已经提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析 fail-closed 且不产生权威写入。Endpoint Directory、候选事实查询和具体 Resolver 实现仍属于后续接入层。
+
 ```mermaid
 flowchart LR
     Requirement["Capability Target"]
@@ -594,10 +596,12 @@ Transport Binding、飞书 Connector、Agent Endpoint Gateway 与本地 Agent Ru
 |---|---|---|
 | 1 | Exchange Core + Memory Reference | 已完成 |
 | 2 | PostgreSQL Production Adapter Foundation | 已完成 |
-| 3 | HTTP / SDK Binding | 下一阶段 |
+| 3A | Target Resolution Protocol / Core | 已完成 |
+| 3B | HTTP Service Binding | 下一步 |
+| 3C | TypeScript SDK | 未开始 |
 | 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-实施严格遵循上述顺序。阶段 3 只建立可独立运行的 Exchange Service、Transport Binding 和 SDK 边界，不同时实施 Console。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。
+实施严格遵循上述顺序。3A 已先补齐 Capability Target 对外开放所需的协议与 Core 语义；3B 建立可独立运行的 Exchange Service 和 HTTP Transport Binding，3C 再提供统一 TypeScript SDK。阶段 3 不同时实施 Console。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 
 import {
   handoffEventFromJson,
+  handoffStateFromJson,
   replayHandoff,
   type CommandEnvelope,
   type ExchangeApplication,
@@ -449,6 +450,114 @@ export async function verifyExchangeReferenceSuite(
     replay(await persistence.readStream(childHandoffId))?.lifecycle_state,
     "accepted",
   );
+
+  const capabilityRequirement: JsonObject = {
+    capability_id: "software.implementation",
+    version_constraint: ">=1.0.0 <2.0.0",
+    input_media_types: ["text/markdown"],
+  };
+  const capabilityOffered = await application.handle(
+    command(
+      "offer",
+      "human",
+      "reference-suite-capability-offer",
+      {
+        ...offerPayload(
+          scenario.agent_actor_id,
+          false,
+          "urn:work-fabric:reference-suite:work:capability",
+        ),
+        target: { capability_requirement: capabilityRequirement },
+      },
+    ),
+    scenario.human_evidence,
+  );
+  const capabilityHandoffId = acceptedResourceId(
+    capabilityOffered,
+    "Capability Offer",
+  );
+  let capabilityRecords = await persistence.readStream(capabilityHandoffId);
+  assert.deepEqual(
+    capabilityRecords.map(({ event_type }) => event_type),
+    ["workfabric.handoff.target_resolution_requested.v1"],
+  );
+  assert.equal(
+    replay(capabilityRecords)?.lifecycle_state,
+    "target_resolution_pending",
+  );
+
+  assertAccepted(
+    await application.handle(
+      command(
+        "resolve_target",
+        "human",
+        "reference-suite-capability-resolve",
+        {
+          handoff_id: capabilityHandoffId,
+          resolved_target: { actor_id: scenario.agent_actor_id },
+          evidence: [],
+        },
+        1,
+      ),
+      scenario.human_evidence,
+    ),
+    "Capability Resolve Target",
+  );
+  capabilityRecords = await persistence.readStream(capabilityHandoffId);
+  const resolvedState = replay(capabilityRecords);
+  assert.notEqual(resolvedState, null);
+  assert.equal(resolvedState?.lifecycle_state, "offered");
+  assert.deepEqual(
+    resolvedState?.package.target,
+    { capability_requirement: capabilityRequirement },
+  );
+  assert.deepEqual(resolvedState?.target_binding?.target, {
+    actor_id: scenario.agent_actor_id,
+  });
+  assert.equal(resolvedState?.recipient, null);
+
+  assertAccepted(
+    await application.handle(
+      command(
+        "accept",
+        "agent",
+        "reference-suite-capability-accept",
+        { handoff_id: capabilityHandoffId },
+        2,
+      ),
+      scenario.agent_evidence,
+    ),
+    "Capability recipient Accept",
+  );
+  capabilityRecords = await persistence.readStream(capabilityHandoffId);
+  assert.deepEqual(
+    capabilityRecords.map(({ event_type }) => event_type),
+    [
+      "workfabric.handoff.target_resolution_requested.v1",
+      "workfabric.handoff.target_resolved.v1",
+      "workfabric.handoff.accepted.v1",
+    ],
+  );
+  assert.equal(replay(capabilityRecords)?.lifecycle_state, "accepted");
+
+  const capabilityPartitionId = capabilityRecords[0]?.partition_id;
+  assert.equal(typeof capabilityPartitionId, "string");
+  await projector.runPartition(capabilityPartitionId as string, 100);
+  const capabilityModel = await read_models.getHandoff(capabilityHandoffId);
+  assert.notEqual(capabilityModel, null);
+  if (capabilityModel !== null) {
+    const projectedState = handoffStateFromJson(capabilityModel.state);
+    assert.deepEqual(projectedState.package.target, {
+      capability_requirement: capabilityRequirement,
+    });
+    assert.deepEqual(projectedState.target_binding?.target, {
+      actor_id: scenario.agent_actor_id,
+    });
+    assert.equal(
+      assignmentFromHandoff(capabilityModel)?.responsible_actor.actor_id,
+      scenario.agent_actor_id,
+    );
+  }
 
   assert.notEqual(mainPartitionId, undefined);
   await projector.runPartition(mainPartitionId as string, 100);

@@ -16,6 +16,7 @@ import type {
   AuthorityPolicy,
   ResolvedPrincipal,
   RuntimeSubscription,
+  TargetEligibilityVerifier,
 } from "@work-fabric/exchange-spi";
 import {
   loadWfppCommandValidator,
@@ -74,6 +75,21 @@ class ReferenceClock implements Clock {
     return "2026-07-15T09:00:00Z";
   }
 }
+
+const targetEligibility: TargetEligibilityVerifier = {
+  manifest: {
+    profile: "exchange.target-eligibility.v1",
+    adapter: "reference-suite-test",
+    capabilities: {
+      explicit_target_only: true,
+      no_candidate_selection: true,
+      fail_closed: true,
+    },
+  },
+  async verify() {
+    return { kind: "eligible" };
+  },
+};
 
 class ReferenceIds implements IdGenerator {
   private readonly counts = new Map<string, number>();
@@ -143,6 +159,7 @@ describe("verifyExchangeReferenceSuite", () => {
       validator,
       clock,
       ids: new ReferenceIds(),
+      target_eligibility: targetEligibility,
     });
     const readModels = new MemoryHandoffReadModelStore();
     const projector = new HandoffProjector(

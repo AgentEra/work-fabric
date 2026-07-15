@@ -21,6 +21,12 @@
       "assertions": ["Exactly one target form is present.", "Initiator retains responsibility until acceptance."]
     },
     {
+      "id": "target_resolution",
+      "description": "A Capability-targeted Handoff remains pending until an authorized external Resolver submits one eligible Actor or Endpoint, or transparently reports that no target is available.",
+      "interactions": ["handoff.resolve_target", "handoff.report_target_unavailable"],
+      "assertions": ["The immutable Capability Requirement and separate Target Binding are both retained.", "Core validates one explicit target but never selects, ranks, or schedules candidates.", "Concurrent resolutions commit at most one authoritative binding.", "Unavailable eligibility verification fails closed without persistence."]
+    },
+    {
       "id": "handoff_accept",
       "description": "An authorized Recipient accepts responsibility for an offered or rework-requested Handoff.",
       "interactions": ["handoff.accept"],

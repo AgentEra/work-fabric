@@ -337,11 +337,11 @@ git commit -m "feat(runtime): project target resolution facts"
 - Consumes: all completed 3A behavior.
 - Produces: reusable public compatibility assertions and accurate roadmap status showing 3A complete while HTTP and SDK remain next.
 
-- [ ] **Step 1: Write the failing public reference assertion**
+- [x] **Step 1: Write the failing public reference assertion**
 
 Extend the public-only reference suite with Capability Offer → external Resolve Target → recipient Accept. Assert no private Core import is required and the original requirement plus binding remain queryable.
 
-- [ ] **Step 2: Run reference and conformance tests and verify RED**
+- [x] **Step 2: Run reference and conformance tests and verify RED**
 
 ```bash
 npx vitest run packages/exchange-conformance/test/reference-suite.test.ts tools/conformance/test
@@ -350,11 +350,11 @@ npm run conformance
 
 Expected: FAIL until the public reference flow and Exchange contract checklist include Target Resolution.
 
-- [ ] **Step 3: Complete public conformance and update status docs**
+- [x] **Step 3: Complete public conformance and update status docs**
 
 Mark every checklist item in this plan complete. Update the roadmap to say `3A Target Resolution Protocol/Core` is complete and `3B HTTP Service Binding` is next; do not mark Phase 3 complete.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 ```bash
 npm run verify

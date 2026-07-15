@@ -117,7 +117,7 @@ Work Fabric 由以下逻辑能力组成：
 
 ## 当前状态
 
-项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现，以及阶段 2 的 PostgreSQL Production Persistence Foundation。Application 当前仍由进程内调用直接消费协议命令；HTTP、SSE、Webhook、A2A、MCP、飞书与 Agent Runtime 将通过后续 Binding 或 Adapter 接入，参与方的专业工作与 Agent 执行始终在 Core 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation，以及阶段 3A 的 Target Resolution Protocol/Core。Application 当前仍由进程内调用直接消费协议命令；HTTP、SSE、Webhook、A2A、MCP、飞书与 Agent Runtime 将通过后续 Binding 或 Adapter 接入，参与方的专业工作与 Agent 执行始终在 Core 之外。
 
 当前阶段路线：
 
@@ -125,7 +125,9 @@ Work Fabric 由以下逻辑能力组成：
 |---|---|---|
 | 1 | Exchange Core + Memory Reference | 已完成 |
 | 2 | PostgreSQL Production Adapter Foundation | 已完成 |
-| 3 | HTTP / SDK Binding | 下一阶段 |
+| 3A | Target Resolution Protocol / Core | 已完成 |
+| 3B | HTTP Service Binding | 下一步 |
+| 3C | TypeScript SDK | 未开始 |
 | 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
@@ -136,6 +138,8 @@ Work Fabric 由以下逻辑能力组成：
 当前实现边界如下：
 
 - `Handoff` 是责任与生命周期的权威事实；`Assignment` 只能从 Handoff 读模型投影得到，不能独立写入。
+- Capability Target 会先进入 `target_resolution_pending`；外部人、规则服务或 Agent Brain 通过统一命令提交一个明确 Actor/Endpoint，Core 只做授权、资格校验、原子绑定与审计，不做候选选择或调度。
+- 原始 Capability Requirement 保持不变，解析结果单独保存在 `TargetBinding`；未配置 `TargetEligibilityVerifier` 或资格服务不可用时，解析命令 fail-closed 且不落盘。
 - Journal、幂等记录、投影检查点、投递位置、重试和死信具有技术中立 SPI。
 - Memory Adapter 是可执行参考和一致性测试载体，不是生产存储。
 - PostgreSQL Production Adapter Foundation 已完成；它不是 Exchange Core 或 SPI 的依赖，也没有改变公共接口。
@@ -151,7 +155,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一阶段严格聚焦 HTTP / SDK Binding：先把 transport-free Exchange 组合为可独立运行、可通过标准 API 和 SDK 调用的服务，再进入飞书、本地 Agent Runtime、查询运维和 Console。阶段 3 不包含 Console UI。
+下一步严格聚焦 3B HTTP Service Binding，随后再做 3C TypeScript SDK：先把 transport-free Exchange 组合为可独立运行、可通过标准 API 调用的服务，再提供统一 SDK，并在之后进入飞书、本地 Agent Runtime、查询运维和 Console。阶段 3 不包含 Console UI。
 
 ## 文档
 
