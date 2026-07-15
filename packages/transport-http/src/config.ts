@@ -3,6 +3,7 @@ export interface HttpServiceConfig {
   readonly default_page_limit: number;
   readonly max_page_limit: number;
   readonly request_timeout_ms: number;
+  readonly health_probe_timeout_ms: number;
   readonly sse_max_connections: number;
   readonly sse_poll_interval_ms: number;
   readonly sse_heartbeat_interval_ms: number;
@@ -15,6 +16,7 @@ const defaults: HttpServiceConfig = {
   default_page_limit: 50,
   max_page_limit: 200,
   request_timeout_ms: 30_000,
+  health_probe_timeout_ms: 2_000,
   sse_max_connections: 1_000,
   sse_poll_interval_ms: 500,
   sse_heartbeat_interval_ms: 15_000,

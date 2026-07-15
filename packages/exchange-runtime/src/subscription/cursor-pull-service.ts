@@ -179,6 +179,10 @@ export class CursorPullService {
         partitionId,
       );
       assertNonNegativeSafeInteger(position, "delivery position");
+      const active = await this.deliveryState.getActiveDelivery(
+        subscriptionId,
+        partitionId,
+      );
       if (cursor !== null) {
         let payload;
         try {
@@ -192,16 +196,17 @@ export class CursorPullService {
         if (
           payload.subscription_id !== subscriptionId ||
           payload.partition_id !== partitionId ||
-          payload.position !== position
+          (payload.position !== position &&
+            !(
+              active?.outcome === "pending" &&
+              cursor === active.next_cursor &&
+              payload.position === active.to_position
+            ))
         ) {
           return pullError("precondition_failed", "cursor does not match position");
         }
       }
 
-      const active = await this.deliveryState.getActiveDelivery(
-        subscriptionId,
-        partitionId,
-      );
       if (active !== null) {
         if (
           active.outcome === "pending" &&

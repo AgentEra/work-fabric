@@ -260,25 +260,25 @@ git commit -m "feat(http): bind durable pull and ack"
 
 **Interfaces:** Produces `HealthProbe`, `DependencyHealth`, and complete `HttpService.listen/close` behavior. Consumes `CursorPullService.pullSse`.
 
-- [ ] **Step 1: Write failing SSE tests**
+- [x] **Step 1: Write failing SSE tests**
 
 On an ephemeral loopback port, assert SSE headers, one Event/frame, opaque cursor ID, Protocol Event data, Last-Event-ID resume, heartbeat, no same-connection duplicate while Ack is pending, reconnect replay without Ack, continuation after separate Ack, connection limit, and disconnect cleanup.
 
-- [ ] **Step 2: Write failing health/host tests**
+- [x] **Step 2: Write failing health/host tests**
 
 Cover liveness, bounded readiness, protected dependency detail, failing/throwing/slow probe normalization, readiness false during shutdown, idempotent close, in-flight shutdown deadline, and refusal of new connections after shutdown starts.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```bash
 npx vitest run packages/transport-http/test/sse-route.test.ts packages/transport-http/test/health-host.test.ts
 ```
 
-- [ ] **Step 4: Implement bounded streaming and lifecycle**
+- [x] **Step 4: Implement bounded streaming and lifecycle**
 
 The SSE loop calls `pullSse`, emits only when its cursor differs from the last emitted cursor on that connection, otherwise sends heartbeat comments, and observes both request-abort and shutdown-abort signals.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/transport-http/test/sse-route.test.ts packages/transport-http/test/health-host.test.ts

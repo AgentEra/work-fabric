@@ -353,6 +353,25 @@ describe("CursorPullService", () => {
     });
   });
 
+  it("replays a pending SSE Delivery when Last-Event-ID is its next cursor", async () => {
+    const { service } = await fixture(
+      [record(1)],
+      { delivery_mode: "sse", filter: { ...emptyFilter() } },
+    );
+    const first = await service.pullSse("subscription_01", partitionId, null);
+    if (first.kind !== "delivery") throw new Error("expected SSE delivery");
+
+    const replay = await service.pullSse(
+      "subscription_01",
+      partitionId,
+      first.delivery.next_cursor,
+    );
+    expect(replay).toMatchObject({
+      kind: "delivery",
+      delivery: { delivery_id: first.delivery.delivery_id },
+    });
+  });
+
   it("returns a precondition error without state when the Journal has a gap", async () => {
     const { service, state } = await fixture([record(2)]);
 

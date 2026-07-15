@@ -6,6 +6,10 @@ import type { HttpRequestAuthenticator } from "../public-types.js";
 import type { AuthorityPolicy, IdentityProvider, SubscriptionStore } from "@work-fabric/exchange-spi";
 import type { ExchangeQueryService } from "../query-service.js";
 import type { WfppSchemaValidator } from "@work-fabric/protocol-runtime";
+import type { HealthProbe, HealthService } from "../health-service.js";
+import type { SseConnectionManager } from "../sse-connection-manager.js";
+import { registerHealthRoutes } from "../routes/health-routes.js";
+import { registerSseRoute } from "../routes/sse-route.js";
 import { registerAdminRoutes } from "../routes/admin-routes.js";
 import { registerQueryRoutes } from "../routes/query-routes.js";
 import { registerSubscriptionResourceRoutes } from "../routes/subscription-resource-routes.js";
@@ -27,6 +31,9 @@ export interface InternalServerDependencies {
   readonly subscriptions?: SubscriptionStore;
   readonly schemas?: WfppSchemaValidator;
   readonly delivery?: DurableDeliveryService;
+  readonly health_probes?: readonly HealthProbe[];
+  readonly health?: HealthService;
+  readonly sse_connections?: SseConnectionManager;
 }
 
 export function createInternalServer(
@@ -70,12 +77,27 @@ export function createInternalServer(
       .send(createProblemDetails(status, code, title, { instance: request.url }));
   });
   registerCommandRoute(server, dependencies.application, dependencies.authenticator);
+  if (dependencies.health !== undefined) {
+    registerHealthRoutes(server, {
+      health: dependencies.health,
+      authenticator: dependencies.authenticator,
+      ...(dependencies.identity === undefined ? {} : { identity: dependencies.identity }),
+      ...(dependencies.authority === undefined ? {} : { authority: dependencies.authority }),
+    });
+  }
   if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
     if (dependencies.delivery !== undefined) {
       registerDeliveryRoutes(server, {
         delivery: dependencies.delivery, identity: dependencies.identity,
         authority: dependencies.authority, authenticator: dependencies.authenticator,
       }, config);
+      if (dependencies.sse_connections !== undefined) {
+        registerSseRoute(server, {
+          delivery: dependencies.delivery, identity: dependencies.identity,
+          authority: dependencies.authority, authenticator: dependencies.authenticator,
+          connections: dependencies.sse_connections,
+        }, config);
+      }
     }
     if (dependencies.query !== undefined) {
       registerQueryRoutes(server, {
