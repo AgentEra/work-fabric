@@ -98,25 +98,25 @@ git commit -m "feat(http): add transport service primitives"
 
 **Interfaces:** Produces `AuthorizedHttpRequest`, `authorizeHttpRequest`, `ExchangeQueryService`, and `StoreBackedExchangeQueryService`. Consumes existing Identity, Authority, Journal, read-model, subscription, projection-failure, and delivery-state ports.
 
-- [ ] **Step 1: Write failing authorization tests**
+- [x] **Step 1: Write failing authorization tests**
 
 Cover missing evidence (401), tenant mismatch (401), unrepresented Actor/Endpoint (403), Authority denial (403), and success. Verify exact action/resource and dependency order.
 
-- [ ] **Step 2: Write failing query facade tests**
+- [x] **Step 2: Write failing query facade tests**
 
 Define bounded methods for Handoff get/list, Handoff/partition Protocol Events, Subscription get/list, projection failures, delivery attempts, and delivery position. Assert tenant mismatches return no facts, limits bound immutable output, and EventRecord is always converted with `buildProtocolEvent`.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```bash
 npx vitest run packages/transport-http/test/request-authorization.test.ts packages/transport-http/test/query-service.test.ts
 ```
 
-- [ ] **Step 4: Implement coordinator and facade**
+- [x] **Step 4: Implement coordinator and facade**
 
 Use the resolved Principal tenant; never accept tenant identity from query parameters. Clone returned values and fail closed on inconsistent stored tenant identity.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/transport-http/test/request-authorization.test.ts packages/transport-http/test/query-service.test.ts
