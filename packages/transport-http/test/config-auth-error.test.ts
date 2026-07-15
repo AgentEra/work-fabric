@@ -50,6 +50,17 @@ describe("HTTP service configuration", () => {
       }),
     ).toThrow(/default_page_limit/);
   });
+
+  it("rejects inconsistent Endpoint lease bounds", () => {
+    expect(() => normalizeHttpServiceConfig({
+      endpoint_min_lease_seconds: 61,
+      endpoint_default_lease_seconds: 60,
+    })).toThrow(/endpoint lease bounds/);
+    expect(() => normalizeHttpServiceConfig({
+      endpoint_min_lease_seconds: 10,
+      endpoint_renew_ahead_seconds: 10,
+    })).toThrow(/endpoint_renew_ahead_seconds/);
+  });
 });
 
 describe("Bearer authentication evidence", () => {

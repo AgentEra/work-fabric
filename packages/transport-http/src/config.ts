@@ -9,6 +9,13 @@ export interface HttpServiceConfig {
   readonly sse_heartbeat_interval_ms: number;
   readonly sse_idle_timeout_ms: number;
   readonly shutdown_timeout_ms: number;
+  readonly endpoint_min_lease_seconds: number;
+  readonly endpoint_default_lease_seconds: number;
+  readonly endpoint_max_lease_seconds: number;
+  readonly endpoint_renew_ahead_seconds: number;
+  readonly endpoint_max_capabilities: number;
+  readonly endpoint_max_bindings: number;
+  readonly endpoint_max_inbox_partitions: number;
 }
 
 const defaults: HttpServiceConfig = {
@@ -22,6 +29,13 @@ const defaults: HttpServiceConfig = {
   sse_heartbeat_interval_ms: 15_000,
   sse_idle_timeout_ms: 300_000,
   shutdown_timeout_ms: 15_000,
+  endpoint_min_lease_seconds: 30,
+  endpoint_default_lease_seconds: 60,
+  endpoint_max_lease_seconds: 300,
+  endpoint_renew_ahead_seconds: 10,
+  endpoint_max_capabilities: 64,
+  endpoint_max_bindings: 16,
+  endpoint_max_inbox_partitions: 128,
 };
 
 function positiveInteger(value: number, field: string): number {
@@ -44,6 +58,21 @@ export function normalizeHttpServiceConfig(
   if (config.sse_poll_interval_ms >= config.sse_idle_timeout_ms) {
     throw new TypeError(
       "sse_poll_interval_ms must be less than sse_idle_timeout_ms",
+    );
+  }
+  if (
+    config.endpoint_min_lease_seconds > config.endpoint_default_lease_seconds ||
+    config.endpoint_default_lease_seconds > config.endpoint_max_lease_seconds
+  ) {
+    throw new TypeError(
+      "endpoint lease bounds must satisfy min <= default <= max",
+    );
+  }
+  if (
+    config.endpoint_renew_ahead_seconds >= config.endpoint_min_lease_seconds
+  ) {
+    throw new TypeError(
+      "endpoint_renew_ahead_seconds must be less than endpoint_min_lease_seconds",
     );
   }
   return Object.freeze(config);
