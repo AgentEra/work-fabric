@@ -157,6 +157,12 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
   async commitAtomically(request: AtomicCommitRequest): Promise<AtomicCommitResult> {
     validateRequest(request);
     const result = await this.sessionFactory(request.tenant_id).withTransaction(async (client) => {
+      // Serialize same-key commands even when the command row does not yet
+      // exist; a row-level FOR UPDATE cannot lock a missing key.
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))",
+        [request.tenant_id, request.idempotency_key],
+      );
       const existing = await client.query<Record<string, unknown>>(
         "SELECT tenant_id, idempotency_key, payload_digest, first_request_message_id, outcome FROM work_fabric_commands WHERE tenant_id = $1 AND idempotency_key = $2 FOR UPDATE",
         [request.tenant_id, request.idempotency_key],
@@ -170,7 +176,15 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
       }
 
       const checks = new Map<string, number>();
+      const lockedStreams = new Set<string>();
       for (const check of [...request.version_checks, ...request.appends]) {
+        if (!lockedStreams.has(check.stream_id)) {
+          await client.query(
+            "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))",
+            [request.tenant_id, check.stream_id],
+          );
+          lockedStreams.add(check.stream_id);
+        }
         checks.set(check.stream_id, await currentVersion(client, request.tenant_id, check.stream_id));
       }
       const conflicts = [...request.version_checks, ...request.appends].filter(

@@ -46,6 +46,7 @@ const request = (overrides: Partial<AtomicCommitRequest> = {}): AtomicCommitRequ
 
 class FakeClient implements PostgresClient {
   readonly calls: Array<{ text: string; values?: readonly unknown[] }> = [];
+  readonly timeline: string[] = [];
   responses: Array<PostgresQueryResult<Record<string, unknown>>> = [];
 
   async query<Row extends Record<string, unknown> = Record<string, unknown>>(
@@ -53,6 +54,7 @@ class FakeClient implements PostgresClient {
     values?: readonly unknown[],
   ): Promise<PostgresQueryResult<Row>> {
     this.calls.push(values === undefined ? { text } : { text, values });
+    this.timeline.push(text);
     return (this.responses.shift() ?? { rows: [], rowCount: 0 }) as PostgresQueryResult<Row>;
   }
 
@@ -66,8 +68,10 @@ class RecordingSession implements TenantSession {
 
   async withTransaction<T>(operation: (client: PostgresClient) => Promise<T>): Promise<T> {
     this.markers.push("BEGIN");
+    this.client.timeline.push("BEGIN");
     const result = await operation(this.client);
     this.markers.push("COMMIT");
+    this.client.timeline.push("COMMIT");
     return result;
   }
 }
@@ -89,6 +93,8 @@ describe("PostgresExchangePersistence", () => {
     const client = new FakeClient();
     client.responses = [
       { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 },
       { rows: [{ current_version: 0 }], rowCount: 1 },
       { rows: [], rowCount: 0 },
       { rows: [], rowCount: 0 },
@@ -104,12 +110,16 @@ describe("PostgresExchangePersistence", () => {
     expect(eventIndex).toBeGreaterThanOrEqual(0);
     expect(outboxIndex).toBeGreaterThan(eventIndex);
     expect(commandIndex).toBeGreaterThan(outboxIndex);
+    const commitIndex = client.timeline.indexOf("COMMIT");
+    expect(client.timeline.findIndex((text) => text.startsWith("INSERT INTO work_fabric_outbox"))).toBeLessThan(commitIndex);
     expect(session.markers).toEqual(["BEGIN", "COMMIT"]);
   });
 
   it("replays the same idempotency digest and rejects changed digests", async () => {
     const client = new FakeClient();
     client.responses = [{
+      rows: [], rowCount: 0,
+    }, {
       rows: [{
         tenant_id: "tenant_01",
         idempotency_key: "command_01",
@@ -124,7 +134,7 @@ describe("PostgresExchangePersistence", () => {
       kind: "replayed",
       outcome: request().outcome,
     });
-    client.responses = [{ rows: [{
+    client.responses = [{ rows: [], rowCount: 0 }, { rows: [{
       tenant_id: "tenant_01", idempotency_key: "command_01", payload_digest: "digest_01", first_request_message_id: "message_01", outcome: request().outcome,
     }], rowCount: 1 }];
     await expect(persistence(session).commitAtomically(request({ payload_digest: "other" }))).resolves.toEqual({ kind: "idempotency_key_reused" });
@@ -133,6 +143,8 @@ describe("PostgresExchangePersistence", () => {
   it("returns exact version conflicts without event/outbox writes", async () => {
     const client = new FakeClient();
     client.responses = [
+      { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 },
       { rows: [], rowCount: 0 },
       { rows: [{ current_version: 4 }], rowCount: 1 },
     ];
