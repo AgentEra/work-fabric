@@ -168,12 +168,13 @@ async function fixture(
     record(1, "workfabric.handoff.offered.v1"),
     record(2),
   ],
+  subscriptionOverrides: Partial<RuntimeSubscription> = {},
 ) {
   const state = new MemoryExchangePersistence();
   const subscriptions = new MemorySubscriptionStore();
   const clock = new MutableClock();
   const ids = new TestIds();
-  await subscriptions.putSubscription(subscription());
+  await subscriptions.putSubscription(subscription(subscriptionOverrides));
   const cursors = new OpaqueCursorCodec(secret);
   const service = new CursorPullService(
     new StaticJournal(records),
@@ -293,6 +294,65 @@ describe("OpaqueCursorCodec", () => {
 });
 
 describe("CursorPullService", () => {
+  it("keeps Cursor Pull and SSE delivery modes isolated", async () => {
+    const { service } = await fixture(
+      [record(1)],
+      { delivery_mode: "sse" },
+    );
+
+    await expect(
+      service.pull("subscription_01", partitionId, null, 10),
+    ).resolves.toMatchObject({ kind: "error", code: "precondition_failed" });
+    await expect(
+      service.pullSse("subscription_01", partitionId, null),
+    ).resolves.toMatchObject({ kind: "delivery" });
+  });
+
+  it("pulls one SSE Event, replays it until Ack, and advances only through Ack", async () => {
+    const { service, state } = await fixture(
+      [record(1), record(2)],
+      {
+        delivery_mode: "sse",
+        filter: { ...emptyFilter() },
+      },
+    );
+
+    const first = await service.pullSse("subscription_01", partitionId, null);
+    if (first.kind !== "delivery") throw new Error("expected SSE delivery");
+    expect(first.delivery.events.map((event) => event.id)).toEqual(["event_1"]);
+    expect(await state.loadDeliveryPosition("subscription_01", partitionId)).toBe(0);
+
+    const replay = await service.pullSse(
+      "subscription_01",
+      partitionId,
+      null,
+    );
+    expect(replay).toMatchObject({
+      kind: "delivery",
+      delivery: { delivery_id: first.delivery.delivery_id },
+    });
+    expect(await state.loadDeliveryPosition("subscription_01", partitionId)).toBe(0);
+
+    await expect(
+      service.acknowledge(
+        ack(first.delivery.delivery_id, "acknowledged", {
+          cursor: first.delivery.next_cursor,
+        }),
+      ),
+    ).resolves.toMatchObject({ kind: "acknowledged" });
+    expect(await state.loadDeliveryPosition("subscription_01", partitionId)).toBe(1);
+
+    const second = await service.pullSse(
+      "subscription_01",
+      partitionId,
+      first.delivery.next_cursor,
+    );
+    expect(second).toMatchObject({
+      kind: "delivery",
+      delivery: { events: [{ id: "event_2" }] },
+    });
+  });
+
   it("returns a precondition error without state when the Journal has a gap", async () => {
     const { service, state } = await fixture([record(2)]);
 

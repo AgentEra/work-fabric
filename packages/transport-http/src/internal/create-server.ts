@@ -10,6 +10,10 @@ import { registerAdminRoutes } from "../routes/admin-routes.js";
 import { registerQueryRoutes } from "../routes/query-routes.js";
 import { registerSubscriptionResourceRoutes } from "../routes/subscription-resource-routes.js";
 import {
+  registerDeliveryRoutes,
+  type DurableDeliveryService,
+} from "../routes/delivery-routes.js";
+import {
   registerCommandRoute,
   type CommandApplication,
 } from "../routes/command-route.js";
@@ -22,6 +26,7 @@ export interface InternalServerDependencies {
   readonly authority?: AuthorityPolicy;
   readonly subscriptions?: SubscriptionStore;
   readonly schemas?: WfppSchemaValidator;
+  readonly delivery?: DurableDeliveryService;
 }
 
 export function createInternalServer(
@@ -65,21 +70,29 @@ export function createInternalServer(
       .send(createProblemDetails(status, code, title, { instance: request.url }));
   });
   registerCommandRoute(server, dependencies.application, dependencies.authenticator);
-  if (dependencies.query !== undefined && dependencies.identity !== undefined && dependencies.authority !== undefined) {
-    registerQueryRoutes(server, {
-      query: dependencies.query, identity: dependencies.identity,
-      authority: dependencies.authority, authenticator: dependencies.authenticator,
-    }, config);
-    registerAdminRoutes(server, {
-      query: dependencies.query, identity: dependencies.identity,
-      authority: dependencies.authority, authenticator: dependencies.authenticator,
-    }, config);
-    if (dependencies.subscriptions !== undefined && dependencies.schemas !== undefined) {
-      registerSubscriptionResourceRoutes(server, {
-        query: dependencies.query, subscriptions: dependencies.subscriptions,
-        schemas: dependencies.schemas, identity: dependencies.identity,
+  if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    if (dependencies.delivery !== undefined) {
+      registerDeliveryRoutes(server, {
+        delivery: dependencies.delivery, identity: dependencies.identity,
         authority: dependencies.authority, authenticator: dependencies.authenticator,
-      });
+      }, config);
+    }
+    if (dependencies.query !== undefined) {
+      registerQueryRoutes(server, {
+        query: dependencies.query, identity: dependencies.identity,
+        authority: dependencies.authority, authenticator: dependencies.authenticator,
+      }, config);
+      registerAdminRoutes(server, {
+        query: dependencies.query, identity: dependencies.identity,
+        authority: dependencies.authority, authenticator: dependencies.authenticator,
+      }, config);
+      if (dependencies.subscriptions !== undefined && dependencies.schemas !== undefined) {
+        registerSubscriptionResourceRoutes(server, {
+          query: dependencies.query, subscriptions: dependencies.subscriptions,
+          schemas: dependencies.schemas, identity: dependencies.identity,
+          authority: dependencies.authority, authenticator: dependencies.authenticator,
+        });
+      }
     }
   }
   return server;

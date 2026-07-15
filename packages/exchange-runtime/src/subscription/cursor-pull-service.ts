@@ -125,6 +125,30 @@ export class CursorPullService {
     cursor: string | null,
     limit: number,
   ): Promise<PullResult> {
+    return this.pullForMode(
+      subscriptionId,
+      partitionId,
+      cursor,
+      limit,
+      "cursor_pull",
+    );
+  }
+
+  async pullSse(
+    subscriptionId: string,
+    partitionId: string,
+    cursor: string | null,
+  ): Promise<PullResult> {
+    return this.pullForMode(subscriptionId, partitionId, cursor, 1, "sse");
+  }
+
+  private async pullForMode(
+    subscriptionId: string,
+    partitionId: string,
+    cursor: string | null,
+    limit: number,
+    expectedMode: "cursor_pull" | "sse",
+  ): Promise<PullResult> {
     let now: string;
     try {
       assertOpaqueId(subscriptionId, "subscription_id");
@@ -141,11 +165,11 @@ export class CursorPullService {
       if (
         subscription === null ||
         subscription.state !== "active" ||
-        subscription.delivery_mode !== "cursor_pull"
+        subscription.delivery_mode !== expectedMode
       ) {
         return pullError(
           "precondition_failed",
-          "Subscription is not available for Cursor Pull",
+          "Subscription is not available for this delivery mode",
         );
       }
       assertRuntimeSubscription(subscription);
@@ -299,7 +323,7 @@ export class CursorPullService {
         delivery: this.validatedDocument(claimed.delivery),
       };
     } catch {
-      return pullError("precondition_failed", "Cursor Pull could not be completed");
+      return pullError("precondition_failed", "Pull could not be completed");
     }
   }
 

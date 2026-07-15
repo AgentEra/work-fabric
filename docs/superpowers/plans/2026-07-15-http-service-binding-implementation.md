@@ -218,25 +218,25 @@ git commit -m "feat(http): expose authorized read APIs"
 
 **Interfaces:** Adds `CursorPullService.pullSse(subscriptionId, partitionId, cursor)` with a fixed one-Event limit, sharing the existing delivery engine while requiring delivery mode `sse`.
 
-- [ ] **Step 1: Write failing Runtime tests**
+- [x] **Step 1: Write failing Runtime tests**
 
 Assert `pull` remains `cursor_pull`-only; `pullSse` is `sse`-only, reads one Event, replays the same pending Delivery until Ack, and advances only through Ack.
 
-- [ ] **Step 2: Write failing HTTP Pull/Ack tests**
+- [x] **Step 2: Write failing HTTP Pull/Ack tests**
 
 Cover authentication/authority, delivery/idle, invalid/expired cursor, wrong subscription/partition, Ack outcomes, error/status mapping, and no position change on transport error.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```bash
 npx vitest run packages/exchange-runtime/test/cursor-pull-service.test.ts packages/transport-http/test/delivery-routes.test.ts
 ```
 
-- [ ] **Step 4: Implement one parameterized Runtime engine and HTTP routes**
+- [x] **Step 4: Implement one parameterized Runtime engine and HTTP routes**
 
 Keep existing public `pull` behavior compatible. Pull body is `{ partition_id, cursor, limit }` and Ack body remains the canonical Delivery Ack. Register exact Pull/Ack actions.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/exchange-runtime/test/cursor-pull-service.test.ts packages/transport-http/test/delivery-routes.test.ts
