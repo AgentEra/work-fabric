@@ -37,11 +37,11 @@
 
 **Interfaces:** Produces `HttpServiceConfig`, `HttpRequestAuthenticator`, `BearerAuthenticationEvidenceMapper`, `ProblemDetails`, `operationResultStatus`, and framework-neutral `HttpService` dispatch/listen/close types.
 
-- [ ] **Step 1: Write failing package contract tests**
+- [x] **Step 1: Write failing package contract tests**
 
 Test unsafe limit rejection, Bearer mapping to `{ bearer_token: token }`, missing/malformed authorization returning `null`, OperationResult status mapping, safe Problem Details, and absence of Fastify names from public exports.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 ```bash
 npx vitest run packages/transport-http/test/config-auth-error.test.ts
@@ -49,7 +49,7 @@ npx vitest run packages/transport-http/test/config-auth-error.test.ts
 
 Expected: FAIL because the package does not exist.
 
-- [ ] **Step 3: Implement the public primitives**
+- [x] **Step 3: Implement the public primitives**
 
 Use this public shape:
 
@@ -72,14 +72,14 @@ export interface HttpService {
 
 `HttpServiceConfig` contains positive limits for body bytes, page size, request timeout, SSE connections/poll/heartbeat/idle, and shutdown timeout. Pin Fastify 5.10.0 and keep it internal.
 
-- [ ] **Step 4: Run focused tests and typecheck**
+- [x] **Step 4: Run focused tests and typecheck**
 
 ```bash
 npx vitest run packages/transport-http/test/config-auth-error.test.ts
 npm run typecheck
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/transport-http package-lock.json
@@ -336,4 +336,3 @@ git commit -m "feat(http): complete HTTP service binding"
 ```bash
 git push origin codex/exchange-core-design
 ```
-
