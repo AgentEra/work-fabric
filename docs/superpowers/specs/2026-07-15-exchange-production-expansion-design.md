@@ -111,6 +111,16 @@ Codex and a local Agent Runtime are external participant implementations. The
 Gateway may deliver them a Handoff and receive a Result, but no Work Fabric
 worker invokes Codex or performs the Agent's professional work.
 
+### 2.6 Target Resolution boundary
+
+Capability-targeted Handoffs use the two-stage Target Binding defined in
+[Work Fabric Target Resolution Design](2026-07-15-target-resolution-design.md).
+Exchange records the unresolved requirement, accepts an explicit resolution
+from an external human, rule service or Agent Brain, validates the proposed
+Actor/Endpoint through a technology-neutral eligibility port, and only then
+offers the Handoff for dispatch. Matching, ranking, recommendation and
+execution scheduling remain outside Exchange Core.
+
 ## 3. Logical module layout
 
 ```text
@@ -258,8 +268,9 @@ The implementation is split into independently verifiable plans:
 
 1. Persistence foundation: PostgreSQL schema, transaction adapter, RLS,
    Context metadata and migration/conformance suite.
-2. Service boundary: OIDC/JWT resolution, HTTP Command API, Cursor Pull/Ack,
-   SSE/Webhook binding, stable error and health surfaces.
+2. Service boundary: Target Resolution protocol/Core extension, OIDC/JWT
+   resolution, HTTP Command API, Cursor Pull/Ack, SSE/Webhook binding, stable
+   error and health surfaces, and TypeScript SDK.
 3. Worker runtime: Outbox, Projection, Delivery, Expiry and Reconciliation
    workers with leases, fencing and crash recovery.
 4. Endpoint and Agent boundary: registry, capability discovery, endpoint lease,
@@ -285,8 +296,9 @@ The expansion is complete when:
   Webhook with stable Event ID;
 - restart/crash tests prove outbox, projection, delivery, leases and Context
   recovery without skipped events or duplicate authoritative transitions;
-- endpoint registration and capability discovery can route a Handoff to a
-  local Agent Gateway, while execution remains external;
+- endpoint registration and capability discovery provide authorized facts that
+  an external Resolver uses to bind a Handoff to a local Agent Gateway, while
+  execution remains external;
 - Feishu message/document examples round-trip WorkReference, Handoff, Status,
   Result and human acknowledgement without storing Feishu as authoritative
   Handoff state;
