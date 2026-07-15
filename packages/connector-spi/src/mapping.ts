@@ -95,3 +95,21 @@ export interface ConnectorCommandSink extends ExchangeAdapter {
   readonly manifest: CapabilityManifest;
   execute(input: ConnectorCommandExecution): Promise<ConnectorCommandResult>;
 }
+
+export type ConnectorObservation = Extract<
+  ConnectorMappingOutcome,
+  | { readonly kind: "reference_observed" }
+  | { readonly kind: "reconciliation_observation" }
+>;
+
+export interface ConnectorObservationRecord {
+  readonly tenant_id: string;
+  readonly connector_id: string;
+  readonly ingress_id: string;
+  readonly observation: ConnectorObservation;
+}
+
+export interface ConnectorObservationSink extends ExchangeAdapter {
+  readonly manifest: CapabilityManifest;
+  record(input: ConnectorObservationRecord): Promise<ConnectorCommandResult>;
+}

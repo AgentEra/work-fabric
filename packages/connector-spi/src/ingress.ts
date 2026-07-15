@@ -176,6 +176,19 @@ export class ConnectorContractError extends TypeError {
   }
 }
 
+export class ConnectorIngressStoreError extends Error {
+  constructor(
+    readonly code:
+      | "dedupe_conflict"
+      | "not_found"
+      | "invalid_state"
+      | "claim_lost",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 export function assertBoundedConnectorId(
   value: unknown,
   label: string,

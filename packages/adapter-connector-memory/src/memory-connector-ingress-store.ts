@@ -13,6 +13,7 @@ import {
   type ConnectorIngressEnvelope,
   type ConnectorIngressPage,
   type ConnectorIngressLimits,
+  ConnectorIngressStoreError,
   type ConnectorIngressRecord,
   type ConnectorIngressStore,
   type DeadLetterConnectorIngress,
@@ -246,7 +247,10 @@ export class MemoryConnectorIngressStore implements ConnectorIngressStore {
       const existing = this.records.get(existingId);
       if (existing === undefined) throw new Error("dedupe index is inconsistent");
       if (!isDeepStrictEqual(existing.envelope, candidate)) {
-        throw new Error("Connector ingress dedupe key conflicts with payload");
+        throw new ConnectorIngressStoreError(
+          "dedupe_conflict",
+          "Connector ingress dedupe key conflicts with payload",
+        );
       }
       return { kind: "duplicate", record: publicRecord(existing) };
     }
@@ -419,7 +423,10 @@ export class MemoryConnectorIngressStore implements ConnectorIngressStore {
     );
     const record = this.requireScopedRecord(input);
     if (record.state !== "dead_letter") {
-      throw new Error("Only a dead-letter Connector ingress can be requeued");
+      throw new ConnectorIngressStoreError(
+        "invalid_state",
+        "Only a dead-letter Connector ingress can be requeued",
+      );
     }
     record.state = "retry_wait";
     record.available_at = input.available_at;
@@ -484,7 +491,10 @@ export class MemoryConnectorIngressStore implements ConnectorIngressStore {
       record.lease_expires_at === undefined ||
       compareUtcTimestamps(record.lease_expires_at, input.now) <= 0
     ) {
-      throw new Error("Connector ingress claim is stale or invalid");
+      throw new ConnectorIngressStoreError(
+        "claim_lost",
+        "Connector ingress claim is stale, expired, or invalid",
+      );
     }
     return record;
   }
@@ -500,7 +510,10 @@ export class MemoryConnectorIngressStore implements ConnectorIngressStore {
       record.envelope.tenant_id !== input.tenant_id ||
       record.envelope.connector_id !== input.connector_id
     ) {
-      throw new Error("Connector ingress record was not found");
+      throw new ConnectorIngressStoreError(
+        "not_found",
+        "Connector ingress record was not found",
+      );
     }
     return record;
   }
