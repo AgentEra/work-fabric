@@ -16,6 +16,10 @@ export interface HttpServiceConfig {
   readonly endpoint_max_capabilities: number;
   readonly endpoint_max_bindings: number;
   readonly endpoint_max_inbox_partitions: number;
+  readonly feishu_webhook_body_limit_bytes: number;
+  readonly feishu_webhook_max_clock_skew_seconds: number;
+  readonly feishu_webhook_max_json_depth: number;
+  readonly feishu_webhook_accept_timeout_ms: number;
 }
 
 const defaults: HttpServiceConfig = {
@@ -36,6 +40,10 @@ const defaults: HttpServiceConfig = {
   endpoint_max_capabilities: 64,
   endpoint_max_bindings: 16,
   endpoint_max_inbox_partitions: 128,
+  feishu_webhook_body_limit_bytes: 262_144,
+  feishu_webhook_max_clock_skew_seconds: 300,
+  feishu_webhook_max_json_depth: 32,
+  feishu_webhook_accept_timeout_ms: 2_000,
 };
 
 function positiveInteger(value: number, field: string): number {

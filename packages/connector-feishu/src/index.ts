@@ -6,6 +6,7 @@ export * from "./event-mapper.js";
 export * from "./event-renderer.js";
 export * from "./identity-mapper.js";
 export * from "./ingress-normalizer.js";
+export * from "./long-connection-source.js";
 export * from "./open-api-client.js";
 export * from "./resource-resolver.js";
 export * from "./signal-adapter.js";

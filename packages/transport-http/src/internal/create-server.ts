@@ -26,6 +26,8 @@ import {
 } from "../routes/endpoint-routes.js";
 import type { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import type { EndpointInboxQueryService } from "@work-fabric/exchange-runtime";
+import type { FeishuWebhookDependencies } from "../public-types.js";
+import { registerFeishuWebhookRoute } from "../routes/feishu-webhook-route.js";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -41,6 +43,7 @@ export interface InternalServerDependencies {
   readonly sse_connections?: SseConnectionManager;
   readonly endpoint_directory?: EndpointDirectoryService;
   readonly endpoint_inbox?: EndpointInboxQueryService;
+  readonly feishu_webhook?: FeishuWebhookDependencies;
 }
 
 export function createInternalServer(
@@ -84,6 +87,9 @@ export function createInternalServer(
       .send(createProblemDetails(status, code, title, { instance: request.url }));
   });
   registerCommandRoute(server, dependencies.application, dependencies.authenticator);
+  if (dependencies.feishu_webhook !== undefined) {
+    registerFeishuWebhookRoute(server, dependencies.feishu_webhook, config);
+  }
   if (dependencies.health !== undefined) {
     registerHealthRoutes(server, {
       health: dependencies.health,
