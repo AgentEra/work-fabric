@@ -40,14 +40,31 @@ const event: EventRecord = {
 
 describe("durability SPI contract", () => {
   it("names the outbox and worker lease capability requirements", () => {
-    expect(OUTBOX_REQUIRED_CAPABILITIES.length).toBeGreaterThan(0);
-    expect(WORKER_LEASE_REQUIRED_CAPABILITIES.length).toBeGreaterThan(0);
-    expect(DURABILITY_REQUIRED_CAPABILITIES).toEqual(
-      expect.arrayContaining([
-        ...OUTBOX_REQUIRED_CAPABILITIES,
-        ...WORKER_LEASE_REQUIRED_CAPABILITIES,
-      ]),
-    );
+    const expectedOutbox = [
+      "tenant_isolation",
+      "partition_ordering",
+      "outbox_claim_leases",
+      "outbox_publish_fencing",
+      "outbox_failure_fencing",
+      "outbox_retry_schedule",
+      "outbox_failure_idempotency",
+      "outbox_publish_idempotency",
+      "immutable_reads",
+      "deep_clone",
+    ];
+    const expectedWorkerLease = [
+      "worker_lease_acquisition",
+      "worker_lease_renewal",
+      "worker_lease_release",
+      "worker_lease_fencing",
+      "worker_lease_recovery",
+    ];
+    expect(OUTBOX_REQUIRED_CAPABILITIES).toEqual(expectedOutbox);
+    expect(WORKER_LEASE_REQUIRED_CAPABILITIES).toEqual(expectedWorkerLease);
+    expect(DURABILITY_REQUIRED_CAPABILITIES).toEqual([
+      ...expectedOutbox,
+      ...expectedWorkerLease,
+    ]);
   });
 
   it("keeps the technology-neutral records and ports assignable", async () => {

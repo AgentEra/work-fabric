@@ -6,7 +6,12 @@ export const OUTBOX_REQUIRED_CAPABILITIES = [
   "partition_ordering",
   "outbox_claim_leases",
   "outbox_publish_fencing",
+  "outbox_failure_fencing",
   "outbox_retry_schedule",
+  "outbox_failure_idempotency",
+  "outbox_publish_idempotency",
+  "immutable_reads",
+  "deep_clone",
 ] as const;
 
 /** Capabilities required to coordinate crash-recoverable workers. */

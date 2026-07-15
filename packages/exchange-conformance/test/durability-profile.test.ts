@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   addUtcTimestampSeconds,
   compareUtcTimestamps,
+  parseUtcTimestamp,
   type CapabilityManifest,
   type EventRecord,
   type OutboxClaim,
@@ -91,7 +92,12 @@ function validCapabilities(): Readonly<Record<string, boolean>> {
     partition_ordering: true,
     outbox_claim_leases: true,
     outbox_publish_fencing: true,
+    outbox_failure_fencing: true,
     outbox_retry_schedule: true,
+    outbox_failure_idempotency: true,
+    outbox_publish_idempotency: true,
+    immutable_reads: true,
+    deep_clone: true,
     worker_lease_acquisition: true,
     worker_lease_renewal: true,
     worker_lease_release: true,
@@ -292,12 +298,7 @@ function validateIdentity(value: unknown, label: string): asserts value is strin
 }
 
 function validateTimestamp(value: unknown, label: string): asserts value is string {
-  if (
-    typeof value !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value)
-  ) {
-    throw new TypeError(`${label} must be a strict UTC timestamp`);
-  }
+  parseUtcTimestamp(value, label);
 }
 
 function validateSeconds(value: unknown): asserts value is number {
@@ -358,6 +359,107 @@ class MarksWithoutMatchingLease extends MemoryDurabilityAdapter {
   }
 }
 
+class AllowsStaleFailure extends MemoryDurabilityAdapter {
+  override async recordFailure(
+    outboxId: string,
+    owner: string,
+    fencingToken: number,
+    nextAttemptAt: string,
+  ): Promise<boolean> {
+    const result = await super.recordFailure(
+      outboxId,
+      owner,
+      fencingToken,
+      nextAttemptAt,
+    );
+    return owner === "worker_stale_a" ? true : result;
+  }
+}
+
+class RepeatsFailureSuccess extends MemoryDurabilityAdapter {
+  private readonly failed = new Set<string>();
+
+  override async recordFailure(
+    outboxId: string,
+    owner: string,
+    fencingToken: number,
+    nextAttemptAt: string,
+  ): Promise<boolean> {
+    const result = await super.recordFailure(
+      outboxId,
+      owner,
+      fencingToken,
+      nextAttemptAt,
+    );
+    const key = `${outboxId}:${owner}:${fencingToken}:${nextAttemptAt}`;
+    if (result) this.failed.add(key);
+    return result || this.failed.has(key);
+  }
+}
+
+class MutatesRetryRow extends MemoryDurabilityAdapter {
+  override async claim(request: OutboxClaim): Promise<readonly OutboxRecord[]> {
+    const result = await super.claim(request);
+    if (request.owner !== "worker_profile_c") return result;
+    return result.map((record) => ({
+      ...record,
+      outbox_id: "tampered-outbox",
+      attempt: 999,
+      fencing_token: Number.POSITIVE_INFINITY,
+      event: {
+        ...record.event,
+        domain_data: { ...record.event.domain_data, position: "tampered" },
+        protocol_data: { ...record.event.protocol_data, position: "tampered" },
+      },
+    }));
+  }
+}
+
+class SharesJsonBodies extends MemoryDurabilityAdapter {
+  private shared: OutboxRecord | undefined;
+
+  override async listPending(
+    tenantId: string,
+    partitionId: string,
+  ): Promise<readonly OutboxRecord[]> {
+    const result = await super.listPending(tenantId, partitionId);
+    const first = result[0];
+    if (this.shared === undefined && first !== undefined) this.shared = first;
+    if (this.shared === undefined || first === undefined) return result;
+    return result.map((record) =>
+      record.outbox_id === this.shared?.outbox_id ? this.shared : record,
+    );
+  }
+}
+
+class AllowsStaleRelease extends MemoryDurabilityAdapter {
+  override async release(
+    leaseKey: string,
+    owner: string,
+    fencingToken: number,
+  ): Promise<boolean> {
+    const result = await super.release(leaseKey, owner, fencingToken);
+    return owner === "worker_profile_a" && result === false ? true : result;
+  }
+}
+
+class ReclaimsUnexpired extends MemoryDurabilityAdapter {
+  private previousClaim: readonly OutboxRecord[] = [];
+
+  override async claim(request: OutboxClaim): Promise<readonly OutboxRecord[]> {
+    const result = await super.claim(request);
+    if (
+      request.owner === "worker_profile_a" &&
+      result.length === 0 &&
+      this.previousClaim.length > 0
+    ) {
+      return this.previousClaim;
+    }
+    this.previousClaim = result;
+    return result;
+  }
+}
+
 const profile = (factory: () => DurabilityConformanceAdapter) =>
   verifyDurabilityProfile(factory);
 
@@ -371,6 +473,12 @@ describe("durability profile", () => {
     ["expired lease", () => new ReturnsExpiredLease()],
     ["tenant isolation", () => new ClaimsAnotherTenant()],
     ["matching lease", () => new MarksWithoutMatchingLease()],
+    ["stale failure fencing", () => new AllowsStaleFailure()],
+    ["failure idempotency", () => new RepeatsFailureSuccess()],
+    ["retry row integrity", () => new MutatesRetryRow()],
+    ["nested JSON clone", () => new SharesJsonBodies()],
+    ["stale release fencing", () => new AllowsStaleRelease()],
+    ["same-owner claim fencing", () => new ReclaimsUnexpired()],
   ])("rejects an adapter that violates %s", async (_name, factory) => {
     await expect(profile(factory)).rejects.toThrow();
   });
