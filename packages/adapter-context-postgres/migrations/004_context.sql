@@ -3,11 +3,13 @@ CREATE TABLE IF NOT EXISTS work_fabric_context_bundles (
   context_id text NOT NULL,
   version bigint NOT NULL,
   digest text,
+  expires_at text,
   bundle jsonb NOT NULL,
   actor_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
   endpoint_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
   PRIMARY KEY (tenant_id, context_id, version)
 );
+ALTER TABLE work_fabric_context_bundles ADD COLUMN IF NOT EXISTS expires_at text;
 
 ALTER TABLE work_fabric_context_bundles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_context_bundles FORCE ROW LEVEL SECURITY;

@@ -9,7 +9,7 @@ class FakeClient implements PostgresClient {
   release(): void {}
 }
 class Session implements TenantSession { readonly tenant_id = "tenant_01"; constructor(readonly client: FakeClient) {} withTransaction<T>(operation: (client: PostgresClient) => Promise<T>): Promise<T> { return operation(this.client); } }
-const bundle = { context_id: "context_01", version: 1, digest: { algorithm: "sha-256", value: "abc" }, visibility_scope: { actor_ids: ["actor_01"], endpoint_ids: ["endpoint_01"] }, extensions: { state: "draft" } } as const;
+const bundle = { context_id: "context_01", version: 1, digest: { algorithm: "sha-256", value: "abc" }, visibility_scope: { actor_ids: ["actor_01"], endpoint_ids: ["endpoint_01"], expires_at: null }, extensions: { state: "draft" } } as const;
 
 describe("PostgresContextRepository", () => {
   it("writes immutable bundles and returns canonical references", async () => {
