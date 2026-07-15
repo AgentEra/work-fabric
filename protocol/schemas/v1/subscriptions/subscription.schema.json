@@ -34,13 +34,7 @@
       "required": ["mode"],
       "properties": {
         "mode": {
-          "oneOf": [
-            { "enum": ["cursor_pull", "sse", "webhook"] },
-            {
-              "type": "string",
-              "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*\\.[a-z0-9]+(?:[.-][a-z0-9]+)*/[a-z][a-z0-9_]*$"
-            }
-          ]
+          "enum": ["cursor_pull", "sse", "webhook"]
         },
         "binding_id": {
           "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"

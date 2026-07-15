@@ -1,6 +1,6 @@
 # WFPP v1 Interactions and Handoff Lifecycle
 
-机器可读权威定义位于 [handoff-lifecycle.json](handoff-lifecycle.json)。本文件给出规范语义；实现 MUST 同时满足状态机和 Canonical Schema。
+机器可读权威生命周期定义位于 [handoff-lifecycle.json](handoff-lifecycle.json)，公开命令的 `message_type` 到 Payload Schema ID 映射位于 [interaction-payloads.json](interaction-payloads.json)。本文件给出规范语义；实现 MUST 同时满足状态机、交互 Payload 映射和 Canonical Schema。
 
 ## Endpoint 与发现
 
@@ -10,7 +10,15 @@
 
 ### `handoff.offer`
 
-从无状态创建 `offered` Handoff。Exchange 校验 Package、目标、Authority 与时限并记录 `workfabric.handoff.offered.v1`。Offer 不转移责任。
+从无状态创建 Handoff。Actor/Endpoint Target 需要满足 `explicit_target` 条件并直接进入 `offered`，记录 `workfabric.handoff.offered.v1`。Capability Requirement Target 需要满足 `capability_target` 条件并进入 `target_resolution_pending`，记录 `workfabric.handoff.target_resolution_requested.v1`。两种路径都不转移责任。
+
+### `handoff.resolve_target`
+
+仅允许前态为 `target_resolution_pending`。经过授权的外部 Resolver 提交一个明确 Actor/Endpoint Target；Exchange 验证目标满足原始 Capability Requirement 后记录不可变 Target Binding，进入 `offered` 并发布 `workfabric.handoff.target_resolved.v1`。Exchange 不执行候选匹配、排名、推荐或选择。
+
+### `handoff.report_target_unavailable`
+
+仅允许前态为 `target_resolution_pending`。经过授权的外部 Resolver 报告无法形成合格 Target Binding，记录原因与证据，进入终态 `target_unavailable` 并发布 `workfabric.handoff.target_unavailable.v1`。这是透明的解析结果，不是 Exchange 调度算法的输出。
 
 ### `handoff.accept`
 
@@ -22,11 +30,11 @@
 
 ### `handoff.expire`
 
-仅允许前态 `offered`，并要求 `accept_by` 已过。成功后进入终态 `expired`。
+允许前态 `target_resolution_pending` 或 `offered`，并要求 `accept_by` 已过。成功后进入终态 `expired`。
 
 ### `handoff.cancel`
 
-允许前态 `offered` 或 `accepted`，并要求策略允许。成功后进入终态 `cancelled`。取消不会自动补偿已经发生的外部副作用。
+允许前态 `target_resolution_pending`、`offered` 或 `accepted`，并要求策略允许。成功后进入终态 `cancelled`。取消不会自动补偿已经发生的外部副作用。
 
 ### `handoff.report_status`
 
@@ -50,11 +58,11 @@
 
 ### `handoff.transfer`
 
-仅允许前态 `accepted`。当前 Recipient 必须被授权且允许再委托。操作原子创建初始状态为 `offered` 的子 Handoff；父 Handoff 保持 `accepted`，原 Recipient 继续负责。
+仅允许前态 `accepted`。当前 Recipient 必须被授权且允许再委托。操作原子创建子 Handoff：明确 Actor/Endpoint Target 的子 Handoff 初始为 `offered`，Capability Target 的子 Handoff 初始为 `target_resolution_pending`。父 Handoff 保持 `accepted`，原 Recipient 继续负责。
 
 ### `handoff.child_accepted`
 
-这是 Exchange 在子 Handoff 成功接受时执行的关联迁移，不是独立客户端命令。子 Handoff 进入 `accepted` 的同一事务中，父 Handoff 从 `accepted` 进入终态 `transferred`。
+这是 Exchange 在子 Handoff 成功接受时执行的关联迁移，不是独立客户端命令，也不得出现在公开交互 Payload 映射中。子 Handoff 进入 `accepted` 的同一事务中，父 Handoff 从 `accepted` 进入终态 `transferred`。
 
 ## 非规范草稿
 

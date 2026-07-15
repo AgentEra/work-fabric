@@ -1,7 +1,9 @@
-import type { ErrorObject } from "ajv";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { loadSchemaRegistry } from "../src/schema-registry.js";
+import {
+  loadSchemaRegistry,
+  type SchemaRegistryError,
+} from "../src/schema-registry.js";
 
 let registry: Awaited<ReturnType<typeof loadSchemaRegistry>>;
 
@@ -9,7 +11,10 @@ beforeAll(async () => {
   registry = await loadSchemaRegistry("protocol/schemas/v1");
 });
 
-function errors(schemaName: string, value: unknown): ErrorObject[] | null {
+function errors(
+  schemaName: string,
+  value: unknown,
+): readonly SchemaRegistryError[] | null {
   const schemaId = `urn:work-fabric:schema:v1:${schemaName}`;
   const validator = registry.getSchema(schemaId);
   if (validator === undefined) {
@@ -138,6 +143,28 @@ describe("SubscriptionFilter", () => {
         extensions: {},
       }),
     ).toBeNull();
+  });
+
+  it("rejects an unsupported delivery mode", () => {
+    expect(
+      errors("subscription", {
+        subscription_id: "subscription_invalid_mode",
+        owner: {
+          actor_id: "actor_agent_01",
+          actor_type: "agent",
+        },
+        endpoint_id: "endpoint_runtime_01",
+        filter,
+        delivery: {
+          mode: "vendor.example/custom_push",
+        },
+        state: "active",
+        cursor: null,
+        created_at: "2026-07-13T07:59:00Z",
+        updated_at: "2026-07-13T07:59:00Z",
+        extensions: {},
+      }),
+    ).not.toBeNull();
   });
 });
 

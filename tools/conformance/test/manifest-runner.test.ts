@@ -21,7 +21,7 @@ describe("runLifecycleScenario", () => {
       steps: [
         {
           interaction: "handoff.offer",
-          conditions: [],
+          conditions: ["explicit_target"],
           expected_state: "offered",
           expected_event_type: "workfabric.handoff.offered.v1",
         },
@@ -91,6 +91,6 @@ describe("runRepositoryConformance", () => {
     expect(result.results.every((entry) => entry.passed)).toBe(true);
     expect(result.coverage.missing_positive).toEqual([]);
     expect(result.coverage.missing_negative).toEqual([]);
-    expect(result.exchange_behavior_count).toBe(14);
+    expect(result.exchange_behavior_count).toBe(15);
   });
 });

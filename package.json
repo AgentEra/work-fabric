@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "workspaces": ["packages/*"],
   "engines": {
     "node": ">=22.20.0"
   },
@@ -11,7 +12,11 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "conformance": "tsx tools/conformance/src/cli.ts",
-    "verify": "npm run typecheck && npm test && npm run conformance"
+    "postgres:migrate": "tsx tools/postgres-migrate.ts",
+    "postgres:smoke": "tsx tools/postgres-smoke.ts",
+    "verify:postgres": "npm run typecheck && vitest run packages/adapter-postgres-common/test packages/adapter-storage-postgres/test packages/adapter-context-postgres/test && npm run conformance",
+    "verify": "npm run typecheck && npm test && npm run conformance",
+    "verify:exchange": "npm run typecheck && vitest run packages && npm run conformance"
   },
   "dependencies": {
     "ajv": "8.20.0",

@@ -14,6 +14,7 @@ WFPP v1 是 Work Fabric 的语言无关核心协议。它定义人、Agent 与�
 - [安全与授权](spec/security.md)
 - [版本与兼容](spec/versioning.md)
 - [机器可读 Handoff 生命周期](spec/handoff-lifecycle.json)
+- [机器可读交互 Payload 映射](spec/interaction-payloads.json)
 - [一致性用例](conformance/)
 - [参考序列](examples/)
 
@@ -24,6 +25,10 @@ WFPP v1 是 Work Fabric 的语言无关核心协议。它定义人、Agent 与�
 WFPP Core 包含领域语义、交互语义、Canonical Message、Schema、事件和订阅语义。HTTP、SSE、Webhook、A2A、MCP、本地 IPC 与 SDK 属于 Binding 或 Adapter；它们可以承载 WFPP，但不能重定义 Handoff、责任、Receipt、AuthorityScope 或生命周期。
 
 Authoritative Exchange 是逻辑角色，不限制单体、集群、嵌入式或联邦部署。Work Fabric Server 将作为参考实现，但不属于本协议包。
+
+Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身份、授权、上下文可用性和 Handoff 命令，原子记录状态移交并生成协作事件；人、Agent 与系统的实际执行不发生在 Core 或 Runtime 内。`Handoff` 是权威事实，`Assignment` 是可重建投影。
+
+持久化同样属于可替换 Adapter：Memory 实现承载参考行为，PostgreSQL 实现通过既有 SPI 提供生产持久化、RLS、CAS、outbox 和 Context 元数据；协议语义不依赖 PostgreSQL。
 
 ## Schema 索引
 
@@ -53,7 +58,17 @@ Authoritative Exchange 是逻辑角色，不限制单体、集群、嵌入式或
 - `urn:work-fabric:schema:v1:acceptance-criterion`
 - `urn:work-fabric:schema:v1:capability-requirement`
 - `urn:work-fabric:schema:v1:handoff-target`
+- `urn:work-fabric:schema:v1:handoff-explicit-target`
+- `urn:work-fabric:schema:v1:handoff-target-resolution`
+- `urn:work-fabric:schema:v1:handoff-target-unavailable-command`
 - `urn:work-fabric:schema:v1:handoff-offer`
+- `urn:work-fabric:schema:v1:handoff-reference`
+- `urn:work-fabric:schema:v1:handoff-cancel-command`
+- `urn:work-fabric:schema:v1:handoff-status-command`
+- `urn:work-fabric:schema:v1:handoff-result-command`
+- `urn:work-fabric:schema:v1:handoff-verification-command`
+- `urn:work-fabric:schema:v1:handoff-rework-command`
+- `urn:work-fabric:schema:v1:handoff-transfer-command`
 - `urn:work-fabric:schema:v1:handoff-snapshot`
 - `urn:work-fabric:schema:v1:status-update`
 - `urn:work-fabric:schema:v1:artifact`
@@ -79,14 +94,17 @@ Authoritative Exchange 是逻辑角色，不限制单体、集群、嵌入式或
 
 `definitions` 是内部共享 Schema，不作为独立消息声明兼容性。
 
+公共 `protocol-event` 是存储事件的隔离视图，不得包含内部 `domain_data`、Partition position、Commit ID、幂等记录或存储 Cursor 元数据。协议中的全局 Subscription 是逻辑消费视图；实现必须为每个 Subscription × Partition 保存独立恢复位置，因此不产生跨 Partition 的全局有序承诺。
+
 ## 一致性验证
 
 ```bash
 npm ci
 npm run verify
+npm run verify:exchange
 ```
 
-`npm run conformance` 会加载全部 Schema，运行正负 Golden Fixtures、生命周期场景、Exchange Core 行为清单和覆盖检查。实现只有在全部用例通过后，才可以声明兼容对应的 WFPP v1 Profile。
+`npm run conformance` 会加载全部 Schema，运行正负 Golden Fixtures、生命周期场景、Exchange Core 行为清单和覆盖检查。`npm run verify:exchange` 还会执行 Exchange packages、可恢复投影与投递，以及只依赖公共导出的 Reference Suite。实现只有在全部用例通过后，才可以声明兼容对应的 WFPP v1 Profile。
 
 ## 参考序列
 

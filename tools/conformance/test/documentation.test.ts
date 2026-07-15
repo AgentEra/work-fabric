@@ -1,6 +1,5 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ValidateFunction } from "ajv";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,7 +7,11 @@ import {
   loadLifecycle,
   type HandoffState,
 } from "../src/lifecycle-runner.js";
-import { findJsonFiles, loadSchemaRegistry } from "../src/schema-registry.js";
+import {
+  findJsonFiles,
+  loadSchemaRegistry,
+  type SchemaRegistryValidator,
+} from "../src/schema-registry.js";
 
 const protocolRoot = "protocol";
 
@@ -31,9 +34,9 @@ interface ReferenceSequence {
 }
 
 function validatorFor(
-  getSchema: (id: string) => ValidateFunction | undefined,
+  getSchema: (id: string) => SchemaRegistryValidator | undefined,
   schemaId: string,
-): ValidateFunction {
+): SchemaRegistryValidator {
   const validator = getSchema(schemaId);
   if (validator === undefined) {
     throw new Error(`Schema not registered: ${schemaId}`);

@@ -149,9 +149,9 @@
     }
   ],
   "lifecycle": [
-    { "interaction": "handoff.offer", "conditions": [], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
+    { "interaction": "handoff.offer", "conditions": ["explicit_target"], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
     { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" },
-    { "interaction": "handoff.transfer", "conditions": ["recipient_authorized", "redelegation_allowed"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.offered.v1" },
+    { "interaction": "handoff.transfer", "conditions": ["recipient_authorized", "redelegation_allowed", "child_explicit_target"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.offered.v1" },
     { "interaction": "handoff.child_accepted", "conditions": ["child_handoff_accepted"], "expected_state": "transferred", "expected_event_type": "workfabric.handoff.transferred.v1" }
   ]
 }

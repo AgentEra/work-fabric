@@ -141,7 +141,7 @@
     }
   ],
   "lifecycle": [
-    { "interaction": "handoff.offer", "conditions": [], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
+    { "interaction": "handoff.offer", "conditions": ["explicit_target"], "expected_state": "offered", "expected_event_type": "workfabric.handoff.offered.v1" },
     { "interaction": "handoff.accept", "conditions": ["recipient_authorized", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" },
     { "interaction": "handoff.return_result", "conditions": ["result_schema_valid", "authority_valid"], "expected_state": "result_returned", "expected_event_type": "workfabric.handoff.result_returned.v1" },
     { "interaction": "handoff.verify", "conditions": ["verifier_authorized", "criteria_satisfied"], "expected_state": "verified", "expected_event_type": "workfabric.handoff.verified.v1" },

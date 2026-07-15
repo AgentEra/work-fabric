@@ -1,7 +1,9 @@
-import type { ErrorObject } from "ajv";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { loadSchemaRegistry } from "../src/schema-registry.js";
+import {
+  loadSchemaRegistry,
+  type SchemaRegistryError,
+} from "../src/schema-registry.js";
 
 let registry: Awaited<ReturnType<typeof loadSchemaRegistry>>;
 
@@ -9,7 +11,10 @@ beforeAll(async () => {
   registry = await loadSchemaRegistry("protocol/schemas/v1");
 });
 
-function errors(schemaName: string, value: unknown): ErrorObject[] | null {
+function errors(
+  schemaName: string,
+  value: unknown,
+): readonly SchemaRegistryError[] | null {
   const schemaId = `urn:work-fabric:schema:v1:${schemaName}`;
   const validator = registry.getSchema(schemaId);
   if (validator === undefined) {
@@ -97,6 +102,20 @@ describe("OperationResult", () => {
         operation_status: "accepted",
         resource,
         receipt,
+        error: null,
+        extensions: {},
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a successful operation whose transition issues no receipt", () => {
+    expect(
+      errors("operation-result", {
+        spec_version: "1.0",
+        request_message_id: "msg_01",
+        operation_status: "accepted",
+        resource,
+        receipt: null,
         error: null,
         extensions: {},
       }),

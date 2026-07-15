@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-target-resolution",
+  "title": "Handoff Target Resolution Command Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_id", "resolved_target", "evidence"],
+  "properties": {
+    "handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "resolved_target": {
+      "$ref": "urn:work-fabric:schema:v1:handoff-explicit-target"
+    },
+    "evidence": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:evidence"
+      }
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

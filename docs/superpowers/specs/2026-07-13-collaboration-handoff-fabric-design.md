@@ -13,7 +13,7 @@ Work Fabric 用统一参与协议连接人、AI Agent、Agent Runtime、传统�
 1. **Unified Participation Protocol**：定义身份、能力、工作引用、协作请求、分派、交接、上下文、状态、结果和回执等共同语义。
 2. **Collaboration & Handoff Exchange**：持久化协作事实，维护分派与责任迁移状态，并通过事件、订阅和通知把变化可靠地传递给人、Agent 和外部系统。
 
-Work Graph、Context Workspace、事件网络、能力匹配和自动化规则都是支撑协作对接与交接的能力，不是系统中心。完全 AI 自动化来自参与端点的可替换性：当人类参与端逐步被 Agent 端点替换时，协议和交接闭环保持不变。
+Work Graph、Context Workspace 和事件网络都是支撑协作对接与交接的能力，不是系统中心。能力匹配、目标选择和自动化规则属于通过协议接入的可选外部 Resolver 或参与服务。完全 AI 自动化来自参与端点与外部决策模块的可替换性：当人类参与端逐步被 Agent 端点替换时，协议和交接闭环保持不变。
 
 ## 2. 项目使命与设计原则
 
@@ -47,6 +47,7 @@ Work Fabric 将分散在飞书、CRM、项目管理、Git、知识库、Agent Ru
 - 交接时的上下文、授权范围、验收条件和回传通道。
 - 责任接收、状态移交、问题升级、再次交接、结果回传和验收回执。
 - 协作事件、订阅、通知、确认、游标和重放。
+- 将目标已经确定的 Handoff 可靠派发，并跟踪 Delivery、Ack、重试和恢复。
 - 协作链路的身份、委托、权限、因果、证据和审计。
 - 面向查询和透明化的资源关系图与状态投影。
 - Connector、Agent 和客户端的 SDK、契约测试及一致性验证。
@@ -60,12 +61,15 @@ Work Fabric 将分散在飞书、CRM、项目管理、Git、知识库、Agent Ru
 - 强制所有参与方采用同一种工作流或传输协议。
 - 将所有外部内容复制为第二套完整数据仓库。
 - 内置一个包办所有业务流程的通用自动化执行引擎。
+- 根据能力、负载、成本或模型判断自动选择 Handoff 接收方。
+- 安排 Agent、Workflow 或外部系统内部的执行步骤和资源。
 
 ### 3.3 可选支撑能力
 
 以下能力可以作为独立模块、插件或外部服务接入，不进入稳定内核：
 
 - 基于能力与负载的接收方推荐。
+- 人工、规则或 AI Target Resolver。
 - 超时提醒、简单路由规则和升级策略。
 - 外部 Workflow Engine 桥接。
 - Agent Runtime、模型服务和工具平台桥接。
@@ -201,6 +205,14 @@ Trace 回答：谁在何时把什么交给了谁、附带了什么、对方是�
 
 系统按需把工作引用、参与者、Handoff、Context 和结果关系投影为查询图。该图服务于探索和透明化，不是所有写入的唯一物理存储。
 
+### 5.5 目标解析、交接派发与执行调度
+
+- **Target Resolution** 由发起方或外部 Resolver 决定 Handoff 绑定到哪个 Actor/Endpoint。Resolver 可以是人工、规则服务或 AI Scheduling Brain，并通过统一协议查询候选事实、提交解析结果和证据。
+- **Handoff Dispatch** 由 Work Fabric 负责，在目标确定后完成 Binding 选择、可靠投递、Delivery/Ack、重试、死信和恢复。派发只负责连接，不负责决定“谁更适合”。
+- **Execution Scheduling** 由接收方外部 Runtime、Workflow 或工作系统负责，包括任务拆解、模型与工具选择、内部 Worker 安排和执行顺序。
+
+Capability Target 在解析前不代表任何 Endpoint 已获得责任。Work Fabric 不得以内置排名、随机选择或首个响应者竞争作为默认解析策略；并发控制只保证目标绑定和责任迁移的权威写入唯一。直接 Actor/Endpoint Target 不依赖 Resolver，任何智能调度模块也必须可以移除或替换而不改变 Handoff 协议。
+
 ## 6. 核心领域模型
 
 ### 6.1 Identity 与参与端
@@ -315,14 +327,15 @@ OFFERED
 ### 7.2 发起、接收和执行交接
 
 1. 发起方引用外部 Work，创建 Collaboration Thread 或加入已有 Thread。
-2. 发起方构造 HandoffPackage，并指定接收方或所需 Capability。
-3. Exchange 校验身份、委托、上下文权限和有效期，持久化 Handoff 并发布 `handoff.offered`。
-4. Signal 服务向目标 Endpoint 投递通知或任务邀请。
-5. 接收方返回 Receipt，并选择接受或拒绝。
-6. 接受后责任记录切换到接收方，发布 `handoff.accepted`。
-7. 接收方在 Work Fabric 外部执行工作，通过 StatusReport 回报进展、问题和阻塞。
-8. 接收方提交 ArtifactReference、Evidence 和结果摘要，Handoff 进入 `RESULT_RETURNED`。
-9. 发起方或指定验收方确认结果、请求返工或再次交接。
+2. 发起方构造 HandoffPackage，并明确指定 Actor/Endpoint，或声明尚待解析的 Capability Requirement。
+3. 对 Capability Target，外部 Resolver 查询 Endpoint/Capability 事实并通过协议提交明确目标；Exchange 校验并记录解析来源，但不参与选择算法。
+4. Exchange 校验身份、委托、上下文权限、有效期和目标资格，持久化 Handoff 并发布 `handoff.offered`。
+5. Handoff Dispatch 向已确定的 Endpoint 可靠投递通知或任务邀请。
+6. 接收方返回 Receipt，并选择接受或拒绝；消息送达不等于责任接受。
+7. 接受后责任记录切换到接收方，发布 `handoff.accepted`。
+8. 接收方在 Work Fabric 外部执行工作，通过 StatusReport 回报进展、问题和阻塞。
+9. 接收方提交 ArtifactReference、Evidence 和结果摘要，Handoff 进入 `RESULT_RETURNED`。
+10. 发起方或指定验收方确认结果、请求返工或再次交接。
 
 ### 7.3 Agent 再次交接
 
@@ -436,6 +449,7 @@ Subscription 可根据以下条件组合过滤：
 - 客户自定义字段进入命名空间扩展，不直接修改稳定内核字段。
 - Capability 使用可版本化描述符，包含输入、结果、限制和支持的交互模式。
 - Connector 以资源映射、事件映射、状态映射、命令映射和对账策略为明确边界。
+- Target Resolver 只通过候选事实查询、待解析事件和目标解析命令接入；决策逻辑不得进入 Exchange Core 事务。
 - Transport Binding 与领域 Schema 分离。
 - SDK 附带契约测试；Endpoint 和 Connector 必须通过一致性测试后才能声明兼容版本。
 
@@ -586,12 +600,14 @@ work-fabric
 - 资源映射、状态映射、命令写回和对账事件。
 - 关系图和项目级透明化视图。
 
-### 第四阶段：可选智能路由与生态
+### 第四阶段：可选 Target Resolver 与生态
 
-- 能力匹配和接收方推荐。
+- 通过统一协议接入的能力匹配、接收方推荐和 AI Scheduling Brain。
 - 风险、超时和升级规则。
 - 外部 Workflow、Agent Protocol 和模型服务 Binding。
 - 行业扩展包与 Connector/Agent 生态。
+
+这些模块都位于 Exchange Core 外部，可以独立部署、替换或移除；Work Fabric 只提供事实查询、解析结果提交、可靠派发和审计脉络。
 
 每一阶段都增强协作互联能力，不把外部执行职责吸收到 Work Fabric 内部。
 

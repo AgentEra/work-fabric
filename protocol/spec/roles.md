@@ -26,8 +26,16 @@ Exchange 持有 Handoff、Resource Version、Receipt 和 Event 的权威事实�
 
 Exchange 是逻辑角色，可以嵌入单进程、运行在集群中或由联邦节点承担。物理拓扑不能改变协议语义。
 
-## 6. 责任迁移
+## 6. Target Resolver
 
+Target Resolver 是可选外部参与角色，可以由人、规则服务或 Agent Brain 承担。它读取经过授权的 Capability 与 Endpoint 事实，并为一个 `target_resolution_pending` Handoff 提交明确 Actor/Endpoint Target，或者报告当前无法形成合格绑定。
+
+Resolver 的匹配、排名、推荐和选择逻辑不属于 Exchange。Resolver 发送的每个结果都必须经过 Principal、Actor、Endpoint、Delegation、Authority 和目标资格校验。直接 Actor/Endpoint Target 不依赖 Resolver。
+
+## 7. 责任迁移
+
+- `target_resolution_pending`：Initiator 仍负责，Resolver 尚未产生接收方责任。
+- `target_unavailable`：没有接收方获得责任，当前 Handoff 无活动执行责任。
 - `offered`：Initiator 仍负责。
 - `accepted`：Recipient 负责外部执行。
 - `result_returned`：Verifier 负责验收决策。

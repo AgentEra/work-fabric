@@ -17,6 +17,8 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
+Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B 已在 Core 之外增加 HTTP Service Binding，把外部参与方接到同一命令、查询、订阅和事件契约；Core 仍只完成授权后的目标校验、责任移交和权威记录。
+
 ### Work Fabric 原生负责
 
 - 统一参与协议和版本化契约。
@@ -26,6 +28,7 @@ Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，�
 - Context 的范围化传递。
 - 对外状态报告、结果引用和验收回执。
 - 事件、订阅、通知、确认、重放和状态对账。
+- 将已确定目标的 Handoff 可靠派发到 Endpoint，并区分送达、读取和责任接受。
 - 责任历史、事件因果、证据和审计视图。
 
 ### Work Fabric 不负责
@@ -36,6 +39,8 @@ Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，�
 - 替代外部工作系统成为业务内容主库。
 - 强制所有参与方采用相同 Workflow 或传输技术。
 - 通过一个内部自动化引擎包办所有业务流程。
+- 根据能力、负载、成本或模型判断自动选择接收方。
+- 安排参与方内部的任务拆解、模型调用、工具使用或执行顺序。
 
 ## 2. 架构原则
 
@@ -49,6 +54,7 @@ Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，�
 8. **逻辑图与物理存储分离**：协作关系可以投影为图，但权威事务状态不绑定单一图数据库。
 9. **最小授权**：交接携带与当前工作绑定的授权范围，不向 Agent 或 Adapter 发放租户级长期权限。
 10. **自动化来自端点可替换性**：人类端点可以逐步替换为 Agent 端点，而协议、治理和交接链保持稳定。
+11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、目标解析协议和可靠派发；目标选择与执行计划由外部人、规则或 Agent Brain 决定。
 
 ## 3. 系统上下文
 
@@ -58,6 +64,7 @@ flowchart TB
         Human["Human Workplaces<br/>飞书 / Console / API"]
         Agent["Agent Brains & Runtimes<br/>本地 Runtime / Codex / 远程 Agent"]
         System["Legacy & AI-native Systems<br/>CRM / PM / Git / KB / 部署 / 监控"]
+        Resolver["Optional Target Resolver<br/>人 / 规则 / AI Scheduling Brain"]
     end
 
     subgraph Fabric["Work Fabric：协作对接与交接边界"]
@@ -73,6 +80,7 @@ flowchart TB
     Human <--> HumanAdapter
     Agent <--> AgentEndpoint
     System <--> Connector
+    Resolver <--> Protocol
     HumanAdapter <--> Protocol
     AgentEndpoint <--> Protocol
     Connector <--> Protocol
@@ -131,6 +139,8 @@ L0  Transport Bindings
     HTTP / gRPC / WebSocket / Webhook / Broker / Local IPC / SDK
 ```
 
+当前已实现 L0 的 HTTP 命令/查询绑定，以及复用 Durable Subscription 的 Cursor Pull/Ack 和 SSE 呈现。WebSocket、Webhook Worker、SDK 与其他 Binding 仍是独立后续模块；它们必须复用同一 WFPP 语义和交付位置，不能成为旁路状态通道。
+
 不同传输绑定必须保持相同的领域语义和状态机。例如，飞书卡片点击和 Agent 的流式 `accept` 消息都可以表达 `RESPONSIBILITY_ACCEPTED`，但交互方式不同。
 
 Core Protocol Artifacts 是后续实现的唯一机器可读语义基线。Exchange Server、HTTP/SSE/Webhook、A2A、MCP、飞书 Adapter 和 Agent Runtime SDK 必须依赖这些 Core Artifact，并通过 `npm run conformance`；它们不能在各自实现中复制或重定义 Handoff 状态机。
@@ -152,7 +162,7 @@ Exchange 是 Work Fabric 的事务核心，持久化框架真正拥有的协作�
 - 维护 Participant、Endpoint、Capability 和 Delegation。
 - 将外部需求、任务、文档、代码和事件登记为 WorkReference。
 - 创建和维护 CollaborationThread。
-- 保存 Assignment、Handoff、StatusReport、Result 和 Receipt。
+- 以 Handoff 保存权威责任与生命周期事实，并从中投影 Assignment、Status、Result 和 Receipt 视图。
 - 根据 Receipt 明确当前责任，而不是根据消息送达推断责任。
 - 维护 Handoff 之间的父子关系、Correlation 和 Causation。
 - 在状态变化时原子写入 Outbox Event。
@@ -188,6 +198,32 @@ extension_fields
 | Deadline / Expiry | 接收责任和返回结果的时间边界 |
 | Correlation / Causation | 所属协作链及直接上游原因 |
 
+### 5.3 Target Resolution、Handoff Dispatch 与 Execution Scheduling
+
+三者必须保持独立：
+
+- **Target Resolution** 决定 Handoff 应绑定到哪个 Actor 或 Endpoint。它可以由发起方直接完成，也可以由外部人工选择器、规则服务或 AI Scheduling Brain 完成。Work Fabric 提供候选 Endpoint 的事实查询和解析结果提交协议，但不实现排名、推荐或选择算法。
+- **Handoff Dispatch** 在目标确定后选择兼容 Binding，可靠投递 Handoff，维护 Delivery、Ack、重试、死信与恢复，并验证接收方是否有资格代表目标承担责任。这是 Work Fabric 的原生连接职责。
+- **Execution Scheduling** 决定任务如何拆分、何时执行、使用哪些模型、工具或内部 Worker，完全属于接收方 Runtime、Workflow 或外部系统。
+
+Capability Target 表达尚未解析的能力需求。未得到经过授权的解析结果前，Work Fabric 不得把并发抢占或“首个响应者”当作默认分派策略。底层乐观并发只用于保证同一 Handoff 的权威状态不会被多个写入同时提交，不代表业务调度决策。
+
+当前 3A 实现已经提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析 fail-closed 且不产生权威写入。Endpoint Directory、候选事实查询和具体 Resolver 实现仍属于后续接入层。
+
+```mermaid
+flowchart LR
+    Requirement["Capability Target"]
+    Resolver["External Target Resolver<br/>Human / Rule / Agent Brain"]
+    Resolved["Resolved Actor / Endpoint"]
+    Exchange["Work Fabric Exchange<br/>Validate / Record / Trace"]
+    Dispatch["Work Fabric Handoff Dispatch<br/>Binding / Delivery / Ack / Retry"]
+    Endpoint["External Endpoint"]
+    Execution["External Execution"]
+
+    Requirement --> Resolver --> Resolved --> Exchange --> Dispatch --> Endpoint --> Execution
+    Execution -->|"Status / Result via Protocol"| Exchange
+```
+
 ## 6. 核心领域模型
 
 | 对象 | 含义 |
@@ -210,6 +246,8 @@ extension_fields
 | `Receipt` | 投递、接收、责任承担、结果接收或验收确认 |
 
 `Principal`、`Actor` 和 `Endpoint` 必须分离。飞书机器人可以用自己的 Principal 调用系统，但代表某个 Human Actor；一个 Agent Runtime Principal 也可以代表多个独立 Agent Actor。
+
+`Handoff` 是唯一可写的责任事实；`Assignment` 是从 Handoff 当前责任人派生的读模型。投影可以清空并由 Journal 重建，任何组件都不能绕过 Handoff 独立修改 Assignment。
 
 Receipt 至少区分：
 
@@ -296,9 +334,11 @@ payload
 - 事件按 Tenant 和 Handoff 或 Thread 分区。
 - 只保证单个 Handoff 或 Thread 内的顺序，不提供全局顺序。
 - 外部投递采用 at-least-once；消费者使用 `event_id` 或业务幂等键去重。
-- Subscription 保存独立 Cursor，可以暂停、恢复和重放。
+- Subscription 按 Subscription × Partition 保存独立 Cursor，可以暂停、恢复和重放。
+- “全局订阅”只表示跨逻辑 Partition 聚合消费，不提供单一全局 Cursor 或跨 Partition 顺序；恢复时分别推进每个 Partition 的位置。
 - Notification 分别记录已投递、已读取和责任已接受。
 - 永久失败进入死信队列并产生可订阅的失败事件。
+- 公共 Protocol Event 不包含内部 `domain_data`、Partition position、Commit ID、幂等记录或其他存储 Cursor 元数据。
 
 ### 8.4 订阅条件
 
@@ -430,6 +470,8 @@ Work Graph 是逻辑查询视图，不是架构中心，也不要求使用图数
 
 权威 Handoff 状态和 Outbox 使用本地事务保证一致；对象、索引和投影通过事件异步更新。
 
+Phase 1 的 Memory Storage Adapter 只用于参考行为、集成测试和一致性验证，不具备生产持久性声明。当前 PostgreSQL Adapter 已通过既有 SPI 提供 authority、outbox、runtime state、delivery/lease 与 Context 元数据持久化；PostgreSQL 不进入 Core/SPI 依赖，其他符合相同行为 Profile 的存储实现可以等价替换。迁移、RLS 和运维边界见 [PostgreSQL 部署文档](postgresql-deployment.md)。
+
 ## 13. 可靠性与失败处理
 
 | 场景 | 策略 |
@@ -473,6 +515,10 @@ Connector 使用五个明确边界：
 ### Agent 扩展
 
 Agent Endpoint 使用 Capability Descriptor 声明输入、结果、限制、交互模式和协议版本。能力发现只负责协作接入，不要求 Work Fabric 理解 Agent 内部实现。
+
+### Target Resolver 扩展
+
+Target Resolver 是通过统一协议接入的可选外部模块。它订阅待解析的 Capability Target，查询经过授权的 Endpoint/Capability 事实，并提交明确的 Actor 或 Endpoint 解析结果及可选证据。Resolver 可以由人工、规则、优化算法或 AI Agent 实现；Exchange 只验证和记录结果，不调用或内置其决策逻辑。移除所有 Resolver 后，直接 Actor/Endpoint Target 仍必须正常工作。
 
 ### 业务类型扩展
 
@@ -534,16 +580,39 @@ Agent Endpoint 使用 Capability Descriptor 声明输入、结果、限制、交
 
 该示例验证的是跨参与方、跨阶段和跨系统的协作对接，而不是在 Work Fabric 内部实现销售、合同、研发、部署和运维流程。
 
-## 19. 实施边界
+## 19. 已实现的 Core 与 HTTP 边界
 
-第一里程碑只建立统一参与与交接的最小闭环：
+Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 
-- 基础 Protocol 与 Schema。
-- Participant、Endpoint、WorkReference、Thread、Handoff 和 Receipt。
-- Handoff 状态机与 Outbox Event。
-- Agent Endpoint Gateway。
-- 飞书通知/交互 Adapter。
-- 本地 Agent Runtime 参考接入。
-- 基础协作审计时间线。
+- WFPP Protocol、Schema、命令验证与公共 Event。
+- Handoff 权威生命周期、幂等、乐观并发和父子原子责任转移。
+- 技术中立的 Identity、Authority、Context、Persistence、Projection、Subscription 和 Signal SPI。
+- 可重建 Handoff/Assignment 读模型、at-least-once Signal、Cursor Pull/Ack、重试和死信参考行为。
+- Memory 参考 Adapters、复用型 Conformance Profiles 和端到端公共 Reference Suite。
 
-Subscription、完整 Context Exchange、更多 Connector、关系投影和智能路由在后续里程碑演进。每个里程碑都增强协作互联能力，不把执行职责吸收到 Work Fabric 内部。
+阶段 3B 在上述 Core 之外完成 HTTP Service Binding：
+
+- `POST /v1/commands` 原样承载 Canonical WFPP Command，并把 `OperationResult` 作为权威响应。
+- Participant Query、Admin Query 与 Console 未来使用同一身份和 Authority 链；没有内部管理旁路。
+- Subscription 资源使用公共 WFPP Schema，内部 Runtime 表示由边界 codec 映射，存储技术不进入 HTTP Contract。
+- Cursor Pull/Ack 与 SSE 共用 Durable Subscription、Pending Delivery 和交付位置；SSE 不建立第二套事件账本。
+- 健康检查、连接上限、请求/分页限制和优雅关停均在 Host 边界有界处理。
+- Route 不接收 SQL Client 或具体存储 Adapter，不做 Target Resolution、调度、Decider 调用或外部工作执行。
+
+飞书 Connector、Agent Endpoint Gateway、本地 Agent Runtime、TypeScript SDK、Webhook Worker 与生产身份 Adapter 仍属于后续独立模块。PostgreSQL Production Adapter 与 Context Adapter 已作为 SPI 实现落地；所有这些模块只增强接入和运行能力，不改变 Core 的职责边界。
+
+## 20. 阶段路线与执行状态
+
+| 阶段 | 范围 | 状态 |
+|---|---|---|
+| 1 | Exchange Core + Memory Reference | 已完成 |
+| 2 | PostgreSQL Production Adapter Foundation | 已完成 |
+| 3A | Target Resolution Protocol / Core | 已完成 |
+| 3B | HTTP Service Binding | 已完成 |
+| 3C | TypeScript SDK | 下一步 |
+| 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
+| 6 | 高吞吐 Signal 与集群分区 | 未开始 |
+| 7 | 跨 Exchange Federation Profile | 未开始 |
+
+实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B 已建立可监听、可关闭、可通过 Canonical API 使用的 HTTP Service Binding，并以纯 HTTP 黑盒参考流验证 Direct Offer、Capability Resolve、查询、Pull/Ack、SSE 和健康检查。3C 下一步基于这套 Contract 提供统一 TypeScript SDK，不重定义领域对象。阶段 3 不同时实施 Console。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。

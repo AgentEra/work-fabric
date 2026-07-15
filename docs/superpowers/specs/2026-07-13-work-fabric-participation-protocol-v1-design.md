@@ -36,7 +36,7 @@ WFPP v1 必须支持：
 
 WFPP v1 不定义：
 
-- Agent 自动匹配、评分、负载均衡或智能路由算法。
+- Agent 自动匹配、评分、负载均衡、目标选择或智能路由算法；这些由可替换的外部 Target Resolver 实现。
 - Workflow 编排或 Agent 内部 Task 执行。
 - 模型推理、工具调用和知识检索实现。
 - 文件上传协议或大体量二进制传输。
@@ -457,7 +457,7 @@ Exchange MUST 保存交接时使用的 Context Version 与 Digest。Context 可�
 }
 ```
 
-Capability 表达可承担的协作能力，不定义其内部实现。Exchange MAY 查询并返回候选 Endpoint，但 v1 不规定匹配、排序或调度算法。
+Capability 表达可承担的协作能力，不定义其内部实现。Exchange MAY 查询并返回经过授权的候选 Endpoint 事实，但 MUST NOT 对候选进行排名、推荐或自动选择。人工、规则服务或 AI Brain 等外部 Target Resolver 可以使用相同协议读取候选事实并提交明确解析结果。
 
 ### 9.6 EndpointDescriptor
 
@@ -517,7 +517,9 @@ Offer MUST 使用以下目标之一：
 - 明确 `endpoint_id`。
 - `CapabilityRequirement`。
 
-如果使用 CapabilityRequirement，Exchange MAY 选择接收端，也 MAY 返回候选端或 `capability_unavailable`。v1 不定义自动匹配算法。
+如果使用 CapabilityRequirement，该 Target 表达尚未解析的能力需求，不授权 Exchange 自动选择接收端。Exchange MAY 返回候选端事实或 `capability_unavailable`；经过授权的外部 Target Resolver 负责提交明确 Actor/Endpoint 解析结果，Exchange 只校验目标满足声明能力、记录解析来源并执行后续 Handoff Dispatch。
+
+直接 Actor/Endpoint Target 不依赖 Resolver。Capability Target 在解析前不产生接收方责任，也不得默认采用首个响应者、随机选择或内置负载均衡。Target Resolution 的规范消息和状态扩展必须在对外开放 Capability Target Binding 前完成；当前 Core Artifact 不能被解释为已经提供内置调度能力。
 
 ### 10.2 OfferHandoffCommand Payload
 

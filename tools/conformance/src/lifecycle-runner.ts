@@ -1,6 +1,8 @@
 import { readFile } from "node:fs/promises";
 
 export const handoffStates = [
+  "target_resolution_pending",
+  "target_unavailable",
   "offered",
   "accepted",
   "result_returned",
@@ -28,7 +30,7 @@ export interface LifecycleTransition {
 export interface LifecycleModel {
   readonly spec_version: "1.0";
   readonly name: string;
-  readonly initial_state: HandoffState;
+  readonly initial_states: readonly HandoffState[];
   readonly states: readonly HandoffState[];
   readonly terminal_states: readonly HandoffState[];
   readonly transitions: readonly LifecycleTransition[];
@@ -54,7 +56,9 @@ function assertLifecycleModel(value: unknown): asserts value is LifecycleModel {
   }
   if (
     typeof value.name !== "string" ||
-    !stateSet.has(String(value.initial_state)) ||
+    !Array.isArray(value.initial_states) ||
+    value.initial_states.length === 0 ||
+    value.initial_states.some((state) => !stateSet.has(String(state))) ||
     !Array.isArray(value.states) ||
     !Array.isArray(value.terminal_states) ||
     !Array.isArray(value.transitions)
@@ -94,10 +98,19 @@ export function findTransition(
   model: LifecycleModel,
   state: HandoffState | null,
   interaction: string,
+  satisfiedConditions?: ReadonlySet<string>,
 ): LifecycleTransition | undefined {
-  return model.transitions.find(
+  const candidates = model.transitions.filter(
     (transition) =>
       transition.interaction === interaction && transition.from.includes(state),
+  );
+  if (satisfiedConditions === undefined) return candidates[0];
+  return (
+    candidates.find((transition) =>
+      transition.required_conditions.every((condition) =>
+        satisfiedConditions.has(condition),
+      ),
+    ) ?? candidates[0]
   );
 }
 
@@ -111,7 +124,12 @@ export function applyTransition(
     throw new Error(`Cannot apply ${interaction} to terminal state ${state}`);
   }
 
-  const transition = findTransition(model, state, interaction);
+  const transition = findTransition(
+    model,
+    state,
+    interaction,
+    satisfiedConditions,
+  );
   if (transition === undefined) {
     const knownInteraction = model.transitions.some(
       (candidate) => candidate.interaction === interaction,

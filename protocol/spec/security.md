@@ -26,6 +26,8 @@ ContextBundle 的 Visibility Scope 和 Expiry 必须在读取时检查，而不�
 
 Idempotency Key、Resource Version、Event ID 和 `wfsequence` 共同防止重复副作用、陈旧写入与事件乱序。实现 MUST 比较规范化 Payload；同一 Idempotency Key 绑定不同 Payload 时拒绝处理。
 
+Target Resolution 必须单独验证 `resolve_target` 或 `report_target_unavailable` Authority。Eligibility 验证只能回答一个已提交明确目标是否满足不可变 Capability Requirement，不得返回候选列表或替换目标。并发解析最多提交一个权威 Target Binding；失败的并发写入不得被解释为 Resolver 优先级或调度结果。
+
 ## 6. Extension
 
 Extension Key MUST 使用反向域名或组织命名空间。Extension 不能改变核心责任、生命周期或安全语义，也不能承载 Credential、私钥或访问令牌。

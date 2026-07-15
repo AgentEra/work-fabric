@@ -57,9 +57,6 @@
           "resource": {
             "$ref": "urn:work-fabric:schema:v1:resource-version-ref"
           },
-          "receipt": {
-            "$ref": "urn:work-fabric:schema:v1:operation-receipt"
-          },
           "error": { "type": "null" }
         }
       },

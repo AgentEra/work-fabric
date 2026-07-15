@@ -1,7 +1,9 @@
-import type { ErrorObject } from "ajv";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { loadSchemaRegistry } from "../src/schema-registry.js";
+import {
+  loadSchemaRegistry,
+  type SchemaRegistryError,
+} from "../src/schema-registry.js";
 
 let registry: Awaited<ReturnType<typeof loadSchemaRegistry>>;
 
@@ -9,7 +11,10 @@ beforeAll(async () => {
   registry = await loadSchemaRegistry("protocol/schemas/v1");
 });
 
-function errors(schemaName: string, value: unknown): ErrorObject[] | null {
+function errors(
+  schemaName: string,
+  value: unknown,
+): readonly SchemaRegistryError[] | null {
   const schemaId = `urn:work-fabric:schema:v1:${schemaName}`;
   const validator = registry.getSchema(schemaId);
   if (validator === undefined) {
@@ -80,6 +85,40 @@ const offer = {
   extensions: {},
 };
 
+function snapshot(context: {
+  readonly context_bundle_id: string | null;
+  readonly context_bundle_version: number | null;
+}): unknown {
+  return {
+    handoff_id: "handoff_42",
+    thread_id: "thread_01",
+    resource_version: 1,
+    lifecycle_state: "offered",
+    current_responsible_actor: {
+      actor_id: "actor_human_01",
+      actor_type: "human",
+    },
+    target_binding: null,
+    package: {
+      work_reference: offer.work_reference,
+      target: offer.target,
+      intent: offer.intent,
+      ...context,
+      authority_scope_id: "authority_01",
+      acceptance_criteria_ids: ["tests-pass"],
+      verifier_actor_id: "actor_pm_01",
+      accept_by: "2026-07-13T09:00:00Z",
+      result_due_at: "2026-07-14T08:00:00Z",
+    },
+    latest_status: null,
+    result: null,
+    parent_handoff_id: null,
+    created_at: "2026-07-13T07:55:00Z",
+    updated_at: "2026-07-13T08:00:00Z",
+    extensions: {},
+  };
+}
+
 const result = {
   summary: [
     {
@@ -144,6 +183,62 @@ describe("HandoffTarget", () => {
   });
 });
 
+describe("TargetResolution", () => {
+  const evidence = {
+    evidence_id: "evidence_resolution_01",
+    evidence_type: "resolver_decision",
+    content: {
+      kind: "data",
+      schema_ref: "urn:example:schema:resolver-decision:v1",
+      data: { policy: "approved-routing-policy" },
+    },
+  };
+
+  it.each([
+    { actor_id: "actor_agent_01" },
+    { endpoint_id: "endpoint_runtime_01" },
+  ])("accepts one explicit target form", (target) => {
+    expect(errors("handoff-explicit-target", target)).toBeNull();
+  });
+
+  it("rejects a nested Capability Requirement as a resolved target", () => {
+    expect(
+      errors("handoff-explicit-target", {
+        capability_requirement: {
+          capability_id: "software.implementation",
+        },
+      }),
+    ).not.toBeNull();
+  });
+
+  it("accepts an explicit target resolution", () => {
+    expect(
+      errors("handoff-target-resolution", {
+        handoff_id: "handoff_42",
+        resolved_target: { endpoint_id: "endpoint_runtime_01" },
+        evidence: [evidence],
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a transparent unavailable outcome", () => {
+    expect(
+      errors("handoff-target-unavailable-command", {
+        handoff_id: "handoff_42",
+        reason_code: "no_eligible_target",
+        reason: [
+          {
+            kind: "text",
+            media_type: "text/plain",
+            text: "No authorized endpoint currently satisfies the requirement",
+          },
+        ],
+        evidence: [evidence],
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("HandoffOffer", () => {
   it("accepts the approved external-execution package", () => {
     expect(errors("handoff-offer", offer)).toBeNull();
@@ -152,6 +247,8 @@ describe("HandoffOffer", () => {
 
 describe("HandoffSnapshot", () => {
   it.each([
+    "target_resolution_pending",
+    "target_unavailable",
     "offered",
     "accepted",
     "result_returned",
@@ -170,6 +267,7 @@ describe("HandoffSnapshot", () => {
         resource_version: 4,
         lifecycle_state: lifecycleState,
         current_responsible_actor: null,
+        target_binding: null,
         package: {
           work_reference: offer.work_reference,
           target: offer.target,
@@ -200,6 +298,30 @@ describe("HandoffSnapshot", () => {
         resource_version: 1,
         lifecycle_state: "draft",
       }),
+    ).not.toBeNull();
+  });
+
+  it("allows an absent Context only as a null ID/version pair", () => {
+    const withoutContext = snapshot({
+      context_bundle_id: null,
+      context_bundle_version: null,
+    });
+    expect(errors("handoff-snapshot", withoutContext)).toBeNull();
+
+    expect(
+      errors(
+        "handoff-snapshot",
+        snapshot({
+          context_bundle_id: "context_01",
+          context_bundle_version: null,
+        }),
+      ),
+    ).not.toBeNull();
+    expect(
+      errors(
+        "handoff-snapshot",
+        snapshot({ context_bundle_id: null, context_bundle_version: 1 }),
+      ),
     ).not.toBeNull();
   });
 });

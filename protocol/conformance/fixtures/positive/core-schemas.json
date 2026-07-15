@@ -282,6 +282,43 @@
     }
   },
   {
+    "name": "valid handoff explicit target",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-explicit-target",
+    "expected_valid": true,
+    "instance": {
+      "endpoint_id": "endpoint_agent"
+    }
+  },
+  {
+    "name": "valid handoff target resolution",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-target-resolution",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "resolved_target": {
+        "endpoint_id": "endpoint_agent"
+      },
+      "evidence": []
+    }
+  },
+  {
+    "name": "valid handoff target unavailable command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-target-unavailable-command",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "reason_code": "no_eligible_target",
+      "reason": [
+        {
+          "kind": "text",
+          "media_type": "text/plain",
+          "text": "No eligible target is currently available"
+        }
+      ],
+      "evidence": []
+    }
+  },
+  {
     "name": "valid handoff snapshot",
     "schema_id": "urn:work-fabric:schema:v1:handoff-snapshot",
     "expected_valid": true,
@@ -294,6 +331,7 @@
         "actor_id": "initiator_01",
         "actor_type": "human"
       },
+      "target_binding": null,
       "package": {
         "work_reference": {
           "uri": "urn:work:item:42",
@@ -364,6 +402,23 @@
         "resource_version": 2,
         "recorded_at": "2026-07-13T08:00:00Z"
       },
+      "error": null
+    }
+  },
+  {
+    "name": "valid accepted operation result without receipt",
+    "schema_id": "urn:work-fabric:schema:v1:operation-result",
+    "expected_valid": true,
+    "instance": {
+      "spec_version": "1.0",
+      "request_message_id": "message_offer_01",
+      "operation_status": "accepted",
+      "resource": {
+        "resource_type": "handoff",
+        "resource_id": "handoff_02",
+        "resource_version": 1
+      },
+      "receipt": null,
       "error": null
     }
   },
@@ -540,6 +595,188 @@
       "current_resource_version": null,
       "field_violations": [],
       "details": {}
+    }
+  },
+  {
+    "name": "valid handoff snapshot without context",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-snapshot",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_02",
+      "thread_id": "thread_01",
+      "resource_version": 1,
+      "lifecycle_state": "offered",
+      "current_responsible_actor": {
+        "actor_id": "initiator_01",
+        "actor_type": "human"
+      },
+      "target_binding": null,
+      "package": {
+        "work_reference": {
+          "uri": "urn:work:item:42",
+          "extensions": {}
+        },
+        "target": {
+          "actor_id": "actor_01"
+        },
+        "intent": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Implement the approved change"
+          }
+        ],
+        "context_bundle_id": null,
+        "context_bundle_version": null,
+        "authority_scope_id": "authority_01",
+        "acceptance_criteria_ids": ["tests-pass"],
+        "verifier_actor_id": "verifier_01",
+        "accept_by": "2026-07-13T09:00:00Z",
+        "result_due_at": "2026-07-14T08:00:00Z"
+      },
+      "latest_status": null,
+      "result": null,
+      "parent_handoff_id": null,
+      "created_at": "2026-07-13T08:00:00Z",
+      "updated_at": "2026-07-13T08:00:00Z"
+    }
+  },
+  {
+    "name": "valid handoff reference command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-reference",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01"
+    }
+  },
+  {
+    "name": "valid handoff cancel command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-cancel-command",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "reason": [
+        {
+          "kind": "text",
+          "media_type": "text/plain",
+          "text": "Cancelled by the initiator"
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid handoff status command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-status-command",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "status": {
+        "status_report_id": "status_01",
+        "execution_status": "in_progress",
+        "progress": 0.5,
+        "message": [],
+        "observed_at": "2026-07-13T08:30:00Z",
+        "blocked_on": []
+      }
+    }
+  },
+  {
+    "name": "valid handoff result command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-result-command",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "result": {
+        "summary": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Implemented and tested"
+          }
+        ],
+        "artifacts": [],
+        "evidence": []
+      }
+    }
+  },
+  {
+    "name": "valid handoff verification command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-verification-command",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "satisfied_criterion_ids": ["tests-pass"],
+      "summary": [
+        {
+          "kind": "text",
+          "media_type": "text/plain",
+          "text": "All acceptance criteria are satisfied"
+        }
+      ],
+      "evidence": []
+    }
+  },
+  {
+    "name": "valid handoff rework command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-rework-command",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "criterion_ids": ["tests-pass"],
+      "reason": [
+        {
+          "kind": "text",
+          "media_type": "text/plain",
+          "text": "Fix the failing tests"
+        }
+      ]
+    }
+  },
+  {
+    "name": "valid handoff transfer command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-transfer-command",
+    "expected_valid": true,
+    "instance": {
+      "parent_handoff_id": "handoff_01",
+      "child_offer": {
+        "work_reference": {
+          "uri": "urn:work:item:42",
+          "extensions": {}
+        },
+        "target": {
+          "actor_id": "actor_02"
+        },
+        "intent": [
+          {
+            "kind": "text",
+            "media_type": "text/plain",
+            "text": "Complete the delegated work"
+          }
+        ],
+        "authority_scope": {
+          "delegation_id": "delegation_02",
+          "scopes": ["work:read"],
+          "resource_refs": ["urn:work:item:42"],
+          "expires_at": "2026-07-14T08:00:00Z",
+          "may_redelegate": false
+        },
+        "acceptance_criteria": [
+          {
+            "criterion_id": "tests-pass",
+            "description": "Tests pass",
+            "required": true,
+            "result_schema_ref": null,
+            "required_evidence_types": ["test_report"]
+          }
+        ],
+        "verifier": {
+          "actor_id": "verifier_01",
+          "actor_type": "human"
+        },
+        "priority": "normal",
+        "accept_by": "2026-07-13T09:00:00Z",
+        "result_due_at": "2026-07-14T08:00:00Z"
+      }
     }
   }
 ]
