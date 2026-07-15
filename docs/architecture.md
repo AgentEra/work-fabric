@@ -553,3 +553,17 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - Memory 参考 Adapters、复用型 Conformance Profiles 和端到端公共 Reference Suite。
 
 Transport Binding、飞书 Connector、Agent Endpoint Gateway 与本地 Agent Runtime 接入仍属于后续独立模块；PostgreSQL Production Adapter 与 Context Adapter 已作为 SPI 实现落地。它们增强参与方接入和运行能力，不会把外部执行职责吸收到 Work Fabric Core 内部。
+
+## 20. 阶段路线与执行状态
+
+| 阶段 | 范围 | 状态 |
+|---|---|---|
+| 1 | Exchange Core + Memory Reference | 已完成 |
+| 2 | PostgreSQL Production Adapter Foundation | 已完成 |
+| 3 | HTTP / SDK Binding | 下一阶段 |
+| 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
+| 6 | 高吞吐 Signal 与集群分区 | 未开始 |
+| 7 | 跨 Exchange Federation Profile | 未开始 |
+
+实施严格遵循上述顺序。阶段 3 只建立可独立运行的 Exchange Service、Transport Binding 和 SDK 边界，不同时实施 Console。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。

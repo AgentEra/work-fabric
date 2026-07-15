@@ -105,14 +105,28 @@ Work Fabric 由以下逻辑能力组成：
 
 ## 当前状态
 
-项目已经完成 WFPP v1 Core Protocol Artifacts 和 Exchange Core Phase 1 参考实现。Phase 1 是 **transport-free** 的：Application 直接消费协议命令，HTTP、SSE、Webhook、A2A、MCP、飞书与 Agent Runtime 均通过后续 Binding 或 Adapter 接入；参与方的专业工作与 Agent 执行始终在 Core 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现，以及阶段 2 的 PostgreSQL Production Persistence Foundation。Application 当前仍由进程内调用直接消费协议命令；HTTP、SSE、Webhook、A2A、MCP、飞书与 Agent Runtime 将通过后续 Binding 或 Adapter 接入，参与方的专业工作与 Agent 执行始终在 Core 之外。
+
+当前阶段路线：
+
+| 阶段 | 范围 | 状态 |
+|---|---|---|
+| 1 | Exchange Core + Memory Reference | 已完成 |
+| 2 | PostgreSQL Production Adapter Foundation | 已完成 |
+| 3 | HTTP / SDK Binding | 下一阶段 |
+| 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
+| 6 | 高吞吐 Signal 与集群分区 | 未开始 |
+| 7 | 跨 Exchange Federation Profile | 未开始 |
+
+阶段严格按顺序推进。Console 不进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都必须通过标准 API 提交协议命令。
 
 当前实现边界如下：
 
 - `Handoff` 是责任与生命周期的权威事实；`Assignment` 只能从 Handoff 读模型投影得到，不能独立写入。
 - Journal、幂等记录、投影检查点、投递位置、重试和死信具有技术中立 SPI。
 - Memory Adapter 是可执行参考和一致性测试载体，不是生产存储。
-- PostgreSQL 是下一生产 Storage Adapter，不是 Exchange Core 或 SPI 的依赖，也不会改变公共接口。
+- PostgreSQL Production Adapter Foundation 已完成；它不是 Exchange Core 或 SPI 的依赖，也没有改变公共接口。
 - PostgreSQL 适配器已覆盖 authority、outbox、projection、subscription、delivery、lease 和 Context 元数据；部署与迁移说明见 [PostgreSQL 部署文档](docs/postgresql-deployment.md)。
 - `npm run postgres:migrate -- --dry-run` 可预览迁移，`npm run postgres:smoke` 在设置 `PG_TEST_URL` 后执行租户 RLS 烟测。
 - “全局订阅”是跨逻辑 Partition 的查询与消费视图；恢复、确认和重放位置始终按 Subscription × Partition 独立保存，不承诺全局顺序。
@@ -125,7 +139,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一阶段将首先实现可插拔的 PostgreSQL 生产 Adapter，再在同一协议边界上增加独立 Transport Binding、Agent Endpoint 与外部系统 Connector。
+下一阶段严格聚焦 HTTP / SDK Binding：先把 transport-free Exchange 组合为可独立运行、可通过标准 API 和 SDK 调用的服务，再进入飞书、本地 Agent Runtime、查询运维和 Console。阶段 3 不包含 Console UI。
 
 ## 文档
 

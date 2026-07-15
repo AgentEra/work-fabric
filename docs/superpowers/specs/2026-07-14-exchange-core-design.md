@@ -789,15 +789,17 @@ Feishu / Agent / Webhook Adapters
 
 ### 14.3 后续顺序
 
-```text
-阶段 1：Exchange Core + Memory Reference
-阶段 2：PostgreSQL Production Adapter
-阶段 3：HTTP / SDK Binding
-阶段 4：飞书与本地 Agent Runtime 接入
-阶段 5：查询、运维和可观测性
-阶段 6：高吞吐 Signal 与集群分区
-阶段 7：跨 Exchange Federation Profile
-```
+| 阶段 | 范围 | 执行状态 |
+|---|---|---|
+| 1 | Exchange Core + Memory Reference | 已完成 |
+| 2 | PostgreSQL Production Adapter Foundation | 已完成 |
+| 3 | HTTP / SDK Binding | 下一阶段 |
+| 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
+| 6 | 高吞吐 Signal 与集群分区 | 未开始 |
+| 7 | 跨 Exchange Federation Profile | 未开始 |
+
+阶段严格按顺序推进。阶段 3 不包含 Console；先完成独立 HTTP Server、Transport Binding 与 SDK 边界，再进入参与方接入。Console 位于阶段 5，是可关闭、可替换的外围客户端，以状态呈现为主，不参与 Handoff 的必要执行链路；其可选人工干预也必须通过标准 API 提交协议命令，不能直接写存储或复制领域状态机。
 
 ## 15. 实施前协议修订
 
