@@ -10,6 +10,7 @@ export * from "./json.js";
 export * from "./persistence.js";
 export * from "./projection.js";
 export * from "./runtime-state.js";
+export * from "./semantic-version.js";
 export * from "./signal.js";
 export * from "./subscription.js";
 export * from "./target-resolution.js";

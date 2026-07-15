@@ -25,6 +25,25 @@ export const ENDPOINT_DIRECTORY_REQUIRED_CAPABILITIES = [
   "deterministic_pagination",
 ] as const;
 
+export type EndpointStoreErrorCode =
+  | "registration_exists"
+  | "registration_version_conflict"
+  | "immutable_binding"
+  | "idempotency_conflict"
+  | "session_fenced"
+  | "stale_sequence"
+  | "session_not_found";
+
+export class EndpointStoreError extends Error {
+  constructor(
+    readonly code: EndpointStoreErrorCode,
+    message: string,
+  ) {
+    super(message);
+    this.name = "EndpointStoreError";
+  }
+}
+
 export type EndpointAvailability =
   | "available"
   | "busy"
@@ -229,6 +248,11 @@ export interface EndpointDirectoryStore extends ExchangeAdapter {
     tenantId: string,
     endpointId: string,
     clientSessionId: string,
+  ): Promise<StoredEndpointSession | null>;
+  getSession(
+    tenantId: string,
+    endpointId: string,
+    sessionId: string,
   ): Promise<StoredEndpointSession | null>;
   getProjectedEndpoint(
     tenantId: string,
