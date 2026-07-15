@@ -12,7 +12,14 @@ export interface HttpRequestAuthenticator {
 }
 
 export interface HttpDispatchRequest {
-  readonly method: string;
+  readonly method:
+    | "DELETE"
+    | "GET"
+    | "HEAD"
+    | "OPTIONS"
+    | "PATCH"
+    | "POST"
+    | "PUT";
   readonly url: string;
   readonly headers?: Readonly<Record<string, string>>;
   readonly payload?: JsonObject | readonly unknown[] | string | null;

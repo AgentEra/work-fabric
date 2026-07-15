@@ -139,25 +139,25 @@ git commit -m "feat(http): add authorized query services"
 
 **Interfaces:** Produces `createHttpService(dependencies, config): HttpService`. Consumes `ExchangeApplication` and `HttpRequestAuthenticator`.
 
-- [ ] **Step 1: Write failing Command route tests**
+- [x] **Step 1: Write failing Command route tests**
 
 Cover Content-Type, malformed/excessive JSON, missing Bearer, valid Offer, invalid command, Authority denial, idempotent retry, version conflict, unavailable Resolver, request ID, and exact HTTP/OperationResult mapping through `service.dispatch`.
 
-- [ ] **Step 2: Write failing dependency guard**
+- [x] **Step 2: Write failing dependency guard**
 
 Assert Core/SPI do not import Fastify, Node HTTP, or transport-http, and the transport public index does not export internal modules.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```bash
 npx vitest run packages/transport-http/test/command-route.test.ts packages/transport-http/test/dependency-boundaries.test.ts
 ```
 
-- [ ] **Step 4: Implement the shell and route**
+- [x] **Step 4: Implement the shell and route**
 
 The command route extracts bounded authentication metadata, maps missing evidence to an empty object for the Application's normal unauthenticated result, invokes only `application.handle`, and returns the unchanged `OperationResult`. Thrown failures become a bounded synthetic 503 result without internal text.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/transport-http/test/command-route.test.ts packages/transport-http/test/dependency-boundaries.test.ts
