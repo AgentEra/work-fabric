@@ -163,15 +163,17 @@ git commit -m "feat(spi): add target eligibility verifier"
 - Modify: `packages/exchange-core/src/domain/handoff-reducer.ts`
 - Modify: `packages/exchange-core/src/domain/handoff-state-codec.ts`
 - Modify: `packages/exchange-core/src/domain/index.ts`
+- Modify: `packages/exchange-core/src/application/handoff-codec.ts`
 - Test: `packages/exchange-core/test/handoff-decider.test.ts`
 - Test: `packages/exchange-core/test/handoff-reducer.test.ts`
 - Test: `packages/exchange-core/test/handoff-codec.test.ts`
+- Test: `packages/exchange-core/test/concurrency.integration.test.ts`
 
 **Interfaces:**
 - Consumes: protocol explicit target and Evidence JSON.
 - Produces: lifecycle states `target_resolution_pending` and `target_unavailable`; commands `resolve_target` and `report_target_unavailable`; events `target_resolution_requested`, `target_resolved`, and `target_unavailable`; immutable `TargetBinding`; `effectiveHandoffTarget(state)`.
 
-- [ ] **Step 1: Write failing domain tests one behavior at a time**
+- [x] **Step 1: Write failing domain tests one behavior at a time**
 
 Cover direct Offer unchanged, Capability Offer pending, pending cannot accept, eligible resolve reaches offered, unavailable becomes terminal, cancel/expire pending, second resolve rejected, and state/event codec round trips.
 
@@ -183,7 +185,7 @@ expect(decision).toMatchObject({
 });
 ```
 
-- [ ] **Step 2: Run domain tests and verify RED**
+- [x] **Step 2: Run domain tests and verify RED**
 
 ```bash
 npx vitest run packages/exchange-core/test/handoff-decider.test.ts packages/exchange-core/test/handoff-reducer.test.ts packages/exchange-core/test/handoff-codec.test.ts
@@ -191,11 +193,11 @@ npx vitest run packages/exchange-core/test/handoff-decider.test.ts packages/exch
 
 Expected: FAIL because the new commands, events, states, and binding codec are absent.
 
-- [ ] **Step 3: Implement minimal domain behavior**
+- [x] **Step 3: Implement minimal domain behavior**
 
 Add the immutable binding and effective-target helper. Keep the original Package unchanged. Make pending and unavailable states reject every interaction not explicitly listed in the design. Reuse `accept_by` for pending expiry.
 
-- [ ] **Step 4: Run domain tests for GREEN**
+- [x] **Step 4: Run domain tests for GREEN**
 
 ```bash
 npx vitest run packages/exchange-core/test/handoff-decider.test.ts packages/exchange-core/test/handoff-reducer.test.ts packages/exchange-core/test/handoff-codec.test.ts
@@ -204,7 +206,7 @@ npm run typecheck
 
 Expected: all domain tests and typecheck pass.
 
-- [ ] **Step 5: Commit the domain model**
+- [x] **Step 5: Commit the domain model**
 
 ```bash
 git add packages/exchange-core/src/domain packages/exchange-core/test

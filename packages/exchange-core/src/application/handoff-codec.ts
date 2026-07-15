@@ -343,6 +343,7 @@ type StateChangedField =
   | "recipient"
   | "resource_version"
   | "result"
+  | "target_binding"
   | "updated_at";
 
 type ChangedField = StateChangedField | "latest_status";
@@ -350,12 +351,33 @@ type ChangedField = StateChangedField | "latest_status";
 function projectEvent(event: HandoffEvent): EventProjection {
   switch (event.event_type) {
     case "workfabric.handoff.offered.v1":
+    case "workfabric.handoff.target_resolution_requested.v1":
       return {
         change_type: "created",
         changed_fields: [
           "current_responsible_actor",
           "lifecycle_state",
           "package",
+        ],
+        receipt_type: null,
+      };
+    case "workfabric.handoff.target_resolved.v1":
+      return {
+        change_type: "target_resolved",
+        changed_fields: [
+          "lifecycle_state",
+          "target_binding",
+          "updated_at",
+        ],
+        receipt_type: null,
+      };
+    case "workfabric.handoff.target_unavailable.v1":
+      return {
+        change_type: "target_unavailable",
+        changed_fields: [
+          "current_responsible_actor",
+          "lifecycle_state",
+          "updated_at",
         ],
         receipt_type: null,
       };

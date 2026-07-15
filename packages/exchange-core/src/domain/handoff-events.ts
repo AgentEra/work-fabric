@@ -1,6 +1,10 @@
 import type { JsonObject } from "@work-fabric/exchange-spi";
 
-import type { ActorRef, HandoffPackage } from "./handoff-types.js";
+import type {
+  ActorRef,
+  HandoffPackage,
+  TargetBinding,
+} from "./handoff-types.js";
 
 interface HandoffEventBase {
   readonly handoff_id: string;
@@ -13,6 +17,33 @@ export interface HandoffOfferedEvent extends HandoffEventBase {
   readonly initiator: ActorRef;
   readonly package: HandoffPackage;
   readonly parent_handoff_id: string | null;
+}
+
+export interface HandoffTargetResolutionRequestedEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.target_resolution_requested.v1";
+  readonly thread_id: string;
+  readonly initiator: ActorRef;
+  readonly package: HandoffPackage;
+  readonly parent_handoff_id: string | null;
+}
+
+export interface HandoffTargetResolvedEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.target_resolved.v1";
+  readonly binding: TargetBinding;
+}
+
+export interface HandoffTargetUnavailableEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.target_unavailable.v1";
+  readonly resolved_by: ActorRef;
+  readonly resolver_endpoint_id: string;
+  readonly delegation_id: string | null;
+  readonly reason_code:
+    | "no_candidate"
+    | "no_eligible_target"
+    | "policy_rejected"
+    | "resolver_unavailable";
+  readonly reason: readonly JsonObject[];
+  readonly evidence: readonly JsonObject[];
 }
 
 export interface HandoffAcceptedEvent extends HandoffEventBase {
@@ -67,6 +98,9 @@ export interface HandoffTransferredEvent extends HandoffEventBase {
 
 export type HandoffEvent =
   | HandoffOfferedEvent
+  | HandoffTargetResolutionRequestedEvent
+  | HandoffTargetResolvedEvent
+  | HandoffTargetUnavailableEvent
   | HandoffAcceptedEvent
   | HandoffDeclinedEvent
   | HandoffExpiredEvent

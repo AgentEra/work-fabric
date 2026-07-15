@@ -1,4 +1,8 @@
-import type { JsonObject, JsonValue } from "@work-fabric/exchange-spi";
+import type {
+  ExplicitHandoffTarget,
+  JsonObject,
+  JsonValue,
+} from "@work-fabric/exchange-spi";
 
 import type { HandoffEvent } from "./handoff-events.js";
 import type {
@@ -10,6 +14,7 @@ import type {
   HandoffPackage,
   HandoffState,
   HandoffTarget,
+  TargetBinding,
 } from "./handoff-types.js";
 
 type UnknownRecord = { readonly [key: string]: unknown };
@@ -242,6 +247,8 @@ function decodeLifecycleState(
 ): HandoffLifecycleState {
   const lifecycleState = requireString(value, path, invalid);
   switch (lifecycleState) {
+    case "target_resolution_pending":
+    case "target_unavailable":
     case "offered":
     case "accepted":
     case "result_returned":
@@ -256,6 +263,73 @@ function decodeLifecycleState(
     default:
       return invalid(path);
   }
+}
+
+function decodeExplicitTarget(
+  value: unknown,
+  path: string,
+  invalid: InvalidStoredValue,
+): ExplicitHandoffTarget {
+  const target = decodeTarget(value, path, invalid);
+  if ("capability_requirement" in target) invalid(path);
+  return target;
+}
+
+function decodeTargetBinding(
+  value: unknown,
+  path: string,
+  invalid: InvalidStoredValue,
+): TargetBinding {
+  const binding = requireRecord(value, path, invalid);
+  requireOnlyKeys(
+    binding,
+    [
+      "target",
+      "resolved_by",
+      "resolver_endpoint_id",
+      "delegation_id",
+      "resolved_at",
+      "evidence",
+    ],
+    path,
+    invalid,
+  );
+  return {
+    target: decodeExplicitTarget(binding.target, `${path}.target`, invalid),
+    resolved_by: decodeActor(
+      binding.resolved_by,
+      `${path}.resolved_by`,
+      invalid,
+    ),
+    resolver_endpoint_id: requireString(
+      binding.resolver_endpoint_id,
+      `${path}.resolver_endpoint_id`,
+      invalid,
+    ),
+    delegation_id: requireNullableString(
+      binding.delegation_id,
+      `${path}.delegation_id`,
+      invalid,
+    ),
+    resolved_at: requireString(
+      binding.resolved_at,
+      `${path}.resolved_at`,
+      invalid,
+    ),
+    evidence: requireObjectArray(
+      binding.evidence,
+      `${path}.evidence`,
+      invalid,
+    ),
+  };
+}
+
+function decodeNullableTargetBinding(
+  value: unknown,
+  path: string,
+  invalid: InvalidStoredValue,
+): TargetBinding | null {
+  return value === null ? null : decodeTargetBinding(value, path, invalid);
 }
 
 function decodeTarget(
@@ -501,6 +575,17 @@ function targetToJson(target: HandoffTarget): JsonObject {
   return { capability_requirement: target.capability_requirement };
 }
 
+function targetBindingToJson(binding: TargetBinding): JsonObject {
+  return {
+    target: targetToJson(binding.target),
+    resolved_by: actorToJson(binding.resolved_by),
+    resolver_endpoint_id: binding.resolver_endpoint_id,
+    delegation_id: binding.delegation_id,
+    resolved_at: binding.resolved_at,
+    evidence: binding.evidence,
+  };
+}
+
 function authorityScopeToJson(authority: AuthorityScope): JsonObject {
   const base: JsonObject = {
     delegation_id: authority.delegation_id,
@@ -566,6 +651,10 @@ export function handoffStateToJson(state: HandoffState): JsonObject {
       state.current_responsible_actor === null
         ? null
         : actorToJson(state.current_responsible_actor),
+    target_binding:
+      state.target_binding === null
+        ? null
+        : targetBindingToJson(state.target_binding),
     package: packageToJson(state.package),
     result: state.result,
     parent_handoff_id: state.parent_handoff_id,
@@ -588,6 +677,7 @@ export function handoffStateFromJson(value: JsonObject): HandoffState {
       "recipient",
       "verifier",
       "current_responsible_actor",
+      "target_binding",
       "package",
       "result",
       "parent_handoff_id",
@@ -619,6 +709,11 @@ export function handoffStateFromJson(value: JsonObject): HandoffState {
       "current_responsible_actor",
       invalidState,
     ),
+    target_binding: decodeNullableTargetBinding(
+      state.target_binding,
+      "target_binding",
+      invalidState,
+    ),
     package: decodePackage(state.package, "package", invalidState),
     result:
       state.result === null
@@ -647,12 +742,25 @@ export function handoffEventToJson(event: HandoffEvent): JsonObject {
   };
   switch (event.event_type) {
     case "workfabric.handoff.offered.v1":
+    case "workfabric.handoff.target_resolution_requested.v1":
       return {
         ...common,
         thread_id: event.thread_id,
         initiator: actorToJson(event.initiator),
         package: packageToJson(event.package),
         parent_handoff_id: event.parent_handoff_id,
+      };
+    case "workfabric.handoff.target_resolved.v1":
+      return { ...common, binding: targetBindingToJson(event.binding) };
+    case "workfabric.handoff.target_unavailable.v1":
+      return {
+        ...common,
+        resolved_by: actorToJson(event.resolved_by),
+        resolver_endpoint_id: event.resolver_endpoint_id,
+        delegation_id: event.delegation_id,
+        reason_code: event.reason_code,
+        reason: event.reason,
+        evidence: event.evidence,
       };
     case "workfabric.handoff.accepted.v1":
       return { ...common, recipient: actorToJson(event.recipient) };
@@ -690,6 +798,9 @@ function decodeEventType(
   const eventType = requireString(value, "event_type", invalidEvent);
   switch (eventType) {
     case "workfabric.handoff.offered.v1":
+    case "workfabric.handoff.target_resolution_requested.v1":
+    case "workfabric.handoff.target_resolved.v1":
+    case "workfabric.handoff.target_unavailable.v1":
     case "workfabric.handoff.accepted.v1":
     case "workfabric.handoff.declined.v1":
     case "workfabric.handoff.expired.v1":
@@ -710,12 +821,25 @@ function eventKeys(eventType: HandoffEvent["event_type"]): readonly string[] {
   const common = ["event_type", "handoff_id", "occurred_at"];
   switch (eventType) {
     case "workfabric.handoff.offered.v1":
+    case "workfabric.handoff.target_resolution_requested.v1":
       return [
         ...common,
         "thread_id",
         "initiator",
         "package",
         "parent_handoff_id",
+      ];
+    case "workfabric.handoff.target_resolved.v1":
+      return [...common, "binding"];
+    case "workfabric.handoff.target_unavailable.v1":
+      return [
+        ...common,
+        "resolved_by",
+        "resolver_endpoint_id",
+        "delegation_id",
+        "reason_code",
+        "reason",
+        "evidence",
       ];
     case "workfabric.handoff.accepted.v1":
       return [...common, "recipient"];
@@ -752,6 +876,7 @@ export function handoffEventFromJson(value: JsonObject): HandoffEvent {
 
   switch (eventType) {
     case "workfabric.handoff.offered.v1":
+    case "workfabric.handoff.target_resolution_requested.v1":
       return {
         event_type: eventType,
         handoff_id: handoffId,
@@ -765,6 +890,51 @@ export function handoffEventFromJson(value: JsonObject): HandoffEvent {
         ),
         occurred_at: occurredAt,
       };
+    case "workfabric.handoff.target_resolved.v1":
+      return {
+        event_type: eventType,
+        handoff_id: handoffId,
+        binding: decodeTargetBinding(event.binding, "binding", invalidEvent),
+        occurred_at: occurredAt,
+      };
+    case "workfabric.handoff.target_unavailable.v1": {
+      const reasonCode = requireString(
+        event.reason_code,
+        "reason_code",
+        invalidEvent,
+      );
+      if (
+        reasonCode !== "no_candidate" &&
+        reasonCode !== "no_eligible_target" &&
+        reasonCode !== "policy_rejected" &&
+        reasonCode !== "resolver_unavailable"
+      ) {
+        invalidEvent("reason_code");
+      }
+      return {
+        event_type: eventType,
+        handoff_id: handoffId,
+        resolved_by: decodeActor(
+          event.resolved_by,
+          "resolved_by",
+          invalidEvent,
+        ),
+        resolver_endpoint_id: requireString(
+          event.resolver_endpoint_id,
+          "resolver_endpoint_id",
+          invalidEvent,
+        ),
+        delegation_id: requireNullableString(
+          event.delegation_id,
+          "delegation_id",
+          invalidEvent,
+        ),
+        reason_code: reasonCode,
+        reason: requireObjectArray(event.reason, "reason", invalidEvent),
+        evidence: requireObjectArray(event.evidence, "evidence", invalidEvent),
+        occurred_at: occurredAt,
+      };
+    }
     case "workfabric.handoff.accepted.v1":
       return {
         event_type: eventType,

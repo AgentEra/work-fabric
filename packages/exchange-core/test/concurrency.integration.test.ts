@@ -342,7 +342,7 @@ function result(key: string): CommandEnvelope {
 }
 
 describe("Exchange concurrency and application recovery", () => {
-  it("commits exactly one of two concurrent capability-target Accepts", async () => {
+  it("rejects every concurrent Accept until a Capability target is resolved", async () => {
     const persistence = new MemoryExchangePersistence();
     const app = application(persistence);
     await app.handle(
@@ -364,23 +364,23 @@ describe("Exchange concurrency and application recovery", () => {
       }),
     ]);
 
-    expect(outcomes.map((value) => value.operation_status).sort()).toEqual([
-      "accepted",
-      "conflict",
+    expect(outcomes.map((value) => value.operation_status)).toEqual([
+      "rejected",
+      "rejected",
     ]);
-    expect(
-      outcomes.find(({ operation_status }) => operation_status === "conflict"),
-    ).toMatchObject({ error: { code: "version_conflict" } });
+    for (const outcome of outcomes) {
+      expect(outcome).toMatchObject({
+        operation_status: "rejected",
+        error: {
+          code: "invalid_state_transition",
+          retryable: false,
+        },
+      });
+    }
     const records = await persistence.readStream("handoff_1");
-    expect(records).toHaveLength(2);
-    const acceptedEvent = handoffEventFromJson(records[1]!.domain_data);
-    const winningActor =
-      outcomes[0]?.operation_status === "accepted"
-        ? "actor_agent_a"
-        : "actor_agent_b";
-    expect(acceptedEvent).toMatchObject({
-      event_type: "workfabric.handoff.accepted.v1",
-      recipient: { actor_id: winningActor, actor_type: "agent" },
+    expect(records).toHaveLength(1);
+    expect(handoffEventFromJson(records[0]!.domain_data)).toMatchObject({
+      event_type: "workfabric.handoff.target_resolution_requested.v1",
     });
   });
 

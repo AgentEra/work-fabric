@@ -29,6 +29,10 @@ const otherActor: ActorRef = {
   actor_id: "actor_other",
   actor_type: "agent",
 };
+const resolver: ActorRef = {
+  actor_id: "actor_resolver",
+  actor_type: "agent",
+};
 
 const handoffPackage: HandoffPackage = {
   work_reference: { system: "github", resource_id: "issue_42" },
@@ -75,6 +79,17 @@ const allowedContext: HandoffDecisionContext = {
   policy_allows_cancel: true,
   context_available: true,
   authority_valid: true,
+  resolver_authorized: true,
+  target_eligible: true,
+};
+
+const capabilityPackage: HandoffPackage = {
+  ...handoffPackage,
+  target: {
+    capability_requirement: {
+      capability_id: "software.implementation",
+    },
+  },
 };
 
 function offeredEvent(
@@ -230,6 +245,176 @@ const reworkCommand: HandoffCommand = {
 };
 
 describe("Handoff lifecycle decisions", () => {
+  it("keeps a Capability Offer pending without binding a recipient", () => {
+    const decision = decideHandoff(
+      null,
+      {
+        kind: "offer",
+        handoff_id: "handoff_capability",
+        thread_id: "thread_01",
+        actor: initiator,
+        package: capabilityPackage,
+        parent_handoff_id: null,
+      },
+      allowedContext,
+    );
+    const event = requireAccepted(decision);
+
+    expect(event.event_type).toBe(
+      "workfabric.handoff.target_resolution_requested.v1",
+    );
+    const state = evolveHandoff(null, event, 1);
+    expect(state.lifecycle_state).toBe("target_resolution_pending");
+    expect(state.current_responsible_actor).toEqual(initiator);
+    expect(state.target_binding).toBeNull();
+  });
+
+  it("binds one eligible explicit target before the Handoff becomes offered", () => {
+    const pending = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.target_resolution_requested.v1",
+        handoff_id: "handoff_capability",
+        thread_id: "thread_01",
+        initiator,
+        package: capabilityPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const decision = decideHandoff(
+      pending,
+      {
+        kind: "resolve_target",
+        handoff_id: "handoff_capability",
+        actor: resolver,
+        resolver_endpoint_id: "endpoint_resolver",
+        delegation_id: "delegation_resolver",
+        resolved_target: { actor_id: recipient.actor_id },
+        evidence: [],
+      },
+      allowedContext,
+    );
+    const event = requireAccepted(decision);
+    const offered = evolveHandoff(pending, event, 2);
+
+    expect(offered.lifecycle_state).toBe("offered");
+    expect(offered.package.target).toEqual(capabilityPackage.target);
+    expect(offered.target_binding).toEqual({
+      target: { actor_id: recipient.actor_id },
+      resolved_by: resolver,
+      resolver_endpoint_id: "endpoint_resolver",
+      delegation_id: "delegation_resolver",
+      resolved_at: allowedContext.now,
+      evidence: [],
+    });
+    expect(offered.current_responsible_actor).toEqual(initiator);
+  });
+
+  it("authorizes acceptance against the resolved Actor rather than the Capability Requirement", () => {
+    const pending = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.target_resolution_requested.v1",
+        handoff_id: "handoff_01",
+        thread_id: "thread_01",
+        initiator,
+        package: capabilityPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const offered = evolveHandoff(
+      pending,
+      {
+        event_type: "workfabric.handoff.target_resolved.v1",
+        handoff_id: "handoff_01",
+        binding: {
+          target: { actor_id: recipient.actor_id },
+          resolved_by: resolver,
+          resolver_endpoint_id: "endpoint_resolver",
+          delegation_id: null,
+          resolved_at: "2026-07-14T01:05:00Z",
+          evidence: [],
+        },
+        occurred_at: "2026-07-14T01:05:00Z",
+      },
+      2,
+    );
+
+    expectRejected(
+      decideHandoff(
+        offered,
+        { ...acceptCommand, actor: otherActor },
+        allowedContext,
+      ),
+      "permission_denied",
+    );
+    expect(requireAccepted(decideHandoff(offered, acceptCommand, allowedContext)))
+      .toMatchObject({
+        event_type: "workfabric.handoff.accepted.v1",
+        recipient,
+      });
+  });
+
+  it("records an authorized unavailable outcome as terminal", () => {
+    const pending = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.target_resolution_requested.v1",
+        handoff_id: "handoff_capability",
+        thread_id: "thread_01",
+        initiator,
+        package: capabilityPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const decision = decideHandoff(
+      pending,
+      {
+        kind: "report_target_unavailable",
+        handoff_id: "handoff_capability",
+        actor: resolver,
+        resolver_endpoint_id: "endpoint_resolver",
+        delegation_id: null,
+        reason_code: "no_eligible_target",
+        reason: [{ kind: "text", text: "No eligible target" }],
+        evidence: [],
+      },
+      allowedContext,
+    );
+    const unavailable = evolveHandoff(pending, requireAccepted(decision), 2);
+
+    expect(unavailable.lifecycle_state).toBe("target_unavailable");
+    expect(unavailable.current_responsible_actor).toBeNull();
+    expect(unavailable.target_binding).toBeNull();
+  });
+
+  it("rejects acceptance before a Capability target is resolved", () => {
+    const pending = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.target_resolution_requested.v1",
+        handoff_id: "handoff_01",
+        thread_id: "thread_01",
+        initiator,
+        package: capabilityPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+
+    expectRejected(
+      decideHandoff(pending, acceptCommand, allowedContext),
+      "invalid_state_transition",
+    );
+  });
+
   const transitionCases: readonly {
     readonly label: string;
     readonly state: HandoffState | null;

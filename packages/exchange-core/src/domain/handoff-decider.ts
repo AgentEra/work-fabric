@@ -6,6 +6,7 @@ import type {
   HandoffDecisionContext,
 } from "./handoff-commands.js";
 import type { HandoffEvent } from "./handoff-events.js";
+import { effectiveHandoffTarget } from "./handoff-types.js";
 import type {
   ActorRef,
   HandoffLifecycleState,
@@ -32,8 +33,13 @@ function actorEquals(left: ActorRef | null, right: ActorRef): boolean {
 }
 
 function isDirectRecipient(state: HandoffState, actor: ActorRef): boolean {
-  const target = state.package.target;
+  const target = effectiveHandoffTarget(state);
+  if (target === null) return false;
   return !("actor_id" in target) || target.actor_id === actor.actor_id;
+}
+
+function isCapabilityTarget(state: HandoffState): boolean {
+  return "capability_requirement" in state.package.target;
 }
 
 function isAuthorizedRecipient(
@@ -155,7 +161,10 @@ function decideExpire(
   command: Extract<HandoffCommand, { readonly kind: "expire" }>,
   context: HandoffDecisionContext,
 ): DomainDecision {
-  const invalidState = isAllowedState(state, command.kind, ["offered"]);
+  const invalidState = isAllowedState(state, command.kind, [
+    "target_resolution_pending",
+    "offered",
+  ]);
   if (invalidState !== null) return invalidState;
   if (
     timestamp(context.now, "decision now") <
@@ -179,6 +188,7 @@ function decideCancel(
   context: HandoffDecisionContext,
 ): DomainDecision {
   const invalidState = isAllowedState(state, command.kind, [
+    "target_resolution_pending",
     "offered",
     "accepted",
   ]);
@@ -193,6 +203,70 @@ function decideCancel(
     event_type: "workfabric.handoff.cancelled.v1",
     handoff_id: command.handoff_id,
     reason: command.reason,
+    occurred_at: context.now,
+  });
+}
+
+function decideResolveTarget(
+  state: HandoffState,
+  command: Extract<HandoffCommand, { readonly kind: "resolve_target" }>,
+  context: HandoffDecisionContext,
+): DomainDecision {
+  const invalidState = isAllowedState(state, command.kind, [
+    "target_resolution_pending",
+  ]);
+  if (invalidState !== null) return invalidState;
+  if (!isCapabilityTarget(state)) {
+    return reject("invalid_argument", "Handoff does not have a Capability target");
+  }
+  if (!context.resolver_authorized) {
+    return rejectUnauthorized("resolve the Handoff target");
+  }
+  if (!context.target_eligible) {
+    return reject("precondition_failed", "Resolved target is not eligible");
+  }
+  return accept({
+    event_type: "workfabric.handoff.target_resolved.v1",
+    handoff_id: command.handoff_id,
+    binding: {
+      target: command.resolved_target,
+      resolved_by: command.actor,
+      resolver_endpoint_id: command.resolver_endpoint_id,
+      delegation_id: command.delegation_id,
+      resolved_at: context.now,
+      evidence: command.evidence,
+    },
+    occurred_at: context.now,
+  });
+}
+
+function decideTargetUnavailable(
+  state: HandoffState,
+  command: Extract<
+    HandoffCommand,
+    { readonly kind: "report_target_unavailable" }
+  >,
+  context: HandoffDecisionContext,
+): DomainDecision {
+  const invalidState = isAllowedState(state, command.kind, [
+    "target_resolution_pending",
+  ]);
+  if (invalidState !== null) return invalidState;
+  if (!isCapabilityTarget(state)) {
+    return reject("invalid_argument", "Handoff does not have a Capability target");
+  }
+  if (!context.resolver_authorized) {
+    return rejectUnauthorized("report the Handoff target unavailable");
+  }
+  return accept({
+    event_type: "workfabric.handoff.target_unavailable.v1",
+    handoff_id: command.handoff_id,
+    resolved_by: command.actor,
+    resolver_endpoint_id: command.resolver_endpoint_id,
+    delegation_id: command.delegation_id,
+    reason_code: command.reason_code,
+    reason: command.reason,
+    evidence: command.evidence,
     occurred_at: context.now,
   });
 }
@@ -377,7 +451,10 @@ export function decideHandoff(
       );
     }
     return accept({
-      event_type: "workfabric.handoff.offered.v1",
+      event_type:
+        "capability_requirement" in command.package.target
+          ? "workfabric.handoff.target_resolution_requested.v1"
+          : "workfabric.handoff.offered.v1",
       handoff_id: command.handoff_id,
       thread_id: command.thread_id,
       initiator: command.actor,
@@ -395,6 +472,10 @@ export function decideHandoff(
   }
 
   switch (command.kind) {
+    case "resolve_target":
+      return decideResolveTarget(state, command, context);
+    case "report_target_unavailable":
+      return decideTargetUnavailable(state, command, context);
     case "accept":
       return decideAccept(state, command, context);
     case "decline":

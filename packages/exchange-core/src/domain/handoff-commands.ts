@@ -1,4 +1,4 @@
-import type { JsonObject } from "@work-fabric/exchange-spi";
+import type { ExplicitHandoffTarget, JsonObject } from "@work-fabric/exchange-spi";
 
 import type { ActorRef, HandoffPackage } from "./handoff-types.js";
 
@@ -10,6 +10,29 @@ export type HandoffCommand =
       readonly actor: ActorRef;
       readonly package: HandoffPackage;
       readonly parent_handoff_id: string | null;
+    }
+  | {
+      readonly kind: "resolve_target";
+      readonly handoff_id: string;
+      readonly actor: ActorRef;
+      readonly resolver_endpoint_id: string;
+      readonly delegation_id: string | null;
+      readonly resolved_target: ExplicitHandoffTarget;
+      readonly evidence: readonly JsonObject[];
+    }
+  | {
+      readonly kind: "report_target_unavailable";
+      readonly handoff_id: string;
+      readonly actor: ActorRef;
+      readonly resolver_endpoint_id: string;
+      readonly delegation_id: string | null;
+      readonly reason_code:
+        | "no_candidate"
+        | "no_eligible_target"
+        | "policy_rejected"
+        | "resolver_unavailable";
+      readonly reason: readonly JsonObject[];
+      readonly evidence: readonly JsonObject[];
     }
   | {
       readonly kind: "accept";
@@ -72,4 +95,6 @@ export interface HandoffDecisionContext {
   readonly policy_allows_cancel: boolean;
   readonly context_available: boolean;
   readonly authority_valid: boolean;
+  readonly resolver_authorized?: boolean;
+  readonly target_eligible?: boolean;
 }

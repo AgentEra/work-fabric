@@ -1,4 +1,8 @@
-import type { ContextReference, JsonObject } from "@work-fabric/exchange-spi";
+import type {
+  ContextReference,
+  ExplicitHandoffTarget,
+  JsonObject,
+} from "@work-fabric/exchange-spi";
 
 export type ActorType = "human" | "agent" | "system";
 
@@ -31,6 +35,8 @@ export interface AuthorityScope {
 }
 
 export type HandoffLifecycleState =
+  | "target_resolution_pending"
+  | "target_unavailable"
   | "offered"
   | "accepted"
   | "result_returned"
@@ -55,6 +61,15 @@ export interface HandoffPackage {
   readonly result_due_at: string;
 }
 
+export interface TargetBinding {
+  readonly target: ExplicitHandoffTarget;
+  readonly resolved_by: ActorRef;
+  readonly resolver_endpoint_id: string;
+  readonly delegation_id: string | null;
+  readonly resolved_at: string;
+  readonly evidence: readonly JsonObject[];
+}
+
 export interface HandoffState {
   readonly handoff_id: string;
   readonly thread_id: string;
@@ -64,10 +79,20 @@ export interface HandoffState {
   readonly recipient: ActorRef | null;
   readonly verifier: ActorRef;
   readonly current_responsible_actor: ActorRef | null;
+  readonly target_binding: TargetBinding | null;
   readonly package: HandoffPackage;
   readonly result: JsonObject | null;
   readonly parent_handoff_id: string | null;
   readonly child_handoff_id: string | null;
   readonly created_at: string;
   readonly updated_at: string;
+}
+
+export function effectiveHandoffTarget(
+  state: HandoffState,
+): ExplicitHandoffTarget | null {
+  if ("capability_requirement" in state.package.target) {
+    return state.target_binding?.target ?? null;
+  }
+  return state.package.target;
 }

@@ -26,6 +26,10 @@ const verifier: ActorRef = {
   actor_id: "actor_verifier",
   actor_type: "system",
 };
+const resolver: ActorRef = {
+  actor_id: "actor_resolver",
+  actor_type: "agent",
+};
 
 const handoffPackage: HandoffPackage = {
   work_reference: {
@@ -61,6 +65,15 @@ const handoffPackage: HandoffPackage = {
   priority: "high",
   accept_by: "2026-07-14T08:00:00Z",
   result_due_at: "2026-07-15T08:00:00Z",
+};
+
+const capabilityPackage: HandoffPackage = {
+  ...handoffPackage,
+  target: {
+    capability_requirement: {
+      capability_id: "software.implementation",
+    },
+  },
 };
 
 const storedAuthorityScope: JsonObject = {
@@ -177,6 +190,34 @@ function offered(
   };
 }
 
+function targetResolutionRequested(): HandoffEvent {
+  return {
+    event_type: "workfabric.handoff.target_resolution_requested.v1",
+    handoff_id: "handoff_capability",
+    thread_id: "thread_01",
+    initiator,
+    package: capabilityPackage,
+    parent_handoff_id: null,
+    occurred_at: "2026-07-14T01:00:00Z",
+  };
+}
+
+function targetResolved(): HandoffEvent {
+  return {
+    event_type: "workfabric.handoff.target_resolved.v1",
+    handoff_id: "handoff_capability",
+    binding: {
+      target: { endpoint_id: "endpoint_agent" },
+      resolved_by: resolver,
+      resolver_endpoint_id: "endpoint_resolver",
+      delegation_id: null,
+      resolved_at: "2026-07-14T01:05:00Z",
+      evidence: [],
+    },
+    occurred_at: "2026-07-14T01:05:00Z",
+  };
+}
+
 function accepted(
   overrides: Partial<Extract<HandoffEvent, { event_type: "workfabric.handoff.accepted.v1" }>> = {},
 ): Extract<HandoffEvent, { event_type: "workfabric.handoff.accepted.v1" }> {
@@ -234,6 +275,38 @@ function versioned(...events: readonly HandoffEvent[]) {
 }
 
 describe("Handoff event replay", () => {
+  it("replays Capability request and immutable target binding", () => {
+    const requested: HandoffEvent = {
+      event_type: "workfabric.handoff.target_resolution_requested.v1",
+      handoff_id: "handoff_capability",
+      thread_id: "thread_01",
+      initiator,
+      package: capabilityPackage,
+      parent_handoff_id: null,
+      occurred_at: "2026-07-14T01:00:00Z",
+    };
+    const resolved: HandoffEvent = {
+      event_type: "workfabric.handoff.target_resolved.v1",
+      handoff_id: "handoff_capability",
+      binding: {
+        target: { endpoint_id: "endpoint_agent" },
+        resolved_by: resolver,
+        resolver_endpoint_id: "endpoint_resolver",
+        delegation_id: null,
+        resolved_at: "2026-07-14T01:05:00Z",
+        evidence: [],
+      },
+      occurred_at: "2026-07-14T01:05:00Z",
+    };
+
+    const state = replayHandoff(versioned(requested, resolved));
+
+    expect(state?.lifecycle_state).toBe("offered");
+    expect(state?.package.target).toEqual(capabilityPackage.target);
+    expect(state?.target_binding).toEqual(resolved.binding);
+    expect(state?.current_responsible_actor).toEqual(initiator);
+  });
+
   it("moves responsibility Initiator -> Recipient -> Verifier -> none on the normal path", () => {
     const offeredState = evolveHandoff(null, offered(), 1);
     expect(offeredState.lifecycle_state).toBe("offered");
@@ -442,6 +515,19 @@ describe("Handoff replay guards", () => {
 describe("Handoff stored JSON boundary", () => {
   const allEvents: readonly HandoffEvent[] = [
     offered(),
+    targetResolutionRequested(),
+    targetResolved(),
+    {
+      event_type: "workfabric.handoff.target_unavailable.v1",
+      handoff_id: "handoff_capability",
+      resolved_by: resolver,
+      resolver_endpoint_id: "endpoint_resolver",
+      delegation_id: null,
+      reason_code: "no_eligible_target",
+      reason: [{ kind: "text", text: "No eligible target" }],
+      evidence: [],
+      occurred_at: "2026-07-14T01:05:00Z",
+    },
     accepted(),
     {
       event_type: "workfabric.handoff.declined.v1",
@@ -496,6 +582,20 @@ describe("Handoff stored JSON boundary", () => {
     expect(decoded.package).not.toBe(state.package);
   });
 
+  it("round-trips a resolved Capability state with a separate immutable binding", () => {
+    const state = replayHandoff(
+      versioned(targetResolutionRequested(), targetResolved()),
+    );
+    expect(state).not.toBeNull();
+    if (state === null) throw new Error("Expected resolved Capability state");
+
+    const decoded = handoffStateFromJson(handoffStateToJson(state));
+
+    expect(decoded).toEqual(state);
+    expect(decoded.package.target).toEqual(capabilityPackage.target);
+    expect(decoded.target_binding).toEqual(state.target_binding);
+  });
+
   it.each(allEvents)("round-trips $event_type", (event) => {
     const stored: JsonObject = handoffEventToJson(event);
     const decoded = handoffEventFromJson(stored);
@@ -513,6 +613,7 @@ describe("Handoff stored JSON boundary", () => {
     ["initiator", { actor_id: "actor" }],
     ["recipient", "actor_recipient"],
     ["current_responsible_actor", {}],
+    ["target_binding", {}],
     ["result", []],
     ["parent_handoff_id", 2],
     ["child_handoff_id", false],

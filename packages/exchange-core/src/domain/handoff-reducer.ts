@@ -2,6 +2,7 @@ import type { HandoffEvent } from "./handoff-events.js";
 import type { HandoffLifecycleState, HandoffState } from "./handoff-types.js";
 
 const TERMINAL_STATES: ReadonlySet<HandoffLifecycleState> = new Set([
+  "target_unavailable",
   "closed",
   "declined",
   "expired",
@@ -30,6 +31,13 @@ function eventAllowedFrom(
   eventType: HandoffEvent["event_type"],
 ): boolean {
   switch (lifecycleState) {
+    case "target_resolution_pending":
+      return [
+        "workfabric.handoff.target_resolved.v1",
+        "workfabric.handoff.target_unavailable.v1",
+        "workfabric.handoff.expired.v1",
+        "workfabric.handoff.cancelled.v1",
+      ].includes(eventType);
     case "offered":
       return [
         "workfabric.handoff.accepted.v1",
@@ -53,6 +61,7 @@ function eventAllowedFrom(
       return eventType === "workfabric.handoff.accepted.v1";
     case "verified":
       return eventType === "workfabric.handoff.closed.v1";
+    case "target_unavailable":
     case "closed":
     case "declined":
     case "expired":
@@ -66,7 +75,10 @@ function evolveExisting(
   state: HandoffState,
   event: Exclude<
     HandoffEvent,
-    { readonly event_type: "workfabric.handoff.offered.v1" }
+    | { readonly event_type: "workfabric.handoff.offered.v1" }
+    | {
+        readonly event_type: "workfabric.handoff.target_resolution_requested.v1";
+      }
   >,
   streamVersion: number,
 ): HandoffState {
@@ -77,6 +89,18 @@ function evolveExisting(
   };
 
   switch (event.event_type) {
+    case "workfabric.handoff.target_resolved.v1":
+      return {
+        ...common,
+        lifecycle_state: "offered",
+        target_binding: event.binding,
+      };
+    case "workfabric.handoff.target_unavailable.v1":
+      return {
+        ...common,
+        lifecycle_state: "target_unavailable",
+        current_responsible_actor: null,
+      };
     case "workfabric.handoff.accepted.v1":
       return {
         ...common,
@@ -147,9 +171,13 @@ export function evolveHandoff(
   requireStreamVersion(state, streamVersion);
 
   if (state === null) {
-    if (event.event_type !== "workfabric.handoff.offered.v1") {
+    if (
+      event.event_type !== "workfabric.handoff.offered.v1" &&
+      event.event_type !==
+        "workfabric.handoff.target_resolution_requested.v1"
+    ) {
       throw new Error(
-        `First Handoff event must be workfabric.handoff.offered.v1, received ${event.event_type}`,
+        `First Handoff event must create a Handoff, received ${event.event_type}`,
       );
     }
 
@@ -157,11 +185,15 @@ export function evolveHandoff(
       handoff_id: event.handoff_id,
       thread_id: event.thread_id,
       resource_version: streamVersion,
-      lifecycle_state: "offered",
+      lifecycle_state:
+        event.event_type === "workfabric.handoff.offered.v1"
+          ? "offered"
+          : "target_resolution_pending",
       initiator: event.initiator,
       recipient: null,
       verifier: event.package.verifier,
       current_responsible_actor: event.initiator,
+      target_binding: null,
       package: event.package,
       result: null,
       parent_handoff_id: event.parent_handoff_id,
@@ -179,8 +211,11 @@ export function evolveHandoff(
   if (TERMINAL_STATES.has(state.lifecycle_state)) {
     throw new Error(`Handoff is terminal in state ${state.lifecycle_state}`);
   }
-  if (event.event_type === "workfabric.handoff.offered.v1") {
-    throw new Error("Handoff cannot be offered more than once");
+  if (
+    event.event_type === "workfabric.handoff.offered.v1" ||
+    event.event_type === "workfabric.handoff.target_resolution_requested.v1"
+  ) {
+    throw new Error("Handoff cannot be created more than once");
   }
   if (!eventAllowedFrom(state.lifecycle_state, event.event_type)) {
     throw new Error(
