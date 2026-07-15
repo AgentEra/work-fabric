@@ -2,6 +2,7 @@ export { BearerTokenProvider } from "./authentication.js";
 export type * from "./authentication.js";
 export type * from "./config.js";
 export type * from "./command-client.js";
+export { ConnectorSdkCommandSink } from "./connector-command-sink.js";
 export { WorkFabricClient } from "./client.js";
 export {
   WorkFabricHttpError,
