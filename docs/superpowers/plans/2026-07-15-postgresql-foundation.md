@@ -181,12 +181,20 @@ export interface TenantSession {
   withTransaction<T>(operation: (client: PostgresClient) => Promise<T>): Promise<T>;
 }
 
+export interface MigrationSource {
+  readonly id: string;
+  readonly sql: string;
+}
+
 export function createPgPool(connectionString: string): PostgresPool;
 export function createTenantSession(
   pool: PostgresPool,
   tenantId: string,
 ): TenantSession;
-export function migrationStatements(): readonly string[];
+export function runMigrations(
+  client: PostgresClient,
+  sources: readonly MigrationSource[],
+): Promise<number>;
 ```
 
 - [ ] **Step 1: Write failing SQL/session tests**
@@ -298,7 +306,9 @@ Expected: FAIL because the PostgreSQL Adapter and migration do not exist.
 - [ ] **Step 3: Add authoritative migrations**
 
 Create tenant-scoped tables for streams, events, command records, snapshots and
-outbox rows. Use unique constraints for `(tenant_id, idempotency_key)`,
+outbox rows. Export the migration as `MigrationSource` data so the common
+migration runner can order it with runtime and Context migrations. Use unique
+constraints for `(tenant_id, idempotency_key)`,
 `(tenant_id, event_id)`, `(tenant_id, stream_id, stream_version)` and
 `(tenant_id, partition_id, partition_position)`. Store immutable protocol/domain
 JSON in JSONB and expose only mapped `EventRecord` values.
@@ -453,7 +463,8 @@ Expected: FAIL because the package and Context migration do not exist.
 
 - [ ] **Step 3: Add immutable Context tables and implement queries**
 
-Create tenant-scoped bundle/version/item metadata with a unique
+Export the migration as `MigrationSource` data. Create tenant-scoped
+bundle/version/item metadata with a unique
 `(tenant_id, context_id, version)` key. Store visibility arrays and digest
 canonically. `putBundle` inserts once and returns the existing reference only
 when the complete body is equal; `checkAvailability` checks tenant, digest,
@@ -513,9 +524,11 @@ names only after successful checks.
 
 - [ ] **Step 2: Implement safe tooling**
 
-Use `PG_TEST_URL` or an explicit CLI argument, run migrations in one transaction
-per migration, set tenant context before profile queries, and close pools in a
-`finally` block. Never print the connection string or secret values.
+Use `PG_TEST_URL` or an explicit CLI argument, collect the common, storage and
+Context `MigrationSource` exports, sort by numeric migration ID, run migrations
+in one transaction per migration, set tenant context before profile queries,
+and close pools in a `finally` block. Never print the connection string or
+secret values.
 
 - [ ] **Step 3: Add deployment and architecture docs**
 
