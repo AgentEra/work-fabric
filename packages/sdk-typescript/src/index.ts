@@ -8,6 +8,8 @@ export {
   WorkFabricTransportError,
 } from "./errors.js";
 export type * from "./errors.js";
+export { EndpointClient } from "./endpoint-client.js";
+export type * from "./endpoint-client.js";
 export type * from "./handoff-client.js";
 export type * from "./operations-client.js";
 export type * from "./protocol-types.js";

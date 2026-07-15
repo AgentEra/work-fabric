@@ -1,0 +1,10 @@
+{
+  "name": "@work-fabric/example-local-agent-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@work-fabric/agent-gateway": "0.1.0",
+    "@work-fabric/sdk-typescript": "0.1.0"
+  }
+}

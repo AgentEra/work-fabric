@@ -21,6 +21,11 @@ import {
   registerCommandRoute,
   type CommandApplication,
 } from "../routes/command-route.js";
+import {
+  registerEndpointRoutes,
+} from "../routes/endpoint-routes.js";
+import type { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
+import type { EndpointInboxQueryService } from "@work-fabric/exchange-runtime";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -34,6 +39,8 @@ export interface InternalServerDependencies {
   readonly health_probes?: readonly HealthProbe[];
   readonly health?: HealthService;
   readonly sse_connections?: SseConnectionManager;
+  readonly endpoint_directory?: EndpointDirectoryService;
+  readonly endpoint_inbox?: EndpointInboxQueryService;
 }
 
 export function createInternalServer(
@@ -86,6 +93,20 @@ export function createInternalServer(
     });
   }
   if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    if (
+      dependencies.schemas !== undefined &&
+      dependencies.endpoint_directory !== undefined &&
+      dependencies.endpoint_inbox !== undefined
+    ) {
+      registerEndpointRoutes(server, {
+        directory: dependencies.endpoint_directory,
+        inbox: dependencies.endpoint_inbox,
+        schemas: dependencies.schemas,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      });
+    }
     if (dependencies.delivery !== undefined) {
       registerDeliveryRoutes(server, {
         delivery: dependencies.delivery, identity: dependencies.identity,

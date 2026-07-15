@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:endpoint-session-open",
+  "title": "Endpoint Session Open",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "client_session_id",
+    "protocol_version",
+    "capabilities",
+    "availability",
+    "requested_lease_seconds",
+    "expected_registration_version"
+  ],
+  "properties": {
+    "client_session_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "protocol_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+$",
+      "maxLength": 32
+    },
+    "capabilities": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:capability-descriptor"
+      }
+    },
+    "availability": {
+      "enum": ["available", "busy", "draining", "unavailable"]
+    },
+    "requested_lease_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "expected_registration_version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

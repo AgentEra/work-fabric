@@ -11,5 +11,8 @@
     "@work-fabric/exchange-core": "0.1.0",
     "@work-fabric/exchange-spi": "0.1.0",
     "@work-fabric/protocol-runtime": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/adapter-endpoint-memory": "0.1.0"
   }
 }

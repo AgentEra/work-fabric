@@ -554,6 +554,23 @@ function visibleActorIds(state: HandoffState): readonly string[] {
     ...("actor_id" in state.package.target
       ? [state.package.target.actor_id]
       : []),
+    ...(state.target_binding !== null &&
+    "actor_id" in state.target_binding.target
+      ? [state.target_binding.target.actor_id]
+      : []),
+  ]);
+}
+
+function visibleEndpointIds(
+  state: HandoffState,
+  authorizedEndpointIds: readonly string[],
+): readonly string[] {
+  return unique([
+    ...authorizedEndpointIds,
+    ...(state.target_binding !== null &&
+    "endpoint_id" in state.target_binding.target
+      ? [state.target_binding.target.endpoint_id]
+      : []),
   ]);
 }
 
@@ -727,7 +744,10 @@ export function encodeHandoffEvents(
       endpoint_id: input.envelope.endpoint_id,
       visibility: "participants",
       visible_actor_ids: visibleActorIds(nextState),
-      visible_endpoint_ids: unique(input.authorized_endpoint_ids),
+      visible_endpoint_ids: visibleEndpointIds(
+        nextState,
+        input.authorized_endpoint_ids,
+      ),
       occurred_at: event.occurred_at,
       domain_data: handoffEventToJson(event),
       protocol_data: protocolData,
