@@ -1,0 +1,23 @@
+{
+  "schema": "2.0",
+  "header": {
+    "event_id": "event-message-1",
+    "event_type": "im.message.receive_v1",
+    "create_time": "1784073600000",
+    "tenant_key": "tenant-key-1",
+    "token": "fixture-token"
+  },
+  "event": {
+    "sender": {
+      "sender_id": { "open_id": "ou-human-1" },
+      "sender_type": "user"
+    },
+    "message": {
+      "message_id": "om-message-1",
+      "chat_id": "oc-chat-1",
+      "chat_type": "group",
+      "message_type": "text",
+      "content": "{\"text\":\"hello\"}"
+    }
+  }
+}
