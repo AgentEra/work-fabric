@@ -30,6 +30,20 @@ interface TransportInternals {
   readonly random?: () => number;
 }
 
+export interface StreamTransportRequest {
+  readonly path: readonly string[];
+  readonly query?: Readonly<Record<string, QueryValue>>;
+  readonly signal?: AbortSignal;
+  readonly representation?: RepresentationContext | null;
+  readonly headers?: Readonly<Record<string, string>>;
+}
+
+export interface OpenedSdkStream {
+  readonly body: ReadableStream<Uint8Array>;
+  readonly signal: AbortSignal;
+  close(): void;
+}
+
 function encodedUrl(
   baseUrl: URL,
   path: readonly string[],
@@ -233,5 +247,96 @@ export class SdkTransport {
     } finally {
       linked.cleanup();
     }
+  }
+
+  async openStream(input: StreamTransportRequest): Promise<OpenedSdkStream> {
+    const url = encodedUrl(this.config.baseUrl, input.path, input.query);
+    const linked = linkedAbortSignal(input.signal, this.config.requestTimeoutMs);
+    try {
+      const authorization = await this.config.authentication.getAuthorization({
+        method: "GET",
+        url: url.toString(),
+        signal: linked.signal,
+      });
+      const headers = new Headers(input.headers);
+      headers.set("accept", "text/event-stream");
+      headers.set("cache-control", "no-cache");
+      if (authorization !== null) headers.set("authorization", authorization);
+      const representation = input.representation === undefined
+        ? this.config.representation
+        : input.representation;
+      if (representation !== null) {
+        headers.set("x-wf-actor-id", representation.actorId);
+        headers.set("x-wf-endpoint-id", representation.endpointId);
+        if (representation.delegationId !== undefined) {
+          headers.set("x-wf-delegation-id", representation.delegationId);
+        }
+      }
+      linked.signal.throwIfAborted();
+      const response = await this.config.fetch(url, {
+        method: "GET",
+        headers,
+        redirect: "manual",
+        signal: linked.signal,
+      });
+      if (
+        response.status === 0 ||
+        (response.status >= 300 && response.status < 400) ||
+        (response.url !== "" && new URL(response.url).origin !== url.origin)
+      ) {
+        throw transportFailure("redirect_rejected");
+      }
+      if (!response.ok) {
+        let value: unknown;
+        try {
+          value = JSON.parse(await response.text()) as unknown;
+        } catch {
+          throw transportFailure("invalid_response");
+        }
+        try {
+          throw new WorkFabricHttpError(
+            problemDetails(value, response.status),
+            response.headers.get("x-request-id"),
+          );
+        } catch (error) {
+          if (error instanceof WorkFabricHttpError) throw error;
+          throw transportFailure("invalid_response");
+        }
+      }
+      if (
+        !response.headers.get("content-type")?.toLowerCase().startsWith("text/event-stream") ||
+        response.body === null
+      ) {
+        throw transportFailure("invalid_response");
+      }
+      linked.clearTimeout();
+      return {
+        body: response.body,
+        signal: linked.signal,
+        close: linked.cleanup,
+      };
+    } catch (error) {
+      linked.cleanup();
+      if (error instanceof WorkFabricHttpError || error instanceof WorkFabricTransportError) {
+        throw error;
+      }
+      if (linked.signal.aborted || isAbortError(error)) {
+        throw transportFailure(linked.didTimeout() ? "timeout" : "aborted");
+      }
+      throw transportFailure("network_error");
+    }
+  }
+
+  async waitBeforeReconnect(reconnectIndex: number, signal?: AbortSignal): Promise<void> {
+    const policy = this.config.streamReconnect;
+    const ceiling = Math.min(
+      policy.maxDelayMs,
+      policy.baseDelayMs * 2 ** reconnectIndex,
+    );
+    const delay = Math.max(
+      0,
+      Math.round(ceiling * Math.min(1, Math.max(0, this.random()))),
+    );
+    await this.sleep(delay, signal);
   }
 }

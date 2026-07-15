@@ -253,21 +253,21 @@ git commit -m "feat(sdk): add durable Subscription client"
 
 **Interfaces:** Completes `stream(subscriptionId, { partitionId, cursor? }, options?)` using Fetch streaming, the parser, and configured reconnect policy.
 
-- [ ] **Step 1: Write failing stream tests**
+- [x] **Step 1: Write failing stream tests**
 
 With scripted ReadableStreams prove Authorization and representation headers, initial/reconnect `Last-Event-ID`, yield, duplicate-before-Ack, no auto-Ack, reconnect delay/reset, malformed frame, exhaustion, and Abort during Fetch/read/backoff.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/subscription-stream.test.ts
 ```
 
-- [ ] **Step 3: Implement the async generator**
+- [x] **Step 3: Implement the async generator**
 
 Bound frame memory. Set resume cursor before yield. Reacquire authentication on reconnect. Explicit Abort returns cleanly; exhaustion throws `stream_reconnect_exhausted` without Delivery content.
 
-- [ ] **Step 4: Run, typecheck, and commit**
+- [x] **Step 4: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/subscription-stream.test.ts

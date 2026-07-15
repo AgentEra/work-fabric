@@ -1,6 +1,7 @@
 export interface LinkedAbortSignal {
   readonly signal: AbortSignal;
   readonly didTimeout: () => boolean;
+  readonly clearTimeout: () => void;
   readonly cleanup: () => void;
 }
 
@@ -18,16 +19,24 @@ export function linkedAbortSignal(
     external?.addEventListener("abort", abortFromExternal, { once: true });
   }
 
-  const timeout = setTimeout(() => {
+  let timeout: ReturnType<typeof setTimeout> | undefined = setTimeout(() => {
     timedOut = true;
     controller.abort(new DOMException("request timed out", "TimeoutError"));
   }, timeoutMs);
 
+  const clearRequestTimeout = () => {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
+      timeout = undefined;
+    }
+  };
+
   return {
     signal: controller.signal,
     didTimeout: () => timedOut,
+    clearTimeout: clearRequestTimeout,
     cleanup() {
-      clearTimeout(timeout);
+      clearRequestTimeout();
       external?.removeEventListener("abort", abortFromExternal);
     },
   };

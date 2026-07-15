@@ -5,6 +5,8 @@ import type {
 import type { RequestOptions } from "./query-client.js";
 import { decodeObject, identifier, positive } from "./query-client.js";
 import { decodeEventDelivery } from "./sse-parser.js";
+import { SseDeliveryParser } from "./sse-parser.js";
+import { WorkFabricHttpError, WorkFabricTransportError } from "./errors.js";
 import type {
   AckResult,
   DeliveryAck,
@@ -24,6 +26,11 @@ export interface PullInput {
 export interface AcknowledgeDeliveryOptions extends RequestOptions {
   readonly details?: JsonObject;
   readonly extensions?: JsonObject;
+}
+
+export interface StreamInput {
+  readonly partitionId: string;
+  readonly cursor?: string | null;
 }
 
 function transportOptions(representation: RepresentationContext, options: RequestOptions) {
@@ -121,5 +128,105 @@ export class SubscriptionClient {
       ...(options.extensions === undefined ? {} : { extensions: options.extensions }),
     };
     return this.acknowledge(ack, options);
+  }
+
+  async *stream(
+    subscriptionId: string,
+    input: StreamInput,
+    options: RequestOptions = {},
+  ): AsyncIterable<EventDelivery> {
+    const id = identifier(subscriptionId, "subscriptionId");
+    const partitionId = identifier(input.partitionId, "partitionId");
+    let resumeCursor = cursor(input.cursor);
+    let reconnects = 0;
+    const signal = options.signal;
+
+    while (!signal?.aborted) {
+      let opened: Awaited<ReturnType<SdkTransport["openStream"]>>;
+      try {
+        opened = await this.transport.openStream({
+          path: ["v1", "subscriptions", id, "events"],
+          query: { partition_id: partitionId },
+          ...(resumeCursor === null
+            ? {}
+            : { headers: { "last-event-id": resumeCursor } }),
+          ...transportOptions(this.representation, options),
+        });
+      } catch (error) {
+        if (signal?.aborted || (error instanceof WorkFabricTransportError && error.code === "aborted")) {
+          return;
+        }
+        if (!this.reconnectable(error)) throw error;
+        if (reconnects >= this.config.streamReconnect.maxReconnects) {
+          throw this.reconnectExhausted();
+        }
+        if (!(await this.backoff(reconnects, signal))) return;
+        reconnects += 1;
+        continue;
+      }
+
+      const reader = opened.body.getReader();
+      let reconnect = true;
+      try {
+        const parser = new SseDeliveryParser(this.config.streamReconnect.maxFrameBytes);
+        while (!signal?.aborted) {
+          const item = await reader.read();
+          const frames = item.done ? parser.finish() : parser.push(item.value);
+          for (const frame of frames) {
+            resumeCursor = frame.id;
+            reconnects = 0;
+            yield frame.data;
+          }
+          if (item.done) break;
+        }
+      } catch (error) {
+        if (signal?.aborted || opened.signal.aborted) return;
+        if (
+          error instanceof WorkFabricTransportError &&
+          error.code === "stream_protocol_error"
+        ) {
+          reconnect = false;
+          throw error;
+        }
+      } finally {
+        try { await reader.cancel(); } catch { /* transport close is authoritative */ }
+        opened.close();
+      }
+
+      if (!reconnect || signal?.aborted) return;
+      if (reconnects >= this.config.streamReconnect.maxReconnects) {
+        throw this.reconnectExhausted();
+      }
+      if (!(await this.backoff(reconnects, signal))) return;
+      reconnects += 1;
+    }
+  }
+
+  private reconnectable(error: unknown): boolean {
+    if (error instanceof WorkFabricHttpError) {
+      return error.status === 429 || error.status === 503;
+    }
+    return error instanceof WorkFabricTransportError &&
+      (error.code === "network_error" || error.code === "timeout");
+  }
+
+  private async backoff(index: number, signal: AbortSignal | undefined): Promise<boolean> {
+    try {
+      await this.transport.waitBeforeReconnect(index, signal);
+      return !signal?.aborted;
+    } catch {
+      if (signal?.aborted) return false;
+      throw new WorkFabricTransportError(
+        "stream_reconnect_exhausted",
+        "The Work Fabric event stream could not reconnect",
+      );
+    }
+  }
+
+  private reconnectExhausted(): WorkFabricTransportError {
+    return new WorkFabricTransportError(
+      "stream_reconnect_exhausted",
+      "The Work Fabric event stream exhausted its reconnect limit",
+    );
   }
 }
