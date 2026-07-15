@@ -15,7 +15,7 @@ describe("PostgreSQL context integration", () => {
     const setup = await pool.connect(); await setup.query(`CREATE SCHEMA "${schema}"`); await setup.query(`SET search_path TO "${schema}"`); await runMigrations(setup, [TENANT_CONTEXT_MIGRATION, CONTEXT_MIGRATION]); setup.release();
     const sessionFactory = (tenantId: string): TenantSession => { const base = createTenantSession(pool as PostgresPool, tenantId); return { tenant_id: base.tenant_id, withTransaction: (operation) => base.withTransaction(async (client) => { await client.query(`SET LOCAL search_path TO "${schema}"`); return operation(client); }) }; };
     const repository = new PostgresContextRepository(sessionFactory);
-    await repository.putBundle("tenant_context", { context_id: "context_01", version: 1, digest: null, visibility_scope: { actor_ids: ["actor_01"], endpoint_ids: [] } });
+    await repository.putBundle("tenant_context", { context_id: "context_01", version: 1, digest: null, visibility_scope: { actor_ids: ["actor_01"], endpoint_ids: [], expires_at: null } });
     await expect(repository.checkAvailability({ tenant_id: "other_tenant", actor_id: "actor_01", endpoint_id: "endpoint_01", reference: { context_id: "context_01", version: 1, digest: null } })).resolves.toMatchObject({ kind: "unavailable" });
     const cleanup = await pool.connect(); await cleanup.query(`SET search_path TO "${schema}"`); await cleanup.query(`DROP SCHEMA "${schema}" CASCADE`); cleanup.release();
   });

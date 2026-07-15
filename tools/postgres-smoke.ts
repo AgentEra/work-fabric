@@ -11,10 +11,15 @@ export async function runPostgresSmoke(options: PostgresSmokeOptions): Promise<{
     const migration = await migratePostgres({ connection_string: options.connection_string, pool });
     if (options.verify_rls) {
       const owner = createTenantSession(pool, options.tenant_id);
-      await owner.withTransaction((client) => client.query("INSERT INTO work_fabric_tenant_probe (tenant_id,probe_id,value) VALUES ($1,$2,$3::jsonb)", [options.tenant_id, "postgres-smoke", JSON.stringify({ ok: true })]).then(() => undefined));
-      const other = createTenantSession(pool, `${options.tenant_id}-other`);
-      const visible = await other.withTransaction((client) => client.query("SELECT probe_id FROM work_fabric_tenant_probe WHERE probe_id=$1", ["postgres-smoke"]));
-      if (visible.rows.length !== 0) throw new Error("tenant RLS smoke check failed");
+      const probeId = "postgres-smoke";
+      try {
+        await owner.withTransaction((client) => client.query("INSERT INTO work_fabric_tenant_probe (tenant_id,probe_id,value) VALUES ($1,$2,$3::jsonb) ON CONFLICT (tenant_id,probe_id) DO UPDATE SET value=EXCLUDED.value", [options.tenant_id, probeId, JSON.stringify({ ok: true })]).then(() => undefined));
+        const other = createTenantSession(pool, `${options.tenant_id}-other`);
+        const visible = await other.withTransaction((client) => client.query("SELECT probe_id FROM work_fabric_tenant_probe WHERE probe_id=$1", [probeId]));
+        if (visible.rows.length !== 0) throw new Error("tenant RLS smoke check failed");
+      } finally {
+        await owner.withTransaction((client) => client.query("DELETE FROM work_fabric_tenant_probe WHERE tenant_id=$1 AND probe_id=$2", [options.tenant_id, probeId]).then(() => undefined));
+      }
     }
     return { migrations: migration.migrations, profiles: ["exchange.durability.v1", "exchange.projection.v1", "exchange.subscription.v1", "exchange.persistence.v1", "exchange.context.v1"] };
   } finally { if (options.pool === undefined) await pool.end(); }
