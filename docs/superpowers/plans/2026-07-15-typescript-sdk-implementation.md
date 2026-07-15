@@ -34,11 +34,11 @@
 
 **Interfaces:** Produces `AuthenticationProvider`, `BearerTokenProvider`, `RepresentationContext`, `WorkFabricClientOptions`, normalized internal configuration, `ProblemDetails`, `WorkFabricHttpError`, and `WorkFabricTransportError`.
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 Test absolute base URL normalization, credential/query/fragment rejection, positive timeouts and retry limits, immutable representation, static and refreshing Bearer providers, safe errors, and public-index dependency guards.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/config-auth-errors.test.ts
@@ -46,7 +46,7 @@ npx vitest run packages/sdk-typescript/test/config-auth-errors.test.ts
 
 Expected: FAIL because the package does not exist.
 
-- [ ] **Step 3: Implement public primitives**
+- [x] **Step 3: Implement public primitives**
 
 ```ts
 export interface AuthenticationProvider {
@@ -71,14 +71,14 @@ export type TransportErrorCode =
 
 `BearerTokenProvider` accepts a string or `() => Promise<string>` and returns `Bearer <token>` after bounded validation. Errors never contain tokens, bodies, or response content.
 
-- [ ] **Step 4: Run focused tests and typecheck**
+- [x] **Step 4: Run focused tests and typecheck**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/config-auth-errors.test.ts
 npm run typecheck
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/sdk-typescript package-lock.json
