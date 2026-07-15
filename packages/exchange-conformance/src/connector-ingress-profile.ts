@@ -69,7 +69,7 @@ export async function verifyConnectorIngressProfile(
     "semantic dedupe-key reuse must reject",
   );
   assert.equal(
-    (await store.accept(envelope({ tenant_id: "tenant_other" }))).kind,
+    (await store.accept(envelope({ connector_id: "connector_other" }))).kind,
     "accepted",
   );
   await rejects(

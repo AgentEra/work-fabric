@@ -9,8 +9,12 @@ It provides:
 - tenant-scoped subscriptions;
 - cursor delivery positions, active-delivery CAS, attempts and dead letters;
 - fenced outbox and worker leases.
+- durable Connector ingress with atomic external-event deduplication, fenced
+  claims, retry scheduling, dead-letter requeue and tenant isolation.
 
 The adapter never executes a participant's work. It records handoffs, statuses, receipts and delivery facts while people, Agents and external systems continue executing in their own environments.
 
 Use `EXCHANGE_AUTHORITY_MIGRATION`, `RUNTIME_STATE_MIGRATION`,
-`RUNTIME_STATE_HARDENING_MIGRATION` and the common tenant migration with the shared migration runner.
+`RUNTIME_STATE_HARDENING_MIGRATION`, `ENDPOINT_BOUNDARY_MIGRATION`,
+`CONNECTOR_INGRESS_MIGRATION` and the common tenant migration with the shared
+migration runner.
