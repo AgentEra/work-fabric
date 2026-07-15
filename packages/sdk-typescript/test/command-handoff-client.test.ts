@@ -2,13 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BearerTokenProvider,
-  CommandClient,
-  HandoffClient,
   type CommandEnvelope,
   type JsonObject,
   type OperationResult,
 } from "../src/index.js";
+import { CommandClient } from "../src/command-client.js";
 import { normalizeClientOptions } from "../src/config.js";
+import { HandoffClient } from "../src/handoff-client.js";
 import { SdkTransport } from "../src/transport.js";
 
 const accepted = (messageId: string): OperationResult => ({

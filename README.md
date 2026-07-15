@@ -162,9 +162,36 @@ Query/Admin 请求使用 `X-WF-Actor-ID`、`X-WF-Endpoint-ID` 和可选 `X-WF-De
 
 HTTP 配置统一限制请求体、默认/最大分页、请求超时、健康探针超时、SSE 连接数、轮询/心跳/空闲时间和优雅关停截止时间。Pull、Ack 与 SSE 共用一个持久交付账本；SSE 的 `id` 是不透明交付游标，`data` 是仅含一个 Protocol Event 的 canonical Event Delivery，因此客户端可直接取得 `delivery_id` 并提交标准 Ack。只有有效 Ack 才推进位置。
 
+## TypeScript SDK
+
+阶段 3C 已提供 `@work-fabric/sdk-typescript`，在 Node.js 与兼容 Web Standards 的运行时上统一封装阶段 3B 的公共 HTTP Contract。Human 应用、Agent Runtime、Connector 和 Console 使用同一个 `WorkFabricClient`，不存在 Agent 专用或 Admin 旁路客户端。
+
+```ts
+import { BearerTokenProvider, WorkFabricClient } from "@work-fabric/sdk-typescript";
+
+const fabric = new WorkFabricClient({
+  baseUrl: "http://127.0.0.1:8080",
+  tenantId: "tenant_01",
+  exchangeId: "exchange_01",
+  representation: {
+    actorId: "agent_implementation",
+    endpointId: "runtime_local",
+  },
+  authentication: new BearerTokenProvider(() => obtainAccessToken()),
+});
+
+const handoff = await fabric.queries.getHandoff("handoff_01");
+await fabric.handoffs.accept(
+  { handoff_id: handoff.handoff_id },
+  { expectedVersion: handoff.resource_version, idempotencyKey: "accept-01" },
+);
+```
+
+SDK 提供 Canonical Command、完整 Handoff 便捷方法、Query、Operations、Subscription Put/Pull/Ack 和认证 SSE。写请求不自动重试；查询只有有界重试；SSE 保留至少一次、显式 Ack 和未确认重放语义。SDK 不缓存权威状态、不选择目标、不执行工作，也不替调用方处理或确认事件。完整 API、浏览器约束和错误模型见 [TypeScript SDK 文档](packages/sdk-typescript/README.md)。
+
 ## 当前状态
 
-项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A 的 Target Resolution Protocol/Core，以及阶段 3B 的 HTTP Service Binding。Canonical 命令、授权查询、运维可见性、Durable Pull/Ack、SSE、健康检查和服务生命周期已经可以通过同一个公共 HTTP Surface 使用；Webhook Worker、A2A、MCP、飞书、Agent Runtime、SDK 和 Console 仍属于后续阶段，参与方的专业工作与 Agent 执行始终在 Core 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation，以及阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK。Canonical 命令、授权查询、运维可见性、Durable Pull/Ack、认证 SSE 和统一 SDK 已经可以通过同一个公共 Contract 使用；Webhook Worker、A2A、MCP、飞书、Agent Runtime 和 Console 仍属于后续阶段，参与方的专业工作与 Agent 执行始终在 Core 之外。
 
 当前阶段路线：
 
@@ -174,7 +201,7 @@ HTTP 配置统一限制请求体、默认/最大分页、请求超时、健康�
 | 2 | PostgreSQL Production Adapter Foundation | 已完成 |
 | 3A | Target Resolution Protocol / Core | 已完成 |
 | 3B | HTTP Service Binding | 已完成 |
-| 3C | TypeScript SDK | 下一步 |
+| 3C | TypeScript SDK | 已完成 |
 | 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
@@ -196,6 +223,7 @@ HTTP 配置统一限制请求体、默认/最大分页、请求超时、健康�
 - 公共 WFPP Protocol Event 只包含协议字段，不暴露内部 `domain_data`、Partition position、Commit ID 或其他存储游标元数据。
 - HTTP Route 只做传输映射、身份/代表关系校验、Authority 调用和有界序列化；它不调用 Decider、不选择目标、不直接访问数据库。
 - Pull 与 SSE 是同一个 Durable Subscription 的两种呈现，复用交付位置、Pending Delivery、Ack、重放和至少一次语义；WebSocket 未进入 3B。
+- TypeScript SDK 只封装公共 HTTP Contract；Human、Agent、Connector 与 Operations 调用共享认证、表示和 Authority 链，不创建第二套状态、Admin 旁路或自动执行层。
 - `/health/live` 与 `/health/ready` 只返回有界进程状态；受保护的 `/v1/admin/health` 才返回不含错误文本的依赖摘要。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
@@ -205,7 +233,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一步严格进入 3C TypeScript SDK：SDK 只封装当前公共 HTTP Contract，不创建第二套状态模型或 Agent 专用捷径。随后再进入飞书、本地 Agent Runtime、查询运维和 Console。阶段 3 不包含 Console UI，Webhook Worker、OIDC Adapter、Agent Gateway 和生产部署组合也不因 3B 完成而被宣称就绪。
+下一步严格进入阶段 4 的飞书与本地 Agent Runtime 接入，复用既有 WFPP、HTTP 和 TypeScript SDK，不把外部执行逻辑引入 Exchange。阶段 3 不包含 Console UI；Webhook Worker、OIDC Adapter、Agent Gateway、Endpoint Directory、Console 和生产部署组合也不因 3C 完成而被宣称就绪。
 
 ## 文档
 
@@ -217,5 +245,7 @@ npm run verify:exchange
 - [协作对接与工作交接详细设计](docs/superpowers/specs/2026-07-13-collaboration-handoff-fabric-design.md)
 - [Work Fabric Participation Protocol v1 设计](docs/superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)
 - [HTTP Service Binding 设计](docs/superpowers/specs/2026-07-15-http-service-binding-design.md)
+- [TypeScript SDK](packages/sdk-typescript/README.md)
+- [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

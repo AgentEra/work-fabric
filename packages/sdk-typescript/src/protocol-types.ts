@@ -12,6 +12,7 @@ export type {
 } from "@work-fabric/exchange-runtime";
 export type {
   DeliveryAttempt,
+  ExplicitHandoffTarget,
   ProjectionFailureRecord,
   RuntimeSubscription,
   HandoffReadModel,

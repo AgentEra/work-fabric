@@ -5,6 +5,7 @@ import type {
 import type { CommandClient } from "./command-client.js";
 import type {
   CommandEnvelope,
+  ExplicitHandoffTarget,
   JsonObject,
   OperationResult,
 } from "./protocol-types.js";
@@ -39,7 +40,7 @@ export type HandoffReferencePayload = JsonObject & {
 };
 
 export type HandoffTargetResolutionPayload = HandoffReferencePayload & {
-  readonly resolved_target: JsonObject;
+  readonly resolved_target: ExplicitHandoffTarget;
   readonly evidence?: readonly JsonObject[];
 };
 

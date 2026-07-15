@@ -1,8 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { SseDeliveryParser, WorkFabricTransportError } from "../src/index.js";
+import { WorkFabricTransportError } from "../src/index.js";
+import { SseDeliveryParser } from "../src/sse-parser.js";
 
-const delivery = (cursor = "cursor_01", events: readonly unknown[] = [{ id: "event_01" }]) => ({
+const protocolEvent = (id: string) => ({
+  specversion: "1.0",
+  id,
+  type: "workfabric.handoff.accepted.v1",
+  subject: "handoff_01",
+  time: "2026-07-15T10:00:00.000Z",
+});
+
+const delivery = (cursor = "cursor_01", events: readonly unknown[] = [protocolEvent("event_01")]) => ({
   delivery_id: "delivery_01",
   subscription_id: "subscription_01",
   attempt: 1,
@@ -53,7 +62,7 @@ describe("SseDeliveryParser", () => {
     ["event: other\nid: cursor_01\ndata: {}\n\n", "event type"],
     [`event: workfabric.delivery\nid: other\ndata: ${JSON.stringify(delivery())}\n\n`, "cursor"],
     [`event: workfabric.delivery\nid: cursor_01\ndata: ${JSON.stringify(delivery("cursor_01", []))}\n\n`, "one Event"],
-    [`event: workfabric.delivery\nid: cursor_01\ndata: ${JSON.stringify(delivery("cursor_01", [{ id: "one" }, { id: "two" }]))}\n\n`, "one Event"],
+    [`event: workfabric.delivery\nid: cursor_01\ndata: ${JSON.stringify(delivery("cursor_01", [protocolEvent("one"), protocolEvent("two")]))}\n\n`, "one Event"],
     ["event: workfabric.delivery\nid: cursor_01\ndata: {\n\n", "JSON"],
   ])("rejects malformed delivery frames (%s)", (input) => {
     const parser = new SseDeliveryParser(16_384);

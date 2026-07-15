@@ -290,21 +290,21 @@ git commit -m "feat(sdk): add authenticated SSE streaming"
 
 **Interfaces:** Produces an executable Node SDK reference flow and roadmap status with 3C complete and Phase 4 next.
 
-- [ ] **Step 1: Write failing real-server test**
+- [x] **Step 1: Write real-server test**
 
 Use only public SDK methods against the real 3B service for Direct Offer, replay, conflict, Capability Offer → Resolve → Accept, Handoff/Event read, Subscription Put, Pull/Ack, SSE reconnect/Ack/continuation, live/ready, and protected health. Client code never accesses server persistence or Core.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run the focused real-server test**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/sdk-reference.integration.test.ts
 ```
 
-- [ ] **Step 3: Complete docs**
+- [x] **Step 3: Complete docs**
 
 Document installation, setup, canonical/convenience commands, idempotency, Query, Pull/Ack, streaming, errors, retries, Node customization, and browser constraints. Mark only 3C complete and Phase 4 next.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 ```bash
 npm run verify
@@ -312,7 +312,7 @@ npm run verify:exchange
 git diff --check
 ```
 
-- [ ] **Step 5: Review, commit, and push**
+- [x] **Step 5: Review, commit, and push**
 
 ```bash
 git diff --stat

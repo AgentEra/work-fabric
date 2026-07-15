@@ -22,7 +22,7 @@ export interface TransportRequest<T> {
   readonly representation?: RepresentationContext | null;
   readonly headers?: Readonly<Record<string, string>>;
   readonly decode: (value: unknown) => T;
-  readonly decodeError?: (value: unknown, status: number) => T;
+  readonly decodeError?: (value: unknown, status: number) => T | undefined;
 }
 
 interface TransportInternals {
@@ -210,7 +210,8 @@ export class SdkTransport {
         if (!response.ok) {
           if (input.decodeError !== undefined) {
             try {
-              return input.decodeError(value, response.status);
+              const decoded = input.decodeError(value, response.status);
+              if (decoded !== undefined) return decoded;
             } catch {
               throw transportFailure("invalid_response");
             }

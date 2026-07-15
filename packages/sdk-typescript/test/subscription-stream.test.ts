@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BearerTokenProvider,
-  SubscriptionClient,
   WorkFabricTransportError,
   type EventDelivery,
 } from "../src/index.js";
 import { normalizeClientOptions } from "../src/config.js";
+import { SubscriptionClient } from "../src/subscription-client.js";
 import { SdkTransport } from "../src/transport.js";
 
 const delivery = (cursor: string): EventDelivery => ({

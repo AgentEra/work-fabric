@@ -1,5 +1,7 @@
 # Work Fabric TypeScript SDK Design
 
+**Implementation status:** Phase 3C is complete. The package, real HTTP black-box reference flow, runtime-boundary guards, and repository verification implement this design without expanding the Exchange into an execution engine.
+
 ## 1. Goal and phase boundary
 
 Phase 3C adds `@work-fabric/sdk-typescript`, a universal Fetch-based client for

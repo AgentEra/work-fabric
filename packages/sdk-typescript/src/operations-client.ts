@@ -22,6 +22,31 @@ export interface HealthReport { readonly status: "ready" | "not_ready"; readonly
 export interface LivenessReport { readonly status: "live" }
 export interface ReadinessReport { readonly status: "ready" | "not_ready" }
 
+function decodeHealth(value: unknown): HealthReport {
+  const report = decodeObject<Record<string, unknown>>(value);
+  if (
+    (report.status !== "ready" && report.status !== "not_ready") ||
+    !Array.isArray(report.dependencies)
+  ) {
+    throw new TypeError("HealthReport is invalid");
+  }
+  return report as unknown as HealthReport;
+}
+
+function decodeLiveness(value: unknown): LivenessReport {
+  const report = decodeObject<Record<string, unknown>>(value);
+  if (report.status !== "live") throw new TypeError("LivenessReport is invalid");
+  return report as unknown as LivenessReport;
+}
+
+function decodeReadiness(value: unknown): ReadinessReport {
+  const report = decodeObject<Record<string, unknown>>(value);
+  if (report.status !== "ready" && report.status !== "not_ready") {
+    throw new TypeError("ReadinessReport is invalid");
+  }
+  return report as unknown as ReadinessReport;
+}
+
 function requestOptions(representation: RepresentationContext, options: RequestOptions) {
   return {
     representation: options.representation ?? representation,
@@ -52,14 +77,14 @@ export class OperationsClient {
   }
 
   getHealth(options: RequestOptions = {}): Promise<HealthReport> {
-    return this.transport.request({ method: "GET", path: ["v1", "admin", "health"], retry: "none", ...requestOptions(this.representation, options), decode: decodeObject<HealthReport>, decodeError: decodeObject<HealthReport> });
+    return this.transport.request({ method: "GET", path: ["v1", "admin", "health"], retry: "none", ...requestOptions(this.representation, options), decode: decodeHealth, decodeError: (value, status) => status === 503 ? decodeHealth(value) : undefined });
   }
 
   getLiveness(options: Omit<RequestOptions, "representation"> = {}): Promise<LivenessReport> {
-    return this.transport.request({ method: "GET", path: ["health", "live"], retry: "query", representation: null, ...(options.signal === undefined ? {} : { signal: options.signal }), decode: decodeObject<LivenessReport> });
+    return this.transport.request({ method: "GET", path: ["health", "live"], retry: "query", representation: null, ...(options.signal === undefined ? {} : { signal: options.signal }), decode: decodeLiveness });
   }
 
   getReadiness(options: Omit<RequestOptions, "representation"> = {}): Promise<ReadinessReport> {
-    return this.transport.request({ method: "GET", path: ["health", "ready"], retry: "none", representation: null, ...(options.signal === undefined ? {} : { signal: options.signal }), decode: decodeObject<ReadinessReport>, decodeError: decodeObject<ReadinessReport> });
+    return this.transport.request({ method: "GET", path: ["health", "ready"], retry: "none", representation: null, ...(options.signal === undefined ? {} : { signal: options.signal }), decode: decodeReadiness, decodeError: (value, status) => status === 503 ? decodeReadiness(value) : undefined });
   }
 }

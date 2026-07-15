@@ -34,7 +34,15 @@ export function decodeEventDelivery(
     !Array.isArray(events) ||
     events.length === 0 ||
     (exactlyOneEvent && events.length !== 1) ||
-    events.some((event) => typeof event !== "object" || event === null || Array.isArray(event))
+    events.some((event) => {
+      if (typeof event !== "object" || event === null || Array.isArray(event)) return true;
+      const candidate = event as Record<string, unknown>;
+      return candidate.specversion !== "1.0" ||
+        typeof candidate.id !== "string" || candidate.id.length === 0 ||
+        typeof candidate.type !== "string" || candidate.type.length === 0 ||
+        typeof candidate.subject !== "string" || candidate.subject.length === 0 ||
+        typeof candidate.time !== "string" || candidate.time.length === 0;
+    })
   ) {
     return protocolError();
   }
@@ -118,7 +126,7 @@ export class SseDeliveryParser {
 
   private assertBounded(): void {
     const bytes = this.encoder.encode(
-      `${this.lines.join("\n")}${this.text}`,
+      `${this.lines.join("\n")}${this.lines.length > 0 && this.text.length > 0 ? "\n" : ""}${this.text}`,
     ).byteLength;
     if (bytes > this.maxFrameBytes) protocolError();
   }

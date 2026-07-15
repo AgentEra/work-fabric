@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
@@ -176,7 +176,13 @@ describe("safe SDK errors", () => {
   });
 
   it("keeps server and Node implementation imports out of the public index", async () => {
-    const source = await readFile(new URL("../src/index.ts", import.meta.url), "utf8");
-    expect(source).not.toMatch(/fastify|node:|adapter-|exchange-application/i);
+    const directory = new URL("../src/", import.meta.url);
+    const files = (await readdir(directory)).filter((file) => file.endsWith(".ts"));
+    const source = (await Promise.all(
+      files.map((file) => readFile(new URL(file, directory), "utf8")),
+    )).join("\n");
+    expect(source).not.toMatch(
+      /(?:from\s+["'](?:fastify|node:|@work-fabric\/adapter-|@work-fabric\/transport-http)|exchange-application|handoff-decider)/i,
+    );
   });
 });

@@ -2,12 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BearerTokenProvider,
-  SubscriptionClient,
   type DeliveryAck,
   type EventDelivery,
   type SubscriptionDocument,
 } from "../src/index.js";
 import { normalizeClientOptions } from "../src/config.js";
+import { SubscriptionClient } from "../src/subscription-client.js";
 import { SdkTransport } from "../src/transport.js";
 
 function json(value: unknown, status = 200) {

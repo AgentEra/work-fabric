@@ -2,11 +2,11 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BearerTokenProvider,
-  OperationsClient,
-  QueryClient,
   WorkFabricHttpError,
 } from "../src/index.js";
 import { normalizeClientOptions } from "../src/config.js";
+import { OperationsClient } from "../src/operations-client.js";
+import { QueryClient } from "../src/query-client.js";
 import { SdkTransport } from "../src/transport.js";
 
 function json(value: unknown, status = 200) {
@@ -98,5 +98,6 @@ describe("QueryClient and OperationsClient", () => {
     expect(fetch).not.toHaveBeenCalled();
 
     await expect(queries.getHandoff("handoff_01")).rejects.toBeInstanceOf(WorkFabricHttpError);
+    await expect(operations.getHealth()).rejects.toBeInstanceOf(WorkFabricHttpError);
   });
 });
