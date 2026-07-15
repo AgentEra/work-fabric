@@ -173,7 +173,7 @@ git commit -m "feat(sdk): add Handoff command client"
 - Test: `packages/sdk-typescript/test/query-operations-client.test.ts`
 - Test: `packages/sdk-typescript/test/client-composition.test.ts`
 
-**Interfaces:** Produces `QueryClient`, `OperationsClient`, and `WorkFabricClient` with `commands`, `handoffs`, `queries`, `subscriptions`, and `operations`. `withRepresentation` returns an immutable sibling sharing transport configuration.
+**Interfaces:** Produces `QueryClient`, `OperationsClient`, and `WorkFabricClient` with `commands`, `handoffs`, `queries`, and `operations`. Task 5 adds `subscriptions` once its concrete client exists. `withRepresentation` returns an immutable sibling sharing transport configuration.
 
 - [ ] **Step 1: Write failing resource tests**
 
@@ -321,4 +321,3 @@ git add README.md docs packages package-lock.json
 git commit -m "feat(sdk): complete TypeScript SDK"
 git push -u origin codex/typescript-sdk
 ```
-
