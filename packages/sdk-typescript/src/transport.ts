@@ -10,7 +10,8 @@ import {
 } from "./errors.js";
 import { abortableSleep, retryDelay, type Sleep } from "./retry.js";
 
-type QueryValue = string | number | boolean | null | undefined;
+type QueryScalar = string | number | boolean | null | undefined;
+type QueryValue = QueryScalar | readonly QueryScalar[];
 
 export interface TransportRequest<T> {
   readonly method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -55,8 +56,11 @@ function encodedUrl(
   const url = new URL(path.map(encodeURIComponent).join("/"), baseUrl);
   if (query !== undefined) {
     for (const [key, value] of Object.entries(query)) {
-      if (value !== null && value !== undefined) {
-        url.searchParams.append(key, String(value));
+      const values = Array.isArray(value) ? value : [value];
+      for (const item of values) {
+        if (item !== null && item !== undefined) {
+          url.searchParams.append(key, String(item));
+        }
       }
     }
   }

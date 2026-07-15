@@ -18,6 +18,17 @@ export type {
   HandoffReadModel,
   JsonObject,
   ProtocolEvent,
+  BindingDescriptor,
+  CapabilityDescriptor,
+  EndpointActorRef,
+  EndpointAvailability,
+  EndpointDescriptor,
+  EndpointDiscoveryPage,
+  EndpointInboxPartition,
+  EndpointInboxPartitionPage,
+  EndpointLimits,
+  EndpointRegistration,
+  EndpointSession,
 } from "@work-fabric/exchange-spi";
 
 export interface SubscriptionDocument {
