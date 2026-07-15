@@ -229,6 +229,11 @@ async function verifyStrictInputs(
     assert.ok(lease !== null, `lease acquire must accept valid UTC fraction ${timestamp}`);
     if (lease !== null) {
       assert.equal(
+        lease.expires_at,
+        addUtcTimestampSeconds(timestamp, 30),
+        `lease expiry must preserve valid UTC fraction ${timestamp}`,
+      );
+      assert.equal(
         await mustAccept(
           store.renew(
             fractionLeaseKey,
@@ -258,8 +263,24 @@ async function verifyStrictInputs(
       `claim must accept valid UTC fraction ${timestamp}`,
     );
     const fractionRecord = fractionClaim[0];
-    assert.ok(fractionRecord !== undefined);
-    if (fractionRecord === undefined || fractionRecord.lease_owner === null) return;
+    if (fractionRecord === undefined) {
+      assert.fail(`claim must return a row for valid UTC fraction ${timestamp}`);
+    }
+    if (fractionRecord.lease_owner === null) {
+      assert.fail(`claimed row must be leased for valid UTC fraction ${timestamp}`);
+    }
+    const fractionClaimRequest = {
+      ...claim,
+      owner: fractionOwner,
+      now: timestamp,
+      limit: 1,
+    } satisfies OutboxClaim;
+    assertRecordShape(fractionRecord, fractionClaimRequest);
+    assert.equal(
+      fractionRecord.lease_expires_at,
+      addUtcTimestampSeconds(timestamp, 30),
+      `claim expiry must preserve valid UTC fraction ${timestamp}`,
+    );
     assert.equal(
       await mustAccept(
         store.recordFailure(
@@ -272,6 +293,18 @@ async function verifyStrictInputs(
       ),
       true,
       `failure recording must succeed for valid UTC fraction ${timestamp}`,
+    );
+    const scheduled = (await store.listPending(
+      fixtures.tenant_id,
+      fixtures.partition_id,
+    )).find((record) => record.outbox_id === fractionRecord.outbox_id);
+    assert.ok(scheduled !== undefined);
+    if (scheduled === undefined) continue;
+    assertRecordShape(scheduled, fractionClaimRequest);
+    assert.equal(
+      scheduled.next_attempt_at,
+      timestamp,
+      `retry timestamp must preserve valid UTC fraction ${timestamp}`,
     );
   }
   for (const value of INVALID_POSITIVE_INTEGERS) {
