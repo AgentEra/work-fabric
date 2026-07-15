@@ -10,6 +10,7 @@ ALTER TABLE work_fabric_delivery_attempts
   ADD PRIMARY KEY (tenant_id, subscription_id, event_id, attempt);
 
 ALTER TABLE work_fabric_outbox ALTER COLUMN attempt SET DEFAULT 1;
+UPDATE work_fabric_outbox SET attempt = 1 WHERE attempt = 0;
 
 CREATE TABLE IF NOT EXISTS work_fabric_delivery_active (
   tenant_id text NOT NULL, subscription_id text NOT NULL, partition_id text NOT NULL,
