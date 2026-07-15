@@ -175,25 +175,25 @@ git commit -m "feat(sdk): add Handoff command client"
 
 **Interfaces:** Produces `QueryClient`, `OperationsClient`, and `WorkFabricClient` with `commands`, `handoffs`, `queries`, and `operations`. Task 5 adds `subscriptions` once its concrete client exists. `withRepresentation` returns an immutable sibling sharing transport configuration.
 
-- [ ] **Step 1: Write failing resource tests**
+- [x] **Step 1: Write failing resource tests**
 
 Assert exact Handoff/Event/Partition/Admin/health paths, encoded IDs and query values, representation headers, safe integer validation, Query retry, and typed Problem failures.
 
-- [ ] **Step 2: Write failing composition tests**
+- [x] **Step 2: Write failing composition tests**
 
 Assert one shared transport, immutable `withRepresentation`, per-call representation override, and Human/Agent/operations equality apart from headers and authority.
 
-- [ ] **Step 3: Run and verify RED**
+- [x] **Step 3: Run and verify RED**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/query-operations-client.test.ts packages/sdk-typescript/test/client-composition.test.ts
 ```
 
-- [ ] **Step 4: Implement clients and composition**
+- [x] **Step 4: Implement clients and composition**
 
 Return fresh readonly views without a cache. Public live/ready calls omit representation headers; protected operations health uses the normal representation chain.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/query-operations-client.test.ts packages/sdk-typescript/test/client-composition.test.ts

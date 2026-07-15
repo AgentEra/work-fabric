@@ -10,6 +10,9 @@ export type {
   AckResult,
 } from "@work-fabric/exchange-runtime";
 export type {
+  DeliveryAttempt,
+  ProjectionFailureRecord,
+  RuntimeSubscription,
   HandoffReadModel,
   JsonObject,
   ProtocolEvent,
@@ -67,4 +70,3 @@ export interface SseDeliveryFrame {
     readonly extensions?: JsonObject;
   };
 }
-

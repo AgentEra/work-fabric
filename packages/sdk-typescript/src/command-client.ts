@@ -31,21 +31,23 @@ function decodeOperationResult(value: unknown): OperationResult {
 }
 
 export class CommandClient {
-  constructor(private readonly transport: SdkTransport) {}
+  constructor(
+    private readonly transport: SdkTransport,
+    private readonly representation?: RepresentationContext,
+  ) {}
 
   send(
     envelope: CommandEnvelope,
     options: CommandSendOptions = {},
   ): Promise<OperationResult> {
+    const representation = options.representation ?? this.representation;
     return this.transport.request({
       method: "POST",
       path: ["v1", "commands"],
       body: envelope,
       retry: "none",
       ...(options.signal === undefined ? {} : { signal: options.signal }),
-      ...(options.representation === undefined
-        ? {}
-        : { representation: options.representation }),
+      ...(representation === undefined ? {} : { representation }),
       decode: decodeOperationResult,
       decodeError: decodeOperationResult,
     });

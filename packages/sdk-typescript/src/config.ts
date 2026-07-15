@@ -155,18 +155,7 @@ export function normalizeClientOptions(
   if (typeof fetchImplementation !== "function") {
     throw new TypeError("fetch must be available");
   }
-  const representation = Object.freeze({
-    actorId: identity(input.representation.actorId, "actorId"),
-    endpointId: identity(input.representation.endpointId, "endpointId"),
-    ...(input.representation.delegationId === undefined
-      ? {}
-      : {
-          delegationId: identity(
-            input.representation.delegationId,
-            "delegationId",
-          ),
-        }),
-  });
+  const representation = normalizeRepresentationContext(input.representation);
   return Object.freeze({
     baseUrl: baseUrl(input.baseUrl),
     authentication: input.authentication,
@@ -185,3 +174,19 @@ export function normalizeClientOptions(
   });
 }
 
+export function normalizeRepresentationContext(
+  input: RepresentationContext,
+): Readonly<RepresentationContext> {
+  return Object.freeze({
+    actorId: identity(input.actorId, "actorId"),
+    endpointId: identity(input.endpointId, "endpointId"),
+    ...(input.delegationId === undefined
+      ? {}
+      : {
+          delegationId: identity(
+            input.delegationId,
+            "delegationId",
+          ),
+        }),
+  });
+}
