@@ -458,7 +458,24 @@ describe("MemoryExchangePersistence", () => {
       stream_id: "stream_01",
       stream_version: 2,
       schema_version: "1.0",
-      state: { nested: { value: "original" } },
+      state: {
+        nested: { value: "original" },
+        lifecycle_state: "offered",
+        package: {
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+            },
+          },
+        },
+        target_binding: {
+          target: { endpoint_id: "endpoint_agent" },
+          resolved_by: { actor_id: "actor_resolver", actor_type: "system" },
+          resolver_endpoint_id: "endpoint_resolver",
+          delegation_id: null,
+          evidence: [],
+        },
+      },
     } as const;
 
     await store.saveSnapshot(snapshot);
@@ -469,7 +486,20 @@ describe("MemoryExchangePersistence", () => {
     const mutableOutput = loaded?.state.nested as { value: string };
     mutableOutput.value = "changed-output";
     expect(await store.loadSnapshot("stream_01")).toMatchObject({
-      state: { nested: { value: "original" } },
+      state: {
+        nested: { value: "original" },
+        package: {
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+            },
+          },
+        },
+        target_binding: {
+          target: { endpoint_id: "endpoint_agent" },
+          resolver_endpoint_id: "endpoint_resolver",
+        },
+      },
     });
 
     await expect(

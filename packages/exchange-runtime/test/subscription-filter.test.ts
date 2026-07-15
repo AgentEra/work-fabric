@@ -8,6 +8,7 @@ import type {
 } from "@work-fabric/exchange-spi";
 
 import {
+  buildProtocolEvent,
   DefaultSubscriptionDeliveryPolicy,
   matchesSubscription,
 } from "../src/index.js";
@@ -136,6 +137,38 @@ describe("matchesSubscription", () => {
     ).toBe(false);
   });
 
+  it.each(["target_resolution_pending", "target_unavailable"])(
+    "matches the %s lifecycle state",
+    (lifecycleState) => {
+      const event = protocolEvent({
+        type:
+          lifecycleState === "target_resolution_pending"
+            ? "workfabric.handoff.target_resolution_requested.v1"
+            : "workfabric.handoff.target_unavailable.v1",
+        data: {
+          resource_version: 1,
+          change: {
+            change_type: lifecycleState,
+            from_state: null,
+            to_state: lifecycleState,
+            details: {
+              lifecycle_state: lifecycleState,
+              capability_ids: ["software.implementation"],
+            },
+          },
+          receipt: null,
+        },
+      });
+
+      expect(
+        matchesSubscription(
+          { ...emptyFilter(), lifecycle_states: [lifecycleState] },
+          event,
+        ),
+      ).toBe(true);
+    },
+  );
+
   it.each([
     ["event_types", ["workfabric.handoff.accepted.v1"]],
     ["actor_ids", ["actor_01"]],
@@ -214,6 +247,53 @@ describe("matchesSubscription", () => {
 
     expect(matchesSubscription(filter, protocolEvent())).toBe(true);
     expect(invoked).toBe(false);
+  });
+});
+
+describe("buildProtocolEvent", () => {
+  it("publishes protocol facts without storage or private domain fields", () => {
+    const record = eventRecord({
+      event_type: "workfabric.handoff.target_resolved.v1",
+      domain_data: {
+        private_candidates: ["agent-a", "agent-b"],
+        private_score: 0.99,
+      },
+      protocol_data: {
+        resource_version: 2,
+        change: {
+          change_type: "target_resolved",
+          from_state: "target_resolution_pending",
+          to_state: "offered",
+          details: {
+            lifecycle_state: "offered",
+            capability_ids: ["software.implementation"],
+            resolved_target: { endpoint_id: "endpoint_agent" },
+            resolved_by_actor_id: "actor_resolver",
+            resolver_endpoint_id: "endpoint_resolver",
+          },
+        },
+        receipt: null,
+      },
+    });
+
+    const event = buildProtocolEvent(record);
+
+    expect(event).toMatchObject({
+      type: "workfabric.handoff.target_resolved.v1",
+      wfsequence: 2,
+      data: {
+        change: {
+          to_state: "offered",
+          details: {
+            resolved_target: { endpoint_id: "endpoint_agent" },
+            resolver_endpoint_id: "endpoint_resolver",
+          },
+        },
+      },
+    });
+    expect(JSON.stringify(event)).not.toMatch(
+      /private_candidates|private_score|partition_position|commit_id|domain_data/,
+    );
   });
 });
 

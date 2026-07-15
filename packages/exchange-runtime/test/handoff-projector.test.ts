@@ -119,6 +119,56 @@ function accepted(handoffId = parentId): HandoffEvent {
   };
 }
 
+function targetResolutionRequested(): HandoffEvent {
+  return {
+    event_type: "workfabric.handoff.target_resolution_requested.v1",
+    handoff_id: parentId,
+    thread_id: parentId,
+    initiator,
+    package: {
+      ...handoffPackage,
+      target: {
+        capability_requirement: {
+          capability_id: "software.implementation",
+          version_constraint: ">=1.0.0",
+        },
+      },
+    },
+    parent_handoff_id: null,
+    occurred_at: "2026-07-15T01:00:00.000Z",
+  };
+}
+
+function targetResolved(): HandoffEvent {
+  return {
+    event_type: "workfabric.handoff.target_resolved.v1",
+    handoff_id: parentId,
+    binding: {
+      target: { actor_id: recipient.actor_id },
+      resolved_by: { actor_id: "resolver_01", actor_type: "system" },
+      resolver_endpoint_id: "endpoint_resolver",
+      delegation_id: "delegation_resolver",
+      resolved_at: "2026-07-15T01:30:00.000Z",
+      evidence: [{ evidence_type: "capability_attestation" }],
+    },
+    occurred_at: "2026-07-15T01:30:00.000Z",
+  };
+}
+
+function targetUnavailable(): HandoffEvent {
+  return {
+    event_type: "workfabric.handoff.target_unavailable.v1",
+    handoff_id: parentId,
+    resolved_by: { actor_id: "resolver_01", actor_type: "system" },
+    resolver_endpoint_id: "endpoint_resolver",
+    delegation_id: null,
+    reason_code: "no_eligible_target",
+    reason: [{ kind: "text", text: "No eligible target" }],
+    evidence: [],
+    occurred_at: "2026-07-15T01:30:00.000Z",
+  };
+}
+
 function statusReported(handoffId = parentId): HandoffEvent {
   return {
     event_type: "workfabric.handoff.status_reported.v1",
@@ -335,6 +385,86 @@ describe("HandoffProjector", () => {
       result_due_at: handoffPackage.result_due_at,
       latest_status: null,
     });
+  });
+
+  it("projects target resolution while preserving requirement and separate binding", async () => {
+    const records = [
+      record(targetResolutionRequested(), 1, 1),
+      record(targetResolved(), 2, 2),
+    ];
+    const { models, projector } = fixture(records);
+
+    await projector.runPartition(partitionId, 1);
+    let model = await models.getHandoff(parentId);
+    expect(model).toMatchObject({
+      stream_version: 1,
+      state: {
+        lifecycle_state: "target_resolution_pending",
+        recipient: null,
+        target_binding: null,
+        package: {
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              version_constraint: ">=1.0.0",
+            },
+          },
+        },
+      },
+    });
+    expect(model === null ? null : assignmentFromHandoff(model)).toMatchObject({
+      responsible_actor: initiator,
+      lifecycle_state: "target_resolution_pending",
+    });
+
+    await projector.runPartition(partitionId, 1);
+    model = await models.getHandoff(parentId);
+    expect(model).toMatchObject({
+      stream_version: 2,
+      latest_status: null,
+      state: {
+        lifecycle_state: "offered",
+        recipient: null,
+        package: {
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              version_constraint: ">=1.0.0",
+            },
+          },
+        },
+        target_binding: {
+          target: { actor_id: recipient.actor_id },
+          resolved_by: { actor_id: "resolver_01", actor_type: "system" },
+          resolver_endpoint_id: "endpoint_resolver",
+          delegation_id: "delegation_resolver",
+        },
+      },
+    });
+    expect(model === null ? null : assignmentFromHandoff(model)).toMatchObject({
+      responsible_actor: initiator,
+      lifecycle_state: "offered",
+    });
+  });
+
+  it("projects target unavailable as transparent terminal state", async () => {
+    const { models, projector } = fixture([
+      record(targetResolutionRequested(), 1, 1),
+      record(targetUnavailable(), 2, 2),
+    ]);
+
+    await projector.runPartition(partitionId, 10);
+
+    const model = await models.getHandoff(parentId);
+    expect(model).toMatchObject({
+      stream_version: 2,
+      state: {
+        lifecycle_state: "target_unavailable",
+        target_binding: null,
+        recipient: null,
+      },
+    });
+    expect(model === null ? null : assignmentFromHandoff(model)).toBeNull();
   });
 
   it("moves responsibility across Accept, Result, Verify, and Close", async () => {

@@ -209,7 +209,28 @@ describe("PostgresExchangePersistence", () => {
   });
 
   it("round-trips and deletes tenant snapshots", async () => {
-    const snapshot = { stream_id: "stream_01", stream_version: 1, schema_version: "1.0", state: { state: "ok" } };
+    const snapshot = {
+      stream_id: "stream_01",
+      stream_version: 2,
+      schema_version: "1.0",
+      state: {
+        lifecycle_state: "offered",
+        package: {
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+            },
+          },
+        },
+        target_binding: {
+          target: { actor_id: "actor_agent" },
+          resolved_by: { actor_id: "actor_resolver", actor_type: "system" },
+          resolver_endpoint_id: "endpoint_resolver",
+          delegation_id: "delegation_resolver",
+          evidence: [],
+        },
+      },
+    };
     const client = new FakeClient();
     const session = new RecordingSession(client);
     await persistence(session).saveSnapshot(snapshot);

@@ -263,7 +263,7 @@ npm run typecheck
 
 Expected: all Core and local identity tests pass.
 
-- [ ] **Step 5: Commit application behavior**
+- [x] **Step 5: Commit application behavior**
 
 ```bash
 git add packages/exchange-core packages/adapter-identity-local
@@ -288,11 +288,11 @@ git commit -m "feat(exchange): apply external target resolutions"
 - Consumes: new domain events and state codec.
 - Produces: safe public Protocol Events and Handoff projections that expose pending/unavailable state and Target Binding without internal candidate facts or scores.
 
-- [ ] **Step 1: Write failing projection and event tests**
+- [x] **Step 1: Write failing projection and event tests**
 
 Assert pending and resolved events project in order, snapshots retain the Capability Requirement plus separate binding, assignment remains null until `accept`, filters can select the new lifecycle states, and replay across Memory/PostgreSQL JSON persistence preserves all fields.
 
-- [ ] **Step 2: Run affected tests and verify RED**
+- [x] **Step 2: Run affected tests and verify RED**
 
 ```bash
 npx vitest run packages/exchange-runtime/test packages/adapter-storage-memory/test/memory-exchange-persistence.test.ts packages/adapter-storage-postgres/test/postgres-exchange-persistence.test.ts
@@ -300,11 +300,11 @@ npx vitest run packages/exchange-runtime/test packages/adapter-storage-memory/te
 
 Expected: FAIL on unknown event/state or missing Target Binding projection.
 
-- [ ] **Step 3: Implement safe event and projection mappings**
+- [x] **Step 3: Implement safe event and projection mappings**
 
 Expose only requirement/explicit-target references, provenance IDs, reason code, and resource version. Do not expose private candidate sets, scores, policy internals, `domain_data`, partition positions, or commit IDs.
 
-- [ ] **Step 4: Run runtime and adapter tests for GREEN**
+- [x] **Step 4: Run runtime and adapter tests for GREEN**
 
 ```bash
 npx vitest run packages/exchange-runtime/test packages/adapter-storage-memory/test packages/adapter-storage-postgres/test
@@ -313,7 +313,7 @@ npm run typecheck
 
 Expected: all non-live tests pass; PostgreSQL live tests may remain skipped when `PG_TEST_URL` is absent.
 
-- [ ] **Step 5: Commit runtime compatibility**
+- [x] **Step 5: Commit runtime compatibility**
 
 ```bash
 git add packages/exchange-runtime packages/adapter-storage-memory packages/adapter-storage-postgres

@@ -1010,6 +1010,92 @@ describe("Handoff Event encoding", () => {
     ]);
   });
 
+  it("publishes only safe target-resolution facts in Event change details", () => {
+    const capabilityPackage: HandoffEvent & {
+      event_type: "workfabric.handoff.target_resolution_requested.v1";
+    } = {
+      ...offeredEvent(),
+      event_type: "workfabric.handoff.target_resolution_requested.v1",
+      package: {
+        ...offeredEvent().package,
+        target: {
+          capability_requirement: {
+            capability_id: "software.implementation",
+            private_policy_hint: "must-not-be-public",
+          },
+        },
+      },
+    };
+    const pending = stateAfter(capabilityPackage);
+    const resolved: HandoffEvent = {
+      event_type: "workfabric.handoff.target_resolved.v1",
+      handoff_id: "handoff_01",
+      binding: {
+        target: { endpoint_id: "endpoint_agent" },
+        resolved_by: { actor_id: "actor_resolver", actor_type: "system" },
+        resolver_endpoint_id: "endpoint_resolver",
+        delegation_id: "delegation_resolver",
+        resolved_at: "2026-07-14T02:00:00Z",
+        evidence: [{ private_score: 0.99 }],
+      },
+      occurred_at: "2026-07-14T02:00:00Z",
+    };
+    const resolvedEncoding = encodeHandoffEvents(
+      encodingInput([resolved], {
+        current_state: pending,
+        current_stream_version: 1,
+        receipt_ids: [null],
+      }),
+    );
+
+    expect(resolvedEncoding.events[0]?.protocol_data.change).toMatchObject({
+      details: {
+        work_reference_uri: "urn:work:item:42",
+        capability_ids: ["software.implementation"],
+        lifecycle_state: "offered",
+        resolved_target: { endpoint_id: "endpoint_agent" },
+        resolved_by_actor_id: "actor_resolver",
+        resolver_endpoint_id: "endpoint_resolver",
+        delegation_id: "delegation_resolver",
+      },
+    });
+    expect(
+      canonicalJson(resolvedEncoding.events[0]?.protocol_data),
+    ).not.toMatch(/private_policy_hint|private_score|evidence/);
+
+    const unavailable: HandoffEvent = {
+      event_type: "workfabric.handoff.target_unavailable.v1",
+      handoff_id: "handoff_01",
+      resolved_by: { actor_id: "actor_resolver", actor_type: "system" },
+      resolver_endpoint_id: "endpoint_resolver",
+      delegation_id: null,
+      reason_code: "no_eligible_target",
+      reason: [{ kind: "text", text: "private explanation" }],
+      evidence: [{ private_candidates: ["agent-a", "agent-b"] }],
+      occurred_at: "2026-07-14T02:00:00Z",
+    };
+    const unavailableEncoding = encodeHandoffEvents(
+      encodingInput([unavailable], {
+        current_state: pending,
+        current_stream_version: 1,
+        receipt_ids: [null],
+      }),
+    );
+
+    expect(unavailableEncoding.events[0]?.protocol_data.change).toMatchObject({
+      details: {
+        capability_ids: ["software.implementation"],
+        lifecycle_state: "target_unavailable",
+        resolved_by_actor_id: "actor_resolver",
+        resolver_endpoint_id: "endpoint_resolver",
+        reason_code: "no_eligible_target",
+      },
+    });
+    expect(
+      canonicalJson(unavailableEncoding.events[0]?.protocol_data),
+    ).not.toMatch(/private explanation|private_candidates|agent-a|evidence/);
+  });
+
   it("rejects mismatched generated Event and event-aligned Receipt IDs", () => {
     expect(() =>
       encodeHandoffEvents(

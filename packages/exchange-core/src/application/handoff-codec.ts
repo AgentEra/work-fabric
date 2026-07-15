@@ -571,7 +571,32 @@ function capabilityIds(state: HandoffState): readonly string[] {
   return typeof capabilityId === "string" ? [capabilityId] : [];
 }
 
-function routingDetails(state: HandoffState): JsonObject {
+function targetResolutionDetails(event: HandoffEvent): JsonObject {
+  switch (event.event_type) {
+    case "workfabric.handoff.target_resolved.v1":
+      return {
+        resolved_target: event.binding.target,
+        resolved_by_actor_id: event.binding.resolved_by.actor_id,
+        resolver_endpoint_id: event.binding.resolver_endpoint_id,
+        ...(event.binding.delegation_id === null
+          ? {}
+          : { delegation_id: event.binding.delegation_id }),
+      };
+    case "workfabric.handoff.target_unavailable.v1":
+      return {
+        resolved_by_actor_id: event.resolved_by.actor_id,
+        resolver_endpoint_id: event.resolver_endpoint_id,
+        ...(event.delegation_id === null
+          ? {}
+          : { delegation_id: event.delegation_id }),
+        reason_code: event.reason_code,
+      };
+    default:
+      return {};
+  }
+}
+
+function routingDetails(state: HandoffState, event: HandoffEvent): JsonObject {
   const uri = workReferenceUri(state);
   const capabilities = capabilityIds(state);
   return {
@@ -580,6 +605,7 @@ function routingDetails(state: HandoffState): JsonObject {
       ? {}
       : { capability_ids: capabilities }),
     lifecycle_state: state.lifecycle_state,
+    ...targetResolutionDetails(event),
   };
 }
 
@@ -677,7 +703,7 @@ export function encodeHandoffEvents(
         from_state: fromState,
         to_state: nextState.lifecycle_state,
         changed_fields: changedFields(projection, beforeState, nextState),
-        details: routingDetails(nextState),
+        details: routingDetails(nextState, event),
       },
       receipt: receiptSummary,
     };
