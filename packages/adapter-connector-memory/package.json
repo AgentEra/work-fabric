@@ -1,5 +1,5 @@
 {
-  "name": "@work-fabric/exchange-conformance",
+  "name": "@work-fabric/adapter-connector-memory",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -8,10 +8,10 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
-    "@work-fabric/adapter-storage-postgres": "0.1.0",
     "@work-fabric/connector-spi": "0.1.0",
-    "@work-fabric/exchange-core": "0.1.0",
-    "@work-fabric/exchange-runtime": "0.1.0",
     "@work-fabric/exchange-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/exchange-conformance": "0.1.0"
   }
 }

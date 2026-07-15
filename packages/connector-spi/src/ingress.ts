@@ -48,6 +48,8 @@ export interface ConnectorIngressRecord {
   readonly completed_at?: string;
   readonly last_error_code?: string;
   readonly last_error_detail?: string;
+  readonly last_requeue_reason?: string;
+  readonly last_requeued_at?: string;
 }
 
 export interface ConnectorIngressClaim extends ConnectorIngressRecord {
@@ -150,6 +152,21 @@ export interface ConnectorIngressLimits {
   readonly max_lease_seconds: number;
 }
 
+export const DEFAULT_CONNECTOR_INGRESS_LIMITS: ConnectorIngressLimits = {
+  max_id_length: 255,
+  max_event_type_length: 255,
+  max_payload_bytes: 262_144,
+  max_json_depth: 32,
+  max_trace_fields: 16,
+  max_error_detail_length: 1_024,
+  max_page_limit: 1_000,
+  max_claim_limit: 1_000,
+  max_lease_seconds: 86_400,
+};
+
+const SECRET_PROPERTY =
+  /(?:secret|password|token|private[_-]?key|credential)/i;
+
 export class ConnectorContractError extends TypeError {
   constructor(
     readonly code: "invalid_field" | "limit_exceeded" | "forbidden_field",
@@ -171,6 +188,60 @@ export function assertBoundedConnectorId(
     throw new ConnectorContractError(
       "limit_exceeded",
       `${label} exceeds its configured limit`,
+    );
+  }
+}
+
+export function resolveConnectorIngressLimits(
+  overrides: Partial<ConnectorIngressLimits> = {},
+): ConnectorIngressLimits {
+  const limits = { ...DEFAULT_CONNECTOR_INGRESS_LIMITS, ...overrides };
+  for (const [name, value] of Object.entries(limits)) {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new RangeError(`${name} must be a positive safe integer`);
+    }
+  }
+  return limits;
+}
+
+export function assertSafeConnectorJson(
+  value: JsonObject,
+  label: string,
+  limits: Pick<
+    ConnectorIngressLimits,
+    "max_payload_bytes" | "max_json_depth"
+  >,
+): void {
+  const visit = (candidate: unknown, depth: number): void => {
+    if (depth > limits.max_json_depth) {
+      throw new ConnectorContractError(
+        "limit_exceeded",
+        `${label} exceeds its configured nesting limit`,
+      );
+    }
+    if (Array.isArray(candidate)) {
+      for (const item of candidate) visit(item, depth + 1);
+      return;
+    }
+    if (candidate !== null && typeof candidate === "object") {
+      for (const [key, item] of Object.entries(candidate)) {
+        if (SECRET_PROPERTY.test(key)) {
+          throw new ConnectorContractError(
+            "forbidden_field",
+            `${label} contains a credential-shaped property`,
+          );
+        }
+        visit(item, depth + 1);
+      }
+    }
+  };
+
+  visit(value, 1);
+  const encoded = new TextEncoder().encode(JSON.stringify(value));
+  if (encoded.byteLength > limits.max_payload_bytes) {
+    throw new ConnectorContractError(
+      "limit_exceeded",
+      `${label} exceeds its configured byte limit`,
     );
   }
 }
