@@ -6,3 +6,4 @@ export * from "./problem-details.js";
 export * from "./public-types.js";
 export * from "./query-service.js";
 export * from "./request-authorization.js";
+export * from "./subscription-codec.js";

@@ -179,25 +179,25 @@ git commit -m "feat(http): expose canonical command endpoint"
 
 **Interfaces:** Consumes `ExchangeQueryService`, `SubscriptionStore`, `WfppSchemaValidator`, request authorization, and page limits. Produces every GET/PUT route in design section 5 except Pull/Ack/SSE.
 
-- [ ] **Step 1: Write failing participant route tests**
+- [x] **Step 1: Write failing participant route tests**
 
 Cover authorized Handoff/Event reads, 404, cross-tenant non-disclosure, exact action/resource, safe Protocol Events, Subscription get, and Subscription put with schema validation, path/body ID equality, tenant/owner checks, immutable persistence, and denial.
 
-- [ ] **Step 2: Write failing Admin route tests**
+- [x] **Step 2: Write failing Admin route tests**
 
 Cover partition Handoffs/Events, active subscriptions for the Principal tenant, projection failures, delivery attempts/position, invalid pagination, default/hard maximum limits, and bounded Problem Details.
 
-- [ ] **Step 3: Run tests and verify RED**
+- [x] **Step 3: Run tests and verify RED**
 
 ```bash
 npx vitest run packages/transport-http/test/query-routes.test.ts packages/transport-http/test/admin-routes.test.ts
 ```
 
-- [ ] **Step 4: Implement routes**
+- [x] **Step 4: Implement routes**
 
 Register one exact authority action from the design table per route. No route may serialize EventRecord or receive a concrete Adapter.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/transport-http/test/query-routes.test.ts packages/transport-http/test/admin-routes.test.ts

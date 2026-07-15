@@ -13,7 +13,10 @@ export interface HttpAuthorizationRequest {
   readonly endpoint_id: string;
   readonly delegation_id: string | null;
   readonly action: string;
-  readonly resource_id: string | null;
+  readonly resource_id:
+    | string
+    | null
+    | ((principal: ResolvedPrincipal) => string | null);
 }
 
 export interface HttpAuthorizationDependencies {
@@ -70,7 +73,10 @@ export async function authorizeHttpRequest(
     endpoint_id: request.endpoint_id,
     delegation_id: request.delegation_id,
     action: request.action,
-    resource_id: request.resource_id,
+    resource_id:
+      typeof request.resource_id === "function"
+        ? request.resource_id(principal)
+        : request.resource_id,
   });
   if (decision.kind === "deny") {
     return denied(403, "permission_denied", "The operation is not authorized");

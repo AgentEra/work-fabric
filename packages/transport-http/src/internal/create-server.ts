@@ -3,6 +3,12 @@ import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 import type { HttpServiceConfig } from "../config.js";
 import { createProblemDetails } from "../problem-details.js";
 import type { HttpRequestAuthenticator } from "../public-types.js";
+import type { AuthorityPolicy, IdentityProvider, SubscriptionStore } from "@work-fabric/exchange-spi";
+import type { ExchangeQueryService } from "../query-service.js";
+import type { WfppSchemaValidator } from "@work-fabric/protocol-runtime";
+import { registerAdminRoutes } from "../routes/admin-routes.js";
+import { registerQueryRoutes } from "../routes/query-routes.js";
+import { registerSubscriptionResourceRoutes } from "../routes/subscription-resource-routes.js";
 import {
   registerCommandRoute,
   type CommandApplication,
@@ -11,6 +17,11 @@ import {
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
   readonly authenticator: HttpRequestAuthenticator;
+  readonly query?: ExchangeQueryService;
+  readonly identity?: IdentityProvider;
+  readonly authority?: AuthorityPolicy;
+  readonly subscriptions?: SubscriptionStore;
+  readonly schemas?: WfppSchemaValidator;
 }
 
 export function createInternalServer(
@@ -54,5 +65,22 @@ export function createInternalServer(
       .send(createProblemDetails(status, code, title, { instance: request.url }));
   });
   registerCommandRoute(server, dependencies.application, dependencies.authenticator);
+  if (dependencies.query !== undefined && dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    registerQueryRoutes(server, {
+      query: dependencies.query, identity: dependencies.identity,
+      authority: dependencies.authority, authenticator: dependencies.authenticator,
+    }, config);
+    registerAdminRoutes(server, {
+      query: dependencies.query, identity: dependencies.identity,
+      authority: dependencies.authority, authenticator: dependencies.authenticator,
+    }, config);
+    if (dependencies.subscriptions !== undefined && dependencies.schemas !== undefined) {
+      registerSubscriptionResourceRoutes(server, {
+        query: dependencies.query, subscriptions: dependencies.subscriptions,
+        schemas: dependencies.schemas, identity: dependencies.identity,
+        authority: dependencies.authority, authenticator: dependencies.authenticator,
+      });
+    }
+  }
   return server;
 }
