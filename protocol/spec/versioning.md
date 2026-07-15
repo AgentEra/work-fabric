@@ -4,6 +4,8 @@
 
 `spec_version` 使用 `major.minor`。v1 Core 固定为 `1.0`。不兼容字段、状态或责任语义变更必须增加 Major；新增可选字段或向后兼容交互可以增加 Minor。
 
+在首个公开 Server/Binding Profile 发布前，仓库版本仍处于 `0.x` 协议定稿期，`1.0` Artifact 可以在同一代码库内补齐尚未对外开放的 Capability Target 语义。Target Resolution 成为首个公开 Binding 基线的一部分；从该基线发布后，前述 Major/Minor 兼容规则严格生效。
+
 Schema ID 使用 `urn:work-fabric:schema:v1:<schema-name>`。Event Type 使用 `workfabric.<domain>.<event>.v1`。Capability 使用自身语义版本，并与协议版本独立协商。
 
 ## 2. 未知字段与扩展

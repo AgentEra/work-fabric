@@ -282,6 +282,43 @@
     }
   },
   {
+    "name": "valid handoff explicit target",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-explicit-target",
+    "expected_valid": true,
+    "instance": {
+      "endpoint_id": "endpoint_agent"
+    }
+  },
+  {
+    "name": "valid handoff target resolution",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-target-resolution",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "resolved_target": {
+        "endpoint_id": "endpoint_agent"
+      },
+      "evidence": []
+    }
+  },
+  {
+    "name": "valid handoff target unavailable command",
+    "schema_id": "urn:work-fabric:schema:v1:handoff-target-unavailable-command",
+    "expected_valid": true,
+    "instance": {
+      "handoff_id": "handoff_01",
+      "reason_code": "no_eligible_target",
+      "reason": [
+        {
+          "kind": "text",
+          "media_type": "text/plain",
+          "text": "No eligible target is currently available"
+        }
+      ],
+      "evidence": []
+    }
+  },
+  {
     "name": "valid handoff snapshot",
     "schema_id": "urn:work-fabric:schema:v1:handoff-snapshot",
     "expected_valid": true,
@@ -294,6 +331,7 @@
         "actor_id": "initiator_01",
         "actor_type": "human"
       },
+      "target_binding": null,
       "package": {
         "work_reference": {
           "uri": "urn:work:item:42",
@@ -572,6 +610,7 @@
         "actor_id": "initiator_01",
         "actor_type": "human"
       },
+      "target_binding": null,
       "package": {
         "work_reference": {
           "uri": "urn:work:item:42",

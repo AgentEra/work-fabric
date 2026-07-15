@@ -22,8 +22,12 @@ describe("Handoff lifecycle model", () => {
   it("declares the authoritative initial and terminal states", async () => {
     const lifecycle = await model();
 
-    expect(lifecycle.initial_state).toBe("offered");
+    expect(
+      (lifecycle as LifecycleModel & { initial_states?: readonly string[] })
+        .initial_states,
+    ).toEqual(["target_resolution_pending", "offered"]);
     expect(lifecycle.terminal_states).toEqual([
+      "target_unavailable",
       "closed",
       "declined",
       "expired",
@@ -34,7 +38,12 @@ describe("Handoff lifecycle model", () => {
 
   it("executes the normal offer-to-close path", async () => {
     const lifecycle = await model();
-    const offered = applyTransition(lifecycle, null, "handoff.offer");
+    const offered = applyTransition(
+      lifecycle,
+      null,
+      "handoff.offer",
+      conditions("explicit_target"),
+    );
     const accepted = applyTransition(
       lifecycle,
       offered.next_state,
@@ -62,6 +71,45 @@ describe("Handoff lifecycle model", () => {
 
     expect(closed.next_state).toBe("closed");
     expect(closed.event_type).toBe("workfabric.handoff.closed.v1");
+  });
+
+  it("keeps a Capability Offer pending until an external target is resolved", async () => {
+    const lifecycle = await model();
+    const pending = applyTransition(
+      lifecycle,
+      null,
+      "handoff.offer",
+      conditions("capability_target"),
+    );
+    const offered = applyTransition(
+      lifecycle,
+      pending.next_state,
+      "handoff.resolve_target",
+      conditions("resolver_authorized", "target_eligible"),
+    );
+
+    expect(pending.next_state).toBe("target_resolution_pending");
+    expect(pending.event_type).toBe(
+      "workfabric.handoff.target_resolution_requested.v1",
+    );
+    expect(offered.next_state).toBe("offered");
+    expect(offered.event_type).toBe("workfabric.handoff.target_resolved.v1");
+  });
+
+  it("records an unavailable target resolution as a transparent terminal state", async () => {
+    const lifecycle = await model();
+
+    const unavailable = applyTransition(
+      lifecycle,
+      "target_resolution_pending" as HandoffState,
+      "handoff.report_target_unavailable",
+      conditions("resolver_authorized"),
+    );
+
+    expect(unavailable.next_state).toBe("target_unavailable");
+    expect(unavailable.event_type).toBe(
+      "workfabric.handoff.target_unavailable.v1",
+    );
   });
 
   it.each([
@@ -139,7 +187,11 @@ describe("Handoff lifecycle model", () => {
       lifecycle,
       "accepted",
       "handoff.transfer",
-      conditions("recipient_authorized", "redelegation_allowed"),
+      conditions(
+        "recipient_authorized",
+        "redelegation_allowed",
+        "child_explicit_target",
+      ),
     );
 
     expect(transfer.next_state).toBe("accepted");
@@ -159,6 +211,30 @@ describe("Handoff lifecycle model", () => {
     expect(transferred.event_type).toBe(
       "workfabric.handoff.transferred.v1",
     );
+  });
+
+  it("keeps a Capability-targeted child pending during transfer", async () => {
+    const lifecycle = await model();
+
+    const transfer = applyTransition(
+      lifecycle,
+      "accepted",
+      "handoff.transfer",
+      conditions(
+        "recipient_authorized",
+        "redelegation_allowed",
+        "child_capability_target",
+      ),
+    );
+
+    expect(transfer.next_state).toBe("accepted");
+    expect(transfer.event_type).toBe(
+      "workfabric.handoff.target_resolution_requested.v1",
+    );
+    expect(transfer.effects).toContainEqual({
+      type: "create_child_handoff",
+      child_initial_state: "target_resolution_pending",
+    });
   });
 
   it("returns undefined for an unknown state/interaction pair", async () => {

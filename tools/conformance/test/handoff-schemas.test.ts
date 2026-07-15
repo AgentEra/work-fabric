@@ -98,6 +98,7 @@ function snapshot(context: {
       actor_id: "actor_human_01",
       actor_type: "human",
     },
+    target_binding: null,
     package: {
       work_reference: offer.work_reference,
       target: offer.target,
@@ -182,6 +183,62 @@ describe("HandoffTarget", () => {
   });
 });
 
+describe("TargetResolution", () => {
+  const evidence = {
+    evidence_id: "evidence_resolution_01",
+    evidence_type: "resolver_decision",
+    content: {
+      kind: "data",
+      schema_ref: "urn:example:schema:resolver-decision:v1",
+      data: { policy: "approved-routing-policy" },
+    },
+  };
+
+  it.each([
+    { actor_id: "actor_agent_01" },
+    { endpoint_id: "endpoint_runtime_01" },
+  ])("accepts one explicit target form", (target) => {
+    expect(errors("handoff-explicit-target", target)).toBeNull();
+  });
+
+  it("rejects a nested Capability Requirement as a resolved target", () => {
+    expect(
+      errors("handoff-explicit-target", {
+        capability_requirement: {
+          capability_id: "software.implementation",
+        },
+      }),
+    ).not.toBeNull();
+  });
+
+  it("accepts an explicit target resolution", () => {
+    expect(
+      errors("handoff-target-resolution", {
+        handoff_id: "handoff_42",
+        resolved_target: { endpoint_id: "endpoint_runtime_01" },
+        evidence: [evidence],
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts a transparent unavailable outcome", () => {
+    expect(
+      errors("handoff-target-unavailable-command", {
+        handoff_id: "handoff_42",
+        reason_code: "no_eligible_target",
+        reason: [
+          {
+            kind: "text",
+            media_type: "text/plain",
+            text: "No authorized endpoint currently satisfies the requirement",
+          },
+        ],
+        evidence: [evidence],
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("HandoffOffer", () => {
   it("accepts the approved external-execution package", () => {
     expect(errors("handoff-offer", offer)).toBeNull();
@@ -190,6 +247,8 @@ describe("HandoffOffer", () => {
 
 describe("HandoffSnapshot", () => {
   it.each([
+    "target_resolution_pending",
+    "target_unavailable",
     "offered",
     "accepted",
     "result_returned",
@@ -208,6 +267,7 @@ describe("HandoffSnapshot", () => {
         resource_version: 4,
         lifecycle_state: lifecycleState,
         current_responsible_actor: null,
+        target_binding: null,
         package: {
           work_reference: offer.work_reference,
           target: offer.target,

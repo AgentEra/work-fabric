@@ -23,6 +23,9 @@ Endpoint：
 
 Handoff：
 
+- `workfabric.handoff.target_resolution_requested.v1`
+- `workfabric.handoff.target_resolved.v1`
+- `workfabric.handoff.target_unavailable.v1`
 - `workfabric.handoff.offered.v1`
 - `workfabric.handoff.accepted.v1`
 - `workfabric.handoff.declined.v1`

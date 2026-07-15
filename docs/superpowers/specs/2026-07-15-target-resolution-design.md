@@ -98,6 +98,11 @@ initiator cancels or creates a new Handoff with a later deadline.
 are invalid while resolution is pending. Once `target_unavailable` is recorded,
 the initiator must create a new Handoff rather than mutate history.
 
+Transfer applies the same target-dependent initial rule to its atomically
+created child Handoff. An explicit child target starts `offered`; a Capability
+child target starts `target_resolution_pending`. The parent remains `accepted`
+and the current recipient remains responsible until the child later accepts.
+
 ## 5. Protocol interactions
 
 ### 5.1 Resolve Target

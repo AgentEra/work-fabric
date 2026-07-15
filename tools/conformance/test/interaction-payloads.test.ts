@@ -43,6 +43,23 @@ const validResultSubmission = fixture("valid result submission");
 
 const validPayloads: Readonly<Record<string, unknown>> = {
   "workfabric.handoff.offer.v1": validOffer,
+  "workfabric.handoff.resolve_target.v1": {
+    handoff_id: "handoff_01",
+    resolved_target: { endpoint_id: "endpoint_agent" },
+    evidence: [],
+  },
+  "workfabric.handoff.report_target_unavailable.v1": {
+    handoff_id: "handoff_01",
+    reason_code: "no_eligible_target",
+    reason: [
+      {
+        kind: "text",
+        media_type: "text/plain",
+        text: "No eligible endpoint is currently available",
+      },
+    ],
+    evidence: [],
+  },
   "workfabric.handoff.accept.v1": { handoff_id: "handoff_01" },
   "workfabric.handoff.decline.v1": { handoff_id: "handoff_01" },
   "workfabric.handoff.expire.v1": { handoff_id: "handoff_01" },
@@ -79,10 +96,13 @@ const validPayloads: Readonly<Record<string, unknown>> = {
 const lifecycle = JSON.parse(
   await readFile("protocol/spec/handoff-lifecycle.json", "utf8"),
 ) as HandoffLifecycle;
-const publicMessageTypes = lifecycle.transitions
-  .filter(({ interaction }) => interaction !== "handoff.child_accepted")
-  .map(({ interaction }) => `workfabric.${interaction}.v1`)
-  .sort();
+const publicMessageTypes = [
+  ...new Set(
+    lifecycle.transitions
+      .filter(({ interaction }) => interaction !== "handoff.child_accepted")
+      .map(({ interaction }) => `workfabric.${interaction}.v1`),
+  ),
+].sort();
 
 let registry: Awaited<ReturnType<typeof loadSchemaRegistry>>;
 let payloadRegistry: InteractionPayloadRegistry;

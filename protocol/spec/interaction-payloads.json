@@ -2,6 +2,8 @@
   "spec_version": "1.0",
   "mappings": {
     "workfabric.handoff.offer.v1": "urn:work-fabric:schema:v1:handoff-offer",
+    "workfabric.handoff.resolve_target.v1": "urn:work-fabric:schema:v1:handoff-target-resolution",
+    "workfabric.handoff.report_target_unavailable.v1": "urn:work-fabric:schema:v1:handoff-target-unavailable-command",
     "workfabric.handoff.accept.v1": "urn:work-fabric:schema:v1:handoff-reference",
     "workfabric.handoff.decline.v1": "urn:work-fabric:schema:v1:handoff-reference",
     "workfabric.handoff.expire.v1": "urn:work-fabric:schema:v1:handoff-reference",

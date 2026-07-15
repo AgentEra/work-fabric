@@ -10,6 +10,7 @@
     "resource_version",
     "lifecycle_state",
     "current_responsible_actor",
+    "target_binding",
     "package",
     "latest_status",
     "result",
@@ -29,6 +30,8 @@
     },
     "lifecycle_state": {
       "enum": [
+        "target_resolution_pending",
+        "target_unavailable",
         "offered",
         "accepted",
         "result_returned",
@@ -44,6 +47,12 @@
     "current_responsible_actor": {
       "oneOf": [
         { "$ref": "urn:work-fabric:schema:v1:actor-ref" },
+        { "type": "null" }
+      ]
+    },
+    "target_binding": {
+      "oneOf": [
+        { "$ref": "#/$defs/target_binding" },
         { "type": "null" }
       ]
     },
@@ -81,6 +90,47 @@
     }
   },
   "$defs": {
+    "target_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target",
+        "resolved_by",
+        "resolver_endpoint_id",
+        "delegation_id",
+        "resolved_at",
+        "evidence"
+      ],
+      "properties": {
+        "target": {
+          "$ref": "urn:work-fabric:schema:v1:handoff-explicit-target"
+        },
+        "resolved_by": {
+          "$ref": "urn:work-fabric:schema:v1:actor-ref"
+        },
+        "resolver_endpoint_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        },
+        "delegation_id": {
+          "oneOf": [
+            {
+              "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+            },
+            { "type": "null" }
+          ]
+        },
+        "resolved_at": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+        },
+        "evidence": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "urn:work-fabric:schema:v1:evidence"
+          }
+        }
+      }
+    },
     "handoff_package": {
       "type": "object",
       "additionalProperties": false,

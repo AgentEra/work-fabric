@@ -21,7 +21,7 @@ describe("runLifecycleScenario", () => {
       steps: [
         {
           interaction: "handoff.offer",
-          conditions: [],
+          conditions: ["explicit_target"],
           expected_state: "offered",
           expected_event_type: "workfabric.handoff.offered.v1",
         },

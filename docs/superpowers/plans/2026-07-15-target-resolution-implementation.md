@@ -34,6 +34,9 @@
 - Modify: `protocol/spec/interactions.md`
 - Modify: `protocol/spec/events.md`
 - Modify: `protocol/spec/core.md`
+- Modify: `protocol/spec/roles.md`
+- Modify: `protocol/spec/security.md`
+- Modify: `protocol/spec/versioning.md`
 - Modify: `protocol/README.md`
 - Modify: `protocol/conformance/fixtures/positive/core-schemas.json`
 - Modify: `protocol/conformance/fixtures/negative/core-schemas.json`
@@ -47,7 +50,7 @@
 - Consumes: existing Actor, Endpoint, Evidence, ContentPart, Handoff Reference, Envelope, lifecycle and fixture conventions.
 - Produces: Schema IDs `urn:work-fabric:schema:v1:handoff-explicit-target`, `urn:work-fabric:schema:v1:handoff-target-resolution`, and `urn:work-fabric:schema:v1:handoff-target-unavailable-command`; interactions `workfabric.handoff.resolve_target.v1` and `workfabric.handoff.report_target_unavailable.v1`; states `target_resolution_pending` and `target_unavailable`.
 
-- [ ] **Step 1: Write failing Schema and lifecycle assertions**
+- [x] **Step 1: Write failing Schema and lifecycle assertions**
 
 Add focused assertions that load the three new Schema IDs, validate a Resolve Target payload, reject a nested Capability target, validate an unavailable payload, and apply these lifecycle paths:
 
@@ -61,7 +64,7 @@ expect(applyTransition(lifecycle, "target_resolution_pending", "handoff.resolve_
   .toBe("offered");
 ```
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 ```bash
 npx vitest run tools/conformance/test/handoff-schemas.test.ts tools/conformance/test/interaction-payloads.test.ts tools/conformance/test/lifecycle-runner.test.ts
@@ -69,11 +72,11 @@ npx vitest run tools/conformance/test/handoff-schemas.test.ts tools/conformance/
 
 Expected: FAIL because the new Schema IDs, mappings, states, and transitions do not exist.
 
-- [ ] **Step 3: Add canonical Schemas, lifecycle, fixtures, and normative text**
+- [x] **Step 3: Add canonical Schemas, lifecycle, fixtures, and normative text**
 
 Define `handoff-explicit-target` as exactly one `actor_id` or `endpoint_id`; define resolution payload as `{handoff_id,resolved_target,evidence}`; define unavailable payload as `{handoff_id,reason_code,reason,evidence}` with the four approved reason codes. Extend the snapshot with nullable `target_binding`, replace the single machine-readable initial state with `initial_states`, and represent both initial paths as `handoff.offer` transitions selected by the mutually exclusive `explicit_target` and `capability_target` conditions. Update the lifecycle runner to select the transition whose required conditions are satisfied, then index every public Schema and Event.
 
-- [ ] **Step 4: Run focused tests and protocol conformance for GREEN**
+- [x] **Step 4: Run focused tests and protocol conformance for GREEN**
 
 ```bash
 npx vitest run tools/conformance/test/handoff-schemas.test.ts tools/conformance/test/interaction-payloads.test.ts tools/conformance/test/lifecycle-runner.test.ts tools/conformance/test/documentation.test.ts
@@ -82,7 +85,7 @@ npm run conformance
 
 Expected: all focused tests pass and conformance reports every fixture and lifecycle scenario passing.
 
-- [ ] **Step 5: Commit canonical artifacts**
+- [x] **Step 5: Commit canonical artifacts**
 
 ```bash
 git add protocol tools/conformance/test

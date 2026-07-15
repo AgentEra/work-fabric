@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-target-unavailable-command",
+  "title": "Handoff Target Unavailable Command Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_id", "reason_code", "reason", "evidence"],
+  "properties": {
+    "handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "reason_code": {
+      "enum": [
+        "no_candidate",
+        "no_eligible_target",
+        "policy_rejected",
+        "resolver_unavailable"
+      ]
+    },
+    "reason": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:content-part"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:evidence"
+      }
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

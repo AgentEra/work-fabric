@@ -58,6 +58,9 @@ Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身
 - `urn:work-fabric:schema:v1:acceptance-criterion`
 - `urn:work-fabric:schema:v1:capability-requirement`
 - `urn:work-fabric:schema:v1:handoff-target`
+- `urn:work-fabric:schema:v1:handoff-explicit-target`
+- `urn:work-fabric:schema:v1:handoff-target-resolution`
+- `urn:work-fabric:schema:v1:handoff-target-unavailable-command`
 - `urn:work-fabric:schema:v1:handoff-offer`
 - `urn:work-fabric:schema:v1:handoff-reference`
 - `urn:work-fabric:schema:v1:handoff-cancel-command`
