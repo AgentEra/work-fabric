@@ -97,25 +97,25 @@ git commit -m "feat(sdk): add client contracts"
 
 **Interfaces:** Produces internal `SdkTransport.request<T>()` and `SdkTransport.openStream()`. A request supplies method, path, query, body, representation, signal, retry mode, and response decoder.
 
-- [ ] **Step 1: Write failing transport tests**
+- [x] **Step 1: Write failing transport tests**
 
 Cover authentication refresh per attempt, JSON and representation headers, URL encoding, external Abort and timeout, invalid JSON, malformed success, RFC 9457 mapping, request ID, manual redirects, Origin mismatch, and secret-free errors.
 
-- [ ] **Step 2: Write failing retry tests**
+- [x] **Step 2: Write failing retry tests**
 
 With fake Fetch and sleeper, prove GET retries network error/429/503 only, honors bounded integer `Retry-After`, caps exponential delay, and never retries POST, deterministic 4xx, redirect, invalid response, or Abort.
 
-- [ ] **Step 3: Run and verify RED**
+- [x] **Step 3: Run and verify RED**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/transport.test.ts
 ```
 
-- [ ] **Step 4: Implement transport and retry**
+- [x] **Step 4: Implement transport and retry**
 
 Use `redirect: "manual"`, a request-local AbortController, explicit timer cleanup, and strict JSON-object decoding. Acquire authentication inside each attempt. Never include Authorization or bodies in errors.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/transport.test.ts
