@@ -1,4 +1,8 @@
 -- Forward-compatible hardening for databases that applied the first 003 migration.
+ALTER TABLE work_fabric_delivery_attempts NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_delivery_attempts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_outbox NO FORCE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_outbox DISABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_projection_failures
   DROP CONSTRAINT IF EXISTS work_fabric_projection_failures_pkey;
 ALTER TABLE work_fabric_projection_failures
@@ -18,6 +22,11 @@ ALTER TABLE work_fabric_delivery_attempts
 
 ALTER TABLE work_fabric_outbox ALTER COLUMN attempt SET DEFAULT 1;
 UPDATE work_fabric_outbox SET attempt = 1 WHERE attempt = 0;
+
+ALTER TABLE work_fabric_delivery_attempts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_delivery_attempts FORCE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_outbox FORCE ROW LEVEL SECURITY;
 
 CREATE TABLE IF NOT EXISTS work_fabric_delivery_active (
   tenant_id text NOT NULL, subscription_id text NOT NULL, partition_id text NOT NULL,
