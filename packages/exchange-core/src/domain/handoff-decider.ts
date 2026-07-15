@@ -223,7 +223,7 @@ function decideResolveTarget(
     return rejectUnauthorized("resolve the Handoff target");
   }
   if (!context.target_eligible) {
-    return reject("precondition_failed", "Resolved target is not eligible");
+    return reject("permission_denied", "Resolved target is not eligible");
   }
   return accept({
     event_type: "workfabric.handoff.target_resolved.v1",

@@ -19,6 +19,9 @@ import type {
   JsonObject,
   ProposedEvent,
   ResolvedPrincipal,
+  TargetEligibilityDecision,
+  TargetEligibilityRequest,
+  TargetEligibilityVerifier,
 } from "@work-fabric/exchange-spi";
 import {
   loadWfppCommandValidator,
@@ -71,6 +74,19 @@ const verifierPrincipal: ResolvedPrincipal = {
       actor_id: "actor_verifier",
       actor_type: "system",
       endpoint_ids: ["endpoint_verifier"],
+    },
+  ],
+  attributes: {},
+};
+
+const resolverPrincipal: ResolvedPrincipal = {
+  principal_id: "principal_resolver",
+  tenant_id: "tenant_01",
+  actor_claims: [
+    {
+      actor_id: "actor_resolver",
+      actor_type: "system",
+      endpoint_ids: ["endpoint_resolver"],
     },
   ],
   attributes: {},
@@ -178,6 +194,30 @@ function existingEnvelope(
     idempotency_key: options.idempotencyKey ?? `${interaction}-01`,
     expected_version: options.expectedVersion,
     payload,
+  };
+}
+
+function targetResolutionEnvelope(
+  messageType:
+    | "workfabric.handoff.resolve_target.v1"
+    | "workfabric.handoff.report_target_unavailable.v1",
+  payload: JsonObject,
+  overrides: Partial<CommandEnvelope> = {},
+): CommandEnvelope {
+  return {
+    spec_version: "1.0",
+    message_id: "message_target_resolution",
+    message_type: messageType,
+    sent_at: "2026-07-15T03:00:00Z",
+    tenant_id: "tenant_01",
+    exchange_id: "exchange_01",
+    actor_id: "actor_resolver",
+    endpoint_id: "endpoint_resolver",
+    delegation_id: "delegation_resolver",
+    idempotency_key: "target-resolution-01",
+    expected_version: 1,
+    payload,
+    ...overrides,
   };
 }
 
@@ -326,6 +366,30 @@ class TrackingValidator implements WfppCommandValidator {
   }
 }
 
+class TrackingTargetEligibilityVerifier implements TargetEligibilityVerifier {
+  readonly manifest = {
+    profile: "exchange.target-eligibility.v1",
+    adapter: "test",
+    capabilities: {
+      explicit_target_only: true,
+      no_candidate_selection: true,
+      fail_closed: true,
+    },
+  };
+  readonly requests: TargetEligibilityRequest[] = [];
+
+  constructor(
+    private readonly decision: TargetEligibilityDecision,
+    private readonly order?: string[],
+  ) {}
+
+  async verify(request: TargetEligibilityRequest) {
+    this.requests.push(structuredClone(request));
+    this.order?.push("targetEligibility.verify");
+    return this.decision;
+  }
+}
+
 class FailOnceMemoryPersistence extends MemoryExchangePersistence {
   private shouldFail = true;
 
@@ -405,6 +469,10 @@ function identityRecords(): readonly LocalIdentityRecord[] {
       authentication_evidence: { token: "verifier" },
       principal: verifierPrincipal,
     },
+    {
+      authentication_evidence: { token: "resolver" },
+      principal: resolverPrincipal,
+    },
   ];
 }
 
@@ -441,6 +509,17 @@ function allowRules(): readonly LocalAuthorityAllowRule[] {
         resource_id: "handoff_1",
       }),
     ),
+    ...["resolve_target", "report_target_unavailable"].map(
+      (action): LocalAuthorityAllowRule => ({
+        tenant_id: "tenant_01",
+        principal_id: "principal_resolver",
+        actor_id: "actor_resolver",
+        actor_type: "system",
+        endpoint_id: "endpoint_resolver",
+        action: `workfabric.handoff.${action}.v1`,
+        resource_id: "handoff_1",
+      }),
+    ),
   ];
 }
 
@@ -462,6 +541,7 @@ function harness(options: {
   readonly validator?: WfppCommandValidator;
   readonly order?: string[];
   readonly ids?: TestIds;
+  readonly targetEligibility?: TargetEligibilityVerifier;
 } = {}): Harness {
   const persistence =
     options.persistence ?? new TrackingMemoryPersistence(options.order);
@@ -489,6 +569,9 @@ function harness(options: {
       validator: commandValidator,
       clock: new TestClock(options.order),
       ids,
+      ...(options.targetEligibility === undefined
+        ? {}
+        : { target_eligibility: options.targetEligibility }),
     }),
     persistence,
     context,
@@ -587,6 +670,292 @@ describe("ExchangeApplication", () => {
       partition_id: expectedPartition,
       protocol_data: { receipt: null },
     });
+  });
+
+  it("fails closed without a target eligibility verifier and does not persist", async () => {
+    const persistence = new TrackingMemoryPersistence();
+    const current = harness({ persistence });
+    await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              version_constraint: ">=1.0.0 <2.0.0",
+              input_media_types: ["text/markdown"],
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+    const commitsAfterOffer = persistence.commitCalls;
+
+    const result = await current.application.handle(
+      targetResolutionEnvelope("workfabric.handoff.resolve_target.v1", {
+        handoff_id: "handoff_1",
+        resolved_target: { actor_id: "actor_agent" },
+        evidence: [],
+      }),
+      { token: "resolver" },
+    );
+
+    expect(result).toMatchObject({
+      operation_status: "temporarily_unavailable",
+      error: { code: "temporarily_unavailable", retryable: true },
+    });
+    expect(persistence.commitCalls).toBe(commitsAfterOffer);
+    expect(await persistence.readStream("handoff_1")).toHaveLength(1);
+  });
+
+  it("verifies, atomically binds, and idempotently replays an explicit target", async () => {
+    const persistence = new TrackingMemoryPersistence();
+    const targetEligibility = new TrackingTargetEligibilityVerifier({
+      kind: "eligible",
+    });
+    const current = harness({ persistence, targetEligibility });
+    await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              version_constraint: ">=1.0.0 <2.0.0",
+              input_media_types: ["text/markdown"],
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+    const command = targetResolutionEnvelope(
+      "workfabric.handoff.resolve_target.v1",
+      {
+        handoff_id: "handoff_1",
+        resolved_target: { actor_id: "actor_agent" },
+        evidence: [],
+      },
+    );
+
+    const result = await current.application.handle(command, {
+      token: "resolver",
+    });
+    const replay = await current.application.handle(
+      { ...command, message_id: "message_target_resolution_retry" },
+      { token: "resolver" },
+    );
+
+    expect(result).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_id: "handoff_1", resource_version: 2 },
+    });
+    expect(replay).toEqual({
+      ...result,
+      request_message_id: "message_target_resolution_retry",
+    });
+    expect(targetEligibility.requests).toEqual([
+      {
+        tenant_id: "tenant_01",
+        exchange_id: "exchange_01",
+        handoff_id: "handoff_1",
+        requirement: {
+          capability_id: "software.implementation",
+          version_constraint: ">=1.0.0 <2.0.0",
+          input_media_types: ["text/markdown"],
+        },
+        proposed_target: { actor_id: "actor_agent" },
+        principal: resolverPrincipal,
+      },
+    ]);
+    const events = await persistence.readStream("handoff_1");
+    expect(events.map(({ event_type }) => event_type)).toEqual([
+      "workfabric.handoff.target_resolution_requested.v1",
+      "workfabric.handoff.target_resolved.v1",
+    ]);
+    const state = replayHandoff(
+      events.map((event) => ({
+        stream_version: event.stream_version,
+        event: handoffEventFromJson(event.domain_data),
+      })),
+    );
+    expect(state).toMatchObject({
+      lifecycle_state: "offered",
+      target_binding: {
+        target: { actor_id: "actor_agent" },
+        resolved_by: { actor_id: "actor_resolver", actor_type: "system" },
+        resolver_endpoint_id: "endpoint_resolver",
+      },
+    });
+  });
+
+  it("records a resolver's terminal target-unavailable outcome without eligibility lookup", async () => {
+    const persistence = new TrackingMemoryPersistence();
+    const targetEligibility = new TrackingTargetEligibilityVerifier({
+      kind: "eligible",
+    });
+    const current = harness({ persistence, targetEligibility });
+    await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+
+    const result = await current.application.handle(
+      targetResolutionEnvelope(
+        "workfabric.handoff.report_target_unavailable.v1",
+        {
+          handoff_id: "handoff_1",
+          reason_code: "no_eligible_target",
+          reason: [
+            {
+              kind: "text",
+              media_type: "text/plain",
+              text: "No eligible target",
+            },
+          ],
+          evidence: [],
+        },
+      ),
+      { token: "resolver" },
+    );
+
+    expect(result).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 2 },
+    });
+    expect(targetEligibility.requests).toHaveLength(0);
+    const records = await persistence.readStream("handoff_1");
+    expect(records[1]?.event_type).toBe(
+      "workfabric.handoff.target_unavailable.v1",
+    );
+    const state = replayHandoff(
+      records.map((event) => ({
+        stream_version: event.stream_version,
+        event: handoffEventFromJson(event.domain_data),
+      })),
+    );
+    expect(state).toMatchObject({
+      lifecycle_state: "target_unavailable",
+      current_responsible_actor: null,
+    });
+  });
+
+  it("rejects a stale target resolution before eligibility lookup", async () => {
+    const targetEligibility = new TrackingTargetEligibilityVerifier({
+      kind: "eligible",
+    });
+    const current = harness({ targetEligibility });
+    await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+
+    const result = await current.application.handle(
+      targetResolutionEnvelope(
+        "workfabric.handoff.resolve_target.v1",
+        {
+          handoff_id: "handoff_1",
+          resolved_target: { actor_id: "actor_agent" },
+          evidence: [],
+        },
+        { expected_version: 2 },
+      ),
+      { token: "resolver" },
+    );
+
+    expect(result).toMatchObject({
+      operation_status: "conflict",
+      error: { code: "version_conflict" },
+    });
+    expect(targetEligibility.requests).toHaveLength(0);
+  });
+
+  it.each([
+    ["unavailable", "temporarily_unavailable", "temporarily_unavailable", 1],
+    ["ineligible", "rejected", "permission_denied", 2],
+  ] as const)(
+    "maps a %s eligibility decision without appending a target binding",
+    async (decisionKind, expectedStatus, expectedCode, expectedCommits) => {
+      const persistence = new TrackingMemoryPersistence();
+      const targetEligibility = new TrackingTargetEligibilityVerifier({
+        kind: decisionKind,
+        reason: "Target verification failed",
+      });
+      const current = harness({ persistence, targetEligibility });
+      await current.application.handle(
+        offerEnvelope({
+          payload: {
+            ...offerPayload,
+            target: {
+              capability_requirement: {
+                capability_id: "software.implementation",
+                version_constraint: ">=1.0.0 <2.0.0",
+                input_media_types: ["text/markdown"],
+              },
+            },
+          },
+        }),
+        { token: "human" },
+      );
+
+      const result = await current.application.handle(
+        targetResolutionEnvelope("workfabric.handoff.resolve_target.v1", {
+          handoff_id: "handoff_1",
+          resolved_target: { actor_id: "actor_agent" },
+          evidence: [],
+        }),
+        { token: "resolver" },
+      );
+
+      expect(result).toMatchObject({
+        operation_status: expectedStatus,
+        error: { code: expectedCode },
+      });
+      expect(targetEligibility.requests).toHaveLength(1);
+      expect(persistence.commitCalls).toBe(expectedCommits);
+      expect(await persistence.readStream("handoff_1")).toHaveLength(1);
+    },
+  );
+
+  it("authorizes a resolver before invoking target eligibility", async () => {
+    const targetEligibility = new TrackingTargetEligibilityVerifier({
+      kind: "eligible",
+    });
+    const current = harness({ allowRules: [], targetEligibility });
+
+    const result = await current.application.handle(
+      targetResolutionEnvelope("workfabric.handoff.resolve_target.v1", {
+        handoff_id: "handoff_1",
+        resolved_target: { actor_id: "actor_agent" },
+        evidence: [],
+      }),
+      { token: "resolver" },
+    );
+
+    expect(result).toMatchObject({
+      operation_status: "rejected",
+      error: { code: "permission_denied" },
+    });
+    expect(targetEligibility.requests).toHaveLength(0);
   });
 
   it("replays the saved outcome with a new message ID before any side effects", async () => {

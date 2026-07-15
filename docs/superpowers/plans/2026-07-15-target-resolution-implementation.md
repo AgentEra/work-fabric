@@ -230,7 +230,7 @@ git commit -m "feat(core): add target binding lifecycle"
 - Consumes: `TargetEligibilityVerifier` and new validated protocol payloads.
 - Produces: authenticated Resolver commands, authority actions `handoff.resolve_target` and `handoff.report_target_unavailable`, eligibility fail-closed behavior, atomic Target Binding commits, and normalized Operation Results.
 
-- [ ] **Step 1: Write failing application tests**
+- [x] **Step 1: Write failing application tests**
 
 Test authorized/eligible resolution, authority denial before verifier call, ineligible rejection, unavailable temporary failure without persistence, deterministic unavailable outcome persistence, idempotent replay, stale version conflict, and two concurrent resolvers committing one binding.
 
@@ -242,7 +242,7 @@ expect(await application.handle(resolveEnvelope, authEvidence)).toMatchObject({
 expect(eligibility.requests).toHaveLength(1);
 ```
 
-- [ ] **Step 2: Run application tests and verify RED**
+- [x] **Step 2: Run application tests and verify RED**
 
 ```bash
 npx vitest run packages/exchange-core/test/exchange-application.test.ts packages/exchange-core/test/concurrency.integration.test.ts packages/adapter-identity-local/test/local-identity-authority.test.ts
@@ -250,11 +250,11 @@ npx vitest run packages/exchange-core/test/exchange-application.test.ts packages
 
 Expected: FAIL because application decoding, authority actions, and verifier integration are absent.
 
-- [ ] **Step 3: Implement application integration**
+- [x] **Step 3: Implement application integration**
 
 Decode the two interactions, authorize before eligibility, call the verifier only for Resolve Target, map `ineligible` to deterministic `permission_denied`, map `unavailable` to non-persisted `temporarily_unavailable`, and commit through the existing expected-version/idempotency transaction.
 
-- [ ] **Step 4: Run application, integration, and reference tests for GREEN**
+- [x] **Step 4: Run application, integration, and reference tests for GREEN**
 
 ```bash
 npx vitest run packages/exchange-core/test packages/adapter-identity-local/test

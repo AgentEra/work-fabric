@@ -14,6 +14,7 @@ import type {
   ExchangePersistence,
   JsonObject,
   ResolvedPrincipal,
+  TargetEligibilityVerifier,
 } from "@work-fabric/exchange-spi";
 import {
   loadWfppCommandValidator,
@@ -37,6 +38,8 @@ const principals = {
   agentA: principal("agent_a", "agent"),
   agentB: principal("agent_b", "agent"),
   child: principal("child", "agent"),
+  resolverA: principal("resolver_a", "system"),
+  resolverB: principal("resolver_b", "system"),
 } as const;
 
 function principal(
@@ -223,6 +226,7 @@ beforeAll(async () => {
 function application(
   persistence: ExchangePersistence = new MemoryExchangePersistence(),
   context = new MemoryContextRepository(),
+  targetEligibility?: TargetEligibilityVerifier,
 ) {
   return new ExchangeApplication({
     persistence,
@@ -232,6 +236,9 @@ function application(
     validator,
     clock: new TestClock(),
     ids: new TestIds(),
+    ...(targetEligibility === undefined
+      ? {}
+      : { target_eligibility: targetEligibility }),
   });
 }
 
@@ -342,6 +349,79 @@ function result(key: string): CommandEnvelope {
 }
 
 describe("Exchange concurrency and application recovery", () => {
+  it("atomically binds exactly one of two concurrent target resolutions", async () => {
+    const persistence = new MemoryExchangePersistence();
+    const targetEligibility: TargetEligibilityVerifier = {
+      manifest: {
+        profile: "exchange.target-eligibility.v1",
+        adapter: "integration-eligible",
+        capabilities: {
+          explicit_target_only: true,
+          no_candidate_selection: true,
+          fail_closed: true,
+        },
+      },
+      async verify() {
+        return { kind: "eligible" };
+      },
+    };
+    const app = application(
+      persistence,
+      new MemoryContextRepository(),
+      targetEligibility,
+    );
+    await app.handle(
+      offer(
+        "offer-capability-resolution",
+        offerPayload({
+          capability_requirement: { capability_id: "software.implementation" },
+        }),
+      ),
+      { token: "human" },
+    );
+
+    const outcomes = await Promise.all([
+      app.handle(
+        envelope(
+          "resolve_target",
+          "resolverA",
+          "resolve-a",
+          {
+            handoff_id: "handoff_1",
+            resolved_target: { actor_id: "actor_agent_a" },
+            evidence: [],
+          },
+          1,
+        ),
+        { token: "resolverA" },
+      ),
+      app.handle(
+        envelope(
+          "resolve_target",
+          "resolverB",
+          "resolve-b",
+          {
+            handoff_id: "handoff_1",
+            resolved_target: { actor_id: "actor_agent_b" },
+            evidence: [],
+          },
+          1,
+        ),
+        { token: "resolverB" },
+      ),
+    ]);
+
+    expect(outcomes.map(({ operation_status }) => operation_status).sort()).toEqual([
+      "accepted",
+      "conflict",
+    ]);
+    const records = await persistence.readStream("handoff_1");
+    expect(records).toHaveLength(2);
+    expect(records[1]?.event_type).toBe(
+      "workfabric.handoff.target_resolved.v1",
+    );
+  });
+
   it("rejects every concurrent Accept until a Capability target is resolved", async () => {
     const persistence = new MemoryExchangePersistence();
     const app = application(persistence);

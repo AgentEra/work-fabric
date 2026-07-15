@@ -1,5 +1,6 @@
 import type {
   ContextReference,
+  ExplicitHandoffTarget,
   JsonObject,
   JsonValue,
   ProposedEvent,
@@ -142,6 +143,39 @@ function target(value: JsonValue | undefined, field: string): HandoffTarget {
   };
 }
 
+function explicitTarget(
+  value: JsonValue | undefined,
+  field: string,
+): ExplicitHandoffTarget {
+  const decoded = object(value, field);
+  if (decoded.actor_id !== undefined) {
+    return { actor_id: string(decoded.actor_id, `${field}.actor_id`) };
+  }
+  if (decoded.endpoint_id !== undefined) {
+    return { endpoint_id: string(decoded.endpoint_id, `${field}.endpoint_id`) };
+  }
+  return invalidPayload(field);
+}
+
+function targetUnavailableReasonCode(
+  value: JsonValue | undefined,
+  field: string,
+): Extract<
+  HandoffCommand,
+  { readonly kind: "report_target_unavailable" }
+>["reason_code"] {
+  const decoded = string(value, field);
+  switch (decoded) {
+    case "no_candidate":
+    case "no_eligible_target":
+    case "policy_rejected":
+    case "resolver_unavailable":
+      return decoded;
+    default:
+      return invalidPayload(field);
+  }
+}
+
 function priority(
   value: JsonValue | undefined,
   field: string,
@@ -243,6 +277,33 @@ export function decodeHandoffCommand(
         actor,
         package: decodeOfferPackage(payload, contextReference),
         parent_handoff_id: null,
+      };
+    case "workfabric.handoff.resolve_target.v1":
+      return {
+        kind: "resolve_target",
+        handoff_id: handoffId(payload),
+        actor,
+        resolver_endpoint_id: envelope.endpoint_id,
+        delegation_id: envelope.delegation_id ?? null,
+        resolved_target: explicitTarget(
+          payload.resolved_target,
+          "payload.resolved_target",
+        ),
+        evidence: objectArray(payload.evidence, "payload.evidence"),
+      };
+    case "workfabric.handoff.report_target_unavailable.v1":
+      return {
+        kind: "report_target_unavailable",
+        handoff_id: handoffId(payload),
+        actor,
+        resolver_endpoint_id: envelope.endpoint_id,
+        delegation_id: envelope.delegation_id ?? null,
+        reason_code: targetUnavailableReasonCode(
+          payload.reason_code,
+          "payload.reason_code",
+        ),
+        reason: objectArray(payload.reason, "payload.reason"),
+        evidence: objectArray(payload.evidence, "payload.evidence"),
       };
     case "workfabric.handoff.accept.v1":
       return { kind: "accept", handoff_id: handoffId(payload), actor };

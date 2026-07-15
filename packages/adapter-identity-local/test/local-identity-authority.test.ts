@@ -217,6 +217,38 @@ describe("LocalAuthorityPolicy", () => {
     ).resolves.toEqual({ kind: "allow" });
   });
 
+  it("scopes target-resolution authority to the exact action and Handoff", async () => {
+    const action = "workfabric.handoff.resolve_target.v1";
+    const policy = new LocalAuthorityPolicy([
+      allowRule({ action, resource_id: "handoff_pending" }),
+    ]);
+
+    await expect(
+      policy.authorize(
+        authorityRequest(runtimePrincipal, {
+          action,
+          resource_id: "handoff_pending",
+        }),
+      ),
+    ).resolves.toEqual({ kind: "allow" });
+    await expect(
+      policy.authorize(
+        authorityRequest(runtimePrincipal, {
+          action: "workfabric.handoff.report_target_unavailable.v1",
+          resource_id: "handoff_pending",
+        }),
+      ),
+    ).resolves.toMatchObject({ kind: "deny" });
+    await expect(
+      policy.authorize(
+        authorityRequest(runtimePrincipal, {
+          action,
+          resource_id: "handoff_other",
+        }),
+      ),
+    ).resolves.toMatchObject({ kind: "deny" });
+  });
+
   it("denies an explicit rule when the Principal has no trusted Actor representation", async () => {
     const policy = new LocalAuthorityPolicy([
       allowRule({ actor_id: "agent_unconfigured" }),

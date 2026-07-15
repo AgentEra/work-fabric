@@ -411,6 +411,29 @@ export class ExchangeApplication {
           contextAvailable,
         );
       }
+      let targetEligible = false;
+      if (
+        command.kind === "resolve_target" &&
+        currentState?.lifecycle_state === "target_resolution_pending" &&
+        "capability_requirement" in currentState.package.target
+      ) {
+        const targetEligibility = this.dependencies.target_eligibility;
+        if (targetEligibility === undefined) {
+          return toOperationResult(envelope.message_id, temporaryFailure());
+        }
+        const eligibility = await targetEligibility.verify({
+          tenant_id: envelope.tenant_id,
+          exchange_id: envelope.exchange_id,
+          handoff_id: handoffId,
+          requirement: currentState.package.target.capability_requirement,
+          proposed_target: command.resolved_target,
+          principal,
+        });
+        if (eligibility.kind === "unavailable") {
+          return toOperationResult(envelope.message_id, temporaryFailure());
+        }
+        targetEligible = eligibility.kind === "eligible";
+      }
       const now = this.dependencies.clock.now();
       const decision = decideHandoff(currentState, command, {
         now,
@@ -419,6 +442,10 @@ export class ExchangeApplication {
         policy_allows_cancel: true,
         context_available: contextAvailable,
         authority_valid: true,
+        resolver_authorized:
+          command.kind === "resolve_target" ||
+          command.kind === "report_target_unavailable",
+        target_eligible: targetEligible,
       });
       let outcome: NormalizedOperationOutcome;
       let appends: readonly {

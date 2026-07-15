@@ -297,6 +297,64 @@ describe("Handoff Command decoding", () => {
     ).toMatchObject({ thread_id: "thread_existing" });
   });
 
+  it("decodes target resolution with resolver transport identity", () => {
+    expect(
+      decodeHandoffCommand(
+        envelope(
+          "workfabric.handoff.resolve_target.v1",
+          {
+            handoff_id: "handoff_01",
+            resolved_target: { endpoint_id: "endpoint_worker" },
+            evidence: [{ evidence_type: "capability_attestation" }],
+          },
+          { endpoint_id: "endpoint_resolver", delegation_id: "delegation_02" },
+        ),
+        actor,
+        "handoff_generated",
+        null,
+      ),
+    ).toEqual({
+      kind: "resolve_target",
+      handoff_id: "handoff_01",
+      actor,
+      resolver_endpoint_id: "endpoint_resolver",
+      delegation_id: "delegation_02",
+      resolved_target: { endpoint_id: "endpoint_worker" },
+      evidence: [{ evidence_type: "capability_attestation" }],
+    });
+  });
+
+  it("decodes a terminal target-unavailable report", () => {
+    const withDelegation = envelope(
+      "workfabric.handoff.report_target_unavailable.v1",
+      {
+        handoff_id: "handoff_01",
+        reason_code: "no_eligible_target",
+        reason: [{ kind: "text", text: "No eligible target" }],
+        evidence: [],
+      },
+      { endpoint_id: "endpoint_resolver" },
+    );
+    const { delegation_id: _delegationId, ...withoutDelegation } = withDelegation;
+    expect(
+      decodeHandoffCommand(
+        withoutDelegation,
+        actor,
+        "handoff_generated",
+        null,
+      ),
+    ).toEqual({
+      kind: "report_target_unavailable",
+      handoff_id: "handoff_01",
+      actor,
+      resolver_endpoint_id: "endpoint_resolver",
+      delegation_id: null,
+      reason_code: "no_eligible_target",
+      reason: [{ kind: "text", text: "No eligible target" }],
+      evidence: [],
+    });
+  });
+
   it.each([
     ["accept", { handoff_id: "handoff_01" }, {}],
     ["decline", { handoff_id: "handoff_01" }, {}],

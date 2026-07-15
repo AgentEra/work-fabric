@@ -4,6 +4,7 @@ import type {
   ExchangePersistence,
   IdentityProvider,
   ResolvedPrincipal,
+  TargetEligibilityVerifier,
 } from "@work-fabric/exchange-spi";
 import type { WfppCommandValidator } from "@work-fabric/protocol-runtime";
 
@@ -30,4 +31,5 @@ export interface ExchangeApplicationDependencies {
   readonly validator: WfppCommandValidator;
   readonly clock: Clock;
   readonly ids: IdGenerator;
+  readonly target_eligibility?: TargetEligibilityVerifier;
 }
