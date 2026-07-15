@@ -5,6 +5,7 @@ import {
   CONTEXT_REQUIRED_CAPABILITIES,
   IDENTITY_REQUIRED_CAPABILITIES,
   SIGNAL_REQUIRED_CAPABILITIES,
+  TARGET_ELIGIBILITY_REQUIRED_CAPABILITIES,
   assertCapabilities,
   type AuthorityPolicy,
   type AuthorityRequest,
@@ -19,6 +20,8 @@ import {
   type ResolvedPrincipal,
   type SignalAdapter,
   type SignalDestination,
+  type TargetEligibilityRequest,
+  type TargetEligibilityVerifier,
 } from "@work-fabric/exchange-spi";
 
 export interface IdentityProfileFixtures {
@@ -48,6 +51,12 @@ export interface SignalProfileFixtures {
     readonly event: ProtocolEvent;
     readonly destination: SignalDestination;
   }[]>;
+}
+
+export interface TargetEligibilityProfileFixtures {
+  readonly eligible_request: TargetEligibilityRequest;
+  readonly ineligible_request: TargetEligibilityRequest;
+  readonly unavailable_request: TargetEligibilityRequest;
 }
 
 function assertProfile(
@@ -178,6 +187,30 @@ export async function verifyAuthorityProfile(
   assert.equal(
     (await adapter.authorize(structuredClone(fixtures.denied_request))).kind,
     "deny",
+  );
+}
+
+export async function verifyTargetEligibilityProfile(
+  adapter: TargetEligibilityVerifier,
+  fixtures: TargetEligibilityProfileFixtures,
+): Promise<void> {
+  assertProfile(
+    adapter,
+    "exchange.target-eligibility.v1",
+    TARGET_ELIGIBILITY_REQUIRED_CAPABILITIES,
+  );
+
+  assert.deepEqual(
+    await adapter.verify(structuredClone(fixtures.eligible_request)),
+    { kind: "eligible" },
+  );
+  assert.equal(
+    (await adapter.verify(structuredClone(fixtures.ineligible_request))).kind,
+    "ineligible",
+  );
+  assert.equal(
+    (await adapter.verify(structuredClone(fixtures.unavailable_request))).kind,
+    "unavailable",
   );
 }
 

@@ -107,7 +107,7 @@ git commit -m "feat(protocol): define target resolution lifecycle"
 - Consumes: `ExchangeAdapter`, `ResolvedPrincipal`, `JsonObject`, tenant/exchange/actor/endpoint identifiers.
 - Produces: `TargetEligibilityVerifier.verify(request): Promise<TargetEligibilityDecision>` where decision is `{kind:"eligible"}`, `{kind:"ineligible",reason:string}`, or `{kind:"unavailable",reason:string}`. The request contains one immutable Capability Requirement and one explicit Actor/Endpoint only.
 
-- [ ] **Step 1: Write failing SPI contract tests**
+- [x] **Step 1: Write failing SPI contract tests**
 
 Add a verifier profile whose test adapter records one request and returns each allowed decision. Assert the manifest requires `explicit_target_only`, `no_candidate_selection`, and `fail_closed`.
 
@@ -123,7 +123,7 @@ const decision = await verifier.verify({
 expect(decision).toEqual({ kind: "eligible" });
 ```
 
-- [ ] **Step 2: Run focused tests and verify RED**
+- [x] **Step 2: Run focused tests and verify RED**
 
 ```bash
 npx vitest run packages/exchange-spi/test/target-resolution-contract.test.ts packages/exchange-conformance/test/adapter-profiles.test.ts
@@ -131,11 +131,11 @@ npx vitest run packages/exchange-spi/test/target-resolution-contract.test.ts pac
 
 Expected: FAIL because the target-resolution SPI and conformance profile are absent.
 
-- [ ] **Step 3: Implement the minimal SPI and reusable profile**
+- [x] **Step 3: Implement the minimal SPI and reusable profile**
 
 Export immutable request/decision types, the required capability manifest, and `verifyTargetEligibilityProfile`. Do not add any candidate-list or scoring type.
 
-- [ ] **Step 4: Run focused and dependency-boundary tests for GREEN**
+- [x] **Step 4: Run focused and dependency-boundary tests for GREEN**
 
 ```bash
 npx vitest run packages/exchange-spi/test/target-resolution-contract.test.ts packages/exchange-conformance/test/adapter-profiles.test.ts packages/exchange-core/test/dependency-boundaries.test.ts
@@ -144,7 +144,7 @@ npm run typecheck
 
 Expected: all tests and typecheck pass.
 
-- [ ] **Step 5: Commit the SPI**
+- [x] **Step 5: Commit the SPI**
 
 ```bash
 git add packages/exchange-spi packages/exchange-conformance

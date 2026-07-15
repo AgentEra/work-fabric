@@ -16,6 +16,9 @@ import type {
   SignalAdapter,
   SignalDeliveryResult,
   SignalDestination,
+  TargetEligibilityDecision,
+  TargetEligibilityRequest,
+  TargetEligibilityVerifier,
 } from "@work-fabric/exchange-spi";
 
 import {
@@ -23,6 +26,7 @@ import {
   verifyContextProfile,
   verifyIdentityProfile,
   verifySignalProfile,
+  verifyTargetEligibilityProfile,
 } from "../src/index.js";
 
 const principal: ResolvedPrincipal = {
@@ -269,6 +273,37 @@ const signalManifest = manifest("exchange.signal.v1", {
   outcome_classification: true,
   payload_isolation: true,
 });
+const targetEligibilityManifest = manifest("exchange.target-eligibility.v1", {
+  explicit_target_only: true,
+  no_candidate_selection: true,
+  fail_closed: true,
+});
+
+function targetEligibilityAdapter(): TargetEligibilityVerifier {
+  return {
+    manifest: targetEligibilityManifest,
+    async verify(
+      request: TargetEligibilityRequest,
+    ): Promise<TargetEligibilityDecision> {
+      if ("actor_id" in request.proposed_target) {
+        return { kind: "ineligible", reason: "Actor lacks capability" };
+      }
+      if (request.proposed_target.endpoint_id === "endpoint_unreachable") {
+        return { kind: "unavailable", reason: "Directory unavailable" };
+      }
+      return { kind: "eligible" };
+    },
+  };
+}
+
+const targetEligibilityBase: TargetEligibilityRequest = {
+  tenant_id: "tenant_01",
+  exchange_id: "exchange_01",
+  handoff_id: "handoff_01",
+  requirement: { capability_id: "software.implementation" },
+  proposed_target: { endpoint_id: "endpoint_agent" },
+  principal,
+};
 
 const authorityBase: AuthorityRequest = {
   principal,
@@ -308,6 +343,22 @@ const destination = (destinationId: string): SignalDestination => ({
 });
 
 describe("peripheral Adapter Profile verifiers", () => {
+  it("verifies eligible, ineligible, and unavailable target decisions", async () => {
+    await expect(
+      verifyTargetEligibilityProfile(targetEligibilityAdapter(), {
+        eligible_request: targetEligibilityBase,
+        ineligible_request: {
+          ...targetEligibilityBase,
+          proposed_target: { actor_id: "actor_without_capability" },
+        },
+        unavailable_request: {
+          ...targetEligibilityBase,
+          proposed_target: { endpoint_id: "endpoint_unreachable" },
+        },
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("verifies identity behavior including trusted Actor type preservation", async () => {
     await expect(
       verifyIdentityProfile(identityAdapter(identityManifest), {
