@@ -300,21 +300,21 @@ git commit -m "feat(http): add SSE and service health"
 
 **Interfaces:** Produces an executable 3B HTTP reference flow and roadmap status with 3B complete and 3C TypeScript SDK next.
 
-- [ ] **Step 1: Write the failing black-box reference test**
+- [x] **Step 1: Write the failing black-box reference test**
 
 Use only HTTP against `127.0.0.1:0`. Cover Direct Offer, Capability Offer → Resolve → Accept, idempotency, conflict, Handoff query preserving Requirement and Binding, safe Events, Subscription put, Pull/Ack, SSE reconnect, liveness/readiness, and protected health.
 
-- [ ] **Step 2: Run and verify RED**
+- [x] **Step 2: Run and verify RED**
 
 ```bash
 npx vitest run packages/transport-http/test/http-reference.integration.test.ts
 ```
 
-- [ ] **Step 3: Complete composition and status docs**
+- [x] **Step 3: Complete composition and status docs**
 
 Document startup/configuration/routes. Mark only 3B complete and 3C next; do not claim OIDC, Webhook Worker, SDK, Agent Gateway, or Console.
 
-- [ ] **Step 4: Run full verification**
+- [x] **Step 4: Run full verification**
 
 ```bash
 npm run verify
@@ -322,7 +322,7 @@ npm run verify:exchange
 git diff --check
 ```
 
-- [ ] **Step 5: Review and commit**
+- [x] **Step 5: Review and commit**
 
 ```bash
 git diff --stat
@@ -331,7 +331,7 @@ git add README.md docs packages package-lock.json
 git commit -m "feat(http): complete HTTP service binding"
 ```
 
-- [ ] **Step 6: Push**
+- [x] **Step 6: Push**
 
 ```bash
 git push origin codex/exchange-core-design

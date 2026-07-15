@@ -30,6 +30,7 @@ describe("HTTP service configuration", () => {
     ["default_page_limit", -1],
     ["max_page_limit", 1.5],
     ["request_timeout_ms", Number.NaN],
+    ["health_probe_timeout_ms", 0],
     ["sse_max_connections", Number.MAX_SAFE_INTEGER + 1],
     ["sse_poll_interval_ms", 0],
     ["sse_heartbeat_interval_ms", 0],

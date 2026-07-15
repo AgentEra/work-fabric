@@ -115,9 +115,56 @@ Work Fabric 由以下逻辑能力组成：
 - Codex 作为 Agent Runtime 暴露的代码实施能力，或作为独立 Agent Endpoint。
 - Git、需求系统和部署平台通过 Connector 提供工作引用、状态事件和结果写回。
 
+## HTTP Service Binding
+
+阶段 3B 已提供 `@work-fabric/transport-http`。它把同一个 Exchange Application、Query、Subscription 与 Health 能力绑定为 Node.js HTTP 服务；Fastify 只是包内实现，不进入公共接口。人、Agent、Console 和外部系统使用同一套 API，差别只来自可信身份、代表关系与 Authority Policy，不存在 Console 专用或 Agent 专用的状态通道。
+
+主要入口：
+
+| 能力 | HTTP API |
+|---|---|
+| Canonical WFPP 命令 | `POST /v1/commands` |
+| Handoff 与安全事件查询 | `GET /v1/handoffs/{id}`、`GET /v1/handoffs/{id}/events` |
+| Durable Subscription | `GET/PUT /v1/subscriptions/{id}` |
+| Cursor Pull / Ack | `POST /v1/subscriptions/{id}/pull`、`POST /v1/subscriptions/{id}/ack` |
+| SSE | `GET /v1/subscriptions/{id}/events?partition_id=...` |
+| 运维只读接口 | `/v1/partitions/*`、`/v1/admin/*` |
+| 健康检查 | `/health/live`、`/health/ready`、`/v1/admin/health` |
+
+程序化启动：
+
+```ts
+import {
+  BearerAuthenticationEvidenceMapper,
+  createHttpService,
+  normalizeHttpServiceConfig,
+} from "@work-fabric/transport-http";
+
+const service = createHttpService(
+  {
+    application,
+    authenticator: new BearerAuthenticationEvidenceMapper(),
+    identity,
+    authority,
+    query,
+    subscriptions,
+    schemas,
+    delivery,
+    health_probes,
+  },
+  normalizeHttpServiceConfig({}),
+);
+
+await service.listen({ host: "127.0.0.1", port: 8080 });
+```
+
+Query/Admin 请求使用 `X-WF-Actor-ID`、`X-WF-Endpoint-ID` 和可选 `X-WF-Delegation-ID` 声明代表关系；这些 Header 只是待验证声明，不是权限。默认 Bearer mapper 只生成 authentication evidence，令牌验证仍由 Identity Adapter 负责。
+
+HTTP 配置统一限制请求体、默认/最大分页、请求超时、健康探针超时、SSE 连接数、轮询/心跳/空闲时间和优雅关停截止时间。Pull、Ack 与 SSE 共用一个持久交付账本；SSE 的 `id` 是不透明交付游标，`data` 是仅含一个 Protocol Event 的 canonical Event Delivery，因此客户端可直接取得 `delivery_id` 并提交标准 Ack。只有有效 Ack 才推进位置。
+
 ## 当前状态
 
-项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation，以及阶段 3A 的 Target Resolution Protocol/Core。Application 当前仍由进程内调用直接消费协议命令；HTTP、SSE、Webhook、A2A、MCP、飞书与 Agent Runtime 将通过后续 Binding 或 Adapter 接入，参与方的专业工作与 Agent 执行始终在 Core 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A 的 Target Resolution Protocol/Core，以及阶段 3B 的 HTTP Service Binding。Canonical 命令、授权查询、运维可见性、Durable Pull/Ack、SSE、健康检查和服务生命周期已经可以通过同一个公共 HTTP Surface 使用；Webhook Worker、A2A、MCP、飞书、Agent Runtime、SDK 和 Console 仍属于后续阶段，参与方的专业工作与 Agent 执行始终在 Core 之外。
 
 当前阶段路线：
 
@@ -126,8 +173,8 @@ Work Fabric 由以下逻辑能力组成：
 | 1 | Exchange Core + Memory Reference | 已完成 |
 | 2 | PostgreSQL Production Adapter Foundation | 已完成 |
 | 3A | Target Resolution Protocol / Core | 已完成 |
-| 3B | HTTP Service Binding | 下一步 |
-| 3C | TypeScript SDK | 未开始 |
+| 3B | HTTP Service Binding | 已完成 |
+| 3C | TypeScript SDK | 下一步 |
 | 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
@@ -147,6 +194,9 @@ Work Fabric 由以下逻辑能力组成：
 - `npm run postgres:migrate -- --dry-run` 可预览迁移，`npm run postgres:smoke` 在设置 `PG_TEST_URL` 后执行租户 RLS 烟测。
 - “全局订阅”是跨逻辑 Partition 的查询与消费视图；恢复、确认和重放位置始终按 Subscription × Partition 独立保存，不承诺全局顺序。
 - 公共 WFPP Protocol Event 只包含协议字段，不暴露内部 `domain_data`、Partition position、Commit ID 或其他存储游标元数据。
+- HTTP Route 只做传输映射、身份/代表关系校验、Authority 调用和有界序列化；它不调用 Decider、不选择目标、不直接访问数据库。
+- Pull 与 SSE 是同一个 Durable Subscription 的两种呈现，复用交付位置、Pending Delivery、Ack、重放和至少一次语义；WebSocket 未进入 3B。
+- `/health/live` 与 `/health/ready` 只返回有界进程状态；受保护的 `/v1/admin/health` 才返回不含错误文本的依赖摘要。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
 
@@ -155,7 +205,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一步严格聚焦 3B HTTP Service Binding，随后再做 3C TypeScript SDK：先把 transport-free Exchange 组合为可独立运行、可通过标准 API 调用的服务，再提供统一 SDK，并在之后进入飞书、本地 Agent Runtime、查询运维和 Console。阶段 3 不包含 Console UI。
+下一步严格进入 3C TypeScript SDK：SDK 只封装当前公共 HTTP Contract，不创建第二套状态模型或 Agent 专用捷径。随后再进入飞书、本地 Agent Runtime、查询运维和 Console。阶段 3 不包含 Console UI，Webhook Worker、OIDC Adapter、Agent Gateway 和生产部署组合也不因 3B 完成而被宣称就绪。
 
 ## 文档
 
@@ -166,5 +216,6 @@ npm run verify:exchange
 - [人、Agent 与系统参考序列](protocol/examples/)
 - [协作对接与工作交接详细设计](docs/superpowers/specs/2026-07-13-collaboration-handoff-fabric-design.md)
 - [Work Fabric Participation Protocol v1 设计](docs/superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)
+- [HTTP Service Binding 设计](docs/superpowers/specs/2026-07-15-http-service-binding-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

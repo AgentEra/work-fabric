@@ -163,7 +163,7 @@ describe("SSE subscription route", () => {
     if (reader === undefined) throw new Error("expected SSE response body");
     const text = await readUntil(reader, (value) => value.includes(": heartbeat"));
     expect(text).toContain("id: cursor_1");
-    expect(text).toContain(`data: ${JSON.stringify(event(1))}`);
+    expect(text).toContain(`data: ${JSON.stringify(delivery(1))}`);
     expect(text.match(/^data:/gm)).toHaveLength(1);
     controller.abort();
     await service.close();
@@ -182,7 +182,7 @@ describe("SSE subscription route", () => {
     const replay = await openStream(origin, replayController.signal, "cursor_1");
     if (replay.reader === undefined) throw new Error("expected replay stream");
     const replayed = await readUntil(replay.reader, (value) => value.includes("id: cursor_1"));
-    expect(replayed).toContain(`data: ${JSON.stringify(event(1))}`);
+    expect(replayed).toContain(`data: ${JSON.stringify(delivery(1))}`);
 
     const ack = await fetch(`${origin}/v1/subscriptions/subscription_01/ack`, {
       method: "POST",
@@ -198,7 +198,7 @@ describe("SSE subscription route", () => {
     expect(ack.status).toBe(200);
     expect(acknowledge).toHaveBeenCalledOnce();
     const continued = await readUntil(replay.reader, (value) => value.includes("id: cursor_2"));
-    expect(continued).toContain(`data: ${JSON.stringify(event(2))}`);
+    expect(continued).toContain(`data: ${JSON.stringify(delivery(2))}`);
     replayController.abort();
     await service.close();
   });

@@ -115,10 +115,9 @@ export function registerSseRoute(
         );
         if (result.kind === "delivery") {
           if (result.delivery.next_cursor !== lastEmittedCursor) {
-            const protocolEvent = result.delivery.events[0];
-            if (protocolEvent === undefined) break;
+            if (result.delivery.events.length !== 1) break;
             response.write(
-              `id: ${result.delivery.next_cursor}\nevent: workfabric.event\ndata: ${JSON.stringify(protocolEvent)}\n\n`,
+              `id: ${result.delivery.next_cursor}\nevent: workfabric.delivery\ndata: ${JSON.stringify(result.delivery)}\n\n`,
             );
             lastEmittedCursor = result.delivery.next_cursor;
             lastWriteAt = Date.now();

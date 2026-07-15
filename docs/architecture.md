@@ -17,7 +17,7 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
-Exchange Core Phase 1 是 **transport-free** 的参考实现：它没有 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。Binding 与 Adapter 把外部参与方接到统一命令和事件契约上，Core 只完成授权后的目标校验、责任移交和权威记录。
+Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B 已在 Core 之外增加 HTTP Service Binding，把外部参与方接到同一命令、查询、订阅和事件契约；Core 仍只完成授权后的目标校验、责任移交和权威记录。
 
 ### Work Fabric 原生负责
 
@@ -138,6 +138,8 @@ L1  Message Contract
 L0  Transport Bindings
     HTTP / gRPC / WebSocket / Webhook / Broker / Local IPC / SDK
 ```
+
+当前已实现 L0 的 HTTP 命令/查询绑定，以及复用 Durable Subscription 的 Cursor Pull/Ack 和 SSE 呈现。WebSocket、Webhook Worker、SDK 与其他 Binding 仍是独立后续模块；它们必须复用同一 WFPP 语义和交付位置，不能成为旁路状态通道。
 
 不同传输绑定必须保持相同的领域语义和状态机。例如，飞书卡片点击和 Agent 的流式 `accept` 消息都可以表达 `RESPONSIBILITY_ACCEPTED`，但交互方式不同。
 
@@ -578,7 +580,7 @@ Target Resolver 是通过统一协议接入的可选外部模块。它订阅待�
 
 该示例验证的是跨参与方、跨阶段和跨系统的协作对接，而不是在 Work Fabric 内部实现销售、合同、研发、部署和运维流程。
 
-## 19. Phase 1 实施边界
+## 19. 已实现的 Core 与 HTTP 边界
 
 Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 
@@ -588,7 +590,16 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - 可重建 Handoff/Assignment 读模型、at-least-once Signal、Cursor Pull/Ack、重试和死信参考行为。
 - Memory 参考 Adapters、复用型 Conformance Profiles 和端到端公共 Reference Suite。
 
-Transport Binding、飞书 Connector、Agent Endpoint Gateway 与本地 Agent Runtime 接入仍属于后续独立模块；PostgreSQL Production Adapter 与 Context Adapter 已作为 SPI 实现落地。它们增强参与方接入和运行能力，不会把外部执行职责吸收到 Work Fabric Core 内部。
+阶段 3B 在上述 Core 之外完成 HTTP Service Binding：
+
+- `POST /v1/commands` 原样承载 Canonical WFPP Command，并把 `OperationResult` 作为权威响应。
+- Participant Query、Admin Query 与 Console 未来使用同一身份和 Authority 链；没有内部管理旁路。
+- Subscription 资源使用公共 WFPP Schema，内部 Runtime 表示由边界 codec 映射，存储技术不进入 HTTP Contract。
+- Cursor Pull/Ack 与 SSE 共用 Durable Subscription、Pending Delivery 和交付位置；SSE 不建立第二套事件账本。
+- 健康检查、连接上限、请求/分页限制和优雅关停均在 Host 边界有界处理。
+- Route 不接收 SQL Client 或具体存储 Adapter，不做 Target Resolution、调度、Decider 调用或外部工作执行。
+
+飞书 Connector、Agent Endpoint Gateway、本地 Agent Runtime、TypeScript SDK、Webhook Worker 与生产身份 Adapter 仍属于后续独立模块。PostgreSQL Production Adapter 与 Context Adapter 已作为 SPI 实现落地；所有这些模块只增强接入和运行能力，不改变 Core 的职责边界。
 
 ## 20. 阶段路线与执行状态
 
@@ -597,11 +608,11 @@ Transport Binding、飞书 Connector、Agent Endpoint Gateway 与本地 Agent Ru
 | 1 | Exchange Core + Memory Reference | 已完成 |
 | 2 | PostgreSQL Production Adapter Foundation | 已完成 |
 | 3A | Target Resolution Protocol / Core | 已完成 |
-| 3B | HTTP Service Binding | 下一步 |
-| 3C | TypeScript SDK | 未开始 |
+| 3B | HTTP Service Binding | 已完成 |
+| 3C | TypeScript SDK | 下一步 |
 | 4 | 飞书与本地 Agent Runtime 接入 | 未开始 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-实施严格遵循上述顺序。3A 已先补齐 Capability Target 对外开放所需的协议与 Core 语义；3B 建立可独立运行的 Exchange Service 和 HTTP Transport Binding，3C 再提供统一 TypeScript SDK。阶段 3 不同时实施 Console。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。
+实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B 已建立可监听、可关闭、可通过 Canonical API 使用的 HTTP Service Binding，并以纯 HTTP 黑盒参考流验证 Direct Offer、Capability Resolve、查询、Pull/Ack、SSE 和健康检查。3C 下一步基于这套 Contract 提供统一 TypeScript SDK，不重定义领域对象。阶段 3 不同时实施 Console。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。

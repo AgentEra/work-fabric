@@ -2,6 +2,11 @@
 
 ## 1. Goal and status
 
+**Implementation status: complete (Phase 3B, 2026-07-15).** The implementation
+and black-box reference suite are in `packages/transport-http`. Phase 3C
+TypeScript SDK is next. This status does not include a Webhook Worker, OIDC
+Adapter, Agent Gateway, Console, or production deployment composition.
+
 Phase 3B turns the transport-free Exchange Application and Runtime services
 into one independently runnable Node.js HTTP service. It gives humans, Agents,
 Console clients, and external systems the same protocol, query, subscription,
@@ -142,7 +147,10 @@ creates a second delivery ledger.
 
 - Pull returns standard Protocol Events plus a signed opaque cursor.
 - Ack advances durable delivery position through the existing Runtime service.
-- SSE frames contain one Protocol Event as JSON.
+- SSE `data` contains one schema-valid Event Delivery with exactly one Protocol
+  Event. This preserves `delivery_id`, attempt, visibility, and cursor metadata
+  required to construct the canonical Delivery Ack without exposing storage
+  internals.
 - SSE `id` is the opaque delivery cursor; the Protocol Event keeps its own
   stable CloudEvent `id` in the data.
 - `Last-Event-ID` resumes from the opaque cursor after reconnect.
@@ -195,16 +203,18 @@ requests exceeding configured deadlines before unsafe side effects.
 
 ## 9. Operational safety
 
-Configuration sets exact limits for JSON bytes, query page size, request
-deadline, header bytes, SSE connections, SSE batch size, polling interval,
-heartbeat interval, and graceful shutdown timeout. Defaults are conservative
-and validation rejects unsafe or nonsensical values at startup.
+Configuration sets exact limits for JSON bytes, query page size, request and
+health-probe deadlines, SSE connections, polling interval, heartbeat interval,
+idle lifetime, and graceful shutdown timeout. SSE delivery has a fixed
+single-Event batch. Defaults are conservative and validation rejects unsafe or
+nonsensical values at startup.
 
-Structured request logs contain request ID, tenant after authentication,
-verified Actor/Endpoint, route, response status, and duration. They omit tokens,
+The binding itself does not emit credentials or request bodies. A production
+host may attach structured logging and tracing at its composition boundary; it
+must use verified identity context and may contain request ID, tenant, verified
+Actor/Endpoint, route, response status, and duration. It must omit tokens,
 authentication evidence, request bodies, full Context, and internal errors.
-Correlation headers may be returned but do not replace WFPP correlation and
-causation fields.
+Correlation headers do not replace WFPP correlation and causation fields.
 
 ## 10. Testing and acceptance
 
