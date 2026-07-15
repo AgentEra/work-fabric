@@ -1,5 +1,3 @@
-import { readFile } from "node:fs/promises";
-
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createPgPool,
@@ -10,7 +8,7 @@ import {
 } from "@work-fabric/adapter-postgres-common";
 import type { AtomicCommitRequest } from "@work-fabric/exchange-spi";
 import type { TenantSession } from "@work-fabric/adapter-postgres-common";
-import { PostgresExchangePersistence } from "../src/index.js";
+import { EXCHANGE_AUTHORITY_MIGRATION, PostgresExchangePersistence } from "../src/index.js";
 
 const connectionString = process.env.PG_TEST_URL;
 const live = connectionString !== undefined && connectionString.trim().length > 0;
@@ -62,8 +60,7 @@ describe("PostgreSQL exchange integration", () => {
     const client = await pool.connect();
     await client.query(`CREATE SCHEMA "${schema}"`);
     await client.query(`SET search_path TO "${schema}"`);
-    const exchangeSql = await readFile(new URL("../migrations/002_exchange_authority.sql", import.meta.url), "utf8");
-    await runMigrations(client, [TENANT_CONTEXT_MIGRATION, { id: "002_exchange_authority", sql: exchangeSql }]);
+    await runMigrations(client, [TENANT_CONTEXT_MIGRATION, EXCHANGE_AUTHORITY_MIGRATION]);
     client.release();
 
     const suffix = `${Date.now()}_${Math.random().toString(36).slice(2)}`;

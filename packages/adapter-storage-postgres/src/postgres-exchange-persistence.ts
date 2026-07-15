@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import {
   PERSISTENCE_REQUIRED_CAPABILITIES,
   type AtomicCommitRequest,
@@ -15,6 +16,11 @@ import {
   parseUtcTimestamp,
 } from "@work-fabric/exchange-spi";
 import type { PostgresClient, TenantSession } from "@work-fabric/adapter-postgres-common";
+
+export const EXCHANGE_AUTHORITY_MIGRATION = {
+  id: "002_exchange_authority",
+  sql: readFileSync(new URL("../migrations/002_exchange_authority.sql", import.meta.url), "utf8"),
+} as const;
 
 const manifest: CapabilityManifest = {
   profile: "exchange.persistence.v1",
@@ -145,23 +151,38 @@ async function currentVersion(client: PostgresClient, tenantId: string, streamId
 
 export class PostgresExchangePersistence implements ExchangePersistence, SnapshotRepository {
   readonly manifest = clone(manifest);
+  private tenantContext: string | undefined;
 
   constructor(
     private readonly sessionFactory: (tenantId: string) => TenantSession,
-    private readonly snapshotTenantId = "default",
+    snapshotTenantId?: string,
   ) {
     assertCapabilities(this.manifest, PERSISTENCE_REQUIRED_CAPABILITIES);
-    identity(snapshotTenantId, "snapshotTenantId");
+    if (snapshotTenantId !== undefined) {
+      identity(snapshotTenantId, "tenantId");
+      this.tenantContext = snapshotTenantId;
+    }
+  }
+
+  private readTenant(): string {
+    if (this.tenantContext === undefined) {
+      throw new Error("tenant context is required before journal or snapshot reads");
+    }
+    return this.tenantContext;
   }
 
   async commitAtomically(request: AtomicCommitRequest): Promise<AtomicCommitResult> {
     validateRequest(request);
+    if (this.tenantContext === undefined) this.tenantContext = request.tenant_id;
+    if (this.tenantContext !== request.tenant_id) {
+      throw new Error("a persistence instance cannot be used across tenant contexts");
+    }
     const result = await this.sessionFactory(request.tenant_id).withTransaction(async (client) => {
       // Serialize same-key commands even when the command row does not yet
       // exist; a row-level FOR UPDATE cannot lock a missing key.
       await client.query(
         "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))",
-        [request.tenant_id, request.idempotency_key],
+        [request.tenant_id, `command:${request.idempotency_key}`],
       );
       const existing = await client.query<Record<string, unknown>>(
         "SELECT tenant_id, idempotency_key, payload_digest, first_request_message_id, outcome FROM work_fabric_commands WHERE tenant_id = $1 AND idempotency_key = $2 FOR UPDATE",
@@ -176,16 +197,16 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
       }
 
       const checks = new Map<string, number>();
-      const lockedStreams = new Set<string>();
-      for (const check of [...request.version_checks, ...request.appends]) {
-        if (!lockedStreams.has(check.stream_id)) {
-          await client.query(
-            "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))",
-            [request.tenant_id, check.stream_id],
-          );
-          lockedStreams.add(check.stream_id);
-        }
-        checks.set(check.stream_id, await currentVersion(client, request.tenant_id, check.stream_id));
+      const streamIds = [...new Set([
+        ...request.version_checks.map((check) => check.stream_id),
+        ...request.appends.map((append) => append.stream_id),
+      ])].sort();
+      for (const streamId of streamIds) {
+        await client.query(
+          "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))",
+          [request.tenant_id, `stream:${streamId}`],
+        );
+        checks.set(streamId, await currentVersion(client, request.tenant_id, streamId));
       }
       const conflicts = [...request.version_checks, ...request.appends].filter(
         (check) => checks.get(check.stream_id) !== check.expected_version,
@@ -196,6 +217,11 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
           current_versions: Object.fromEntries(checks),
         } satisfies AtomicCommitResult;
       }
+
+      await client.query(
+        "SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))",
+        [request.tenant_id, `partition:${request.partition_id}`],
+      );
 
       const partition = await client.query<{ current_position: number | string | null }>(
         "SELECT partition_position AS current_position FROM work_fabric_events WHERE tenant_id = $1 AND partition_id = $2 ORDER BY partition_position DESC LIMIT 1 FOR UPDATE",
@@ -243,10 +269,11 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
   async readStream(streamId: string, fromVersion = 0): Promise<readonly EventRecord[]> {
     identity(streamId, "streamId");
     nonNegativeInteger(fromVersion, "fromVersion");
-    return this.sessionFactory(this.snapshotTenantId).withTransaction(async (client) => {
+    const tenantId = this.readTenant();
+    return this.sessionFactory(tenantId).withTransaction(async (client) => {
       const result = await client.query<Record<string, unknown>>(
         "SELECT * FROM work_fabric_events WHERE tenant_id = $1 AND stream_id = $2 AND stream_version >= $3 ORDER BY stream_version",
-        [this.snapshotTenantId, streamId, fromVersion],
+        [tenantId, streamId, fromVersion],
       );
       return result.rows.map(eventFromRow);
     });
@@ -256,10 +283,11 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
     identity(partitionId, "partitionId");
     nonNegativeInteger(afterPosition, "afterPosition");
     positiveInteger(limit, "limit");
-    return this.sessionFactory(this.snapshotTenantId).withTransaction(async (client) => {
+    const tenantId = this.readTenant();
+    return this.sessionFactory(tenantId).withTransaction(async (client) => {
       const result = await client.query<Record<string, unknown>>(
         "SELECT * FROM work_fabric_events WHERE tenant_id = $1 AND partition_id = $2 AND partition_position > $3 ORDER BY partition_position LIMIT $4",
-        [this.snapshotTenantId, partitionId, afterPosition, limit],
+        [tenantId, partitionId, afterPosition, limit],
       );
       return result.rows.map(eventFromRow);
     });
@@ -279,10 +307,11 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
 
   async loadSnapshot(streamId: string): Promise<SnapshotRecord | null> {
     identity(streamId, "streamId");
-    return this.sessionFactory(this.snapshotTenantId).withTransaction(async (client) => {
+    const tenantId = this.readTenant();
+    return this.sessionFactory(tenantId).withTransaction(async (client) => {
       const result = await client.query<Record<string, unknown>>(
         "SELECT stream_id, stream_version, schema_version, state FROM work_fabric_snapshots WHERE tenant_id = $1 AND stream_id = $2",
-        [this.snapshotTenantId, streamId],
+        [tenantId, streamId],
       );
       const row = result.rows[0];
       return row === undefined ? null : clone({
@@ -298,18 +327,20 @@ export class PostgresExchangePersistence implements ExchangePersistence, Snapsho
     identity(snapshot.stream_id, "stream_id");
     nonNegativeInteger(snapshot.stream_version, "stream_version");
     identity(snapshot.schema_version, "schema_version");
-    await this.sessionFactory(this.snapshotTenantId).withTransaction(async (client) => {
+    const tenantId = this.readTenant();
+    await this.sessionFactory(tenantId).withTransaction(async (client) => {
       await client.query(
         "INSERT INTO work_fabric_snapshots (tenant_id, stream_id, stream_version, schema_version, state) VALUES ($1,$2,$3,$4,$5::jsonb) ON CONFLICT (tenant_id, stream_id) DO UPDATE SET stream_version = EXCLUDED.stream_version, schema_version = EXCLUDED.schema_version, state = EXCLUDED.state",
-        [this.snapshotTenantId, snapshot.stream_id, snapshot.stream_version, snapshot.schema_version, JSON.stringify(snapshot.state)],
+        [tenantId, snapshot.stream_id, snapshot.stream_version, snapshot.schema_version, JSON.stringify(snapshot.state)],
       );
     });
   }
 
   async deleteSnapshot(streamId: string): Promise<void> {
     identity(streamId, "streamId");
-    await this.sessionFactory(this.snapshotTenantId).withTransaction(async (client) => {
-      await client.query("DELETE FROM work_fabric_snapshots WHERE tenant_id = $1 AND stream_id = $2", [this.snapshotTenantId, streamId]);
+    const tenantId = this.readTenant();
+    await this.sessionFactory(tenantId).withTransaction(async (client) => {
+      await client.query("DELETE FROM work_fabric_snapshots WHERE tenant_id = $1 AND stream_id = $2", [tenantId, streamId]);
     });
   }
 }

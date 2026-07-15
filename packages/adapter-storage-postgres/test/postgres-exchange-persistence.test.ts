@@ -100,6 +100,7 @@ describe("PostgresExchangePersistence", () => {
       { rows: [], rowCount: 0 },
       { rows: [], rowCount: 0 },
       { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 },
     ];
     const session = new RecordingSession(client);
     const result = await persistence(session).commitAtomically(request());
@@ -147,6 +148,7 @@ describe("PostgresExchangePersistence", () => {
       { rows: [], rowCount: 0 },
       { rows: [], rowCount: 0 },
       { rows: [{ current_version: 4 }], rowCount: 1 },
+      { rows: [], rowCount: 0 },
     ];
     const result = await persistence(new RecordingSession(client)).commitAtomically(request());
     expect(result).toEqual({ kind: "version_conflict", current_versions: { stream_01: 4 } });
@@ -159,6 +161,37 @@ describe("PostgresExchangePersistence", () => {
       outcome: { operation_status: "temporarily_unavailable", resource: null, receipt: null, error: { code: "busy" } },
     }))).rejects.toThrow();
     expect(session.markers).toEqual([]);
+  });
+
+  it("rejects duplicate event IDs before opening a transaction", async () => {
+    const session = new RecordingSession(new FakeClient());
+    await expect(persistence(session).commitAtomically(request({
+      appends: [{ stream_id: "stream_01", expected_version: 0, events: [proposed("same"), proposed("same")] }],
+    }))).rejects.toThrow("duplicate event ID");
+    expect(session.markers).toEqual([]);
+  });
+
+  it("allocates ordered stream and partition positions for a multi-event append", async () => {
+    const client = new FakeClient();
+    client.responses = [
+      { rows: [], rowCount: 0 }, { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 }, { rows: [{ current_version: 0 }], rowCount: 1 },
+      { rows: [], rowCount: 0 }, { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 }, { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 }, { rows: [], rowCount: 0 },
+      { rows: [], rowCount: 0 },
+    ];
+    const multi = request({
+      appends: [{ stream_id: "stream_01", expected_version: 0, events: [proposed("event_a"), proposed("event_b")] }],
+    });
+    const result = await persistence(new RecordingSession(client)).commitAtomically(multi);
+    expect(result.kind).toBe("committed");
+    const eventCalls = client.calls.filter(({ text }) => text.startsWith("INSERT INTO work_fabric_events"));
+    expect(eventCalls).toHaveLength(2);
+    expect(eventCalls[0]?.values?.[20]).toBe(1);
+    expect(eventCalls[0]?.values?.[22]).toBe(1);
+    expect(eventCalls[1]?.values?.[20]).toBe(2);
+    expect(eventCalls[1]?.values?.[22]).toBe(2);
   });
 
   it("maps immutable event rows and snapshot JSON", async () => {
