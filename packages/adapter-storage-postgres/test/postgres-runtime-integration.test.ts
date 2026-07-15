@@ -7,7 +7,7 @@ import {
   type PostgresPool,
   type TenantSession,
 } from "@work-fabric/adapter-postgres-common";
-import { EXCHANGE_AUTHORITY_MIGRATION, PostgresRuntimeState, RUNTIME_STATE_MIGRATION } from "../src/index.js";
+import { EXCHANGE_AUTHORITY_MIGRATION, PostgresRuntimeState, RUNTIME_STATE_HARDENING_MIGRATION, RUNTIME_STATE_MIGRATION } from "../src/index.js";
 import type { EventRecord } from "@work-fabric/exchange-spi";
 
 const connectionString = process.env.PG_TEST_URL;
@@ -24,7 +24,7 @@ describe("PostgreSQL runtime-state integration", () => {
     const setup = await pool.connect();
     await setup.query(`CREATE SCHEMA "${schema}"`);
     await setup.query(`SET search_path TO "${schema}"`);
-    await runMigrations(setup, [TENANT_CONTEXT_MIGRATION, EXCHANGE_AUTHORITY_MIGRATION, RUNTIME_STATE_MIGRATION]);
+    await runMigrations(setup, [TENANT_CONTEXT_MIGRATION, EXCHANGE_AUTHORITY_MIGRATION, RUNTIME_STATE_MIGRATION, RUNTIME_STATE_HARDENING_MIGRATION]);
     setup.release();
     const sessionFactory = (tenantId: string): TenantSession => {
       const base = createTenantSession(pool as PostgresPool, tenantId);

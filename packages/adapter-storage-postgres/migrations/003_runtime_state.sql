@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS work_fabric_worker_leases (
   PRIMARY KEY (tenant_id, lease_key)
 );
 
+ALTER TABLE work_fabric_outbox ALTER COLUMN attempt SET DEFAULT 1;
+
 DO $$ DECLARE table_name text; BEGIN
   FOREACH table_name IN ARRAY ARRAY[
     'work_fabric_projection_checkpoints','work_fabric_projection_failures',
