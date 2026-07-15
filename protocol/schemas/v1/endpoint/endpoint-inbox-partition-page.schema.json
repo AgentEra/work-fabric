@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:endpoint-inbox-partition-page",
+  "title": "Endpoint Inbox Partition Page",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 200,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "partition_id",
+          "latest_position",
+          "active_handoff_count"
+        ],
+        "properties": {
+          "partition_id": {
+            "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+          },
+          "latest_position": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "active_handoff_count": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    "next_cursor": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2048
+    }
+  }
+}

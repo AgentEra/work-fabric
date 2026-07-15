@@ -2,6 +2,8 @@ export * from "./authority.js";
 export * from "./capabilities.js";
 export * from "./context.js";
 export * from "./durability.js";
+export * from "./endpoint-directory.js";
+export * from "./endpoint-inbox.js";
 export * from "./events.js";
 export * from "./identity.js";
 export * from "./json.js";

@@ -52,6 +52,13 @@ Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身
 - `urn:work-fabric:schema:v1:binding-descriptor`
 - `urn:work-fabric:schema:v1:capability-descriptor`
 - `urn:work-fabric:schema:v1:endpoint-descriptor`
+- `urn:work-fabric:schema:v1:endpoint-registration`
+- `urn:work-fabric:schema:v1:endpoint-session-open`
+- `urn:work-fabric:schema:v1:endpoint-session`
+- `urn:work-fabric:schema:v1:endpoint-heartbeat`
+- `urn:work-fabric:schema:v1:endpoint-session-close`
+- `urn:work-fabric:schema:v1:endpoint-discovery-page`
+- `urn:work-fabric:schema:v1:endpoint-inbox-partition-page`
 
 ### Handoff、状态、结果与回执
 

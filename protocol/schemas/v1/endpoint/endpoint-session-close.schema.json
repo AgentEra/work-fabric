@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:endpoint-session-close",
+  "title": "Endpoint Session Close",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "fencing_token",
+    "heartbeat_sequence",
+    "expected_registration_version"
+  ],
+  "properties": {
+    "fencing_token": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "heartbeat_sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "expected_registration_version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}
