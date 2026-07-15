@@ -1,6 +1,7 @@
 export * from "./authority.js";
 export * from "./capabilities.js";
 export * from "./context.js";
+export * from "./durability.js";
 export * from "./events.js";
 export * from "./identity.js";
 export * from "./json.js";
