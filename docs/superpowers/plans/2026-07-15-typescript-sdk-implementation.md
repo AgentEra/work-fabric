@@ -135,25 +135,25 @@ git commit -m "feat(sdk): add universal HTTP transport"
 
 **Interfaces:** Produces `CommandClient.send` and all thirteen Handoff methods. Convenience calls consume tenant, exchange, representation, clock, message-ID generator, mandatory idempotency key, and explicit expected version for existing resources.
 
-- [ ] **Step 1: Write failing Command tests**
+- [x] **Step 1: Write failing Command tests**
 
 Assert exact `POST /v1/commands`, unchanged canonical Envelope, all OperationResult statuses returned without throwing, and no automatic network retry.
 
-- [ ] **Step 2: Write failing builder tests**
+- [x] **Step 2: Write failing builder tests**
 
 For `offer`, `resolveTarget`, `reportTargetUnavailable`, `accept`, `decline`, `expire`, `cancel`, `reportStatus`, `returnResult`, `verify`, `close`, `requestRework`, and `transfer`, assert message type, payload, Actor/Endpoint/Delegation, tenant/exchange, time, ID, version, idempotency, correlation, and causation. Invalid IDs/version/key fail before Fetch.
 
-- [ ] **Step 3: Run and verify RED**
+- [x] **Step 3: Run and verify RED**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/command-handoff-client.test.ts
 ```
 
-- [ ] **Step 4: Implement one Envelope builder and thin methods**
+- [x] **Step 4: Implement one Envelope builder and thin methods**
 
 Every method delegates to one private builder and `CommandClient.send`. `resolveTarget` defaults evidence to `[]` and never selects a target. Transfer sends only the canonical transfer payload.
 
-- [ ] **Step 5: Run, typecheck, and commit**
+- [x] **Step 5: Run, typecheck, and commit**
 
 ```bash
 npx vitest run packages/sdk-typescript/test/command-handoff-client.test.ts

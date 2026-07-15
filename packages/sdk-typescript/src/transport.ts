@@ -22,6 +22,7 @@ export interface TransportRequest<T> {
   readonly representation?: RepresentationContext | null;
   readonly headers?: Readonly<Record<string, string>>;
   readonly decode: (value: unknown) => T;
+  readonly decodeError?: (value: unknown, status: number) => T;
 }
 
 interface TransportInternals {
@@ -193,6 +194,13 @@ export class SdkTransport {
         }
 
         if (!response.ok) {
+          if (input.decodeError !== undefined) {
+            try {
+              return input.decodeError(value, response.status);
+            } catch {
+              throw transportFailure("invalid_response");
+            }
+          }
           try {
             throw new WorkFabricHttpError(
               problemDetails(value, response.status),

@@ -1,5 +1,7 @@
 export * from "./authentication.js";
 export * from "./config.js";
+export * from "./command-client.js";
 export * from "./errors.js";
+export * from "./handoff-client.js";
 export * from "./protocol-types.js";
 export * from "./transport.js";
