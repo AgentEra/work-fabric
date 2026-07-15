@@ -6,6 +6,13 @@ ALTER TABLE work_fabric_projection_failures
 
 ALTER TABLE work_fabric_delivery_attempts
   DROP CONSTRAINT IF EXISTS work_fabric_delivery_attempts_pkey;
+DELETE FROM work_fabric_delivery_attempts newer
+USING work_fabric_delivery_attempts older
+WHERE newer.ctid > older.ctid
+  AND newer.tenant_id = older.tenant_id
+  AND newer.subscription_id = older.subscription_id
+  AND newer.event_id = older.event_id
+  AND newer.attempt = older.attempt;
 ALTER TABLE work_fabric_delivery_attempts
   ADD PRIMARY KEY (tenant_id, subscription_id, event_id, attempt);
 
