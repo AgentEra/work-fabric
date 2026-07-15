@@ -41,6 +41,7 @@ export interface FeishuActionReferenceCodecOptions {
   readonly encryption_key: Uint8Array;
   readonly nonce_factory?: () => Uint8Array;
   readonly max_reference_length?: number;
+  readonly max_issued_references?: number;
 }
 
 export class FeishuActionReferenceError extends Error {
@@ -117,6 +118,8 @@ export class FeishuActionReferenceCodec {
   private readonly key: Buffer;
   private readonly nonceFactory: () => Uint8Array;
   private readonly maximumLength: number;
+  private readonly maximumIssuedReferences: number;
+  private readonly usedNonces = new Set<string>();
 
   constructor(options: FeishuActionReferenceCodecOptions) {
     if (options.encryption_key.byteLength !== 32) {
@@ -125,8 +128,15 @@ export class FeishuActionReferenceCodec {
     this.key = Buffer.from(options.encryption_key);
     this.nonceFactory = options.nonce_factory ?? (() => randomBytes(12));
     this.maximumLength = options.max_reference_length ?? 2_048;
+    this.maximumIssuedReferences = options.max_issued_references ?? 1_000_000;
     if (!Number.isSafeInteger(this.maximumLength) || this.maximumLength <= 0) {
       throw new RangeError("max_reference_length must be positive");
+    }
+    if (
+      !Number.isSafeInteger(this.maximumIssuedReferences) ||
+      this.maximumIssuedReferences <= 0
+    ) {
+      throw new RangeError("max_issued_references must be positive");
     }
   }
 
@@ -136,6 +146,14 @@ export class FeishuActionReferenceCodec {
     if (nonce.byteLength !== 12) {
       throw new TypeError("Feishu action nonce must contain 12 bytes");
     }
+    const nonceIdentity = nonce.toString("hex");
+    if (this.usedNonces.has(nonceIdentity)) {
+      throw new Error("Feishu action nonce must never be reused");
+    }
+    if (this.usedNonces.size >= this.maximumIssuedReferences) {
+      throw new Error("Feishu action nonce/key issuance limit was reached");
+    }
+    this.usedNonces.add(nonceIdentity);
     const cipher = createCipheriv("aes-256-gcm", this.key, nonce);
     cipher.setAAD(AAD);
     const ciphertext = Buffer.concat([

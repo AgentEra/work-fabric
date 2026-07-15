@@ -121,6 +121,25 @@ describe("Feishu identity and action mapping", () => {
     })).toThrow(/expired/i);
   });
 
+  it("rejects nonce reuse for action-reference encryption", () => {
+    const codec = new FeishuActionReferenceCodec({
+      encryption_key: new Uint8Array(32).fill(7),
+      nonce_factory: () => new Uint8Array(12).fill(3),
+    });
+    const claims = {
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      external_tenant_id: "tenant-key-1",
+      external_subject_id: "ou-human-1",
+      operation: "handoff.accept",
+      expected_version: 4,
+      input: { handoff_id: "handoff-1" },
+      expires_at: "2026-07-16T00:10:00Z",
+    };
+    codec.issue(claims);
+    expect(() => codec.issue(claims)).toThrow(/nonce/i);
+  });
+
   it("maps a generated card action to one explicit command", async () => {
     const codec = new FeishuActionReferenceCodec({
       encryption_key: new Uint8Array(32).fill(7),

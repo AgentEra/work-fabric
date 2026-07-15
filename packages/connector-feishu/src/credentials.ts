@@ -9,6 +9,30 @@ export interface FeishuCredentialProvider {
   ): Promise<FeishuWebhookCredentials>;
 }
 
+export interface FeishuAppCredentials {
+  readonly app_id: string;
+  readonly app_secret: string;
+}
+
+export interface FeishuAppCredentialProvider {
+  loadAppCredentials(
+    credentialReference: string,
+  ): Promise<FeishuAppCredentials>;
+}
+
+export function assertFeishuAppCredentials(
+  credentials: FeishuAppCredentials,
+): void {
+  if (
+    typeof credentials.app_id !== "string" ||
+    credentials.app_id.length === 0 ||
+    typeof credentials.app_secret !== "string" ||
+    credentials.app_secret.length === 0
+  ) {
+    throw new TypeError("Feishu application credentials are invalid");
+  }
+}
+
 export function assertFeishuWebhookCredentials(
   credentials: FeishuWebhookCredentials,
 ): void {
