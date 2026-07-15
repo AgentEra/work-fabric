@@ -69,10 +69,10 @@ Exchange Core 不是：
 - Agent Runtime、模型调度器或代码执行沙箱；
 - CRM、项目管理、文档或知识库系统；
 - 参与方内部推理、工具调用和步骤记录器；
-- 自动决定客户业务流程的智能调度器；
+- 自动决定 Handoff 目标、客户业务流程或参与方内部执行计划的智能调度器；
 - 依赖某个数据库或消息队列的封装层。
 
-自动化来自外部参与端可以被 Agent 替换或组合，而不是 Exchange 把外部执行吸收到内部。
+自动化来自外部参与端和 Target Resolver 可以被 Agent 替换或组合，而不是 Exchange 把目标决策或外部执行吸收到内部。Exchange 可以提供候选 Endpoint 事实、目标解析协议和可靠派发，但不实现匹配、排名、推荐或选择算法。
 
 ## 4. 总体架构
 
@@ -126,9 +126,12 @@ Human / Agent / Existing System / AI Service
 
 - 从已提交 Journal 构建查询投影；
 - 执行订阅过滤和 Signal 投递；
+- 在目标已经明确后执行 Handoff Dispatch，包括 Binding 投递、Delivery/Ack、重试和恢复；
 - 管理 checkpoint、重试、退避和 dead-letter；
 - 触发到期检查等系统命令；
 - 不改变已经提交的事件，也不绕过 Application 直接修改聚合。
+
+`dispatch` 只表示可靠连接和投递，不表示目标选择或执行调度。Capability Target 由外部 Target Resolver 解析为明确 Actor/Endpoint；Resolver 通过协议接入，Exchange 负责资格校验、权威记录和并发一致性。底层只提交一个并发写入是存储不变量，不得被描述为“首个合法接受者胜出”的业务调度策略。
 
 #### Adapter
 

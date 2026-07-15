@@ -17,7 +17,7 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
-Exchange Core Phase 1 是 **transport-free** 的参考实现：它没有 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。Binding 与 Adapter 把外部参与方接到统一命令和事件契约上，Core 只完成授权后的分派、状态移交和权威记录。
+Exchange Core Phase 1 是 **transport-free** 的参考实现：它没有 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。Binding 与 Adapter 把外部参与方接到统一命令和事件契约上，Core 只完成授权后的目标校验、责任移交和权威记录。
 
 ### Work Fabric 原生负责
 
@@ -28,6 +28,7 @@ Exchange Core Phase 1 是 **transport-free** 的参考实现：它没有 HTTP Se
 - Context 的范围化传递。
 - 对外状态报告、结果引用和验收回执。
 - 事件、订阅、通知、确认、重放和状态对账。
+- 将已确定目标的 Handoff 可靠派发到 Endpoint，并区分送达、读取和责任接受。
 - 责任历史、事件因果、证据和审计视图。
 
 ### Work Fabric 不负责
@@ -38,6 +39,8 @@ Exchange Core Phase 1 是 **transport-free** 的参考实现：它没有 HTTP Se
 - 替代外部工作系统成为业务内容主库。
 - 强制所有参与方采用相同 Workflow 或传输技术。
 - 通过一个内部自动化引擎包办所有业务流程。
+- 根据能力、负载、成本或模型判断自动选择接收方。
+- 安排参与方内部的任务拆解、模型调用、工具使用或执行顺序。
 
 ## 2. 架构原则
 
@@ -51,6 +54,7 @@ Exchange Core Phase 1 是 **transport-free** 的参考实现：它没有 HTTP Se
 8. **逻辑图与物理存储分离**：协作关系可以投影为图，但权威事务状态不绑定单一图数据库。
 9. **最小授权**：交接携带与当前工作绑定的授权范围，不向 Agent 或 Adapter 发放租户级长期权限。
 10. **自动化来自端点可替换性**：人类端点可以逐步替换为 Agent 端点，而协议、治理和交接链保持稳定。
+11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、目标解析协议和可靠派发；目标选择与执行计划由外部人、规则或 Agent Brain 决定。
 
 ## 3. 系统上下文
 
@@ -60,6 +64,7 @@ flowchart TB
         Human["Human Workplaces<br/>飞书 / Console / API"]
         Agent["Agent Brains & Runtimes<br/>本地 Runtime / Codex / 远程 Agent"]
         System["Legacy & AI-native Systems<br/>CRM / PM / Git / KB / 部署 / 监控"]
+        Resolver["Optional Target Resolver<br/>人 / 规则 / AI Scheduling Brain"]
     end
 
     subgraph Fabric["Work Fabric：协作对接与交接边界"]
@@ -75,6 +80,7 @@ flowchart TB
     Human <--> HumanAdapter
     Agent <--> AgentEndpoint
     System <--> Connector
+    Resolver <--> Protocol
     HumanAdapter <--> Protocol
     AgentEndpoint <--> Protocol
     Connector <--> Protocol
@@ -189,6 +195,30 @@ extension_fields
 | Status Channel | 状态、问题和结果回传方式 |
 | Deadline / Expiry | 接收责任和返回结果的时间边界 |
 | Correlation / Causation | 所属协作链及直接上游原因 |
+
+### 5.3 Target Resolution、Handoff Dispatch 与 Execution Scheduling
+
+三者必须保持独立：
+
+- **Target Resolution** 决定 Handoff 应绑定到哪个 Actor 或 Endpoint。它可以由发起方直接完成，也可以由外部人工选择器、规则服务或 AI Scheduling Brain 完成。Work Fabric 提供候选 Endpoint 的事实查询和解析结果提交协议，但不实现排名、推荐或选择算法。
+- **Handoff Dispatch** 在目标确定后选择兼容 Binding，可靠投递 Handoff，维护 Delivery、Ack、重试、死信与恢复，并验证接收方是否有资格代表目标承担责任。这是 Work Fabric 的原生连接职责。
+- **Execution Scheduling** 决定任务如何拆分、何时执行、使用哪些模型、工具或内部 Worker，完全属于接收方 Runtime、Workflow 或外部系统。
+
+Capability Target 表达尚未解析的能力需求。未得到经过授权的解析结果前，Work Fabric 不得把并发抢占或“首个响应者”当作默认分派策略。底层乐观并发只用于保证同一 Handoff 的权威状态不会被多个写入同时提交，不代表业务调度决策。
+
+```mermaid
+flowchart LR
+    Requirement["Capability Target"]
+    Resolver["External Target Resolver<br/>Human / Rule / Agent Brain"]
+    Resolved["Resolved Actor / Endpoint"]
+    Exchange["Work Fabric Exchange<br/>Validate / Record / Trace"]
+    Dispatch["Work Fabric Handoff Dispatch<br/>Binding / Delivery / Ack / Retry"]
+    Endpoint["External Endpoint"]
+    Execution["External Execution"]
+
+    Requirement --> Resolver --> Resolved --> Exchange --> Dispatch --> Endpoint --> Execution
+    Execution -->|"Status / Result via Protocol"| Exchange
+```
 
 ## 6. 核心领域模型
 
@@ -481,6 +511,10 @@ Connector 使用五个明确边界：
 ### Agent 扩展
 
 Agent Endpoint 使用 Capability Descriptor 声明输入、结果、限制、交互模式和协议版本。能力发现只负责协作接入，不要求 Work Fabric 理解 Agent 内部实现。
+
+### Target Resolver 扩展
+
+Target Resolver 是通过统一协议接入的可选外部模块。它订阅待解析的 Capability Target，查询经过授权的 Endpoint/Capability 事实，并提交明确的 Actor 或 Endpoint 解析结果及可选证据。Resolver 可以由人工、规则、优化算法或 AI Agent 实现；Exchange 只验证和记录结果，不调用或内置其决策逻辑。移除所有 Resolver 后，直接 Actor/Endpoint Target 仍必须正常工作。
 
 ### 业务类型扩展
 

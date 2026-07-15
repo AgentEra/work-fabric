@@ -53,6 +53,18 @@ Work Fabric 的中心不是内部工作流引擎，而是两个稳定能力：
 | 状态报告、结果引用和验收回执 | 飞书、CRM、Git 等系统的业务内容 |
 | 协作事件、订阅、通知和追踪 | 部署、运行和运维处置本身 |
 
+### 目标解析、派发与执行边界
+
+Work Fabric 是连接和交换层，不是任务决策或执行大脑：
+
+| 能力 | 责任归属 |
+|---|---|
+| Target Resolution：根据能力、负载、成本或风险决定交给谁 | 外部人、规则服务、Agent Brain 或可插拔 Resolver |
+| Handoff Dispatch：把已确定的交接可靠送达，处理 Binding、Delivery、Ack、重试和恢复 | Work Fabric |
+| Execution Scheduling：拆解步骤、选择模型与工具、安排参与方内部执行 | 人、Agent Runtime、Workflow 或外部系统 |
+
+直接指定 Actor 或 Endpoint 的 Handoff 不依赖任何 Resolver。Capability Target 只表达待解析的能力需求；Work Fabric 可以提供候选 Endpoint 事实，但不排名、不推荐、不自动选择。外部 Resolver 通过统一协议提交目标解析结果后，Work Fabric 校验目标、记录决策来源并完成派发。消息送达不等于责任接受，只有接收方明确接受 Handoff 后责任才发生迁移。
+
 ## 一次交接如何完成
 
 ```mermaid
@@ -87,7 +99,7 @@ Work Fabric 由以下逻辑能力组成：
 
 - **Participation Edge**：Human Channel Adapter、Agent Endpoint 和 System Connector。
 - **Protocol & Contract**：统一领域语义、交互状态机、消息契约和传输绑定。
-- **Handoff Core**：参与者目录、工作引用、协作线程、分派、交接、状态和回执。
+- **Handoff Core**：参与者目录、工作引用、协作线程、目标绑定、交接、状态和回执。
 - **Signal Network**：事件、订阅、通知、确认、游标和重放。
 - **Context Exchange**：外部引用、必要快照、范围化 Context Bundle 和交接摘要。
 - **Trust & Trace**：身份、委托、权限、因果、审计和责任历史。
