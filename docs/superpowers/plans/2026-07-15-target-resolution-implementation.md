@@ -364,7 +364,7 @@ git diff --check
 
 Expected: typecheck passes, every non-live test passes, conformance is fully green, and the diff has no whitespace errors.
 
-- [ ] **Step 5: Review the complete diff and commit**
+- [x] **Step 5: Review the complete diff and commit**
 
 ```bash
 git diff --stat
@@ -373,7 +373,7 @@ git add README.md docs protocol packages tools
 git commit -m "feat: complete target resolution foundation"
 ```
 
-- [ ] **Step 6: Push the branch**
+- [x] **Step 6: Push the branch**
 
 ```bash
 git push origin codex/exchange-core-design
