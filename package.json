@@ -27,6 +27,7 @@
     "benchmark:wakeup": "tsx tools/benchmark-nats-wakeup.ts",
     "check:console-boundaries": "tsx tools/check-console-boundaries.ts",
     "check:cluster-boundaries": "tsx tools/check-cluster-boundaries.ts",
+    "check:federation-boundaries": "tsx tools/check-federation-boundaries.ts",
     "check:sensitive-observability": "tsx tools/check-sensitive-observability.ts",
     "verify:postgres": "npm run typecheck && vitest run packages/adapter-postgres-common/test packages/adapter-storage-postgres/test packages/adapter-context-postgres/test && npm run conformance",
     "verify": "npm run typecheck && npm test && npm run conformance",

@@ -10,6 +10,7 @@ WFPP v1 是 Work Fabric 的语言无关核心协议。它定义人、Agent 与�
 - [角色与责任](spec/roles.md)
 - [交互与生命周期](spec/interactions.md)
 - [事件](spec/events.md)
+- [跨 Exchange Federation Profile](spec/federation.md)
 - [订阅与投递](spec/subscriptions.md)
 - [安全与授权](spec/security.md)
 - [版本与兼容](spec/versioning.md)
@@ -31,6 +32,8 @@ Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身
 持久化同样属于可替换 Adapter：Memory 实现承载参考行为，PostgreSQL 实现通过既有 SPI 提供生产持久化、RLS、CAS、outbox 和 Context 元数据；协议语义不依赖 PostgreSQL。
 
 Phase 4A 已实现 Endpoint Participation Binding：管理员 Provision 注册事实，外部 Runtime 通过带 fencing 的 Session/Heartbeat 声明在线能力，Resolver 读取未排序 Discovery 事实并显式提交 Target Resolution，Endpoint Inbox 从 committed Handoff Event 重建分区路由，Agent Gateway 再通过公共 SDK 和 Durable SSE 接收 Delivery。该 Binding 不改变 WFPP 生命周期，也不包含目标选择、自动 Ack、自动 Accept 或工作执行。运行说明见[Endpoint 与外部 Agent Runtime 接入](../docs/endpoint-agent-boundary.md)。
+
+Phase 7 已实现独立 Federation Profile：显式 Source/Target Exchange 使用 Ed25519 签名 Offer/Receipt、严格受众与 TTL、canonical digest、重放缓存和幂等 Bridge 对接本地公共 API/SDK。每个 Exchange 只对本地 Handoff 权威；Federation 不发现或选择 Peer，不复制状态，也不执行参与方工作。运行与信任说明见[跨 Exchange Federation](../docs/federation.md)。
 
 ## Schema 索引
 
@@ -100,6 +103,12 @@ Phase 4A 已实现 Endpoint Participation Binding：管理员 Provision 注册�
 - `urn:work-fabric:schema:v1:subscription`
 - `urn:work-fabric:schema:v1:event-delivery`
 - `urn:work-fabric:schema:v1:delivery-ack`
+
+### 跨 Exchange Federation
+
+- `urn:work-fabric:schema:v1:federation-envelope`
+- `urn:work-fabric:schema:v1:federation-transfer-offer`
+- `urn:work-fabric:schema:v1:federation-transfer-receipt`
 
 `definitions` 是内部共享 Schema，不作为独立消息声明兼容性。
 

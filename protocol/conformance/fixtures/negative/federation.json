@@ -1,0 +1,51 @@
+[
+  {
+    "name": "federation offer must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:federation-transfer-offer",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "accepted federation receipt requires target fields",
+    "schema_id": "urn:work-fabric:schema:v1:federation-transfer-receipt",
+    "expected_valid": false,
+    "instance": {
+      "request_message_id": "fed_message_01",
+      "handoff_offer_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "decision": "accepted",
+      "target_handoff_id": null,
+      "target_resource_version": null,
+      "reason_code": "policy_denied",
+      "recorded_at": "2026-07-16T09:00:01Z"
+    }
+  },
+  {
+    "name": "federation envelope requires an Ed25519-sized signature",
+    "schema_id": "urn:work-fabric:schema:v1:federation-envelope",
+    "expected_valid": false,
+    "expected_keyword": "pattern",
+    "instance": {
+      "profile": "workfabric.federation.v1",
+      "message_id": "fed_receipt_01",
+      "transfer_id": "fed_transfer_01",
+      "message_type": "transfer_receipt",
+      "source_exchange_id": "exchange_b",
+      "target_exchange_id": "exchange_a",
+      "sequence": 2,
+      "issued_at": "2026-07-16T09:00:01Z",
+      "expires_at": "2026-07-16T09:05:01Z",
+      "key_id": "key-b",
+      "payload": {
+        "request_message_id": "fed_message_01",
+        "handoff_offer_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "decision": "accepted",
+        "target_handoff_id": "handoff_target_01",
+        "target_resource_version": 1,
+        "reason_code": null,
+        "recorded_at": "2026-07-16T09:00:01Z"
+      },
+      "signature": "too-short"
+    }
+  }
+]

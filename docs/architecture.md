@@ -17,7 +17,7 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
-Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A 增加 Endpoint Directory、Inbox 和只依赖 SDK 的 Agent Gateway；阶段 4B 又在 Core 外增加 durable Connector ingress、映射 worker、reconciliation 和飞书边缘适配。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
+Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A/4B 增加 Endpoint/Agent 与 Connector 边界；阶段 6A/6B 增加数据库权威的集群机械所有权与可选 Wakeup；阶段 7 在 Core 外增加显式 Exchange 间的签名 Federation Profile。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
 
 ### Work Fabric 原生负责
 
@@ -682,6 +682,28 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - NATS 类型只存在于 `adapter-cluster-nats` 和部署工具，不进入 Core、Cluster SPI/Runtime、Service、HTTP、SDK 或 WFPP。
 - Broker 故障只降低反应速度，不阻止 Handoff/协作投影和 Signal 投递；它不新增调度、推理或参与方执行职责。
 
+阶段 7 完成跨 Authoritative Exchange 的签名交接连接：
+
+- `federation-spi` 只定义 Signer、Trust Resolver、Replay Store、Bridge 与 request/receipt Transport，不依赖数据库、HTTP、Broker 或具体密钥服务。
+- `federation-runtime` 对 65,536 字节 canonical 闭合 Envelope 执行 Ed25519、受众、TTL、canonical digest、重复成员/Unicode、消息序列、重放与 Receipt correlation 校验。
+- Source 必须显式给出 Target Exchange；Profile 不发现、评分、推荐或自动选择 Peer。
+- Target Bridge 用 Federation service identity 和 `transfer_id` 幂等键调用自己的公共 API/SDK，创建或关联本地 Handoff；Source Bridge 只在验证签名 Receipt 后应用本地记录。
+- 相同请求重放返回 byte-identical Receipt；同一 Source × Message 的不同 digest fail closed；传输恢复只重发原始签名字节。
+- Source 与 Target 的 Handoff、Journal、版本和 Authority 各自独立权威；没有共享数据库、跨 Exchange 状态覆盖、两阶段提交或全局顺序。
+- Memory Replay Adapter 是本地参考，Node Crypto Adapter 实现显式 Peer/Target/Key Ed25519 信任；生产持久化、Transport 和密钥托管继续可插拔。
+
+```mermaid
+flowchart LR
+    SH["Source local Handoff"] --> SG["Source Federation Gateway<br/>sign + correlate"]
+    SG -->|"signed transfer_offer"| TG["Target Federation Gateway<br/>trust + TTL + replay"]
+    TG --> TB["Target public API/SDK Bridge"]
+    TB --> TH["Target local Handoff"]
+    TH --> TB -->|"decision"| TG
+    TG -->|"signed transfer_receipt"| SG
+    SG --> SB["Source idempotent Receipt Bridge"]
+    SG -. "no discovery / scheduling / execution" .-> Outside7["External people / Agents / systems"]
+```
+
 ```mermaid
 flowchart LR
     API6["API role<br/>public HTTP + SDK"] --> Facts6["Authoritative Handoff facts<br/>Journal + Outbox"]
@@ -710,7 +732,7 @@ flowchart LR
     Owners -. "never participant execution" .-> External["External work systems and Agent runtimes"]
 ```
 
-运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md) 与 [Phase 6B](performance-nats-wakeup-baseline.md) 基线。
+运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，Exchange 间交接见 [Federation 文档](federation.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md) 与 [Phase 6B](performance-nats-wakeup-baseline.md) 基线。
 
 ## 20. 阶段路线与执行状态
 
@@ -726,6 +748,6 @@ flowchart LR
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
 | 6A | 集群分区所有权与数据库恢复 | 已完成 |
 | 6B | Broker-backed Signal/Wakeup 加速 | 已完成 |
-| 7 | 跨 Exchange Federation Profile | 未开始 |
+| 7 | 跨 Exchange Federation Profile | 已完成 |
 
-实施严格遵循上述顺序。3A–5 建立公共连接、Agent/Connector 边界与操作性；6A 以双 Host、故障注入和 fencing 证明集群机械所有权；6B 再以官方 NATS Server、断线回退和静态门禁证明 Broker 仅是提示加速。下一步是阶段 7 Federation，仍不能取代 Exchange 权威或改变连接/交接定位。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–7 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:federation-transfer-offer",
+  "title": "Federation Transfer Offer",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source_handoff_id",
+    "source_thread_id",
+    "source_resource_version",
+    "handoff_offer",
+    "handoff_offer_sha256"
+  ],
+  "properties": {
+    "source_handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "source_thread_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "source_resource_version": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version"
+    },
+    "handoff_offer": {
+      "$ref": "urn:work-fabric:schema:v1:handoff-offer"
+    },
+    "handoff_offer_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    }
+  }
+}

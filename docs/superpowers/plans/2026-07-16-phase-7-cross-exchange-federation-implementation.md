@@ -17,24 +17,24 @@ execution/scheduling responsibility.
 
 ## Tasks
 
-- [ ] Add Federation JSON Schemas and protocol documentation.
-- [ ] Add technology-neutral `federation-spi` contracts and validation types.
-- [ ] Implement strict canonical codec, digest, TTL/audience and stable errors.
-- [ ] Implement replay-safe inbound Gateway and outbound Offer/Receipt client.
-- [ ] Add Memory replay Adapter and Node Ed25519 signer/trust Adapter.
-- [ ] Add conformance profile, tamper/replay/expiry/rotation tests.
-- [ ] Add two-Exchange in-process Offer/Receipt, retry and lost-Receipt proof.
-- [ ] Add dependency/observability gates and deployment documentation.
-- [ ] Update architecture, roadmap and README with the exact completion boundary.
+- [x] Add Federation JSON Schemas and protocol documentation.
+- [x] Add technology-neutral `federation-spi` contracts and validation types.
+- [x] Implement strict canonical codec, digest, TTL/audience and stable errors.
+- [x] Implement replay-safe inbound Gateway and outbound Offer/Receipt client.
+- [x] Add Memory replay Adapter and Node Ed25519 signer/trust Adapter.
+- [x] Add conformance profile, tamper/replay/expiry/rotation tests.
+- [x] Add two-Exchange in-process Offer/Receipt, retry and lost-Receipt proof.
+- [x] Add dependency/observability gates and deployment documentation.
+- [x] Update architecture, roadmap and README with the exact completion boundary.
 - [ ] Run full verification, commit and push without force.
 
 ## Completion checklist
 
-- [ ] Each Exchange remains authoritative only for local records.
-- [ ] Signed Receipt is required before source Bridge application.
-- [ ] Duplicate request returns byte-identical cached Receipt.
-- [ ] Conflicting replay, tamper, expiry and wrong audience fail closed.
-- [ ] Offer content is bounded and never enters telemetry.
-- [ ] No Core/HTTP/SDK/Cluster dependency on Federation Runtime.
-- [ ] No target selection, workflow scheduling, Agent reasoning or execution.
-- [ ] WFPP conformance remains 120/120.
+- [x] Each Exchange remains authoritative only for local records.
+- [x] Signed Receipt is required before source Bridge application.
+- [x] Duplicate request returns byte-identical cached Receipt.
+- [x] Conflicting replay, tamper, expiry and wrong audience fail closed.
+- [x] Offer content is bounded and never enters telemetry.
+- [x] No Core/HTTP/SDK/Cluster dependency on Federation Runtime.
+- [x] No target selection, workflow scheduling, Agent reasoning or execution.
+- [x] WFPP conformance remains complete (126/126 after Federation fixtures).

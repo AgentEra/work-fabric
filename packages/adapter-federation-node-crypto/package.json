@@ -1,0 +1,11 @@
+{
+  "name": "@work-fabric/adapter-federation-node-crypto",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/federation-spi": "0.1.0"
+  }
+}

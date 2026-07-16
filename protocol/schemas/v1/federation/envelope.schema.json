@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:federation-envelope",
+  "title": "Federation Signed Envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "profile",
+    "message_id",
+    "transfer_id",
+    "message_type",
+    "source_exchange_id",
+    "target_exchange_id",
+    "sequence",
+    "issued_at",
+    "expires_at",
+    "key_id",
+    "payload",
+    "signature"
+  ],
+  "properties": {
+    "profile": { "const": "workfabric.federation.v1" },
+    "message_id": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id" },
+    "transfer_id": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id" },
+    "message_type": { "enum": ["transfer_offer", "transfer_receipt"] },
+    "source_exchange_id": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id" },
+    "target_exchange_id": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id" },
+    "sequence": { "type": "integer", "minimum": 1 },
+    "issued_at": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp" },
+    "expires_at": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp" },
+    "key_id": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+    "payload": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:federation-transfer-offer" },
+        { "$ref": "urn:work-fabric:schema:v1:federation-transfer-receipt" }
+      ]
+    },
+    "signature": { "type": "string", "pattern": "^[A-Za-z0-9_-]{86}$" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "message_type": { "const": "transfer_offer" } } },
+      "then": {
+        "properties": {
+          "sequence": { "const": 1 },
+          "payload": { "$ref": "urn:work-fabric:schema:v1:federation-transfer-offer" }
+        }
+      },
+      "else": {
+        "properties": {
+          "sequence": { "const": 2 },
+          "payload": { "$ref": "urn:work-fabric:schema:v1:federation-transfer-receipt" }
+        }
+      }
+    }
+  ]
+}

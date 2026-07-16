@@ -256,9 +256,17 @@ Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、�
 
 真实 HTTP/TypeScript SDK 的五步 Handoff 生命周期已通过双 Host、丢失/重复 Wakeup、外部 Signal Probe 和过期 Owner 接管测试。阶段 6B 又增加了可选 NATS JetStream 元数据提示：严格 4,096 字节 payload、HMAC Tenant Subject、有界 Pull/Ack/Retry、显式非破坏拓扑管理和 Broker 断线回退；数据库扫描始终保持开启与权威。部署边界见[集群分区运行时](docs/cluster-runtime.md)和 [NATS Wakeup 部署](docs/nats-wakeup-deployment.md)。
 
+## 跨 Exchange Federation
+
+阶段 7 已完成 `workfabric.federation.v1`。当 Source 已明确选择 Target Exchange 后，双方通过 Ed25519 签名的 `transfer_offer` / `transfer_receipt` 完成交接对接：严格校验受众、TTL、canonical digest 和显式 Peer/Key 信任；重复请求返回 byte-identical Receipt，冲突重放 fail closed，传输故障只重发原始签名字节。
+
+Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目标、不复制远端状态、不建立全局事务，也不执行参与方工作。部署 Bridge 通过目标 Exchange 的既有公共 API/SDK 幂等创建本地 Handoff；每个 Exchange 只对自己的 Handoff、Journal、版本和 Authority 决策权威。HTTP Federation Binding 与生产 Replay Store 是可独立替换的后续 Adapter，不进入 Core、Cluster Runtime、公共 HTTP 或统一 SDK。
+
+参考实现提供技术中立 SPI、严格 Runtime、Memory Replay Store、Node Ed25519 Adapter、可复用 Conformance Profile、边界门禁，以及两套真实 HTTP/TypeScript SDK/Exchange 的本地权威隔离端到端证明。部署、信任轮换和失败语义见[跨 Exchange Federation](docs/federation.md)。
+
 ## 当前状态
 
-项目已经完成阶段 1–6B：从 WFPP/Exchange Core、生产持久化、HTTP/SDK、Endpoint/Agent、Connector/飞书、查询运维 Console，到集群分区所有权、数据库恢复和可选 NATS Wakeup 加速。Human、Agent、Connector、Console 和开放服务共享同一个公共协议、HTTP 与 SDK 权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
+项目已经完成阶段 1–7：从 WFPP/Exchange Core、生产持久化、HTTP/SDK、Endpoint/Agent、Connector/飞书、查询运维 Console、集群分区所有权和可选 NATS Wakeup，到跨 Exchange 签名交接 Profile。Human、Agent、Connector、Console 和开放服务共享同一个公共协议与权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
 
 当前阶段路线：
 
@@ -274,7 +282,7 @@ Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、�
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
 | 6A | 集群分区所有权与数据库恢复 | 已完成 |
 | 6B | Broker-backed Signal/Wakeup 加速 | 已完成 |
-| 7 | 跨 Exchange Federation Profile | 未开始 |
+| 7 | 跨 Exchange Federation Profile | 已完成 |
 
 阶段严格按顺序推进。Console 没有进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都通过标准 API 提交恢复意图。
 
@@ -308,6 +316,8 @@ Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、�
 - 运维恢复只提交幂等、expected-version 检查的窄意图；实际动作由 fenced worker 和专用端口执行，不经过 Console 直写。
 - `service-node` 是显式组合根；SQLite 使用同一技术中立 SPI 并声明单进程能力，PostgreSQL 仍是生产导向基线。
 - Console 仅使用公共 SDK；SSE 只使查询失效且不自动 Ack，轮询有间隔、抖动、Abort 和单并发上限。
+- Federation 只连接显式 Source/Target Exchange；每方只对本地记录权威，签名 Receipt 不能覆盖本地状态，Bridge 必须使用公共 API/SDK 且以 Transfer ID 幂等。
+- Federation 不做 Peer discovery/ranking、目标选择、状态复制、两阶段提交、全局顺序、Agent 推理或工作执行；生产 Transport、持久 Replay Store 与密钥托管保持可插拔。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
 
@@ -316,7 +326,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一步进入阶段 7 的跨 Exchange Federation Profile。阶段 6B 没有改变数据库权威、公共协议、Authority 或交接边界；Console 仍不是执行路径。Agent Brain、A2A/MCP、其他 Connector 和业务自动化仍是独立外部模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+阶段 1–7 的当前架构闭环已经完成。后续可以按部署需要独立增加 HTTP Federation Binding、生产 Replay Store、更多 Connector 或 A2A/MCP Binding，但它们不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 
@@ -338,6 +348,7 @@ npm run verify:exchange
 - [Phase 6A 性能基线](docs/performance-cluster-baseline.md)
 - [NATS Wakeup 部署](docs/nats-wakeup-deployment.md)
 - [Phase 6B NATS Wakeup 性能基线](docs/performance-nats-wakeup-baseline.md)
+- [跨 Exchange Federation](docs/federation.md)
 - [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

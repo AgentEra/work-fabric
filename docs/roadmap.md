@@ -16,7 +16,7 @@ and repository verification are implemented.
 | 5 | Operations, observability, read projections, read-mostly Console | Complete |
 | 6A | Clustered partition ownership and database-backed recovery | Complete |
 | 6B | Broker-backed Signal/wakeup acceleration | Complete |
-| 7 | Cross-Exchange federation profile | Planned |
+| 7 | Cross-Exchange federation profile | Complete |
 
 ## Phase 4B completion boundary
 
@@ -89,3 +89,24 @@ to the technology-specific Adapter and deployment tools. Phase 6B does not
 rank targets, schedule workflows, reason for Agents, call models/tools or
 perform participant work. See [NATS Wakeup deployment](nats-wakeup-deployment.md)
 and the [performance baseline](performance-nats-wakeup-baseline.md).
+
+## Phase 7 completion boundary
+
+Phase 7 adds the signed `workfabric.federation.v1` request/receipt profile for
+an explicitly selected Source and Target Exchange. It includes closed JSON
+Schemas, deterministic canonical digests, fixed-size Ed25519 signatures,
+audience/TTL checks, explicit peer/key trust, replay-safe byte-identical
+Receipts, stable rejection data and a technology-neutral Bridge/Transport seam.
+
+The reference implementation includes bounded Memory replay behavior, a Node
+Ed25519 Adapter, a reusable conformance profile, tamper/expiry/key-rotation and
+retry/reconciliation tests, static dependency/telemetry gates, and a real
+two-Exchange HTTP/TypeScript SDK proof. Each Exchange owns only its local
+Handoff and applies a signed remote Receipt through a deployment-owned,
+idempotent Bridge; no remote statement overwrites local state.
+
+Phase 7 does not add peer discovery/ranking, target selection, cross-Exchange
+queries, state replication, global ordering, two-phase commit, workflow
+scheduling, Agent reasoning, model/tool calls or participant execution. HTTP
+Federation transport, durable production Replay Stores and managed key custody
+remain replaceable deployment Adapters. See [Cross-Exchange Federation](federation.md).

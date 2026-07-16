@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:federation-transfer-receipt",
+  "title": "Federation Transfer Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "request_message_id",
+    "handoff_offer_sha256",
+    "decision",
+    "target_handoff_id",
+    "target_resource_version",
+    "reason_code",
+    "recorded_at"
+  ],
+  "properties": {
+    "request_message_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "handoff_offer_sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "decision": {
+      "enum": ["accepted", "rejected"]
+    },
+    "target_handoff_id": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id" },
+        { "type": "null" }
+      ]
+    },
+    "target_resource_version": {
+      "oneOf": [
+        { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version" },
+        { "type": "null" }
+      ]
+    },
+    "reason_code": {
+      "oneOf": [
+        { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" },
+        { "type": "null" }
+      ]
+    },
+    "recorded_at": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/timestamp"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "decision": { "const": "accepted" } } },
+      "then": {
+        "properties": {
+          "target_handoff_id": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id" },
+          "target_resource_version": { "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/resource_version" },
+          "reason_code": { "type": "null" }
+        }
+      },
+      "else": {
+        "properties": {
+          "target_handoff_id": { "type": "null" },
+          "target_resource_version": { "type": "null" },
+          "reason_code": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,63}$" }
+        }
+      }
+    }
+  ]
+}

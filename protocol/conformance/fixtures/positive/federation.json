@@ -1,0 +1,77 @@
+[
+  {
+    "name": "valid federation transfer offer",
+    "schema_id": "urn:work-fabric:schema:v1:federation-transfer-offer",
+    "expected_valid": true,
+    "instance": {
+      "source_handoff_id": "handoff_source_01",
+      "source_thread_id": "thread_source_01",
+      "source_resource_version": 1,
+      "handoff_offer": {
+        "work_reference": { "uri": "urn:work:federation:01", "extensions": {} },
+        "target": { "actor_id": "actor_remote" },
+        "intent": [{ "kind": "text", "media_type": "text/plain", "text": "Perform work outside the Exchange" }],
+        "authority_scope": {
+          "delegation_id": "delegation_federation_01",
+          "scopes": ["work:read"],
+          "resource_refs": ["urn:work:federation:01"],
+          "expires_at": "2026-07-17T09:00:00Z",
+          "may_redelegate": false
+        },
+        "acceptance_criteria": [{
+          "criterion_id": "receipt-recorded",
+          "description": "The target records the handoff",
+          "required": true,
+          "result_schema_ref": null,
+          "required_evidence_types": ["operation_receipt"]
+        }],
+        "verifier": { "actor_id": "actor_verifier", "actor_type": "human" },
+        "priority": "normal",
+        "accept_by": "2026-07-16T10:00:00Z",
+        "result_due_at": "2026-07-17T09:00:00Z"
+      },
+      "handoff_offer_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "valid federation transfer receipt",
+    "schema_id": "urn:work-fabric:schema:v1:federation-transfer-receipt",
+    "expected_valid": true,
+    "instance": {
+      "request_message_id": "fed_message_01",
+      "handoff_offer_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "decision": "accepted",
+      "target_handoff_id": "handoff_target_01",
+      "target_resource_version": 1,
+      "reason_code": null,
+      "recorded_at": "2026-07-16T09:00:01Z"
+    }
+  },
+  {
+    "name": "valid signed federation receipt envelope",
+    "schema_id": "urn:work-fabric:schema:v1:federation-envelope",
+    "expected_valid": true,
+    "instance": {
+      "profile": "workfabric.federation.v1",
+      "message_id": "fed_receipt_01",
+      "transfer_id": "fed_transfer_01",
+      "message_type": "transfer_receipt",
+      "source_exchange_id": "exchange_b",
+      "target_exchange_id": "exchange_a",
+      "sequence": 2,
+      "issued_at": "2026-07-16T09:00:01Z",
+      "expires_at": "2026-07-16T09:05:01Z",
+      "key_id": "key-b",
+      "payload": {
+        "request_message_id": "fed_message_01",
+        "handoff_offer_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "decision": "accepted",
+        "target_handoff_id": "handoff_target_01",
+        "target_resource_version": 1,
+        "reason_code": null,
+        "recorded_at": "2026-07-16T09:00:01Z"
+      },
+      "signature": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+    }
+  }
+]
