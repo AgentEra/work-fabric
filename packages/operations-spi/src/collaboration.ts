@@ -124,6 +124,10 @@ export interface ProjectionFreshness {
   readonly observed_at: string;
 }
 
+export interface ProjectionFreshnessSource {
+  load(tenantId: string, partitionId: string): Promise<ProjectionFreshness>;
+}
+
 export interface CursorPage<T> {
   readonly items: readonly T[];
   readonly next_cursor: string | null;
@@ -135,7 +139,7 @@ export interface CollaborationPage<T> extends CursorPage<T> {
 
 export interface ResponsibilityQuery {
   readonly tenant_id: string;
-  readonly partition_id?: string;
+  readonly partition_id: string;
   readonly thread_id?: string;
   readonly responsible_actor_id?: string;
   readonly lifecycle_states?: readonly ResponsibilityLifecycleState[];

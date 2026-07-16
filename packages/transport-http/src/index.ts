@@ -6,6 +6,7 @@ export * from "./operation-result-http.js";
 export * from "./problem-details.js";
 export * from "./public-types.js";
 export * from "./query-service.js";
+export type { CollaborationQueryService } from "@work-fabric/operations-runtime";
 export * from "./request-authorization.js";
 export * from "./sse-connection-manager.js";
 export * from "./subscription-codec.js";

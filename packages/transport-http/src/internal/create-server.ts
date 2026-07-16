@@ -28,6 +28,8 @@ import type { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import type { EndpointInboxQueryService } from "@work-fabric/exchange-runtime";
 import type { FeishuWebhookDependencies } from "../public-types.js";
 import { registerFeishuWebhookRoute } from "../routes/feishu-webhook-route.js";
+import type { CollaborationQueryService } from "@work-fabric/operations-runtime";
+import { registerCollaborationRoutes } from "../routes/collaboration-routes.js";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -44,6 +46,7 @@ export interface InternalServerDependencies {
   readonly endpoint_directory?: EndpointDirectoryService;
   readonly endpoint_inbox?: EndpointInboxQueryService;
   readonly feishu_webhook?: FeishuWebhookDependencies;
+  readonly collaboration?: CollaborationQueryService;
 }
 
 export function createInternalServer(
@@ -99,6 +102,14 @@ export function createInternalServer(
     });
   }
   if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    if (dependencies.collaboration !== undefined) {
+      registerCollaborationRoutes(server, {
+        collaboration: dependencies.collaboration,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      }, config);
+    }
     if (
       dependencies.schemas !== undefined &&
       dependencies.endpoint_directory !== undefined &&

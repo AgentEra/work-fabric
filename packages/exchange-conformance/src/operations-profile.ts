@@ -156,6 +156,7 @@ export async function verifyOperationsStoreProfile(
 
   const firstPage = await collaboration.listResponsibilities({
     tenant_id: "tenant-profile",
+    partition_id: "partition-profile",
     responsible_actor_id: "agent-profile",
     lifecycle_states: ["accepted"],
     limit: 2,
@@ -168,6 +169,7 @@ export async function verifyOperationsStoreProfile(
   await assert.rejects(
     collaboration.listResponsibilities({
       tenant_id: "tenant-profile",
+      partition_id: "partition-profile",
       responsible_actor_id: "different-actor",
       lifecycle_states: ["accepted"],
       cursor: firstPage.next_cursor ?? undefined,
@@ -177,6 +179,7 @@ export async function verifyOperationsStoreProfile(
   );
   const secondPage = await collaboration.listResponsibilities({
     tenant_id: "tenant-profile",
+    partition_id: "partition-profile",
     responsible_actor_id: "agent-profile",
     lifecycle_states: ["accepted"],
     cursor: firstPage.next_cursor ?? undefined,
