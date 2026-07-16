@@ -55,6 +55,8 @@ describe("ConnectorReconciliationService", () => {
         expected_state: "accepted",
         observed_state: "declined",
         expected_version: 4,
+        status: "open",
+        version: 1,
       },
     });
     expect(discrepancies[0]?.discrepancy_id).toBe(

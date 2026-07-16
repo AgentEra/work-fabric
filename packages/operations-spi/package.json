@@ -8,6 +8,7 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
+    "@work-fabric/connector-spi": "0.1.0",
     "@work-fabric/exchange-spi": "0.1.0"
   }
 }

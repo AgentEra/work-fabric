@@ -28,10 +28,11 @@ import type { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import type { EndpointInboxQueryService } from "@work-fabric/exchange-runtime";
 import type { FeishuWebhookDependencies } from "../public-types.js";
 import { registerFeishuWebhookRoute } from "../routes/feishu-webhook-route.js";
-import type { CollaborationQueryService } from "@work-fabric/operations-runtime";
+import type { CollaborationQueryService, OperationsQueryService } from "@work-fabric/operations-runtime";
 import type { OperationAuditRecorder } from "@work-fabric/operations-runtime";
 import { registerCollaborationRoutes } from "../routes/collaboration-routes.js";
 import { bindRequestAudit } from "../routes/route-authorization.js";
+import { registerOperationsRoutes } from "../routes/operations-routes.js";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -50,6 +51,7 @@ export interface InternalServerDependencies {
   readonly feishu_webhook?: FeishuWebhookDependencies;
   readonly collaboration?: CollaborationQueryService;
   readonly audit?: OperationAuditRecorder;
+  readonly operations?: OperationsQueryService;
 }
 
 export function createInternalServer(
@@ -116,6 +118,14 @@ export function createInternalServer(
     });
   }
   if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    if (dependencies.operations !== undefined) {
+      registerOperationsRoutes(server, {
+        operations: dependencies.operations,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      }, config);
+    }
     if (dependencies.collaboration !== undefined) {
       registerCollaborationRoutes(server, {
         collaboration: dependencies.collaboration,
@@ -156,10 +166,6 @@ export function createInternalServer(
         query: dependencies.query, identity: dependencies.identity,
         authority: dependencies.authority, authenticator: dependencies.authenticator,
       }, config);
-      registerAdminRoutes(server, {
-        query: dependencies.query, identity: dependencies.identity,
-        authority: dependencies.authority, authenticator: dependencies.authenticator,
-      }, config);
       if (dependencies.subscriptions !== undefined && dependencies.schemas !== undefined) {
         registerSubscriptionResourceRoutes(server, {
           query: dependencies.query, subscriptions: dependencies.subscriptions,
@@ -167,6 +173,15 @@ export function createInternalServer(
           authority: dependencies.authority, authenticator: dependencies.authenticator,
         });
       }
+    }
+    if (dependencies.query !== undefined || dependencies.operations !== undefined) {
+      registerAdminRoutes(server, {
+        ...(dependencies.query === undefined ? {} : { query: dependencies.query }),
+        ...(dependencies.operations === undefined ? {} : { operations: dependencies.operations }),
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      }, config);
     }
   }
   return server;

@@ -32,6 +32,15 @@ export type {
 } from "@work-fabric/exchange-spi";
 export type {
   CollaborationPage,
+  ActiveDeliveryView,
+  ConnectorDiscrepancyView,
+  ConnectorIngressOperationalView,
+  DeadLetterView,
+  DeliveryAttemptView,
+  DeliveryOperationalState,
+  OperationalPage,
+  ProjectionFailureView,
+  ProjectionOperationalStatus,
   ProjectionFreshness,
   RelationshipView,
   ResponsibilityLifecycleState,
