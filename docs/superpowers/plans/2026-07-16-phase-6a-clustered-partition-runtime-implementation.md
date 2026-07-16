@@ -280,7 +280,7 @@ git commit -m "feat(cluster): add fair bounded ready queue"
 - Consumes: `WorkerLeaseStore`, `Clock`, `PartitionTurnHandler`.
 - Produces: `PartitionLeaseGuard` and `PartitionWorker.run(item, signal)`.
 
-- [ ] **Step 1: Write failing race and stale-fence tests**
+- [x] **Step 1: Write failing race and stale-fence tests**
 
 ```ts
 it("allows one winner and fences an expired owner", async () => {
@@ -299,13 +299,13 @@ it("allows one winner and fences an expired owner", async () => {
 });
 ```
 
-- [ ] **Step 2: Run and confirm missing worker failure**
+- [x] **Step 2: Run and confirm missing worker failure**
 
 Run: `npm test -- packages/cluster-runtime/test/lease-guard.test.ts packages/cluster-runtime/test/partition-worker.test.ts`
 
 Expected: FAIL because the worker classes are missing.
 
-- [ ] **Step 3: Implement lease guard**
+- [x] **Step 3: Implement lease guard**
 
 `PartitionLeaseGuard.acquire()` uses
 `partition:${kind}:${partition_id}`, stores owner/token, and exposes:
@@ -320,7 +320,7 @@ Heartbeat interval is `floor(lease_seconds * 1000 / 3)`. The injected timer
 port is deterministic in tests. A failed renewal aborts the turn controller
 and records `partition_lease_lost`; it never releases with another token.
 
-- [ ] **Step 4: Implement exactly one bounded handler turn**
+- [x] **Step 4: Implement exactly one bounded handler turn**
 
 `PartitionWorker.run()` validates the item, acquires the lease, starts the
 heartbeat, asserts ownership, invokes the matching handler once with
