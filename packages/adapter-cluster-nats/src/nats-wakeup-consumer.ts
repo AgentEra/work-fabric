@@ -107,31 +107,38 @@ export class NatsWakeupConsumer implements PartitionWakeupConsumer {
     signal: AbortSignal,
     expiresMs: number,
   ): Promise<WakeupJetStreamMessage | null> {
+    const localExpiresMs = Math.max(
+      1,
+      Math.min(this.config.pull_expires_ms, expiresMs),
+    );
     const lower = this.options.port.pull({
       stream: this.options.stream,
       consumer: this.options.consumer,
-      expires_ms: Math.max(1, Math.min(this.config.pull_expires_ms, expiresMs)),
+      expires_ms: Math.max(1_000, localExpiresMs),
     });
     this.activePull = lower;
     void lower.finally(() => {
       if (this.activePull === lower) this.activePull = null;
     }).catch(() => undefined);
 
+    let callerAbort: () => void = () => undefined;
+    let closeAbort: () => void = () => undefined;
     const abort = new Promise<never>((_resolve, reject) => {
-      const callerAbort = (): void => reject(abortReason(signal));
-      const closeAbort = (): void => reject(
+      callerAbort = (): void => reject(abortReason(signal));
+      closeAbort = (): void => reject(
         new NatsWakeupError("wakeup_adapter_closed"),
       );
       signal.addEventListener("abort", callerAbort, { once: true });
       this.closeController.signal.addEventListener("abort", closeAbort, { once: true });
-      void lower.finally(() => {
-        signal.removeEventListener("abort", callerAbort);
-        this.closeController.signal.removeEventListener("abort", closeAbort);
-      }).catch(() => undefined);
+    });
+    let timer: ReturnType<typeof setTimeout>;
+    const expired = new Promise<null>((resolve) => {
+      timer = setTimeout(() => resolve(null), localExpiresMs);
+      timer.unref?.();
     });
 
     try {
-      return await Promise.race([lower, abort]);
+      return await Promise.race([lower, abort, expired]);
     } catch (error) {
       if (signal.aborted) throw abortReason(signal);
       if (this.closed) throw new NatsWakeupError("wakeup_adapter_closed");
@@ -144,6 +151,10 @@ export class NatsWakeupConsumer implements PartitionWakeupConsumer {
         count: 1,
       });
       throw new NatsWakeupError("wakeup_transport_unavailable");
+    } finally {
+      clearTimeout(timer!);
+      signal.removeEventListener("abort", callerAbort);
+      this.closeController.signal.removeEventListener("abort", closeAbort);
     }
   }
 

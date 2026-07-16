@@ -46,6 +46,7 @@ export class FakeWakeupJetStreamPort implements WakeupJetStreamPort {
   publishFailure: Error | undefined;
   pullFailure: Error | undefined;
   pendingPull: Promise<WakeupJetStreamMessage | null> | undefined;
+  pullDelayMs = 0;
 
   constructor(private readonly loopback = false) {}
 
@@ -66,6 +67,9 @@ export class FakeWakeupJetStreamPort implements WakeupJetStreamPort {
     readonly expires_ms: number;
   }): Promise<WakeupJetStreamMessage | null> {
     this.pulls.push(input);
+    if (this.pullDelayMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, this.pullDelayMs));
+    }
     if (this.pullFailure !== undefined) throw this.pullFailure;
     if (this.pendingPull !== undefined) return this.pendingPull;
     return this.messages.shift() ?? null;

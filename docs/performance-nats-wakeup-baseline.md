@@ -29,9 +29,9 @@ Environment:
 
 | Metric | p50 | p95 | p99 |
 |---|---:|---:|---:|
-| PubAck latency | 0.122 ms | 0.242 ms | 0.399 ms |
-| Pull-to-Ack latency | 0.156 ms | 0.364 ms | 0.619 ms |
-| Throughput | 22,080.925 msg/s | 23,909.765 msg/s | 23,909.765 msg/s |
+| PubAck latency | 0.122 ms | 0.282 ms | 0.494 ms |
+| Pull-to-Ack latency | 0.158 ms | 0.379 ms | 0.665 ms |
+| Throughput | 21,558.674 msg/s | 23,894.410 msg/s | 23,894.410 msg/s |
 
 - Duplicate delivery ratio: `0`
 - Observed redelivery count: `0`

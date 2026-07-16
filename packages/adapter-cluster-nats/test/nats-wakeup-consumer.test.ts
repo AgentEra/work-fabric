@@ -149,12 +149,14 @@ describe("NatsWakeupConsumer", () => {
 
   it("skips poison and returns a valid hint before reaching the bound", async () => {
     const { port, subjects, consumer } = fixture({ max_poison_per_pull: 2 });
+    port.pullDelayMs = 10;
     const malformed = port.enqueue("bad.subject", new Uint8Array([0xff]));
     port.enqueue(subjects.subjectFor(wakeup), encodeWakeup(wakeup));
 
     const delivery = await consumer.next(new AbortController().signal);
     expect(malformed.terminations).toBe(1);
     expect(delivery?.wakeup).toEqual(wakeup);
+    expect(port.pulls.every((pull) => pull.expires_ms >= 1_000)).toBe(true);
     await delivery?.acknowledge();
   });
 

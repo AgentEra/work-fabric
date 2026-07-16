@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, timingSafeEqual } from "node:crypto";
-import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,30 +84,45 @@ export interface NatsServerReleaseDependencies {
 }
 
 async function download(url: string): Promise<Uint8Array> {
-  const child = spawn("curl", [
-    "--fail",
-    "--location",
-    "--silent",
-    "--show-error",
-    "--max-time",
-    "180",
-    url,
-  ], { stdio: ["ignore", "pipe", "ignore"] });
-  const chunks: Buffer[] = [];
-  let size = 0;
-  child.stdout?.on("data", (chunk: Buffer) => {
-    size += chunk.byteLength;
-    if (size > 64 * 1_024 * 1_024) child.kill("SIGKILL");
-    else chunks.push(chunk);
-  });
-  const code = await childExit(child);
-  if (code !== 0 || size > 64 * 1_024 * 1_024) {
+  const directory = await mkdtemp(join(tmpdir(), "work-fabric-download-"));
+  const target = join(directory, "release-asset");
+  try {
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const child = spawn("curl", [
+        "--fail",
+        "--location",
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "60",
+        "--continue-at",
+        "-",
+        "--output",
+        target,
+        url,
+      ], { stdio: "ignore" });
+      const code = await childExit(child);
+      if (code !== 0) continue;
+      const bytes = await readFile(target);
+      if (bytes.byteLength > 64 * 1_024 * 1_024) break;
+      return Uint8Array.from(bytes);
+    }
+    const resumed = await readFile(target).catch(() => null);
+    if (
+      resumed !== null && resumed.byteLength > 0 &&
+      resumed.byteLength <= 64 * 1_024 * 1_024
+    ) return Uint8Array.from(resumed);
     throw new Error("official NATS Server download failed");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
   }
-  return Uint8Array.from(Buffer.concat(chunks));
 }
 
 function childExit(child: ChildProcess): Promise<number> {
+  if (child.exitCode !== null) return Promise.resolve(child.exitCode);
+  if (child.signalCode !== null) {
+    return Promise.reject(new Error("process terminated by signal"));
+  }
   return new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("exit", (code, signal) => {
@@ -157,7 +172,8 @@ async function stopChild(child: ChildProcess): Promise<void> {
   child.kill("SIGTERM");
   const exited = childExit(child).catch(() => 0);
   const timeout = new Promise<"timeout">((resolve) => {
-    setTimeout(() => resolve("timeout"), 5_000);
+    const timer = setTimeout(() => resolve("timeout"), 5_000);
+    timer.unref?.();
   });
   if (await Promise.race([exited, timeout]) === "timeout") {
     child.kill("SIGKILL");
