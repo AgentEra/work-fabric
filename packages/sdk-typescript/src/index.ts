@@ -4,6 +4,8 @@ export type * from "./config.js";
 export type * from "./command-client.js";
 export { ConnectorSdkCommandSink } from "./connector-command-sink.js";
 export { WorkFabricClient } from "./client.js";
+export { CollaborationClient } from "./collaboration-client.js";
+export type * from "./collaboration-client.js";
 export {
   WorkFabricHttpError,
   WorkFabricTransportError,

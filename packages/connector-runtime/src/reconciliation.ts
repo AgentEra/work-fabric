@@ -40,15 +40,53 @@ export interface ConnectorDiscrepancy {
   readonly observed_state: string;
   readonly observed_at: string;
   readonly metadata: JsonObject;
+  readonly status: "open" | "acknowledged";
+  readonly version: number;
+  readonly acknowledged_at: string | null;
+  readonly acknowledged_by: string | null;
+  readonly acknowledgement_reason: string | null;
 }
 
-export interface ConnectorDiscrepancyStore {
+export interface ConnectorDiscrepancyWriter {
   put(discrepancy: ConnectorDiscrepancy): Promise<void>;
 }
 
+export interface ConnectorDiscrepancyStore extends ConnectorDiscrepancyWriter {
+  get(tenantId: string, discrepancyId: string): Promise<ConnectorDiscrepancy | null>;
+  list(input: ListConnectorDiscrepancies): Promise<ConnectorDiscrepancyPage>;
+  acknowledge(input: AcknowledgeConnectorDiscrepancy): Promise<AcknowledgeDiscrepancyResult>;
+}
+
+export interface ListConnectorDiscrepancies {
+  readonly tenant_id: string;
+  readonly connector_id?: string;
+  readonly statuses?: readonly ConnectorDiscrepancy["status"][];
+  readonly cursor?: string;
+  readonly limit: number;
+}
+
+export interface ConnectorDiscrepancyPage {
+  readonly items: readonly ConnectorDiscrepancy[];
+  readonly next_cursor: string | null;
+}
+
+export interface AcknowledgeConnectorDiscrepancy {
+  readonly tenant_id: string;
+  readonly discrepancy_id: string;
+  readonly expected_version: number;
+  readonly acknowledged_at: string;
+  readonly acknowledged_by: string;
+  readonly reason: string;
+}
+
+export type AcknowledgeDiscrepancyResult =
+  | { readonly kind: "acknowledged" | "replayed"; readonly discrepancy: ConnectorDiscrepancy }
+  | { readonly kind: "conflict"; readonly current_version: number }
+  | { readonly kind: "not_found" };
+
 export interface ConnectorReconciliationServiceOptions {
   readonly expected_state: ConnectorExpectedStateProvider;
-  readonly discrepancies: ConnectorDiscrepancyStore;
+  readonly discrepancies: ConnectorDiscrepancyWriter;
   readonly metadata_limits?: Partial<
     Pick<ConnectorIngressLimits, "max_payload_bytes" | "max_json_depth">
   >;
@@ -139,6 +177,11 @@ export class ConnectorReconciliationService {
       observed_state: observation.observed_state,
       observed_at: observation.observed_at,
       metadata: structuredClone(observation.metadata),
+      status: "open",
+      version: 1,
+      acknowledged_at: null,
+      acknowledged_by: null,
+      acknowledgement_reason: null,
     };
     await this.options.discrepancies.put(structuredClone(discrepancy));
     return { kind: "discrepancy", discrepancy: structuredClone(discrepancy) };

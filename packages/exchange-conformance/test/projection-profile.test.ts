@@ -7,7 +7,10 @@ import type {
   HandoffReadModelStore,
 } from "@work-fabric/exchange-spi";
 
-import { verifyProjectionProfile } from "../src/index.js";
+import {
+  verifyProjectionProfile,
+  verifyTenantScopedProjectionProfile,
+} from "../src/index.js";
 
 type Mutation =
   | "none"
@@ -167,4 +170,20 @@ describe("verifyProjectionProfile", () => {
       ).rejects.toThrow(new RegExp(expectedScenario, "i"));
     });
   }
+});
+
+describe("verifyTenantScopedProjectionProfile", () => {
+  it("accepts separately scoped stores while proving cross-tenant isolation", async () => {
+    const stores = new Map<string, MemoryHandoffReadModelStore>();
+    await expect(
+      verifyTenantScopedProjectionProfile((tenantId) => {
+        let store = stores.get(tenantId);
+        if (store === undefined) {
+          store = new MemoryHandoffReadModelStore();
+          stores.set(tenantId, store);
+        }
+        return store;
+      }),
+    ).resolves.toBeUndefined();
+  });
 });

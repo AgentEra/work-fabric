@@ -28,6 +28,18 @@ import type { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import type { EndpointInboxQueryService } from "@work-fabric/exchange-runtime";
 import type { FeishuWebhookDependencies } from "../public-types.js";
 import { registerFeishuWebhookRoute } from "../routes/feishu-webhook-route.js";
+import type { CollaborationQueryService, OperationsQueryService, RecoveryService } from "@work-fabric/operations-runtime";
+import type { OperationAuditRecorder } from "@work-fabric/operations-runtime";
+import { registerCollaborationRoutes } from "../routes/collaboration-routes.js";
+import { bindRequestAudit } from "../routes/route-authorization.js";
+import { registerOperationsRoutes } from "../routes/operations-routes.js";
+import { registerRecoveryRoutes } from "../routes/recovery-routes.js";
+import {
+  observeSemanticSafely,
+  safeSemanticCorrelationId,
+  type SemanticObservation,
+  type SemanticTelemetryObserver,
+} from "@work-fabric/operations-spi";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -44,6 +56,29 @@ export interface InternalServerDependencies {
   readonly endpoint_directory?: EndpointDirectoryService;
   readonly endpoint_inbox?: EndpointInboxQueryService;
   readonly feishu_webhook?: FeishuWebhookDependencies;
+  readonly collaboration?: CollaborationQueryService;
+  readonly audit?: OperationAuditRecorder;
+  readonly operations?: OperationsQueryService;
+  readonly recovery?: RecoveryService;
+  readonly telemetry?: SemanticTelemetryObserver;
+}
+
+function httpOperation(method: string, url: string): SemanticObservation["operation"] {
+  const path = url.split("?", 1)[0] ?? url;
+  if (method === "POST" && path === "/v1/commands") return "command";
+  if (path.startsWith("/v1/collaboration/")) return "collaboration_query";
+  if (path.startsWith("/v1/operations/") || path.startsWith("/v1/admin/")) {
+    return "operations_query";
+  }
+  return "http_request";
+}
+
+function httpOutcome(status: number): SemanticObservation["outcome"] {
+  if (status < 400) return "succeeded";
+  if (status === 401 || status === 403) return "denied";
+  if (status === 409) return "conflicted";
+  if (status === 429 || status >= 500) return "retryable";
+  return "failed";
 }
 
 export function createInternalServer(
@@ -55,6 +90,32 @@ export function createInternalServer(
     requestTimeout: config.request_timeout_ms,
     logger: false,
   });
+  if (dependencies.telemetry !== undefined) {
+    const requestStartedAt = new WeakMap<object, number>();
+    server.addHook("onRequest", async (request) => {
+      requestStartedAt.set(request, performance.now());
+    });
+    server.addHook("onResponse", async (request, reply) => {
+      const startedAt = requestStartedAt.get(request) ?? performance.now();
+      const correlationId = safeSemanticCorrelationId(request.id);
+      observeSemanticSafely(dependencies.telemetry, {
+        operation: httpOperation(request.method, request.url),
+        outcome: httpOutcome(reply.statusCode),
+        category: "http",
+        duration_ms: Math.max(0, performance.now() - startedAt),
+        count: 1,
+        ...(correlationId === undefined ? {} : { correlation_id: correlationId }),
+      });
+    });
+  }
+  if (dependencies.audit !== undefined) {
+    server.addHook("onRequest", async (request) => {
+      bindRequestAudit(request, dependencies.audit as OperationAuditRecorder);
+    });
+    server.addHook("onResponse", async (request, reply) => {
+      await dependencies.audit?.completeHttp(request.id, reply.statusCode);
+    });
+  }
   server.setErrorHandler((error: FastifyError, request, reply) => {
     const status =
       error.statusCode === 413
@@ -86,7 +147,10 @@ export function createInternalServer(
       .code(status)
       .send(createProblemDetails(status, code, title, { instance: request.url }));
   });
-  registerCommandRoute(server, dependencies.application, dependencies.authenticator);
+  registerCommandRoute(server, dependencies.application, dependencies.authenticator, {
+    ...(dependencies.identity === undefined ? {} : { identity: dependencies.identity }),
+    ...(dependencies.audit === undefined ? {} : { audit: dependencies.audit }),
+  });
   if (dependencies.feishu_webhook !== undefined) {
     registerFeishuWebhookRoute(server, dependencies.feishu_webhook, config);
   }
@@ -99,6 +163,30 @@ export function createInternalServer(
     });
   }
   if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    if (dependencies.recovery !== undefined) {
+      registerRecoveryRoutes(server, {
+        recovery: dependencies.recovery,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      });
+    }
+    if (dependencies.operations !== undefined) {
+      registerOperationsRoutes(server, {
+        operations: dependencies.operations,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      }, config);
+    }
+    if (dependencies.collaboration !== undefined) {
+      registerCollaborationRoutes(server, {
+        collaboration: dependencies.collaboration,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      }, config);
+    }
     if (
       dependencies.schemas !== undefined &&
       dependencies.endpoint_directory !== undefined &&
@@ -131,10 +219,6 @@ export function createInternalServer(
         query: dependencies.query, identity: dependencies.identity,
         authority: dependencies.authority, authenticator: dependencies.authenticator,
       }, config);
-      registerAdminRoutes(server, {
-        query: dependencies.query, identity: dependencies.identity,
-        authority: dependencies.authority, authenticator: dependencies.authenticator,
-      }, config);
       if (dependencies.subscriptions !== undefined && dependencies.schemas !== undefined) {
         registerSubscriptionResourceRoutes(server, {
           query: dependencies.query, subscriptions: dependencies.subscriptions,
@@ -142,6 +226,15 @@ export function createInternalServer(
           authority: dependencies.authority, authenticator: dependencies.authenticator,
         });
       }
+    }
+    if (dependencies.query !== undefined || dependencies.operations !== undefined) {
+      registerAdminRoutes(server, {
+        ...(dependencies.query === undefined ? {} : { query: dependencies.query }),
+        ...(dependencies.operations === undefined ? {} : { operations: dependencies.operations }),
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      }, config);
     }
   }
   return server;

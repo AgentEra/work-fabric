@@ -11,6 +11,12 @@ import type {
   SubscriptionDeliveryPolicy,
   SubscriptionStore,
 } from "@work-fabric/exchange-spi";
+import {
+  observeSemanticSafely,
+  safeSemanticCorrelationId,
+  type SemanticObservation,
+  type SemanticTelemetryObserver,
+} from "@work-fabric/operations-spi";
 
 import { buildProtocolEvent } from "./protocol-event-builder.js";
 import { matchesSubscription } from "./subscription-filter.js";
@@ -44,6 +50,7 @@ export class SignalDispatcher {
     private readonly retry: RetryPolicy,
     private readonly schemas: WfppSchemaValidator,
     private readonly observer?: DispatchObserver,
+    private readonly telemetry?: SemanticTelemetryObserver,
   ) {
     assertPositiveSafeInteger(retry.base_delay_seconds, "base retry delay");
     assertPositiveSafeInteger(retry.max_delay_seconds, "max retry delay");
@@ -143,6 +150,7 @@ export class SignalDispatcher {
       }
       const attemptNumber = attempts.length + 1;
       assertPositiveSafeInteger(attemptNumber, "delivery attempt");
+      const deliveryStartedAt = performance.now();
       const result = await this.signal.deliver(
         protocolEvent,
         subscription.destination,
@@ -181,8 +189,15 @@ export class SignalDispatcher {
         subscription.subscription_id,
       );
 
+      let semanticOutcome: SemanticObservation["outcome"] =
+        result.kind === "accepted" ? "succeeded" : "dead_lettered";
+
       if (result.kind === "retryable_failure") {
-        if (attemptNumber < subscription.max_attempts) return;
+        if (attemptNumber < subscription.max_attempts) {
+          semanticOutcome = "retryable";
+          this.observeDelivery(event, semanticOutcome, deliveryStartedAt);
+          return;
+        }
         await this.deadLetter(
           subscription,
           event,
@@ -199,6 +214,7 @@ export class SignalDispatcher {
           now,
         );
       }
+      this.observeDelivery(event, semanticOutcome, deliveryStartedAt);
 
       const advanced = await this.deliveryState.advanceDeliveryPosition(
         subscription.subscription_id,
@@ -209,6 +225,22 @@ export class SignalDispatcher {
       if (!advanced) return;
       position = event.partition_position;
     }
+  }
+
+  private observeDelivery(
+    event: EventRecord,
+    outcome: SemanticObservation["outcome"],
+    startedAt: number,
+  ): void {
+    const correlationId = safeSemanticCorrelationId(event.correlation_id);
+    observeSemanticSafely(this.telemetry, {
+      operation: "delivery_attempt",
+      outcome,
+      category: "delivery",
+      duration_ms: Math.max(0, performance.now() - startedAt),
+      count: 1,
+      ...(correlationId === undefined ? {} : { correlation_id: correlationId }),
+    });
   }
 
   private retryDelay(attempt: number): number {

@@ -11,6 +11,7 @@ import type {
   ConnectorMappingOutcome,
   ConnectorObservationSink,
 } from "@work-fabric/connector-spi";
+import type { SemanticObservation, SemanticTelemetryObserver } from "@work-fabric/operations-spi";
 
 import {
   ConnectorWorker,
@@ -101,6 +102,7 @@ function worker(
   mapper: ConnectorEventMapper,
   sink: ConnectorCommandSink,
   clock: ConnectorWorkerClock,
+  telemetry?: SemanticTelemetryObserver,
 ) {
   return new ConnectorWorker({
     store,
@@ -123,10 +125,33 @@ function worker(
       max_attempts: 2,
       max_error_detail_length: 80,
     },
+    ...(telemetry === undefined ? {} : { telemetry }),
   });
 }
 
 describe("ConnectorWorker", () => {
+  it("emits ingress outcomes as bounded semantics", async () => {
+    const store = new MemoryConnectorIngressStore();
+    await store.accept(envelope("telemetry"));
+    const observed: SemanticObservation[] = [];
+    const runtime = worker(
+      store,
+      new QueueMapper([acceptedCommand]),
+      new QueueSink([{ kind: "accepted", receipt_id: "receipt-1", event_ids: [] }]),
+      new MutableClock("2026-07-15T00:00:00Z"),
+      { observe(value) { observed.push(value); } },
+    );
+
+    await runtime.runBatch();
+    expect(observed).toMatchObject([{
+      operation: "connector_mapping",
+      outcome: "succeeded",
+      category: "connector",
+      count: 1,
+    }]);
+    expect(JSON.stringify(observed)).not.toContain("connector-1");
+  });
+
   it("completes non-command mapping outcomes without invoking the sink", async () => {
     const store = new MemoryConnectorIngressStore();
     await store.accept(envelope("ignored"));
@@ -275,16 +300,22 @@ describe("ConnectorWorker", () => {
       { kind: "accepted", receipt_id: "receipt-1", event_ids: [] },
       { kind: "accepted", receipt_id: "receipt-2", event_ids: [] },
     ]);
+    const observed: SemanticObservation[] = [];
     const result = await worker(
       store,
       mapper,
       sink,
       new MutableClock("2026-07-15T00:00:02Z"),
+      { observe(value) { observed.push(value); } },
     ).runBatch();
 
     expect(result.fenced).toBe(1);
     expect(sink.calls).toHaveLength(1);
     expect(mapper.calls).toHaveLength(1);
+    expect(observed.map(({ operation, outcome }) => ({ operation, outcome }))).toEqual([
+      { operation: "connector_mapping", outcome: "conflicted" },
+      { operation: "worker_lease_loss", outcome: "conflicted" },
+    ]);
   });
 
   it("renews the fenced claim before a public side effect and aborts after expiry", async () => {

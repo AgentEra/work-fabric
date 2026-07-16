@@ -1,0 +1,24 @@
+{
+  "name": "@work-fabric/adapter-storage-sqlite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/adapter-connector-memory": "0.1.0",
+    "@work-fabric/adapter-context-memory": "0.1.0",
+    "@work-fabric/adapter-endpoint-memory": "0.1.0",
+    "@work-fabric/adapter-operations-memory": "0.1.0",
+    "@work-fabric/connector-runtime": "0.1.0",
+    "@work-fabric/connector-spi": "0.1.0",
+    "@work-fabric/exchange-runtime": "0.1.0",
+    "@work-fabric/exchange-spi": "0.1.0",
+    "@work-fabric/operations-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/exchange-conformance": "0.1.0"
+  }
+}

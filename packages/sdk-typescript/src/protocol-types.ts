@@ -30,6 +30,27 @@ export type {
   EndpointRegistration,
   EndpointSession,
 } from "@work-fabric/exchange-spi";
+export type {
+  AuditRecord,
+  CollaborationPage,
+  ActiveDeliveryView,
+  ConnectorDiscrepancyView,
+  ConnectorIngressOperationalView,
+  DeadLetterView,
+  DeliveryAttemptView,
+  DeliveryOperationalState,
+  OperationalPage,
+  ProjectionFailureView,
+  ProjectionOperationalStatus,
+  RecoveryRequestRecord,
+  RecoveryTarget,
+  SubmitRecoveryResult,
+  ProjectionFreshness,
+  RelationshipView,
+  ResponsibilityLifecycleState,
+  ResponsibilityView,
+  TimelineEntry,
+} from "@work-fabric/operations-spi";
 
 export interface SubscriptionDocument {
   readonly subscription_id: string;

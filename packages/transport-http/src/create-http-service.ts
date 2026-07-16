@@ -90,8 +90,18 @@ export function createHttpService(
   dependencies: InternalServerDependencies,
   config: HttpServiceConfig,
 ): HttpService {
+  const auditProbe = dependencies.audit === undefined
+    ? []
+    : [{
+        dependency_id: "operation-audit",
+        async check() {
+          return dependencies.audit?.status().healthy === true
+            ? "healthy" as const
+            : "unhealthy" as const;
+        },
+      }];
   const health = new HealthService(
-    dependencies.health_probes ?? [],
+    [...(dependencies.health_probes ?? []), ...auditProbe],
     config.health_probe_timeout_ms,
   );
   const sseConnections = new SseConnectionManager(config.sse_max_connections);

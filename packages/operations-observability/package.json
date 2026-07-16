@@ -1,0 +1,17 @@
+{
+  "name": "@work-fabric/operations-observability",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@opentelemetry/api": "1.9.1",
+    "@work-fabric/operations-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/transport-http": "0.1.0"
+  }
+}

@@ -128,7 +128,9 @@ Work Fabric 由以下逻辑能力组成：
 | Durable Subscription | `GET/PUT /v1/subscriptions/{id}` |
 | Cursor Pull / Ack | `POST /v1/subscriptions/{id}/pull`、`POST /v1/subscriptions/{id}/ack` |
 | SSE | `GET /v1/subscriptions/{id}/events?partition_id=...` |
-| 运维只读接口 | `/v1/partitions/*`、`/v1/admin/*` |
+| 协作视图 | `/v1/responsibilities`、`/v1/timeline`、`/v1/relationships` |
+| 运维视图与恢复意图 | `/v1/operations/*`（含 projection、delivery、connector、discrepancy、audit、recovery） |
+| 兼容管理查询 | `/v1/partitions/*`、`/v1/admin/*` |
 | 健康检查 | `/health/live`、`/health/ready`、`/v1/admin/health` |
 
 程序化启动：
@@ -226,9 +228,29 @@ Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
 
 部署组合、权限、凭据、保留策略和本地验证见 [Feishu Connector 示例](examples/feishu-connector/README.md)；客户意向到交付运维的完整连接场景见 [飞书客户项目生命周期示例](docs/feishu-customer-lifecycle-example.md)。
 
+## 查询、运维与 Console
+
+阶段 5 已完成责任、时间线和关系投影，以及 Projection、Delivery、Connector、差异和审计的有界运维视图。所有能力都通过同一 HTTP/TypeScript SDK 暴露，Human、Agent、Connector、客户服务与可选 Console 只有身份和 Authority 差异，没有专用数据旁路。
+
+恢复采用“显式意图 + 预期版本 + 幂等键 + fenced worker”模式，只能请求 Connector requeue、Delivery replay、投影重建或差异确认。它不直接编辑 Handoff，也不决定何时恢复。OpenTelemetry 适配只输出固定低基数语义；内容、凭据、Tenant/Actor/Handoff/Event ID 不进入指标标签。
+
+可运行组合提供：
+
+- `memory-demo`：显式开发模式、重启丢失；
+- `sqlite-local`：本地单进程、完整侧存储重启持久化；
+- `postgres`：由部署注入既有生产适配器，不隐式读取凭据。
+
+```bash
+export WORK_FABRIC_CONFIG=/absolute/path/work-fabric.json
+npm run service:start
+npm run console:build
+```
+
+Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、运维事实和窄恢复表单。它不是执行过程的必要组件，不保存协议真相，不运行 Agent/自动化，不自动 Ack SSE。部署与认证接入见 [Console 文档](docs/console.md)，运维与恢复见 [Operations 文档](docs/operations.md)，SQLite 本地部署见 [SQLite 文档](docs/sqlite-deployment.md)，性能证据见 [Phase 5 性能基线](docs/performance-baseline.md)。
+
 ## 当前状态
 
-项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK、阶段 4A 的 Endpoint/Agent 连接边界，以及阶段 4B 的 generic Connector seam 与飞书 Connector。Human、Agent、Connector、Console 和开放服务共享同一个公共协议、HTTP 与 SDK 权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK、阶段 4A 的 Endpoint/Agent 连接边界、阶段 4B 的 generic Connector seam 与飞书 Connector，以及阶段 5 的查询、运维、可观测性、本地 SQLite 组合和 Read-mostly Console。Human、Agent、Connector、Console 和开放服务共享同一个公共协议、HTTP 与 SDK 权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
 
 当前阶段路线：
 
@@ -241,11 +263,11 @@ Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
 | 3C | TypeScript SDK | 已完成 |
 | 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
 | 4B | Generic Connector + 飞书 Connector | 已完成 |
-| 5 | 查询、运维、可观测性与 Read-mostly Console | 下一步 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-阶段严格按顺序推进。Console 不进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都必须通过标准 API 提交协议命令。
+阶段严格按顺序推进。Console 没有进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都通过标准 API 提交恢复意图。
 
 当前实现边界如下：
 
@@ -272,6 +294,11 @@ Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
 - Connector Worker 在公共 side effect 前续租并校验 fencing；PostgreSQL retention 使用有界 `pruneExpired()` 批次，不让 ingress 成为永久内容库。
 - 交互动作同时绑定飞书用户与签发时的 Work Fabric 身份快照；文档原文读取需要 tenant/connector scope 和显式授权。
 - `/health/live` 与 `/health/ready` 只返回有界进程状态；受保护的 `/v1/admin/health` 才返回不含错误文本的依赖摘要。
+- Responsibility、Timeline 与 Relationship 是可重建投影；每页显式返回 projected/journal position 和 observed time，不把滞后伪装为实时。
+- Operation Audit 是不可变、有界分页的租户事实；保留清理由部署按合规策略显式批处理，不记录 Header、命令体、Context 或结果正文。
+- 运维恢复只提交幂等、expected-version 检查的窄意图；实际动作由 fenced worker 和专用端口执行，不经过 Console 直写。
+- `service-node` 是显式组合根；SQLite 使用同一技术中立 SPI 并声明单进程能力，PostgreSQL 仍是生产导向基线。
+- Console 仅使用公共 SDK；SSE 只使查询失效且不自动 Ack，轮询有间隔、抖动、Abort 和单并发上限。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
 
@@ -280,7 +307,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一步进入阶段 5：先补齐查询投影、审计、指标、追踪、运行健康、Connector/Delivery 可见性和部署性能基线，再让 Read-mostly Console 作为同一 SDK 的可替换客户端接入。Console 不是执行路径，也不拥有状态或管理旁路。Agent Brain、A2A/MCP、其他 Connector 和高吞吐 Broker/集群形态仍是独立后续模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+下一步进入阶段 6：在不改变协议、Authority 和交接边界的前提下评估高吞吐 Signal、Broker 加速与集群分区执行。Console 仍不是执行路径，也不拥有状态或管理旁路。Agent Brain、A2A/MCP、其他 Connector 和业务自动化仍是独立外部模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 
@@ -294,6 +321,10 @@ npm run verify:exchange
 - [HTTP Service Binding 设计](docs/superpowers/specs/2026-07-15-http-service-binding-design.md)
 - [TypeScript SDK](packages/sdk-typescript/README.md)
 - [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)
+- [Operations、审计与恢复](docs/operations.md)
+- [SQLite 本地部署](docs/sqlite-deployment.md)
+- [Read-mostly Console](docs/console.md)
+- [Phase 5 性能基线](docs/performance-baseline.md)
 - [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

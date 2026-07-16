@@ -655,6 +655,32 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 
 详细 Endpoint 边界见 [Endpoint 与外部 Agent Runtime 接入](endpoint-agent-boundary.md)，飞书部署组合见 [Feishu Connector 示例](../examples/feishu-connector/README.md)，完整业务连接场景见 [飞书客户项目生命周期示例](feishu-customer-lifecycle-example.md)。生产身份 Adapter 和真正的本地 Agent Runtime 仍是部署或外部模块；所有连接模块都不改变 Core 的职责边界。
 
+阶段 5 完成可操作性与可替换呈现层：
+
+- `CollaborationProjector` 从 Journal 和 Handoff Read Model 派生 Responsibility、Timeline 与 Relationship；投影按 Tenant × Partition 显式报告 freshness，并可从权威事件精确重建。
+- Operations Query 将 Projection、Delivery、Connector ingress、discrepancy 和 append-only audit 组合为安全、有界、签名游标页面；正文、凭据和内部存储记录不穿透查询边界。
+- Recovery Service 只持久化幂等、带 expected version 的窄恢复意图；实际动作由 fenced Recovery Worker 调用专用 owner port，不能直接改写 Handoff。
+- Semantic Telemetry SPI 只允许固定 operation/outcome/category、duration、count 和可选 trace correlation；OpenTelemetry 指标不携带高基数资源身份。
+- `service-node` 是部署组合根；Memory、SQLite 与 PostgreSQL 继续实现同一技术中立 port。SQLite 明确是本地单进程持久化，PostgreSQL 是生产导向基线。
+- Read-mostly Console 只导入公共 TypeScript SDK。认证 SSE 只触发查询失效且不自动 Ack；轮询是有界 fallback。Console 可关闭、可替换，不在 Handoff 必要路径上。
+
+```mermaid
+flowchart LR
+    P["Human / Agent / Connector / Service"] --> SDK["Shared HTTP + TypeScript SDK"]
+    C["Optional read-mostly Console"] --> SDK
+    SDK --> X["Exchange + Handoff facts"]
+    X --> J["Committed event journal"]
+    J --> CP["Collaboration projector"]
+    CP --> V["Responsibility / Timeline / Relationships"]
+    SDK --> O["Operations query + audit"]
+    SDK --> R["Explicit recovery intent"]
+    R --> W["Fenced external worker turn"]
+    W --> Owners["Projection / Delivery / Connector owners"]
+    Owners -. "never participant execution" .-> External["External work systems and Agent runtimes"]
+```
+
+运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，可复现性能范围见 [Phase 5 性能基线](performance-baseline.md)。
+
 ## 20. 阶段路线与执行状态
 
 | 阶段 | 范围 | 状态 |
@@ -666,8 +692,8 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 | 3C | TypeScript SDK | 已完成 |
 | 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
 | 4B | Generic Connector + 飞书 Connector | 已完成 |
-| 5 | 查询、运维、可观测性与 Read-mostly Console | 下一步 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B/3C 建立 HTTP Service Binding 和统一 SDK；4A 以真实 HTTP + SDK + Gateway 黑盒流证明外部 Agent 连接；4B 以相同公共 Contract 证明飞书人类通道、外部资源和 Connector Worker 的双向连接。阶段 5 下一步补齐操作性、可观测性、读投影和性能基线；Console 是这些 Query API 的外围客户端，不承载领域状态机、不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B/3C 建立 HTTP Service Binding 和统一 SDK；4A 以真实 HTTP + SDK + Gateway 黑盒流证明外部 Agent 连接；4B 以相同公共 Contract 证明飞书人类通道、外部资源和 Connector Worker 的双向连接；阶段 5 再补齐操作性、可观测性、读投影、SQLite 本地组合、性能基线和可替换 Console。下一步阶段 6 只扩展 Signal 与集群分区的吞吐和部署能力，不改变连接/交接定位。单独维护的阶段状态见 [Roadmap](roadmap.md)。

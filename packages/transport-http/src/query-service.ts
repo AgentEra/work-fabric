@@ -79,11 +79,16 @@ export class StoreBackedExchangeQueryService implements ExchangeQueryService {
   }
 
   async listProjectionFailures(projectorId: string, partitionId: string, limit: number) {
-    return bounded(await this.projectionFailures.listProjectionFailures(projectorId, partitionId), limit);
+    const failures = await this.projectionFailures.listProjectionFailures(projectorId, partitionId);
+    return bounded(failures.map((failure) => ({
+      ...failure,
+      reason: "projection_failed",
+    })), limit);
   }
 
   async listDeliveryAttempts(subscriptionId: string, eventId: string, limit: number) {
-    return bounded(await this.deliveryState.listDeliveryAttempts(subscriptionId, eventId), limit);
+    const attempts = await this.deliveryState.listDeliveryAttempts(subscriptionId, eventId);
+    return bounded(attempts.map((attempt) => ({ ...attempt, detail: null })), limit);
   }
 
   async getDeliveryPosition(subscriptionId: string, partitionId: string) {

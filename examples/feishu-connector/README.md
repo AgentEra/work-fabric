@@ -92,5 +92,9 @@ worker boundaries:
 npm test -- packages/connector-feishu/test/feishu-roundtrip.integration.test.ts
 ```
 
-No browser Console is required for this path. A future Console remains a
-read-mostly client of the same HTTP/SDK contracts.
+No browser Console is required for this path. The optional Phase 5 Console is a
+read-mostly client of the same HTTP/SDK contracts; it can inspect bounded
+Connector ingress/discrepancy facts and request an authorized recovery, but it
+does not receive callback content, run the mapping worker or become part of the
+Feishu delivery path. See [Console](../../docs/console.md) and
+[Operations](../../docs/operations.md).
