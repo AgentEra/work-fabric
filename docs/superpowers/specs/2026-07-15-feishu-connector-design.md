@@ -176,6 +176,11 @@ the connector/tenant/user, and resolve to one allowed action such as accept,
 decline, verification receipt, rework request, status report, or result
 submission.
 
+Authenticated claims also carry the Actor/Endpoint/Delegation snapshot
+represented when the card was issued. Callback mapping resolves the external
+user again and requires an exact match; changing that mapping invalidates old
+cards instead of transferring their authority to another Work Fabric identity.
+
 ## 7. Feishu ingress
 
 ### 7.1 Webhook security
@@ -203,14 +208,18 @@ pretending the event was accepted.
 
 For `im.message.receive_v1`, the `message_id` is the dedupe key because Feishu
 documents that event delivery may repeat and identifies the message as the
-stable object. Card callbacks use their callback/event identity plus the opaque
-action token. The generic envelope still retains `event_id` for traceability.
+stable object. Card callbacks use their callback/event identity plus a stable
+SHA-256 digest of the opaque action token so the ingress identity stays inside
+generic ID bounds; the authenticated token itself remains in the bounded
+payload for mapping. The generic envelope still retains `event_id` for
+traceability.
 
 ### 7.3 Long connection
 
-The official Node SDK long-connection source is optional. It verifies and
-normalizes callbacks through the same codec and calls the same ingress acceptor
-as HTTP. It contains no mapping logic. Multiple SDK connections may receive
+The official Node SDK long-connection source is optional. A narrow facade hands
+the Connector an SDK-verified event body; the Connector applies the same
+normalizer and calls the same ingress acceptor as HTTP. It contains no mapping
+logic. Multiple SDK connections may receive
 events non-broadcast/randomly, so durable deduplication remains mandatory.
 
 ## 8. Feishu outbound delivery
@@ -250,6 +259,10 @@ digest, visibility, and access requirements. Feishu remains the content owner.
 Raw document content is fetched on demand through `ConnectorResourceResolver`
 for an authorized participant or Context assembler and is not copied into the
 Handoff event ledger.
+
+Each resolver is bound to one trusted tenant, connector, and credential
+reference. It accepts only `metadata | context`; `context` requires a separate
+injected authorization decision before any raw-content request is sent.
 
 Wiki URLs are first resolved to their backing document identity because a wiki
 token is not guaranteed to equal a Docx document ID. A reference without a
@@ -299,6 +312,12 @@ Every implementation has configurable positive bounds for body bytes, JSON
 depth, string length, trace fields, claim batch, attempts, lease duration,
 retry delay, retention, concurrent requests, token cache entries, message/card
 size, document bytes, and response timeout.
+
+Connector workers renew and fence a claim immediately before command or
+observation side effects. Public commands retain stable idempotency because an
+external call may still outlive a lease or lose its response. Tenant-token
+caches have bounded entries, and Feishu HTTP response bodies are consumed
+through bounded streams instead of unbounded `Response.text()` buffering.
 
 Fast callback acceptance performs only security checks, normalization, and one
 atomic store write. Mapping, SDK calls, Feishu API calls, resource fetches, and

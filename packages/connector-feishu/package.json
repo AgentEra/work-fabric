@@ -12,6 +12,16 @@
     "@work-fabric/exchange-spi": "0.1.0"
   },
   "devDependencies": {
-    "@work-fabric/exchange-conformance": "0.1.0"
+    "@work-fabric/adapter-connector-memory": "0.1.0",
+    "@work-fabric/adapter-context-memory": "0.1.0",
+    "@work-fabric/adapter-identity-local": "0.1.0",
+    "@work-fabric/adapter-storage-memory": "0.1.0",
+    "@work-fabric/connector-runtime": "0.1.0",
+    "@work-fabric/exchange-core": "0.1.0",
+    "@work-fabric/exchange-conformance": "0.1.0",
+    "@work-fabric/exchange-runtime": "0.1.0",
+    "@work-fabric/protocol-runtime": "0.1.0",
+    "@work-fabric/sdk-typescript": "0.1.0",
+    "@work-fabric/transport-http": "0.1.0"
   }
 }

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from "fastify";
 
 import {
   FeishuWebhookError,
+  FeishuIngressError,
   normalizeFeishuEvent,
   verifyFeishuWebhook,
 } from "@work-fabric/connector-feishu";
@@ -116,6 +117,9 @@ export function registerFeishuWebhookRoute(
             ingress_id: accepted.record.ingress_id,
           });
         } catch (error) {
+          if (error instanceof FeishuIngressError) {
+            return failure(reply, 400, "invalid_webhook");
+          }
           if (error instanceof FeishuWebhookError) {
             const unauthorized =
               error.code === "invalid_signature" ||

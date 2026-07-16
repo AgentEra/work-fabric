@@ -52,13 +52,38 @@ describe("Feishu ingress normalizer", () => {
       received_at: "2026-07-15T00:00:01Z",
     });
     expect(result).toMatchObject({
-      dedupe_key: "card:event-card-1:action-reference-1",
       partition_key: "message:om-card-1",
       payload: {
         operator_open_id: "ou-human-1",
         action_ref: "action-reference-1",
       },
     });
+    expect(result.dedupe_key).toMatch(/^card:event-card-1:[a-f0-9]{64}$/);
+  });
+
+  it("bounds card-action deduplication keys independently of opaque reference length", () => {
+    const actionReference = `wfaf1.${"a".repeat(1_000)}`;
+    const result = normalizeFeishuEvent({
+      schema: "2.0",
+      header: {
+        event_id: "event-card-long-reference",
+        event_type: "card.action.trigger",
+        create_time: "1784073600000",
+        tenant_key: "tenant-key-1",
+      },
+      event: {
+        operator: { operator_id: { open_id: "ou-human-1" } },
+        action: { value: { action_ref: actionReference }, tag: "button" },
+        context: { open_message_id: "om-card-1" },
+      },
+    }, {
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      expected_external_tenant_id: "tenant-key-1",
+      received_at: "2026-07-15T00:00:01Z",
+    });
+    expect(result.dedupe_key.length).toBeLessThanOrEqual(255);
+    expect(result.payload.action_ref).toBe(actionReference);
   });
 
   it("rejects tenant mismatch and unsupported event types", () => {

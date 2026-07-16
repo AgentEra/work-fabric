@@ -2,6 +2,10 @@ import {
   assertFeishuAppCredentials,
   type FeishuAppCredentialProvider,
 } from "./credentials.js";
+import {
+  FeishuBoundedResponseError,
+  readBoundedResponseText,
+} from "./bounded-response.js";
 
 export interface FeishuTenantTokenProvider {
   getToken(credentialReference: string, forceRefresh?: boolean): Promise<string>;
@@ -18,6 +22,7 @@ export interface FeishuTenantAccessTokenProviderOptions {
   readonly clock: FeishuTokenClock;
   readonly expiry_skew_seconds: number;
   readonly request_timeout_ms: number;
+  readonly max_cache_entries?: number;
 }
 
 interface CachedToken {
@@ -55,11 +60,16 @@ export class FeishuTenantAccessTokenProvider
   private readonly cache = new Map<string, CachedToken>();
   private readonly inFlight = new Map<string, Promise<string>>();
   private readonly baseUrl: string;
+  private readonly maxCacheEntries: number;
 
   constructor(private readonly options: FeishuTenantAccessTokenProviderOptions) {
     this.baseUrl = new URL(options.base_url).toString().replace(/\/$/, "");
     positive(options.expiry_skew_seconds, "expiry_skew_seconds");
     positive(options.request_timeout_ms, "request_timeout_ms");
+    this.maxCacheEntries = positive(
+      options.max_cache_entries ?? 1_024,
+      "max_cache_entries",
+    );
   }
 
   async getToken(
@@ -116,9 +126,14 @@ export class FeishuTenantAccessTokenProvider
             : "request_rejected",
         );
       }
-      const text = await response.text();
-      if (new TextEncoder().encode(text).byteLength > 64_000) {
-        throw new FeishuTokenError("response_too_large");
+      let text: string;
+      try {
+        text = await readBoundedResponseText(response, 64_000);
+      } catch (error) {
+        if (error instanceof FeishuBoundedResponseError) {
+          throw new FeishuTokenError("response_too_large");
+        }
+        throw error;
       }
       let body: unknown;
       try {
@@ -139,6 +154,13 @@ export class FeishuTenantAccessTokenProvider
         throw new FeishuTokenError("credential_rejected");
       }
       const token = String(value.tenant_access_token);
+      if (
+        !this.cache.has(credentialReference) &&
+        this.cache.size >= this.maxCacheEntries
+      ) {
+        const oldest = this.cache.keys().next().value as string | undefined;
+        if (oldest !== undefined) this.cache.delete(oldest);
+      }
       this.cache.set(credentialReference, {
         value: token,
         usable_until:

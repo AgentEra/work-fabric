@@ -18,6 +18,7 @@ import { assertCapabilities } from "@work-fabric/exchange-spi";
 
 import {
   CONNECTOR_INGRESS_MIGRATION,
+  CONNECTOR_INGRESS_HARDENING_MIGRATION,
   PostgresConnectorIngressStore,
 } from "../src/index.js";
 
@@ -85,6 +86,32 @@ describe("PostgreSQL Connector ingress store", () => {
     expect(session.client.calls.join("\n")).toContain("FOR UPDATE SKIP LOCKED");
   });
 
+  it("uses indexed temporal columns and exposes bounded tenant-scoped retention pruning", async () => {
+    const session = new FakeSession();
+    const store = new PostgresConnectorIngressStore(
+      () => session,
+      "tenant_01",
+      {
+        completed_retention_seconds: 604_800,
+        dead_letter_retention_seconds: 2_592_000,
+      },
+    );
+    expect(CONNECTOR_INGRESS_HARDENING_MIGRATION.sql).toMatch(/TYPE timestamptz/i);
+    expect(CONNECTOR_INGRESS_HARDENING_MIGRATION.sql).toContain(
+      "work_fabric_connector_ingress_claim_idx",
+    );
+    await expect(store.pruneExpired({
+      tenant_id: "tenant_01",
+      connector_id: "connector_01",
+      now: "2026-07-16T00:00:00Z",
+      limit: 100,
+    })).resolves.toBe(0);
+    const sql = session.client.calls.join("\n");
+    expect(sql).toContain("retention_expires_at <= $3");
+    expect(sql).toContain("FOR UPDATE SKIP LOCKED");
+    expect(sql).not.toContain("::timestamptz");
+  });
+
   it.skipIf(!live)("satisfies the shared profile with RLS", async () => {
     if (connectionString === undefined) return;
     pool = createPgPool(connectionString);
@@ -95,6 +122,7 @@ describe("PostgreSQL Connector ingress store", () => {
     await runMigrations(setup, [
       TENANT_CONTEXT_MIGRATION,
       CONNECTOR_INGRESS_MIGRATION,
+      CONNECTOR_INGRESS_HARDENING_MIGRATION,
     ]);
     setup.release();
 

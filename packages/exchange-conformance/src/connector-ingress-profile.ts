@@ -216,6 +216,43 @@ export async function verifyConnectorIngressProfile(
   assert.ok(recovered);
   assert.ok(recovered.fencing_token > leaseClaim.fencing_token);
 
+  const renewalEnvelope = envelope({
+    connector_id: "connector_renewal",
+    external_event_id: "external_renewal",
+    dedupe_key: "renewal:01",
+  });
+  await store.accept(renewalEnvelope);
+  const renewable = (await store.claim({
+    tenant_id: renewalEnvelope.tenant_id,
+    connector_id: renewalEnvelope.connector_id,
+    worker_id: "worker_renewal",
+    now: "2026-07-15T00:01:00Z",
+    lease_seconds: 5,
+    limit: 1,
+  }))[0];
+  assert.ok(renewable);
+  const renewed = await store.renew({
+    tenant_id: renewalEnvelope.tenant_id,
+    connector_id: renewalEnvelope.connector_id,
+    ingress_id: renewable.ingress_id,
+    claim_token: renewable.claim_token,
+    fencing_token: renewable.fencing_token,
+    now: "2026-07-15T00:01:04Z",
+    lease_seconds: 5,
+  });
+  assert.equal(
+    Date.parse(renewed.lease_expires_at),
+    Date.parse("2026-07-15T00:01:09Z"),
+  );
+  assert.equal((await store.claim({
+    tenant_id: renewalEnvelope.tenant_id,
+    connector_id: renewalEnvelope.connector_id,
+    worker_id: "worker_competing",
+    now: "2026-07-15T00:01:06Z",
+    lease_seconds: 5,
+    limit: 1,
+  })).length, 0);
+
   const deadEnvelope = envelope({
     connector_id: "connector_dead",
     external_event_id: "external_dead",

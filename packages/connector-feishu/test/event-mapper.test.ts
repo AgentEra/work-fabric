@@ -84,6 +84,7 @@ describe("Feishu identity and action mapping", () => {
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
+      identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
       operation: "handoff.accept",
       expected_version: 4,
       input: { handoff_id: "handoff-1" },
@@ -131,6 +132,7 @@ describe("Feishu identity and action mapping", () => {
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
+      identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
       operation: "handoff.accept",
       expected_version: 4,
       input: { handoff_id: "handoff-1" },
@@ -151,6 +153,7 @@ describe("Feishu identity and action mapping", () => {
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
+      identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
       operation: "handoff.accept",
       expected_version: 4,
       input: { handoff_id: "handoff-1" },
@@ -181,6 +184,43 @@ describe("Feishu identity and action mapping", () => {
         identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
         input: { handoff_id: "handoff-1" },
       },
+    });
+  });
+
+  it("rejects an action when the external identity mapping changed after issue", async () => {
+    const codec = new FeishuActionReferenceCodec({
+      encryption_key: new Uint8Array(32).fill(7),
+      nonce_factory: () => new Uint8Array(12).fill(4),
+    });
+    const actionRef = codec.issue({
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      external_tenant_id: "tenant-key-1",
+      external_subject_id: "ou-human-1",
+      identity: { actor_id: "human-original", endpoint_id: "endpoint-original" },
+      operation: "handoff.accept",
+      expected_version: 4,
+      input: { handoff_id: "handoff-1" },
+      expires_at: "2026-07-16T00:10:00Z",
+    });
+    const mapper = new FeishuEventMapper({
+      identity_resolver: new FeishuIdentityMapper(async () => ({
+        actor_id: "human-reassigned",
+        endpoint_id: "endpoint-reassigned",
+      })),
+      action_codec: codec,
+      clock: { now: () => "2026-07-16T00:05:00Z" },
+    });
+
+    await expect(mapper.map(claim("card.action.trigger", {
+      operator_open_id: "ou-human-1",
+      action_ref: actionRef,
+      message_id: "om-card-1",
+      action_tag: "button",
+    }))).resolves.toEqual({
+      kind: "rejected",
+      reason_code: "identity_mapping_changed",
+      retryable: false,
     });
   });
 

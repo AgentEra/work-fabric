@@ -4,6 +4,7 @@ import {
   randomBytes,
 } from "node:crypto";
 
+import type { ConnectorResolvedIdentity } from "@work-fabric/connector-spi";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 import { compareUtcTimestamps, parseUtcTimestamp } from "@work-fabric/exchange-spi";
 
@@ -23,6 +24,7 @@ export interface FeishuActionReferenceClaims {
   readonly connector_id: string;
   readonly external_tenant_id: string;
   readonly external_subject_id: string;
+  readonly identity: ConnectorResolvedIdentity;
   readonly operation: string;
   readonly expected_version: number;
   readonly input: JsonObject;
@@ -69,6 +71,23 @@ function bounded(value: unknown): value is string {
   );
 }
 
+function validIdentity(value: unknown): value is ConnectorResolvedIdentity {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const identity = value as Record<string, unknown>;
+  const keys = Object.keys(identity);
+  return (
+    keys.length >= 1 &&
+    keys.length <= 3 &&
+    keys.every((key) =>
+      key === "actor_id" || key === "endpoint_id" || key === "delegation_id") &&
+    bounded(identity.actor_id) &&
+    (identity.endpoint_id === undefined || bounded(identity.endpoint_id)) &&
+    (identity.delegation_id === undefined || bounded(identity.delegation_id))
+  );
+}
+
 function validateClaims(value: unknown): FeishuActionReferenceClaims {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new FeishuActionReferenceError("invalid");
@@ -79,6 +98,7 @@ function validateClaims(value: unknown): FeishuActionReferenceClaims {
     "connector_id",
     "external_tenant_id",
     "external_subject_id",
+    "identity",
     "operation",
     "expected_version",
     "input",
@@ -91,6 +111,7 @@ function validateClaims(value: unknown): FeishuActionReferenceClaims {
     !bounded(claims.connector_id) ||
     !bounded(claims.external_tenant_id) ||
     !bounded(claims.external_subject_id) ||
+    !validIdentity(claims.identity) ||
     !bounded(claims.operation) ||
     !ACTIONS.has(claims.operation) ||
     !Number.isSafeInteger(claims.expected_version) ||

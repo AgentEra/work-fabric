@@ -145,4 +145,20 @@ describe("Feishu HTTP webhook route", () => {
     expect(failed.headers["retry-after"]).toBeDefined();
     await unavailable.close();
   });
+
+  it("classifies a verified but invalid event as a non-retryable client error", async () => {
+    const http = service();
+    const response = await http.dispatch({
+      method: "POST",
+      url: "/v1/connectors/feishu/primary/events",
+      headers: { "content-type": "application/json" },
+      payload: JSON.stringify({
+        ...event,
+        header: { ...event.header, tenant_key: "another-tenant" },
+      }),
+    });
+    expect(response.status_code).toBe(400);
+    expect(response.headers["retry-after"]).toBeUndefined();
+    await http.close();
+  });
 });

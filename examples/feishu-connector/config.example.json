@@ -1,0 +1,27 @@
+{
+  "route_connector_id": "primary",
+  "tenant_id": "tenant_example",
+  "connector_id": "feishu_primary",
+  "external_tenant_id": "feishu_tenant_key",
+  "webhook_credential_ref": "secret-store://work-fabric/feishu/webhook",
+  "open_api_credential_ref": "secret-store://work-fabric/feishu/open-api",
+  "action_reference_key_ref": "secret-store://work-fabric/feishu/action-reference-key-v1",
+  "webhook": {
+    "max_body_bytes": 262144,
+    "max_clock_skew_seconds": 300,
+    "max_json_depth": 32,
+    "accept_timeout_ms": 2000
+  },
+  "worker": {
+    "lease_seconds": 30,
+    "batch_limit": 100,
+    "max_attempts": 8
+  },
+  "token_cache": {
+    "max_entries": 1024
+  },
+  "retention": {
+    "completed_ingress_days": 7,
+    "dead_letter_days": 30
+  }
+}

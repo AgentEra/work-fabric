@@ -65,4 +65,59 @@ describe("FeishuTenantAccessTokenProvider", () => {
         error instanceof Error && !error.message.includes("super-secret-value"),
     );
   });
+
+  it("evicts cached credential domains at the configured bound", async () => {
+    let calls = 0;
+    const provider = new FeishuTenantAccessTokenProvider({
+      credential_provider: {
+        async loadAppCredentials(reference) {
+          return { app_id: reference, app_secret: "test-value" };
+        },
+      },
+      fetch: (async () => {
+        calls += 1;
+        return new Response(JSON.stringify({
+          code: 0,
+          tenant_access_token: `token-${calls}`,
+          expire: 7_200,
+        }), { status: 200 });
+      }) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      clock: { nowEpochSeconds: () => 1_000 },
+      expiry_skew_seconds: 60,
+      request_timeout_ms: 1_000,
+      max_cache_entries: 1,
+    });
+
+    await provider.getToken("credential-ref-1");
+    await provider.getToken("credential-ref-2");
+    await provider.getToken("credential-ref-1");
+    expect(calls).toBe(3);
+  });
+
+  it("reads successful upstream bodies through the bounded stream path", async () => {
+    const response = new Response(JSON.stringify({
+      code: 0,
+      tenant_access_token: "streamed-token",
+      expire: 7_200,
+    }), { status: 200 });
+    Object.defineProperty(response, "text", {
+      value: () => { throw new Error("unbounded Response.text must not run"); },
+    });
+    const provider = new FeishuTenantAccessTokenProvider({
+      credential_provider: {
+        async loadAppCredentials() {
+          return { app_id: "cli-app", app_secret: "test-value" };
+        },
+      },
+      fetch: (async () => response) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      clock: { nowEpochSeconds: () => 1_000 },
+      expiry_skew_seconds: 60,
+      request_timeout_ms: 1_000,
+    });
+    await expect(provider.getToken("credential-ref-1")).resolves.toBe(
+      "streamed-token",
+    );
+  });
 });

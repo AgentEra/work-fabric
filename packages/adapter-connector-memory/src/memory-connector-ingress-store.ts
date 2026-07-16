@@ -20,6 +20,7 @@ import {
   type GetConnectorIngress,
   type ListConnectorIngress,
   type RequeueConnectorIngress,
+  type RenewConnectorIngress,
   type RetryConnectorIngress,
 } from "@work-fabric/connector-spi";
 import {
@@ -370,6 +371,25 @@ export class MemoryConnectorIngressStore implements ConnectorIngressStore {
     delete record.last_error_detail;
     clearClaim(record);
     return publicRecord(record);
+  }
+
+  async renew(input: RenewConnectorIngress): Promise<ConnectorIngressClaim> {
+    if (
+      !Number.isSafeInteger(input.lease_seconds) ||
+      input.lease_seconds <= 0 ||
+      input.lease_seconds > this.limits.max_lease_seconds
+    ) {
+      throw new RangeError(
+        `lease_seconds must be between 1 and ${this.limits.max_lease_seconds}`,
+      );
+    }
+    const record = this.requireClaim(input);
+    record.lease_expires_at = addUtcTimestampSeconds(
+      input.now,
+      input.lease_seconds,
+    );
+    record.updated_at = input.now;
+    return publicClaim(record);
   }
 
   async retry(input: RetryConnectorIngress): Promise<ConnectorIngressRecord> {

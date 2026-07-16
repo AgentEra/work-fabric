@@ -1,4 +1,4 @@
-import { createCipheriv, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -21,30 +21,16 @@ function sign(raw: Uint8Array, timestamp: string, nonce: string): string {
     .digest("hex");
 }
 
-function encrypt(value: unknown): string {
-  const key = createHash("sha256").update(credentials.encrypt_key!).digest();
-  const iv = Buffer.from("0123456789abcdef", "utf8");
-  const cipher = createCipheriv("aes-256-cbc", key, iv);
-  return Buffer.concat([
-    iv,
-    cipher.update(JSON.stringify(value), "utf8"),
-    cipher.final(),
-  ]).toString("base64");
-}
+// Frozen against the current official larksuite/node-sdk AESCipher contract:
+// SHA-256 key, ciphertext-prefixed IV, AES-256-CBC, PKCS padding.
+const ENCRYPTED_EVENT_FIXTURE =
+  "MDEyMzQ1Njc4OWFiY2RlZsLgmT+tkGAZWWqVcmKpB7mjESQH8ufx7ZOengDHDowdOKmT+P7H44cOr+nU1fjMMir7yO4jtvxfdAZDUv7r8S0sId2IITOYXV2nIu/IF/FQu+jsGGokO0HhAGAE+6CvSHj/2+m9JJwkURRxvwp0kvDLBEWIIkQ5IvKM03ZQCAv3WjvLQQKz6kXPUTRu4pKIxpOZAWJdBPC2SqNagEaHOV1lVFKT+F/1U3XIeLXVU4uVpr/A0ZWaTDawvkKzAnCs8Q==";
 
 describe("Feishu webhook codec", () => {
   it("verifies, decrypts, and removes verification material", async () => {
-    const inner = {
-      schema: "2.0",
-      header: {
-        event_id: "event-1",
-        event_type: "im.message.receive_v1",
-        tenant_key: "tenant-key-1",
-        token: credentials.verification_token,
-      },
-      event: { message: { message_id: "om-1" } },
-    };
-    const raw = Buffer.from(JSON.stringify({ encrypt: encrypt(inner) }));
+    const raw = Buffer.from(JSON.stringify({
+      encrypt: ENCRYPTED_EVENT_FIXTURE,
+    }));
     const timestamp = "1784073600";
     const nonce = "nonce-1";
     const result = await verifyFeishuWebhook({

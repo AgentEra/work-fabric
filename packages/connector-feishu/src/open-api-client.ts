@@ -1,4 +1,11 @@
-import type { FeishuTenantTokenProvider } from "./token-provider.js";
+import {
+  FeishuBoundedResponseError,
+  readBoundedResponseText,
+} from "./bounded-response.js";
+import {
+  FeishuTokenError,
+  type FeishuTenantTokenProvider,
+} from "./token-provider.js";
 
 export type FeishuReceiveIdType =
   | "open_id"
@@ -110,7 +117,18 @@ export class FeishuOpenApiClient implements FeishuMessageClient {
           input.credential_ref,
           forceRefresh,
         );
-      } catch {
+      } catch (error) {
+        if (
+          error instanceof FeishuTokenError &&
+          (error.code === "credential_rejected" ||
+            error.code === "request_rejected" ||
+            error.code === "invalid_clock")
+        ) {
+          return {
+            kind: "permanent_failure",
+            error_code: `token_${error.code}`,
+          };
+        }
         return { kind: "retryable_failure", error_code: "token_unavailable" };
       }
       const result = await this.request(input, token);
@@ -153,9 +171,19 @@ export class FeishuOpenApiClient implements FeishuMessageClient {
       if (response.status === 400 || response.status === 403) {
         return { kind: "permanent_failure", error_code: `http_${response.status}` };
       }
-      const text = await response.text();
-      if (new TextEncoder().encode(text).byteLength > this.options.max_response_bytes) {
-        return { kind: "retryable_failure", error_code: "response_too_large" };
+      let text: string;
+      try {
+        text = await readBoundedResponseText(
+          response,
+          this.options.max_response_bytes,
+        );
+      } catch (error) {
+        return {
+          kind: "retryable_failure",
+          error_code: error instanceof FeishuBoundedResponseError
+            ? "response_too_large"
+            : "response_read_failed",
+        };
       }
       let body: unknown;
       try {

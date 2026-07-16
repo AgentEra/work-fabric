@@ -49,6 +49,23 @@ function idempotencyKey(claim: ConnectorIngressClaim): string {
   return `feishu:${digest}`;
 }
 
+function sameIdentity(
+  left: {
+    readonly actor_id: string;
+    readonly endpoint_id?: string;
+    readonly delegation_id?: string;
+  },
+  right: {
+    readonly actor_id: string;
+    readonly endpoint_id?: string;
+    readonly delegation_id?: string;
+  },
+): boolean {
+  return left.actor_id === right.actor_id &&
+    left.endpoint_id === right.endpoint_id &&
+    left.delegation_id === right.delegation_id;
+}
+
 export class FeishuEventMapper implements ConnectorEventMapper {
   readonly manifest = {
     profile: "connector.mapper.v1",
@@ -122,13 +139,20 @@ export class FeishuEventMapper implements ConnectorEventMapper {
         external_subject_id: operator,
         now: this.options.clock.now(),
       });
+      if (!sameIdentity(identity, action.identity)) {
+        return {
+          kind: "rejected",
+          reason_code: "identity_mapping_changed",
+          retryable: false,
+        };
+      }
       return {
         kind: "command",
         command: {
           operation: action.operation,
           idempotency_key: idempotencyKey(claim),
           expected_version: action.expected_version,
-          identity,
+          identity: action.identity,
           input: action.input,
         },
       };

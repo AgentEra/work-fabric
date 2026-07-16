@@ -26,6 +26,7 @@ import {
   type GetConnectorIngress,
   type ListConnectorIngress,
   type RequeueConnectorIngress,
+  type RenewConnectorIngress,
   type RetryConnectorIngress,
 } from "@work-fabric/connector-spi";
 import {
@@ -38,6 +39,14 @@ export const CONNECTOR_INGRESS_MIGRATION = {
   id: "005_connector_ingress",
   sql: readFileSync(
     new URL("../migrations/005_connector_ingress.sql", import.meta.url),
+    "utf8",
+  ),
+} as const;
+
+export const CONNECTOR_INGRESS_HARDENING_MIGRATION = {
+  id: "006_connector_ingress_hardening",
+  sql: readFileSync(
+    new URL("../migrations/006_connector_ingress_hardening.sql", import.meta.url),
     "utf8",
   ),
 } as const;
@@ -66,7 +75,12 @@ function json<T>(value: unknown): T {
 }
 
 function nullableString(value: unknown): string | undefined {
-  return value === null || value === undefined ? undefined : String(value);
+  if (value === null || value === undefined) return undefined;
+  return value instanceof Date ? value.toISOString() : String(value);
+}
+
+function timestampString(value: unknown): string {
+  return value instanceof Date ? value.toISOString() : String(value);
 }
 
 function validateEnvelope(
@@ -140,6 +154,15 @@ export interface PostgresConnectorIngressStoreOptions {
   readonly id_factory?: () => string;
   readonly claim_token_factory?: () => string;
   readonly limits?: Partial<ConnectorIngressLimits>;
+  readonly completed_retention_seconds?: number;
+  readonly dead_letter_retention_seconds?: number;
+}
+
+export interface PruneExpiredConnectorIngress {
+  readonly tenant_id: string;
+  readonly connector_id: string;
+  readonly now: string;
+  readonly limit: number;
 }
 
 export class PostgresConnectorIngressStore implements ConnectorIngressStore {
@@ -148,6 +171,8 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
   private readonly idFactory: () => string;
   private readonly claimTokenFactory: () => string;
   private readonly limits: ConnectorIngressLimits;
+  private readonly completedRetentionSeconds: number;
+  private readonly deadLetterRetentionSeconds: number;
 
   constructor(
     private readonly sessionFactory: (tenantId: string) => TenantSession,
@@ -157,6 +182,19 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
     this.idFactory = options.id_factory ?? randomUUID;
     this.claimTokenFactory = options.claim_token_factory ?? randomUUID;
     this.limits = resolveConnectorIngressLimits(options.limits);
+    this.completedRetentionSeconds = options.completed_retention_seconds ?? 604_800;
+    this.deadLetterRetentionSeconds =
+      options.dead_letter_retention_seconds ?? 2_592_000;
+    this.positiveBounded(
+      this.completedRetentionSeconds,
+      31_536_000,
+      "completed_retention_seconds",
+    );
+    this.positiveBounded(
+      this.deadLetterRetentionSeconds,
+      31_536_000,
+      "dead_letter_retention_seconds",
+    );
     if (tenantId !== undefined) this.bind(tenantId);
   }
 
@@ -236,11 +274,11 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
              FROM work_fabric_connector_ingress
             WHERE tenant_id=$1 AND connector_id=$2
               AND (
-                (state IN ('pending','retry_wait') AND available_at::timestamptz <= $3::timestamptz)
+                (state IN ('pending','retry_wait') AND available_at <= $3)
                 OR
-                (state='processing' AND lease_expires_at::timestamptz <= $3::timestamptz)
+                (state='processing' AND lease_expires_at <= $3)
               )
-            ORDER BY available_at::timestamptz,received_at::timestamptz,ingress_id
+            ORDER BY available_at,received_at,ingress_id
             FOR UPDATE SKIP LOCKED
             LIMIT $4
          )
@@ -263,8 +301,44 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
   async complete(
     input: ConnectorIngressClaimMutation,
   ): Promise<ConnectorIngressRecord> {
+    const retentionExpiresAt = addUtcTimestampSeconds(
+      input.now,
+      this.completedRetentionSeconds,
+    );
     return this.settleClaim(input,
-      `state='completed',completed_at=$6,last_error_code=NULL,last_error_detail=NULL`);
+      `state='completed',completed_at=$6,retention_expires_at=$7,
+       last_error_code=NULL,last_error_detail=NULL`,
+      [retentionExpiresAt]);
+  }
+
+  async renew(input: RenewConnectorIngress): Promise<ConnectorIngressClaim> {
+    this.validateScope(input.tenant_id, input.connector_id);
+    parseUtcTimestamp(input.now, "now");
+    this.positiveBounded(
+      input.lease_seconds,
+      this.limits.max_lease_seconds,
+      "lease_seconds",
+    );
+    const leaseExpiresAt = addUtcTimestampSeconds(input.now, input.lease_seconds);
+    const result = await this.run(input.tenant_id, (client) =>
+      client.query<Row>(
+        `UPDATE work_fabric_connector_ingress
+            SET lease_expires_at=$7,updated_at=$6
+          WHERE tenant_id=$1 AND connector_id=$2 AND ingress_id=$3
+            AND state='processing' AND claim_token=$4 AND fencing_token=$5
+            AND lease_expires_at > $6
+        RETURNING *`,
+        [input.tenant_id, input.connector_id, input.ingress_id,
+          input.claim_token, input.fencing_token, input.now, leaseExpiresAt],
+      ));
+    const row = result.rows[0];
+    if (row === undefined) {
+      throw new ConnectorIngressStoreError(
+        "claim_lost",
+        "Connector ingress claim is stale, expired, or invalid",
+      );
+    }
+    return this.claimRecord(row);
   }
 
   async retry(input: RetryConnectorIngress): Promise<ConnectorIngressRecord> {
@@ -279,9 +353,14 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
     input: DeadLetterConnectorIngress,
   ): Promise<ConnectorIngressRecord> {
     this.validateError(input.error_code, input.error_detail);
+    const retentionExpiresAt = addUtcTimestampSeconds(
+      input.now,
+      this.deadLetterRetentionSeconds,
+    );
     return this.settleClaim(input,
-      `state='dead_letter',last_error_code=$7,last_error_detail=$8`,
-      [input.error_code, input.error_detail ?? null]);
+      `state='dead_letter',retention_expires_at=$7,
+       last_error_code=$8,last_error_detail=$9`,
+      [retentionExpiresAt, input.error_code, input.error_detail ?? null]);
   }
 
   async requeue(
@@ -299,6 +378,7 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
       const result = await client.query<Row>(
         `UPDATE work_fabric_connector_ingress
             SET state='retry_wait',available_at=$4,updated_at=$5,
+                retention_expires_at=NULL,
                 last_requeue_reason=$6,last_requeued_at=$5,
                 last_error_code=NULL,last_error_detail=NULL
           WHERE tenant_id=$1 AND connector_id=$2 AND ingress_id=$3
@@ -332,6 +412,33 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
     });
   }
 
+  async pruneExpired(input: PruneExpiredConnectorIngress): Promise<number> {
+    this.validateScope(input.tenant_id, input.connector_id);
+    parseUtcTimestamp(input.now, "now");
+    this.positiveBounded(input.limit, this.limits.max_page_limit, "limit");
+    const result = await this.run(input.tenant_id, (client) =>
+      client.query<Row>(
+        `WITH expired AS (
+           SELECT tenant_id,connector_id,ingress_id
+             FROM work_fabric_connector_ingress
+            WHERE tenant_id=$1 AND connector_id=$2
+              AND state IN ('completed','dead_letter')
+              AND retention_expires_at <= $3
+            ORDER BY retention_expires_at,ingress_id
+            FOR UPDATE SKIP LOCKED
+            LIMIT $4
+         )
+         DELETE FROM work_fabric_connector_ingress AS ingress
+          USING expired
+          WHERE ingress.tenant_id=expired.tenant_id
+            AND ingress.connector_id=expired.connector_id
+            AND ingress.ingress_id=expired.ingress_id
+         RETURNING ingress.ingress_id`,
+        [input.tenant_id, input.connector_id, input.now, input.limit],
+      ));
+    return result.rowCount;
+  }
+
   async list(input: ListConnectorIngress): Promise<ConnectorIngressPage> {
     this.validateScope(input.tenant_id, input.connector_id);
     this.positiveBounded(input.limit, this.limits.max_page_limit, "limit");
@@ -342,11 +449,11 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
           WHERE tenant_id=$1 AND connector_id=$2
             AND ($3::text[] IS NULL OR state=ANY($3::text[]))
             AND (
-              $4::text IS NULL
-              OR accepted_at::timestamptz > $4::timestamptz
-              OR (accepted_at::timestamptz = $4::timestamptz AND ingress_id > $5)
+              $4 IS NULL
+              OR accepted_at > $4
+              OR (accepted_at = $4 AND ingress_id > $5)
             )
-          ORDER BY accepted_at::timestamptz,ingress_id
+          ORDER BY accepted_at,ingress_id
           LIMIT $6`,
         [input.tenant_id, input.connector_id, input.states ?? null,
           after?.accepted_at ?? null, after?.ingress_id ?? null,
@@ -375,7 +482,7 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
                 claim_owner=NULL,claim_token=NULL,lease_expires_at=NULL
           WHERE tenant_id=$1 AND connector_id=$2 AND ingress_id=$3
             AND state='processing' AND claim_token=$4 AND fencing_token=$5
-            AND lease_expires_at::timestamptz > $6::timestamptz
+            AND lease_expires_at > $6
         RETURNING *`,
         [input.tenant_id, input.connector_id, input.ingress_id,
           input.claim_token, input.fencing_token, input.now, ...extra],
@@ -396,9 +503,9 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
       envelope: json<ConnectorIngressEnvelope>(row.envelope),
       state: row.state as ConnectorIngressState,
       attempt: Number(row.attempt),
-      available_at: String(row.available_at),
-      accepted_at: String(row.accepted_at),
-      updated_at: String(row.updated_at),
+      available_at: timestampString(row.available_at),
+      accepted_at: timestampString(row.accepted_at),
+      updated_at: timestampString(row.updated_at),
       ...(nullableString(row.completed_at) === undefined
         ? {} : { completed_at: nullableString(row.completed_at)! }),
       ...(nullableString(row.last_error_code) === undefined
@@ -419,7 +526,7 @@ export class PostgresConnectorIngressStore implements ConnectorIngressStore {
       claim_owner: String(row.claim_owner),
       claim_token: String(row.claim_token),
       fencing_token: Number(row.fencing_token),
-      lease_expires_at: String(row.lease_expires_at),
+      lease_expires_at: timestampString(row.lease_expires_at),
     };
   }
 

@@ -8,13 +8,16 @@ It provides:
 - projection checkpoints and immutable first-write failures;
 - tenant-scoped subscriptions;
 - cursor delivery positions, active-delivery CAS, attempts and dead letters;
-- fenced outbox and worker leases.
+- fenced outbox and worker leases;
 - durable Connector ingress with atomic external-event deduplication, fenced
-  claims, retry scheduling, dead-letter requeue and tenant isolation.
+  claims and renewal, retry scheduling, dead-letter requeue, lifecycle
+  retention, bounded pruning and tenant isolation.
 
 The adapter never executes a participant's work. It records handoffs, statuses, receipts and delivery facts while people, Agents and external systems continue executing in their own environments.
 
 Use `EXCHANGE_AUTHORITY_MIGRATION`, `RUNTIME_STATE_MIGRATION`,
 `RUNTIME_STATE_HARDENING_MIGRATION`, `ENDPOINT_BOUNDARY_MIGRATION`,
-`CONNECTOR_INGRESS_MIGRATION` and the common tenant migration with the shared
-migration runner.
+`CONNECTOR_INGRESS_MIGRATION`, `CONNECTOR_INGRESS_HARDENING_MIGRATION`, and the
+common tenant migration with the shared migration runner. The hardening
+migration converts hot queue timestamps to indexed `timestamptz` columns; run
+`pruneExpired()` in bounded tenant/connector batches for retention cleanup.

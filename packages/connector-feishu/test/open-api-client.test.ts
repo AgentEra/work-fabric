@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   FeishuOpenApiClient,
+  FeishuTokenError,
   type FeishuTenantTokenProvider,
 } from "../src/index.js";
 
@@ -73,5 +74,59 @@ describe("FeishuOpenApiClient", () => {
       max_response_bytes: 64_000,
     });
     await expect(client.sendMessage(message)).resolves.toMatchObject({ kind });
+  });
+
+  it("uses bounded response streaming and preserves permanent token failures", async () => {
+    const response = new Response(JSON.stringify({
+      code: 0,
+      data: { message_id: "om-streamed" },
+    }), { status: 200 });
+    Object.defineProperty(response, "text", {
+      value: () => { throw new Error("unbounded Response.text must not run"); },
+    });
+    const streamed = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: (async () => response) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+    await expect(streamed.sendMessage(message)).resolves.toEqual({
+      kind: "accepted",
+      message_id: "om-streamed",
+    });
+
+    const rejected = new FeishuOpenApiClient({
+      token_provider: {
+        async getToken() { throw new FeishuTokenError("credential_rejected"); },
+      },
+      fetch: vi.fn() as unknown as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+    await expect(rejected.sendMessage(message)).resolves.toEqual({
+      kind: "permanent_failure",
+      error_code: "token_credential_rejected",
+    });
+  });
+
+  it("keeps API token rejection retryable after one safe refresh", async () => {
+    const tokens = new Tokens();
+    const client = new FeishuOpenApiClient({
+      token_provider: tokens,
+      fetch: (async () => new Response(JSON.stringify({
+        code: 99991663,
+        msg: "token rejected",
+      }), { status: 200 })) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+    await expect(client.sendMessage(message)).resolves.toEqual({
+      kind: "retryable_failure",
+      error_code: "token_rejected",
+    });
+    expect(tokens.calls).toEqual([false, true]);
   });
 });

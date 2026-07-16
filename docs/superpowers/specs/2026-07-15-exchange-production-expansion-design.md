@@ -33,6 +33,19 @@ The following remain independent later modules and are not hidden inside Core:
 - Agent reasoning, Codex execution, Feishu business workflows or any other
   participant's internal work.
 
+### 1.1 Implementation status (2026-07-16)
+
+Delivery increments 1-5 are implemented through Phase 4B: PostgreSQL
+foundation, target resolution, HTTP/SSE, unified TypeScript SDK, worker runtime
+foundations, Endpoint/Agent boundary, generic Connector contracts, durable
+Memory/PostgreSQL Connector ingress, and the Feishu Connector round trip.
+
+The next active increment is operations and scale. OIDC production composition,
+complete observability/performance baselines, optional broker acceleration,
+A2A/MCP, federation, and Console remain incomplete unless documented by a
+later phase. Completing Feishu connectivity does not imply those capabilities
+or any external execution runtime are production-ready.
+
 ## 2. Architectural decisions
 
 ### 2.1 Deployment topology
@@ -264,22 +277,25 @@ Conformance semantics.
 
 ## 9. Delivery order
 
-The implementation is split into independently verifiable plans:
+The implementation is split into independently verifiable plans. Status at the
+Phase 4B boundary is:
 
-1. Persistence foundation: PostgreSQL schema, transaction adapter, RLS,
+1. **Complete** — Persistence foundation: PostgreSQL schema, transaction adapter, RLS,
    Context metadata and migration/conformance suite.
-2. Service boundary: Target Resolution protocol/Core extension, OIDC/JWT
+2. **Partially complete** — Service boundary: Target Resolution protocol/Core extension, OIDC/JWT
    resolution, HTTP Command API, Cursor Pull/Ack, SSE/Webhook binding, stable
-   error and health surfaces, and TypeScript SDK.
-3. Worker runtime: Outbox, Projection, Delivery, Expiry and Reconciliation
+   error and health surfaces, and TypeScript SDK. Production OIDC composition
+   remains outstanding.
+3. **Complete for current reference/production adapter scope** — Worker runtime: Outbox, Projection, Delivery, Expiry and Reconciliation
    workers with leases, fencing and crash recovery.
-4. Endpoint and Agent boundary: registry, capability discovery, endpoint lease,
+4. **Complete** — Endpoint and Agent boundary: registry, capability discovery, endpoint lease,
    Local Agent Gateway and SDK contract.
-5. External connectors: Feishu first, generic WorkReference/status/result
-   connector, then Git/issue/knowledge/deployment examples.
-6. Operations and scale: observability, migrations tooling, performance
+5. **Feishu complete; additional connectors planned** — External connectors:
+   generic ingress/mapping/resource/reconciliation contracts, Feishu first,
+   then Git/issue/knowledge/deployment examples.
+6. **Next** — Operations and scale: observability, migrations tooling, performance
    baselines, optional broker Adapter conformance and deployment samples.
-7. Later independent modules: A2A/MCP bindings, Federation and Console/UI.
+7. **Planned** — Later independent modules: A2A/MCP bindings, Federation and Console/UI.
 
 Every step ends with focused TDD, reusable Conformance, full verification and
 an independent review. No step may add a concrete technology dependency to

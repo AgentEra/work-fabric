@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { ConnectorIngressEnvelope } from "@work-fabric/connector-spi";
 import { parseUtcTimestamp, type JsonObject, type JsonValue } from "@work-fabric/exchange-spi";
 
@@ -93,13 +95,14 @@ function cardEnvelope(
   const eventId = string(header.event_id, "event_id");
   const actionRef = string(value.action_ref, "action_ref");
   const messageId = string(context.open_message_id, "open_message_id");
+  const actionDigest = createHash("sha256").update(actionRef).digest("hex");
   return {
     tenant_id: scope.tenant_id,
     connector_id: scope.connector_id,
     source_system: "feishu",
     external_tenant_id: scope.expected_external_tenant_id,
     external_event_id: eventId,
-    dedupe_key: `card:${eventId}:${actionRef}`,
+    dedupe_key: `card:${eventId}:${actionDigest}`,
     event_type: "card.action.trigger",
     partition_key: `message:${messageId}`,
     occurred_at: occurredAt(header, scope.received_at),

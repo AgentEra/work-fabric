@@ -175,6 +175,9 @@ export class ConnectorWorker {
 
     try {
       if (mapping.kind === "command") {
+        const renewed = await this.renewBeforeSideEffect(claim);
+        if (renewed === null) return "fenced";
+        claim = renewed;
         const result = await this.options.command_sink.execute({
           tenant_id: claim.envelope.tenant_id,
           connector_id: claim.envelope.connector_id,
@@ -194,6 +197,9 @@ export class ConnectorWorker {
         mapping.kind === "reference_observed" ||
         mapping.kind === "reconciliation_observation"
       ) {
+        const renewed = await this.renewBeforeSideEffect(claim);
+        if (renewed === null) return "fenced";
+        claim = renewed;
         const result = await this.options.observation_sink.record({
           tenant_id: claim.envelope.tenant_id,
           connector_id: claim.envelope.connector_id,
@@ -223,6 +229,23 @@ export class ConnectorWorker {
         claim,
         classifyThrown(error, this.options.scope.max_error_detail_length),
       );
+    }
+  }
+
+  private async renewBeforeSideEffect(
+    claim: ConnectorIngressClaim,
+  ): Promise<ConnectorIngressClaim | null> {
+    try {
+      return await this.options.store.renew({
+        ...this.claimMutation(claim),
+        lease_seconds: this.options.scope.lease_seconds,
+      });
+    } catch (error) {
+      if (
+        error instanceof ConnectorIngressStoreError &&
+        error.code === "claim_lost"
+      ) return null;
+      throw error;
     }
   }
 

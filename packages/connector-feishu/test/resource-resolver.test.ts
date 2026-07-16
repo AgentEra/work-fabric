@@ -23,6 +23,10 @@ function client(overrides: Partial<FeishuDocumentClient> = {}): FeishuDocumentCl
 describe("Feishu document resource resolver", () => {
   it("resolves wiki identity before fetching bounded raw content", async () => {
     const resolver = new FeishuDocumentResourceResolver(client(), {
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      credential_ref: "credential-ref-1",
+      authorize_content: async () => true,
       request_timeout_ms: 1_000,
       max_content_bytes: 1_024,
     });
@@ -48,7 +52,14 @@ describe("Feishu document resource resolver", () => {
       async getDocumentRawContent() {
         return { content: "x".repeat(129), media_type: "text/plain" };
       },
-    }), { request_timeout_ms: 1_000, max_content_bytes: 1_024 });
+    }), {
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      credential_ref: "credential-ref-1",
+      authorize_content: async () => true,
+      request_timeout_ms: 1_000,
+      max_content_bytes: 1_024,
+    });
     await expect(resolver.resolve({
       tenant_id: "tenant-1",
       connector_id: "feishu-primary",
@@ -79,5 +90,62 @@ describe("Feishu document resource resolver", () => {
       reason_code: "content_too_large",
       retryable: false,
     });
+  });
+
+  it("rejects cross-scope, unknown-purpose, and unauthorized content queries", async () => {
+    let contentReads = 0;
+    const resolver = new FeishuDocumentResourceResolver(client({
+      async getDocumentRawContent() {
+        contentReads += 1;
+        return { content: "must not be read", media_type: "text/plain" };
+      },
+    }), {
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      credential_ref: "credential-ref-1",
+      authorize_content: async () => false,
+      request_timeout_ms: 1_000,
+      max_content_bytes: 1_024,
+    });
+    const reference = createFeishuDocxReference({
+      document_id: "doccnResolved",
+      revision_id: "9",
+      title: "Current",
+    });
+
+    await expect(resolver.resolve({
+      tenant_id: "another-tenant",
+      connector_id: "feishu-primary",
+      reference,
+      purpose: "metadata",
+      max_bytes: 128,
+    })).resolves.toEqual({
+      kind: "unavailable",
+      reason_code: "scope_mismatch",
+      retryable: false,
+    });
+    await expect(resolver.resolve({
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      reference,
+      purpose: "export_everything",
+      max_bytes: 128,
+    })).resolves.toEqual({
+      kind: "unavailable",
+      reason_code: "unsupported_purpose",
+      retryable: false,
+    });
+    await expect(resolver.resolve({
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      reference,
+      purpose: "context",
+      max_bytes: 128,
+    })).resolves.toEqual({
+      kind: "unavailable",
+      reason_code: "content_access_denied",
+      retryable: false,
+    });
+    expect(contentReads).toBe(0);
   });
 });

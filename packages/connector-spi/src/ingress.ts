@@ -8,6 +8,7 @@ export const CONNECTOR_INGRESS_REQUIRED_CAPABILITIES = [
   "atomic_deduplication",
   "tenant_isolation",
   "fenced_claims",
+  "claim_renewal",
   "lease_recovery",
   "retry_scheduling",
   "dead_letter_requeue",
@@ -88,6 +89,10 @@ export interface ConnectorIngressClaimMutation {
   readonly now: string;
 }
 
+export interface RenewConnectorIngress extends ConnectorIngressClaimMutation {
+  readonly lease_seconds: number;
+}
+
 export interface RetryConnectorIngress extends ConnectorIngressClaimMutation {
   readonly available_at: string;
   readonly error_code: string;
@@ -132,6 +137,7 @@ export interface ConnectorIngressStore extends ExchangeAdapter {
   readonly manifest: CapabilityManifest;
   accept(envelope: ConnectorIngressEnvelope): Promise<AcceptConnectorIngressResult>;
   claim(input: ClaimConnectorIngress): Promise<readonly ConnectorIngressClaim[]>;
+  renew(input: RenewConnectorIngress): Promise<ConnectorIngressClaim>;
   complete(input: ConnectorIngressClaimMutation): Promise<ConnectorIngressRecord>;
   retry(input: RetryConnectorIngress): Promise<ConnectorIngressRecord>;
   deadLetter(input: DeadLetterConnectorIngress): Promise<ConnectorIngressRecord>;

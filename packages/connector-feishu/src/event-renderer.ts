@@ -8,6 +8,9 @@ const ALLOWED_DESTINATION_KEYS = new Set([
   "credential_ref",
   "connector_id",
   "external_tenant_id",
+  "actor_id",
+  "endpoint_id",
+  "delegation_id",
   "receive_id_type",
   "receive_id",
   "render_mode",
@@ -19,6 +22,9 @@ export interface FeishuDestinationConfiguration {
   readonly credential_ref: string;
   readonly connector_id: string;
   readonly external_tenant_id: string;
+  readonly actor_id: string;
+  readonly endpoint_id?: string;
+  readonly delegation_id?: string;
   readonly receive_id_type: FeishuReceiveIdType;
   readonly receive_id: string;
   readonly render_mode: "text" | "card";
@@ -76,6 +82,11 @@ export function parseFeishuDestination(
     credential_ref: bounded(value.credential_ref, "credential_ref"),
     connector_id: bounded(value.connector_id, "connector_id"),
     external_tenant_id: bounded(value.external_tenant_id, "external_tenant_id"),
+    actor_id: bounded(value.actor_id, "actor_id"),
+    ...(value.endpoint_id === undefined
+      ? {} : { endpoint_id: bounded(value.endpoint_id, "endpoint_id") }),
+    ...(value.delegation_id === undefined
+      ? {} : { delegation_id: bounded(value.delegation_id, "delegation_id") }),
     receive_id_type: receiveIdType,
     receive_id: bounded(value.receive_id, "receive_id"),
     render_mode: renderMode,
@@ -150,6 +161,13 @@ export class FeishuEventRenderer {
           connector_id: destination.connector_id,
           external_tenant_id: destination.external_tenant_id,
           external_subject_id: destination.receive_id,
+          identity: {
+            actor_id: destination.actor_id,
+            ...(destination.endpoint_id === undefined
+              ? {} : { endpoint_id: destination.endpoint_id }),
+            ...(destination.delegation_id === undefined
+              ? {} : { delegation_id: destination.delegation_id }),
+          },
           operation,
           expected_version: version,
           input: { handoff_id: handoffId },

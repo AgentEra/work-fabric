@@ -207,9 +207,28 @@ Gateway 只处理连接机械：它不比较候选、不安排任务、不调用
 
 本地评估可使用 Memory Endpoint Adapter；持久部署可使用 PostgreSQL Endpoint Directory/Inbox Adapter，公共 SPI、HTTP 和 SDK 不绑定数据库。完整接入顺序、配置上限、错误模型和外部 Runtime 示例见 [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)。
 
+## Feishu Connector
+
+阶段 4B 已提供第一个具体协作系统连接器，同时把可复用的 Connector 边界从飞书实现中拆出：
+
+- `@work-fabric/connector-spi`：技术中立的 durable ingress、映射、身份、资源和对账契约。
+- Memory 与 PostgreSQL ingress adapters：共享去重、租约、fencing、重试、死信、显式 requeue 和租户隔离行为。
+- `@work-fabric/connector-runtime`：异步映射 worker 和只比较、不静默修改任一侧的 reconciliation service。
+- `@work-fabric/connector-feishu`：Webhook 验签/解密、可选长连接、明确身份映射、受认证的交互动作、文档引用、OpenAPI 和既有 `SignalAdapter` 的飞书实现。
+- `@work-fabric/transport-http`：`POST /v1/connectors/feishu/{connector_id}/events` 只完成安全校验、归一化和 durable accept，不等待映射或 SDK 命令。
+
+```text
+Feishu callback -> durable ingress -> Connector worker -> public TypeScript SDK
+Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
+```
+
+完整 callback、SDK、Exchange、Subscription、卡片动作回流测试证明了连接闭环，同时保持四类事实独立：callback 被持久接收、映射完成、飞书接受出站消息、Actor 接受 Handoff 责任。任一前置事实都不能替代后一个事实。
+
+部署组合、权限、凭据、保留策略和本地验证见 [Feishu Connector 示例](examples/feishu-connector/README.md)；客户意向到交付运维的完整连接场景见 [飞书客户项目生命周期示例](docs/feishu-customer-lifecycle-example.md)。
+
 ## 当前状态
 
-项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK，以及阶段 4A 的 Endpoint Directory、Inbox、HTTP/SDK 与外部 Agent Gateway。Canonical 命令、授权查询、Durable Pull/Ack、认证 SSE、统一 SDK 和原生 Agent 连接边界已经可以通过同一个公共 Contract 使用；飞书 Connector、Webhook Worker、A2A、MCP、Agent Brain 和 Console 仍属于后续阶段，参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK、阶段 4A 的 Endpoint/Agent 连接边界，以及阶段 4B 的 generic Connector seam 与飞书 Connector。Human、Agent、Connector、Console 和开放服务共享同一个公共协议、HTTP 与 SDK 权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
 
 当前阶段路线：
 
@@ -221,8 +240,8 @@ Gateway 只处理连接机械：它不比较候选、不安排任务、不调用
 | 3B | HTTP Service Binding | 已完成 |
 | 3C | TypeScript SDK | 已完成 |
 | 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
-| 4B | 飞书 Connector | 下一步 |
-| 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
+| 4B | Generic Connector + 飞书 Connector | 已完成 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 下一步 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
@@ -246,6 +265,12 @@ Gateway 只处理连接机械：它不比较候选、不安排任务、不调用
 - Endpoint Directory 保存注册、Capability、Binding、租约和 availability 事实；Discovery 只返回确定分页的事实，不包含 score、rank、recommendation 或 selected target。
 - Agent Gateway 只依赖公开 TypeScript SDK，处理 Session 续租、Inbox Partition 刷新、SSE 汇聚和有界背压；Agent Runtime、Resolver、模型、工具与执行回调都在包外。
 - Endpoint Inbox 是可重建的路由投影，不复制 Context、Prompt、结果正文、凭据或外部执行状态；Delivery Ack 与 Handoff Accept 保持独立。
+- Connector ingress 是有界、可保留清理的操作缓冲，不是新的业务真相库；Webhook/长连接只 durable accept，映射 worker 才通过公开 SDK 提交命令。
+- 飞书身份必须映射到已有 Actor/Endpoint；任意聊天默认 inert，只有配置策略或本 Connector 签发的受限动作可以产生协议操作。
+- 飞书文档仍由飞书持有，Exchange 只保存版本化引用和有界元数据；凭据只以 opaque reference 出现在配置中。
+- Reconciliation 只产生可见 discrepancy，不静默覆盖 Work Fabric 或外部系统状态。
+- Connector Worker 在公共 side effect 前续租并校验 fencing；PostgreSQL retention 使用有界 `pruneExpired()` 批次，不让 ingress 成为永久内容库。
+- 交互动作同时绑定飞书用户与签发时的 Work Fabric 身份快照；文档原文读取需要 tenant/connector scope 和显式授权。
 - `/health/live` 与 `/health/ready` 只返回有界进程状态；受保护的 `/v1/admin/health` 才返回不含错误文本的依赖摘要。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
@@ -255,7 +280,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一步进入阶段 4B 的飞书 Connector，复用既有 WFPP、Endpoint、HTTP、Subscription 和 TypeScript SDK，不创建飞书专用状态机，也不把外部执行逻辑引入 Exchange。Console UI 仍属于阶段 5；Webhook Worker、OIDC Adapter、Agent Brain、A2A/MCP 和生产部署组合不因 4A 完成而被宣称就绪。
+下一步进入阶段 5：先补齐查询投影、审计、指标、追踪、运行健康、Connector/Delivery 可见性和部署性能基线，再让 Read-mostly Console 作为同一 SDK 的可替换客户端接入。Console 不是执行路径，也不拥有状态或管理旁路。Agent Brain、A2A/MCP、其他 Connector 和高吞吐 Broker/集群形态仍是独立后续模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 

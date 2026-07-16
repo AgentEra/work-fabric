@@ -33,6 +33,7 @@ describe("Connector SPI contracts", () => {
       "atomic_deduplication",
       "tenant_isolation",
       "fenced_claims",
+      "claim_renewal",
       "lease_recovery",
       "retry_scheduling",
       "dead_letter_requeue",

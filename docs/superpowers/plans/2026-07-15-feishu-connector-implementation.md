@@ -71,14 +71,14 @@ optional Feishu Node SDK boundary.
 - `ConnectorIdentityResolver` and `ConnectorResourceResolver` are
   transport-neutral and tenant scoped.
 
-- [ ] Write compile-time/runtime tests for manifest profiles, exact lifecycle
+- [x] Write compile-time/runtime tests for manifest profiles, exact lifecycle
   unions, readonly tenant scope, and absence of concrete technology fields.
-- [ ] Run `npm test -- packages/connector-spi/test/contracts.test.ts`; confirm
+- [x] Run `npm test -- packages/connector-spi/test/contracts.test.ts`; confirm
   the missing package/import is RED.
-- [ ] Implement the minimal ports and scalar validation helpers. Reuse
+- [x] Implement the minimal ports and scalar validation helpers. Reuse
   `JsonObject` and `ExchangeAdapter` from `exchange-spi` without changing it.
-- [ ] Run the focused test and `npm run typecheck`.
-- [ ] Commit `feat: define generic Connector contracts`.
+- [x] Run the focused test and `npm run typecheck`.
+- [x] Commit `feat: define generic Connector contracts`.
 
 ## Task 2: Memory ingress store and reusable conformance
 
@@ -104,12 +104,12 @@ optional Feishu Node SDK boundary.
 - tenant-filtered read visibility and bounded pagination;
 - defensive cloning of payloads and returned records.
 
-- [ ] Write the profile and Memory invocation first.
-- [ ] Run the two focused tests and confirm missing implementation failures.
-- [ ] Implement the in-memory store using a serialized mutation section and
+- [x] Write the profile and Memory invocation first.
+- [x] Run the two focused tests and confirm missing implementation failures.
+- [x] Implement the in-memory store using a serialized mutation section and
   injected clock/ID factory; do not use wall-clock sleeps in tests.
-- [ ] Run the profile, package test, and typecheck.
-- [ ] Commit `feat: add reference Connector ingress store`.
+- [x] Run the profile, package test, and typecheck.
+- [x] Commit `feat: add reference Connector ingress store`.
 
 ## Task 3: Connector mapping worker
 
@@ -134,13 +134,13 @@ optional Feishu Node SDK boundary.
 - abort after fencing loss without another side effect;
 - expose counts without content-bearing metric labels.
 
-- [ ] Write tests for all five mapper outcomes, sink replay, backoff, terminal
+- [x] Write tests for all five mapper outcomes, sink replay, backoff, terminal
   attempt, mapper exception, and stale claim.
-- [ ] Run the focused test and observe RED.
-- [ ] Implement one `runBatch()` unit with injected store, mapper, sink, clock,
+- [x] Run the focused test and observe RED.
+- [x] Implement one `runBatch()` unit with injected store, mapper, sink, clock,
   retry policy, and metrics observer.
-- [ ] Run focused tests, typecheck, and the Connector conformance profile.
-- [ ] Commit `feat: add durable Connector mapping worker`.
+- [x] Run focused tests, typecheck, and the Connector conformance profile.
+- [x] Commit `feat: add durable Connector mapping worker`.
 
 ## Task 4: PostgreSQL Connector ingress adapter
 
@@ -165,12 +165,12 @@ optional Feishu Node SDK boundary.
 - Every mutation includes tenant, claim token, and fencing predicate.
 - RLS uses the same tenant session mechanism as existing production tables.
 
-- [ ] Instantiate the shared profile against PostgreSQL and add SQL/RLS tests.
-- [ ] Run the focused PostgreSQL tests to capture RED.
-- [ ] Add migration and store implementation using shared Postgres transaction
+- [x] Instantiate the shared profile against PostgreSQL and add SQL/RLS tests.
+- [x] Run the focused PostgreSQL tests to capture RED.
+- [x] Add migration and store implementation using shared Postgres transaction
   helpers; never expose a pool/client in the SPI.
-- [ ] Run focused tests, `npm run verify:postgres`, and migration smoke.
-- [ ] Commit `feat: persist durable Connector ingress in PostgreSQL`.
+- [x] Run focused tests, `npm run verify:postgres`, and migration smoke.
+- [x] Commit `feat: persist durable Connector ingress in PostgreSQL`.
 
 ## Task 5: Feishu credential and webhook codec boundary
 
@@ -199,13 +199,13 @@ optional Feishu Node SDK boundary.
 - reject unknown/oversized/deep/secret-shaped data with safe typed errors;
 - expose no decrypted payload or credentials in errors.
 
-- [ ] Write official-fixture vector tests, tamper tests, skew/replay tests,
+- [x] Write official-fixture vector tests, tamper tests, skew/replay tests,
   challenge tests, duplicate-key tests, and serialization bounds.
-- [ ] Run focused tests and observe RED.
-- [ ] Implement configuration validation, credential-provider interface, codec,
+- [x] Run focused tests and observe RED.
+- [x] Implement configuration validation, credential-provider interface, codec,
   and normalizer using Node crypto primitives behind pure functions.
-- [ ] Run focused tests and typecheck.
-- [ ] Commit `feat: verify and normalize Feishu callbacks`.
+- [x] Run focused tests and typecheck.
+- [x] Commit `feat: verify and normalize Feishu callbacks`.
 
 ## Task 6: Feishu identity, action, and document mapping
 
@@ -239,11 +239,11 @@ optional Feishu Node SDK boundary.
 - raw content fetch enforces media/byte/time limits and returns content to the
   caller without writing Core facts.
 
-- [ ] Write mapper/token/document/resource and SDK sink tests first.
-- [ ] Run focused tests and observe RED.
-- [ ] Implement minimal mapping strategies and injected Feishu document client.
-- [ ] Run focused tests, SDK tests, and typecheck.
-- [ ] Commit `feat: map Feishu participants and resources`.
+- [x] Write mapper/token/document/resource and SDK sink tests first.
+- [x] Run focused tests and observe RED.
+- [x] Implement minimal mapping strategies and injected Feishu document client.
+- [x] Run focused tests, SDK tests, and typecheck.
+- [x] Commit `feat: map Feishu participants and resources`.
 
 ## Task 7: Feishu OpenAPI and outbound SignalAdapter
 
@@ -270,13 +270,13 @@ optional Feishu Node SDK boundary.
 - return a valid Feishu message identifier before reporting accepted;
 - sanitize API bodies and headers from errors/logs.
 
-- [ ] Write renderer, UUID, token concurrency, refresh, timeout, classification,
+- [x] Write renderer, UUID, token concurrency, refresh, timeout, classification,
   and `SignalAdapter` profile tests.
-- [ ] Run focused tests and observe RED.
-- [ ] Implement with injected `fetch`, clock, credential provider, and token
+- [x] Run focused tests and observe RED.
+- [x] Implement with injected `fetch`, clock, credential provider, and token
   cache. Do not import the SDK into Exchange Runtime.
-- [ ] Run focused tests, signal profile, typecheck, and delivery runtime tests.
-- [ ] Commit `feat: deliver Work Fabric events through Feishu`.
+- [x] Run focused tests, signal profile, typecheck, and delivery runtime tests.
+- [x] Commit `feat: deliver Work Fabric events through Feishu`.
 
 ## Task 8: HTTP webhook and optional long-connection event sources
 
@@ -302,14 +302,14 @@ optional Feishu Node SDK boundary.
 - long connection implements a narrow injected SDK facade and invokes the same
   codec/normalizer/acceptor; it contains no event mapping switch.
 
-- [ ] Write Fastify injection tests that prove durable acceptance ordering,
+- [x] Write Fastify injection tests that prove durable acceptance ordering,
   challenge handling, security rejection, duplicate behavior, and latency
   independence; write fake-SDK long-connection tests.
-- [ ] Run focused tests and observe RED.
-- [ ] Implement optional route/source composition with no mandatory production
+- [x] Run focused tests and observe RED.
+- [x] Implement optional route/source composition with no mandatory production
   credential in the default HTTP service.
-- [ ] Run focused transport/connector tests and typecheck.
-- [ ] Commit `feat: expose Feishu Connector event sources`.
+- [x] Run focused transport/connector tests and typecheck.
+- [x] Commit `feat: expose Feishu Connector event sources`.
 
 ## Task 9: Reconciliation, end-to-end proof, docs, and final gates
 
@@ -339,20 +339,20 @@ optional Feishu Node SDK boundary.
 6. injected drift creates a visible discrepancy observation and never mutates
    either system silently.
 
-- [ ] Write the integration test and reconciliation tests first.
-- [ ] Run focused tests and observe RED.
-- [ ] Implement comparison-only reconciliation and finish the fake-Feishu
+- [x] Write the integration test and reconciliation tests first.
+- [x] Run focused tests and observe RED.
+- [x] Implement comparison-only reconciliation and finish the fake-Feishu
   roundtrip harness.
-- [ ] Update architecture, roadmap status, setup/secret/permission/retention
+- [x] Update architecture, roadmap status, setup/secret/permission/retention
   guidance, and the customer lifecycle example.
-- [ ] Run `git diff --check`.
-- [ ] Run `npm run typecheck`.
-- [ ] Run all Connector, HTTP, SDK, runtime, Memory, and PostgreSQL focused
+- [x] Run `git diff --check`.
+- [x] Run `npm run typecheck`.
+- [x] Run all Connector, HTTP, SDK, runtime, Memory, and PostgreSQL focused
   tests.
-- [ ] Run `npm run verify:exchange` and require WFPP conformance 120/120.
-- [ ] Run dependency guards and search tracked code/log fixtures for secret
+- [x] Run `npm run verify:exchange` and require WFPP conformance 120/120.
+- [x] Run dependency guards and search tracked code/log fixtures for secret
   names or real credentials.
-- [ ] Review the branch against the design's acceptance and non-goals, then
+- [x] Review the branch against the design's acceptance and non-goals, then
   commit `docs: complete Phase 4B Feishu Connector`.
 
 ## Completion rule

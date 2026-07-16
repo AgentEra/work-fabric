@@ -286,4 +286,26 @@ describe("ConnectorWorker", () => {
     expect(sink.calls).toHaveLength(1);
     expect(mapper.calls).toHaveLength(1);
   });
+
+  it("renews the fenced claim before a public side effect and aborts after expiry", async () => {
+    const store = new MemoryConnectorIngressStore();
+    await store.accept(envelope("expired-before-command"));
+    const clock = new MutableClock("2026-07-15T00:00:00Z");
+    const mapper: ConnectorEventMapper = {
+      manifest: manifest("connector.mapper.v1"),
+      async map() {
+        clock.value = "2026-07-15T00:00:31Z";
+        return acceptedCommand;
+      },
+    };
+    const sink = new QueueSink([
+      { kind: "accepted", receipt_id: "must-not-run", event_ids: [] },
+    ]);
+
+    await expect(worker(store, mapper, sink, clock).runBatch()).resolves.toMatchObject({
+      fenced: 1,
+      completed: 0,
+    });
+    expect(sink.calls).toEqual([]);
+  });
 });
