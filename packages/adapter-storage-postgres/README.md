@@ -9,6 +9,7 @@ It provides:
 - tenant-scoped Handoff read models plus responsibility, timeline and current
   relationship projections with index-backed cursor queries;
 - append-only operation audit with bounded retention pruning;
+- fenced explicit recovery requests and persisted reconciliation discrepancies;
 - tenant-scoped subscriptions;
 - cursor delivery positions, active-delivery CAS, attempts and dead letters;
 - fenced outbox and worker leases;

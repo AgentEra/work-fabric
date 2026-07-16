@@ -10,6 +10,7 @@
   "dependencies": {
     "@work-fabric/adapter-postgres-common": "0.1.0",
     "@work-fabric/connector-spi": "0.1.0",
+    "@work-fabric/connector-runtime": "0.1.0",
     "@work-fabric/exchange-spi": "0.1.0",
     "@work-fabric/operations-spi": "0.1.0"
   }

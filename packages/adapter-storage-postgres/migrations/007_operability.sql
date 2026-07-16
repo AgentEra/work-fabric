@@ -107,6 +107,45 @@ CREATE INDEX IF NOT EXISTS work_fabric_operation_audit_operation_idx
   ON work_fabric_operation_audit
   (tenant_id, operation, occurred_at DESC, audit_id ASC);
 
+CREATE TABLE IF NOT EXISTS work_fabric_connector_discrepancies (
+  tenant_id text NOT NULL,
+  discrepancy_id text NOT NULL,
+  connector_id text NOT NULL,
+  observed_at timestamptz NOT NULL,
+  status text NOT NULL CHECK (status IN ('open', 'acknowledged')),
+  version bigint NOT NULL CHECK (version > 0),
+  payload jsonb NOT NULL,
+  PRIMARY KEY (tenant_id, discrepancy_id)
+);
+CREATE INDEX IF NOT EXISTS work_fabric_connector_discrepancies_query_idx
+  ON work_fabric_connector_discrepancies
+  (tenant_id, observed_at DESC, discrepancy_id ASC);
+CREATE INDEX IF NOT EXISTS work_fabric_connector_discrepancies_connector_idx
+  ON work_fabric_connector_discrepancies
+  (tenant_id, connector_id, status, observed_at DESC, discrepancy_id ASC);
+
+CREATE TABLE IF NOT EXISTS work_fabric_recovery_requests (
+  tenant_id text NOT NULL,
+  recovery_id text NOT NULL,
+  idempotency_key text NOT NULL,
+  requested_at timestamptz NOT NULL,
+  state text NOT NULL CHECK (state IN ('pending', 'processing', 'completed', 'failed')),
+  version bigint NOT NULL CHECK (version > 0),
+  attempt integer NOT NULL CHECK (attempt >= 0),
+  claim_owner text,
+  claim_token text,
+  fencing_token bigint NOT NULL DEFAULT 0 CHECK (fencing_token >= 0),
+  lease_expires_at timestamptz,
+  outcome_code text,
+  completed_at timestamptz,
+  payload jsonb NOT NULL,
+  PRIMARY KEY (tenant_id, recovery_id),
+  UNIQUE (tenant_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS work_fabric_recovery_requests_claim_idx
+  ON work_fabric_recovery_requests
+  (tenant_id, state, lease_expires_at, requested_at ASC, recovery_id ASC);
+
 ALTER TABLE work_fabric_handoff_read_models ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_handoff_read_models FORCE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_responsibility_views ENABLE ROW LEVEL SECURITY;
@@ -119,6 +158,10 @@ ALTER TABLE work_fabric_relationship_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_relationship_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_operation_audit ENABLE ROW LEVEL SECURITY;
 ALTER TABLE work_fabric_operation_audit FORCE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_connector_discrepancies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_connector_discrepancies FORCE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_recovery_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE work_fabric_recovery_requests FORCE ROW LEVEL SECURITY;
 
 DO $$
 DECLARE table_name text;
@@ -129,7 +172,9 @@ BEGIN
     'work_fabric_timeline_entries',
     'work_fabric_relationship_views',
     'work_fabric_relationship_versions',
-    'work_fabric_operation_audit'
+    'work_fabric_operation_audit',
+    'work_fabric_connector_discrepancies',
+    'work_fabric_recovery_requests'
   ] LOOP
     EXECUTE format('DROP POLICY IF EXISTS %I ON %I', table_name || '_tenant_isolation', table_name);
     EXECUTE format(

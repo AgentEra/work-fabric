@@ -12,6 +12,7 @@ import {
 } from "@work-fabric/adapter-postgres-common";
 import {
   verifyOperationsStoreProfile,
+  verifyRecoveryStoreProfile,
   verifyTenantScopedProjectionProfile,
 } from "@work-fabric/exchange-conformance";
 
@@ -19,7 +20,10 @@ import {
   OPERABILITY_MIGRATION,
   PostgresAuditStore,
   PostgresCollaborationViewStore,
+  PostgresDiscrepancyStore,
   PostgresHandoffReadModelStore,
+  PostgresRecoveryStore,
+  PostgresPartitionJournalPositionSource,
 } from "../src/index.js";
 
 const connectionString = process.env.PG_TEST_URL;
@@ -67,6 +71,8 @@ describe("PostgreSQL operability persistence", () => {
       "work_fabric_relationship_views",
       "work_fabric_relationship_versions",
       "work_fabric_operation_audit",
+      "work_fabric_connector_discrepancies",
+      "work_fabric_recovery_requests",
     ]) {
       expect(OPERABILITY_MIGRATION.sql).toContain(table);
       expect(OPERABILITY_MIGRATION.sql).toContain(
@@ -79,6 +85,7 @@ describe("PostgreSQL operability persistence", () => {
     expect(OPERABILITY_MIGRATION.sql).toMatch(/timeline_entries_query_idx/i);
     expect(OPERABILITY_MIGRATION.sql).toMatch(/relationship_views_thread_idx/i);
     expect(OPERABILITY_MIGRATION.sql).toMatch(/operation_audit_query_idx/i);
+    expect(OPERABILITY_MIGRATION.sql).toMatch(/recovery_requests_claim_idx/i);
   });
 
   it("uses indexed thread filters and bounded skip-locked audit pruning", async () => {
@@ -147,6 +154,49 @@ describe("PostgreSQL operability persistence", () => {
     expect(client.calls[0]).toMatchObject({ values: ["tenant-1", "handoff-1"] });
   });
 
+  it("persists an idempotent recovery request without executing its target", async () => {
+    const client = new FakeClient();
+    client.responses.push({ rows: [], rowCount: 0 });
+    client.responses.push({ rows: [], rowCount: 0 });
+    client.responses.push({ rows: [], rowCount: 0 });
+    client.responses.push({ rows: [], rowCount: 1 });
+    const factory = (tenant: string) => new FakeSession(tenant, client);
+    const recovery = new PostgresRecoveryStore(factory, "tenant-1");
+    const result = await recovery.submit({
+      tenant_id: "tenant-1", recovery_id: "recovery-1", idempotency_key: "key-1",
+      requested_by: "principal-1", requested_at: "2026-07-16T06:00:00.000Z",
+      target: { kind: "projection_rebuild", projector_id: "projector-1", partition_id: "partition-1" },
+      expected_version: 4, reason: "operator_requested",
+    });
+    expect(result).toMatchObject({ kind: "accepted", recovery: { state: "pending" } });
+    expect(client.calls[3]?.sql).toContain("INSERT INTO work_fabric_recovery_requests");
+    expect(JSON.stringify(client.calls)).not.toContain("claim_token");
+  });
+
+  it("persists reconciliation discrepancies and reads journal high-water efficiently", async () => {
+    const client = new FakeClient();
+    client.responses.push({ rows: [], rowCount: 0 });
+    client.responses.push({ rows: [], rowCount: 0 });
+    client.responses.push({ rows: [], rowCount: 1 });
+    client.responses.push({ rows: [{ position: "7" }], rowCount: 1 });
+    const factory = (tenant: string) => new FakeSession(tenant, client);
+    const discrepancies = new PostgresDiscrepancyStore(factory, "tenant-1", {
+      cursor_secret: "postgres-operability-test-secret",
+    });
+    await discrepancies.put({
+      discrepancy_id: "discrepancy-1", tenant_id: "tenant-1", connector_id: "connector-1",
+      external_object_id: "external-1", resource_id: "handoff-1",
+      expected_state: "accepted", expected_version: 2, observed_state: "declined",
+      observed_at: "2026-07-16T05:00:00.000Z", metadata: {}, status: "open",
+      version: 1, acknowledged_at: null, acknowledged_by: null,
+      acknowledgement_reason: null,
+    });
+    const positions = new PostgresPartitionJournalPositionSource(factory, "tenant-1");
+    await expect(positions.load("tenant-1", "partition-1")).resolves.toBe(7);
+    expect(client.calls[2]?.sql).toContain("INSERT INTO work_fabric_connector_discrepancies");
+    expect(client.calls[3]?.sql).toContain("MAX(partition_position)");
+  });
+
   it.skipIf(!live)("passes projection and operations conformance with RLS", async () => {
     if (connectionString === undefined) return;
     pool = createPgPool(connectionString);
@@ -180,6 +230,9 @@ describe("PostgreSQL operability persistence", () => {
           cursor_secret: "postgres-live-profile-secret",
         }),
       }));
+      await verifyRecoveryStoreProfile(
+        (tenantId) => new PostgresRecoveryStore(sessionFactory, tenantId),
+      );
       const other = new PostgresHandoffReadModelStore(sessionFactory, "other-tenant");
       await expect(other.getHandoff("handoff-1")).resolves.toBeNull();
     } finally {

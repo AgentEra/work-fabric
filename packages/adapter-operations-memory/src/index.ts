@@ -1,6 +1,7 @@
 export * from "./memory-audit-store.js";
 export * from "./memory-collaboration-store.js";
 export * from "./memory-discrepancy-store.js";
+export * from "./memory-recovery-store.js";
 
 import { MemoryAuditStore } from "./memory-audit-store.js";
 import { MemoryCollaborationViewStore } from "./memory-collaboration-store.js";

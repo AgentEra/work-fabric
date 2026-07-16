@@ -99,4 +99,49 @@ describe("OperationsClient visibility", () => {
         code: "invalid_response",
       });
   });
+
+  it("submits explicit recovery intent without retrying or adding execution behavior", async () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const record = {
+      tenant_id: "tenant-1", recovery_id: "recovery-1", idempotency_key: "key-1",
+      requested_by: "principal-1", requested_at: "2026-07-16T06:00:00.000Z",
+      target: { kind: "projection_rebuild", projector_id: "projector-1", partition_id: "partition-1" },
+      expected_version: 4, reason: "operator_requested", state: "pending",
+      version: 1, attempt: 0, outcome_code: null, completed_at: null,
+    };
+    const fetch = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests.push({
+        url: String(input), method: init?.method ?? "GET",
+        body: init?.body === undefined ? null : JSON.parse(String(init.body)),
+      });
+      return response(String(input).endsWith("/recoveries")
+        ? { kind: "accepted", recovery: record }
+        : record);
+    }) as unknown as typeof globalThis.fetch;
+    const operations = client(fetch).operations;
+    await operations.requestRecovery({
+      idempotencyKey: "key-1",
+      target: { kind: "projection_rebuild", projector_id: "projector-1", partition_id: "partition-1" },
+      expectedVersion: 4,
+      reason: "operator_requested",
+    });
+    await operations.getRecovery("recovery-1");
+    expect(requests).toEqual([
+      {
+        url: "https://fabric.example.test/api/v1/operations/recoveries",
+        method: "POST",
+        body: {
+          idempotency_key: "key-1",
+          target: { kind: "projection_rebuild", projector_id: "projector-1", partition_id: "partition-1" },
+          expected_version: 4,
+          reason: "operator_requested",
+        },
+      },
+      {
+        url: "https://fabric.example.test/api/v1/operations/recoveries/recovery-1",
+        method: "GET",
+        body: null,
+      },
+    ]);
+  });
 });

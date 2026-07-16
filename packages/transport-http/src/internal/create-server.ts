@@ -28,11 +28,12 @@ import type { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import type { EndpointInboxQueryService } from "@work-fabric/exchange-runtime";
 import type { FeishuWebhookDependencies } from "../public-types.js";
 import { registerFeishuWebhookRoute } from "../routes/feishu-webhook-route.js";
-import type { CollaborationQueryService, OperationsQueryService } from "@work-fabric/operations-runtime";
+import type { CollaborationQueryService, OperationsQueryService, RecoveryService } from "@work-fabric/operations-runtime";
 import type { OperationAuditRecorder } from "@work-fabric/operations-runtime";
 import { registerCollaborationRoutes } from "../routes/collaboration-routes.js";
 import { bindRequestAudit } from "../routes/route-authorization.js";
 import { registerOperationsRoutes } from "../routes/operations-routes.js";
+import { registerRecoveryRoutes } from "../routes/recovery-routes.js";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -52,6 +53,7 @@ export interface InternalServerDependencies {
   readonly collaboration?: CollaborationQueryService;
   readonly audit?: OperationAuditRecorder;
   readonly operations?: OperationsQueryService;
+  readonly recovery?: RecoveryService;
 }
 
 export function createInternalServer(
@@ -118,6 +120,14 @@ export function createInternalServer(
     });
   }
   if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    if (dependencies.recovery !== undefined) {
+      registerRecoveryRoutes(server, {
+        recovery: dependencies.recovery,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      });
+    }
     if (dependencies.operations !== undefined) {
       registerOperationsRoutes(server, {
         operations: dependencies.operations,

@@ -18,6 +18,9 @@ import type {
   OperationalPage,
   ProjectionFailureView,
   ProjectionOperationalStatus,
+  RecoveryRequestRecord,
+  RecoveryTarget,
+  SubmitRecoveryResult,
   ProjectionFailureRecord,
   RuntimeSubscription,
 } from "./protocol-types.js";
@@ -35,6 +38,7 @@ export interface ConnectorIngressQuery extends OperationalPageOptions { readonly
 export interface ConnectorIngressGet extends RequestOptions { readonly connectorId: string; readonly ingressId: string }
 export interface DiscrepancyQuery extends OperationalPageOptions { readonly connectorId?: string; readonly statuses?: readonly ConnectorDiscrepancyView["status"][] }
 export interface DiscrepancyGet extends RequestOptions { readonly connectorId: string; readonly discrepancyId: string }
+export interface RecoveryRequestOptions extends RequestOptions { readonly idempotencyKey: string; readonly target: RecoveryTarget; readonly expectedVersion: number; readonly reason: string }
 export interface DependencyHealth { readonly dependency_id: string; readonly status: "healthy" | "unhealthy"; readonly observed_at: string; readonly latency_ms: number }
 export interface HealthReport { readonly status: "ready" | "not_ready"; readonly dependencies: readonly DependencyHealth[] }
 export interface LivenessReport { readonly status: "live" }
@@ -113,6 +117,15 @@ function pageCursor(value: string | undefined): string | undefined {
     value.length === 0 || value.length > 2048 || value.trim() !== value
   )) throw new TypeError("cursor is invalid");
   return value;
+}
+
+function recoveryReason(value: string): string {
+  const result = identifier(value, "reason");
+  if (
+    !/^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(result) ||
+    /(?:bearer|token|secret|password|credential)/i.test(result)
+  ) throw new TypeError("reason is invalid");
+  return result;
 }
 
 function selected<T extends string>(
@@ -277,6 +290,68 @@ function discrepancy(value: unknown): ConnectorDiscrepancyView {
   };
 }
 
+function recoveryTarget(value: unknown): RecoveryTarget {
+  const candidate = safeObject(value, "recovery target");
+  switch (candidate.kind) {
+    case "connector_requeue": return {
+      kind: candidate.kind,
+      connector_id: stringField(candidate, "connector_id"),
+      ingress_id: stringField(candidate, "ingress_id"),
+      available_at: timestampField(candidate, "available_at"),
+    };
+    case "delivery_replay": return {
+      kind: candidate.kind,
+      subscription_id: stringField(candidate, "subscription_id"),
+      partition_id: stringField(candidate, "partition_id"),
+      event_id: stringField(candidate, "event_id"),
+    };
+    case "projection_rebuild": return {
+      kind: candidate.kind,
+      projector_id: stringField(candidate, "projector_id"),
+      partition_id: stringField(candidate, "partition_id"),
+    };
+    case "discrepancy_acknowledge": return {
+      kind: candidate.kind,
+      discrepancy_id: stringField(candidate, "discrepancy_id"),
+    };
+    default: throw new TypeError("recovery target kind is invalid");
+  }
+}
+
+function recoveryRecord(value: unknown): RecoveryRequestRecord {
+  const candidate = safeObject(value, "recovery record");
+  const state = candidate.state;
+  if (state !== "pending" && state !== "processing" && state !== "completed" && state !== "failed") {
+    throw new TypeError("recovery state is invalid");
+  }
+  return {
+    tenant_id: stringField(candidate, "tenant_id"),
+    recovery_id: stringField(candidate, "recovery_id"),
+    idempotency_key: stringField(candidate, "idempotency_key"),
+    requested_by: stringField(candidate, "requested_by"),
+    requested_at: timestampField(candidate, "requested_at"),
+    target: recoveryTarget(candidate.target),
+    expected_version: integerField(candidate, "expected_version"),
+    reason: stringField(candidate, "reason"),
+    state,
+    version: integerField(candidate, "version", 1),
+    attempt: integerField(candidate, "attempt"),
+    outcome_code: nullableString(candidate, "outcome_code"),
+    completed_at: nullableTimestamp(candidate, "completed_at"),
+  };
+}
+
+function recoveryResult(value: unknown): SubmitRecoveryResult {
+  const candidate = safeObject(value, "recovery result");
+  if (candidate.kind === "conflict") {
+    return { kind: candidate.kind, recovery_id: stringField(candidate, "recovery_id") };
+  }
+  if (candidate.kind !== "accepted" && candidate.kind !== "replayed") {
+    throw new TypeError("recovery result kind is invalid");
+  }
+  return { kind: candidate.kind, recovery: recoveryRecord(candidate.recovery) };
+}
+
 export class OperationsClient {
   constructor(private readonly transport: SdkTransport, private readonly representation: RepresentationContext) {}
 
@@ -350,5 +425,34 @@ export class OperationsClient {
 
   getDiscrepancy(input: DiscrepancyGet): Promise<ConnectorDiscrepancyView> {
     return this.transport.request({ method: "GET", path: ["v1", "operations", "discrepancies", identifier(input.discrepancyId, "discrepancyId")], query: { connector_id: identifier(input.connectorId, "connectorId") }, retry: "query", ...requestOptions(this.representation, input), decode: discrepancy });
+  }
+
+  requestRecovery(input: RecoveryRequestOptions): Promise<SubmitRecoveryResult> {
+    if (!Number.isSafeInteger(input.expectedVersion) || input.expectedVersion < 0) {
+      throw new TypeError("expectedVersion must be a non-negative safe integer");
+    }
+    return this.transport.request({
+      method: "POST",
+      path: ["v1", "operations", "recoveries"],
+      body: {
+        idempotency_key: identifier(input.idempotencyKey, "idempotencyKey"),
+        target: recoveryTarget(input.target),
+        expected_version: input.expectedVersion,
+        reason: recoveryReason(input.reason),
+      },
+      retry: "none",
+      ...requestOptions(this.representation, input),
+      decode: recoveryResult,
+    });
+  }
+
+  getRecovery(recoveryId: string, options: RequestOptions = {}): Promise<RecoveryRequestRecord> {
+    return this.transport.request({
+      method: "GET",
+      path: ["v1", "operations", "recoveries", identifier(recoveryId, "recoveryId")],
+      retry: "query",
+      ...requestOptions(this.representation, options),
+      decode: recoveryRecord,
+    });
   }
 }
