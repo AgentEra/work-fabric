@@ -24,6 +24,25 @@ describe("Phase 5 static gates", () => {
     await expect(checkConsoleBoundaries(root)).rejects.toThrow(/bypasses the SDK/);
   });
 
+  it("allows only the dedicated locale preference browser storage", async () => {
+    const accepted = await mkdtemp(join(tmpdir(), "work-fabric-console-locale-gate-"));
+    const rejected = await mkdtemp(join(tmpdir(), "work-fabric-console-state-gate-"));
+    cleanup.push(accepted, rejected);
+    await mkdir(join(accepted, "src"));
+    await mkdir(join(rejected, "src"));
+    await writeFile(join(accepted, "src", "i18n.ts"), `
+      export const LOCALE_STORAGE_KEY = "work-fabric-console-locale";
+      localStorage.getItem(LOCALE_STORAGE_KEY);
+      localStorage.setItem(LOCALE_STORAGE_KEY, "en");
+    `);
+    await writeFile(join(rejected, "src", "bad.ts"), `
+      localStorage.setItem("handoff", "handoff-01");
+    `);
+
+    await expect(checkConsoleBoundaries(accepted)).resolves.toMatchObject({ source_files: 1 });
+    await expect(checkConsoleBoundaries(rejected)).rejects.toThrow(/second browser state/);
+  });
+
   it("runs a bounded generated-data benchmark smoke", async () => {
     const report = await runOperabilityBenchmark({ records: 10, samples: 2 });
     expect(report.projection_catchup.p50_events_per_second).toBeGreaterThan(0);

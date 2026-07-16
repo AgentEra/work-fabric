@@ -29,8 +29,19 @@ export async function checkConsoleBoundaries(root = resolve("packages/console-we
         violations.push(`${relative(root, path)} imports ${specifier}`);
       }
     }
-    if (/(?:indexedDB|localStorage|sessionStorage|WebSocket)\b/.test(source)) {
-      violations.push(`${relative(root, path)} creates a second browser state/channel`);
+    const sourcePath = relative(root, path);
+    if (/(?:indexedDB|sessionStorage|WebSocket)\b/.test(source)) {
+      violations.push(`${sourcePath} creates a second browser state/channel`);
+    }
+    if (/localStorage\b/.test(source)) {
+      const isLocalePreference = sourcePath === "src/i18n.ts" &&
+        /LOCALE_STORAGE_KEY\s*=\s*["']work-fabric-console-locale["']/.test(source);
+      const calls = [...source.matchAll(/localStorage\.(?:getItem|setItem)\(\s*([^,)\n]+)/g)];
+      const usesOnlyLocaleKey = calls.length > 0 &&
+        calls.every((call) => call[1]?.trim() === "LOCALE_STORAGE_KEY");
+      if (!isLocalePreference || !usesOnlyLocaleKey) {
+        violations.push(`${sourcePath} creates a second browser state/channel`);
+      }
     }
     if (/\bfetch\s*\(/.test(source) && !path.endsWith("config.ts")) {
       violations.push(`${relative(root, path)} bypasses the SDK transport`);

@@ -6,6 +6,7 @@ import { renderShell } from "../src/shell.js";
 describe("Console shell", () => {
   it("renders the Chinese shell and a two-language selector", () => {
     const html = renderShell("<p>content</p>", "north", createPresentation("zh-CN"));
+    expect(html).toContain(">跳到主要内容</a>");
     expect(html).toContain("协作连接控制台");
     expect(html).toContain("交接");
     expect(html).toContain('id="locale-select"');

@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   LOCALE_STORAGE_KEY,
   createPresentation,
+  readBrowserLocale,
   readLocale,
   resolveLocale,
+  saveBrowserLocale,
   saveLocale,
 } from "../src/i18n.js";
 
@@ -29,6 +31,19 @@ describe("Console i18n", () => {
     };
     expect(readLocale(storage, ["zh-CN"])).toBe("zh-CN");
     expect(() => saveLocale(storage, "zh-CN")).not.toThrow();
+  });
+
+  it("uses the dedicated browser preference adapter without exposing other state", () => {
+    const storage = { getItem: vi.fn(() => "zh-CN"), setItem: vi.fn() };
+    vi.stubGlobal("localStorage", storage);
+    try {
+      expect(readBrowserLocale(["en-US"])).toBe("zh-CN");
+      saveBrowserLocale("en");
+      expect(storage.getItem).toHaveBeenCalledWith(LOCALE_STORAGE_KEY);
+      expect(storage.setItem).toHaveBeenCalledWith(LOCALE_STORAGE_KEY, "en");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("provides complete Chinese presentation without rewriting unknown facts", () => {

@@ -57,6 +57,19 @@ reverse proxy/session host inject those two globals. The Console origin may be
 different from Work Fabric only when the API deployment explicitly permits the
 required browser origin and headers.
 
+## Language
+
+The Console ships `en` and `zh-CN` catalogs. A valid value stored under
+`work-fabric-console-locale` overrides browser-language detection; otherwise
+Chinese browser languages select `zh-CN` and all other languages select `en`.
+The header selector changes presentation only. It does not navigate, alter a
+protocol fact, write through the SDK or acknowledge a Delivery.
+
+This UI preference is the only Console value stored in browser storage. Its
+value is restricted to `en` or `zh-CN`; protocol facts, filters, identifiers
+and credentials remain prohibited. Machine identifiers, protocol values,
+reason/error codes and audit operation names remain canonical in every locale.
+
 ## Refresh semantics
 
 An optional existing authenticated SSE Subscription invalidates the current
@@ -66,6 +79,7 @@ active with a 15-second minimum interval, jitter, abort on navigation/shutdown
 and at most one in-flight refresh. WebSocket is not used.
 
 URL state contains only partition and view filters. No protocol state is
-persisted in `localStorage`, `sessionStorage` or IndexedDB. Loading, empty,
-stale, error and denied states are visible; keyboard focus, semantic markup,
+persisted in `localStorage`, `sessionStorage` or IndexedDB; only the bounded
+locale preference described above uses `localStorage`. Loading, empty, stale,
+error and denied states are visible; keyboard focus, semantic markup,
 responsive layout and reduced motion are supported.

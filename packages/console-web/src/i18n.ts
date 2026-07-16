@@ -11,6 +11,7 @@ export interface ConsoleMessages {
   readonly open: string;
   readonly footer: string;
   readonly language: string;
+  readonly skipToContent: string;
   readonly loading: string;
   readonly loadErrorTitle: string;
   readonly unknownError: string;
@@ -84,6 +85,7 @@ const en: ConsoleMessages = {
   open: "Open",
   footer: "Protocol facts, handoffs and operational visibility. Participant execution stays external.",
   language: "Language",
+  skipToContent: "Skip to content",
   loading: "Loading connection facts…",
   loadErrorTitle: "Unable to load Work Fabric facts",
   unknownError: "Unknown error",
@@ -157,6 +159,7 @@ const zhCn: ConsoleMessages = {
   open: "打开",
   footer: "展示协议事实、交接与运维可见性。参与方的实际执行始终发生在 Work Fabric 之外。",
   language: "语言",
+  skipToContent: "跳到主要内容",
   loading: "正在加载协作连接事实…",
   loadErrorTitle: "无法加载 Work Fabric 事实",
   unknownError: "未知错误",
@@ -309,6 +312,22 @@ export function saveLocale(
 ): void {
   try {
     storage?.setItem(LOCALE_STORAGE_KEY, locale);
+  } catch {
+    // UI preference persistence is best-effort.
+  }
+}
+
+export function readBrowserLocale(browserLanguages: readonly string[]): ConsoleLocale {
+  try {
+    return resolveLocale(globalThis.localStorage.getItem(LOCALE_STORAGE_KEY), browserLanguages);
+  } catch {
+    return resolveLocale(null, browserLanguages);
+  }
+}
+
+export function saveBrowserLocale(locale: ConsoleLocale): void {
+  try {
+    globalThis.localStorage.setItem(LOCALE_STORAGE_KEY, locale);
   } catch {
     // UI preference persistence is best-effort.
   }

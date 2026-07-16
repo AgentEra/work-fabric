@@ -3,8 +3,8 @@ import { createConsoleClient } from "./client.js";
 import { loadConsoleConfig, type ConsoleRuntimeConfig } from "./config.js";
 import {
   createPresentation,
-  readLocale,
-  saveLocale,
+  readBrowserLocale,
+  saveBrowserLocale,
   type ConsoleLocale,
 } from "./i18n.js";
 import { consumeInvalidations, LiveRefresh } from "./live-refresh.js";
@@ -30,14 +30,6 @@ function escapeHtml(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
   })[character]!);
-}
-
-function browserStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
-  try {
-    return window.localStorage;
-  } catch {
-    return undefined;
-  }
 }
 
 function browserLanguages(): readonly string[] {
@@ -106,7 +98,7 @@ function bindInteractions(partitionId: string): void {
     const value = (event.currentTarget as HTMLSelectElement).value;
     if (value !== "en" && value !== "zh-CN") return;
     presentation = createPresentation(value as ConsoleLocale);
-    saveLocale(browserStorage(), presentation.locale);
+    saveBrowserLocale(presentation.locale);
     document.documentElement.lang = presentation.locale;
     refresh?.invalidate();
   });
@@ -177,7 +169,7 @@ function syncInvalidation(partitionId: string): void {
 }
 
 async function start(): Promise<void> {
-  presentation = createPresentation(readLocale(browserStorage(), browserLanguages()));
+  presentation = createPresentation(readBrowserLocale(browserLanguages()));
   document.documentElement.lang = presentation.locale;
   runtimeConfig = await loadConsoleConfig();
   client = createConsoleClient(runtimeConfig);
