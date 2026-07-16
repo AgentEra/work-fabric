@@ -603,17 +603,17 @@ OpenTelemetry API, browser TypeScript/Vite, CSS and accessible HTML.
 
 ## Completion checklist
 
-- [ ] Responsibility, timeline and relationship views rebuild exactly.
-- [ ] Human, Agent, Connector, customer service and Console share HTTP/SDK
+- [x] Responsibility, timeline and relationship views rebuild exactly.
+- [x] Human, Agent, Connector, customer service and Console share HTTP/SDK
       contracts and Authority semantics.
-- [ ] Delivery, projection, Connector, discrepancy and audit state are visible
+- [x] Delivery, projection, Connector, discrepancy and audit state are visible
       without secret/content leakage.
-- [ ] Recovery is explicit, fenced/idempotent, expected-version checked and
+- [x] Recovery is explicit, fenced/idempotent, expected-version checked and
       audited; it never edits Handoff state directly.
-- [ ] Metrics/traces have bounded semantic attributes.
-- [ ] Memory, SQLite and PostgreSQL pass applicable conformance profiles.
-- [ ] SQLite restart preserves every durable local-profile store.
-- [ ] Console imports only the SDK and is never required for handoff execution.
-- [ ] Node composition and customer lifecycle example run through public APIs.
-- [ ] Benchmark evidence is reproducible and claims remain scoped.
-- [ ] Full verification and WFPP conformance pass from a clean checkout.
+- [x] Metrics/traces have bounded semantic attributes.
+- [x] Memory, SQLite and PostgreSQL pass applicable conformance profiles.
+- [x] SQLite restart preserves every durable local-profile store.
+- [x] Console imports only the SDK and is never required for handoff execution.
+- [x] Node composition and customer lifecycle example run through public APIs.
+- [x] Benchmark evidence is reproducible and claims remain scoped.
+- [x] Full verification and WFPP conformance pass from a clean checkout.

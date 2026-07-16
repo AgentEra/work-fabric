@@ -34,7 +34,7 @@ The median generated-data projection rate was about 16,032 events/second in
 this narrow in-memory run. That number must not be extrapolated to SQLite,
 PostgreSQL, multi-tenant traffic, real payload sizes or networked HTTP clients.
 
-The Console production build in the same run was 64.9 kB uncompressed across
+The Console production build in the same run was 65.1 kB uncompressed across
 HTML, CSS and JavaScript (about 17.2 kB combined gzip figures reported by
 Vite), below the Phase 5 static asset gate of 250 kB.
 
@@ -45,6 +45,9 @@ Vite), below the Phase 5 static asset gate of 250 kB.
 - Collaboration views and operational facts are read models; deployments may
   place compatible read adapters on replicas while commands, CAS and recovery
   ownership stay on the primary.
+- Operational history pages use adapter-owned indexed keysets and bounded
+  `limit + 1` reads. Journal high-water is an indexed aggregate, not a replay
+  scan. The technology-neutral SPI keeps alternative stores pluggable.
 - SQLite is a local, single-process durability profile. It is not evidence for
   clustered writer throughput.
 - PostgreSQL remains the production-oriented baseline. Representative

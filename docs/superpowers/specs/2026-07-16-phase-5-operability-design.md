@@ -1,5 +1,10 @@
 # Work Fabric Phase 5 Operability Design
 
+**Implementation status:** Complete. Phase 5A/5B/5C contracts, adapters,
+service composition, HTTP/SDK, Console, black-box proof, safety gates and
+scoped performance baseline are implemented without moving execution or
+scheduling into Work Fabric.
+
 ## 1. Goal and architectural boundary
 
 Phase 5 makes the collaboration connection layer understandable and operable

@@ -43,6 +43,15 @@ export async function checkConsoleBoundaries(root = resolve("packages/console-we
       assetBytes += (await stat(path)).size;
       if (path.endsWith(".map")) violations.push(`${relative(root, path)} is an unexpected source map`);
     }
+    const index = await readFile(join(dist, "index.html"), "utf8");
+    const runtimePosition = index.indexOf("/work-fabric-runtime.js");
+    const applicationPosition = index.search(/\/assets\/index-[^"']+\.js/);
+    if (
+      runtimePosition < 0 || applicationPosition < 0 ||
+      runtimePosition > applicationPosition
+    ) {
+      violations.push("runtime configuration must load before the Console application");
+    }
   } catch { /* build may not exist before the build gate */ }
   if (assetBytes > 250_000) violations.push(`production assets exceed 250000 bytes (${assetBytes})`);
   if (violations.length > 0) throw new Error(`Console boundary violations:\n${violations.join("\n")}`);
