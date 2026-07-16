@@ -21,6 +21,7 @@ const ingressStates: readonly ConnectorIngressState[] = [
   "pending", "processing", "retry_wait", "completed", "dead_letter",
 ];
 const discrepancyStatuses = ["open", "acknowledged"] as const;
+const auditOutcomes = ["succeeded", "failed", "conflicted", "not_found"] as const;
 
 function scalar(value: QueryValue): string | null {
   return typeof value === "string" && value.length > 0 &&
@@ -96,11 +97,46 @@ function page(query: { cursor?: QueryValue; limit?: QueryValue }, config: HttpSe
   return { ...(cursor === undefined ? {} : { cursor }), limit };
 }
 
+function timestamp(value: QueryValue): string | undefined | null {
+  const result = optional(value);
+  return result === undefined || result === null || Number.isFinite(Date.parse(result))
+    ? result
+    : null;
+}
+
 export function registerOperationsRoutes(
   server: FastifyInstance,
   dependencies: Dependencies,
   config: HttpServiceConfig,
 ): void {
+  server.get<{ Querystring: {
+    occurred_from?: QueryValue; occurred_to?: QueryValue; principal_id?: QueryValue;
+    operation?: QueryValue; outcome?: QueryValue; cursor?: QueryValue; limit?: QueryValue;
+  } }>("/v1/operations/audit", async (request, reply) => {
+    const occurredFrom = timestamp(request.query.occurred_from);
+    const occurredTo = timestamp(request.query.occurred_to);
+    const principalId = optional(request.query.principal_id);
+    const operation = optional(request.query.operation);
+    const outcomes = values(request.query.outcome, auditOutcomes);
+    const paging = page(request.query, config);
+    if (occurredFrom === null || occurredTo === null || principalId === null || operation === null || outcomes === null || outcomes?.length === 0 || paging === null) {
+      return invalid(reply, request.url);
+    }
+    const auth = await authorized(
+      request, reply, dependencies, "workfabric.operations.audit.read.v1",
+      (resolved) => resolved.tenant_id,
+    );
+    if (auth === null) return;
+    return reply.send(await dependencies.operations.listAudit(auth.principal.tenant_id, {
+      ...(occurredFrom === undefined ? {} : { occurred_from: occurredFrom }),
+      ...(occurredTo === undefined ? {} : { occurred_to: occurredTo }),
+      ...(principalId === undefined ? {} : { principal_id: principalId }),
+      ...(operation === undefined ? {} : { operation }),
+      ...(outcomes === undefined ? {} : { outcome: outcomes[0] }),
+      ...paging,
+    }));
+  });
+
   server.get<{ Params: { projectorId: string; partitionId: string } }>(
     "/v1/operations/projections/:projectorId/partitions/:partitionId",
     async (request, reply) => {

@@ -16,6 +16,8 @@
     "postgres:smoke": "tsx tools/postgres-smoke.ts",
     "sqlite:migrate": "tsx tools/sqlite-migrate.ts",
     "service:start": "tsx packages/service-node/src/main.ts",
+    "console:dev": "npm --workspace @work-fabric/console-web run dev",
+    "console:build": "npm --workspace @work-fabric/console-web run build",
     "verify:postgres": "npm run typecheck && vitest run packages/adapter-postgres-common/test packages/adapter-storage-postgres/test packages/adapter-context-postgres/test && npm run conformance",
     "verify": "npm run typecheck && npm test && npm run conformance",
     "verify:exchange": "npm run typecheck && vitest run packages && npm run conformance"

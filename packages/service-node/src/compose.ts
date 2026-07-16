@@ -1,4 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+
+import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
 
 import { MemoryContextRepository } from "@work-fabric/adapter-context-memory";
 import {
@@ -10,12 +12,14 @@ import {
   LocalIdentityProvider,
 } from "@work-fabric/adapter-identity-local";
 import { MemoryOperationsFixture } from "@work-fabric/adapter-operations-memory";
+import { MemoryDiscrepancyStore, MemoryRecoveryStore } from "@work-fabric/adapter-operations-memory";
 import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import {
   SqliteExchangePersistence,
   SqliteRuntimeState,
   SqliteSession,
   createSqliteContextStore,
+  createSqliteConnectorIngressStore,
   createSqliteEndpointDirectoryStore,
   createSqliteEndpointInboxStore,
   createSqliteHandoffReadModelStore,
@@ -46,16 +50,23 @@ import type {
   SubscriptionStore,
   TargetEligibilityVerifier,
 } from "@work-fabric/exchange-spi";
+import type { ConnectorIngressStore } from "@work-fabric/connector-spi";
+import type { ConnectorDiscrepancyStore } from "@work-fabric/connector-runtime";
 import {
   CollaborationProjector,
   OperationAuditRecorder,
+  RecoveryService,
   StoreBackedCollaborationQueryService,
+  StoreBackedOperationsQueryService,
 } from "@work-fabric/operations-runtime";
 import type {
   AuditStore,
   CollaborationViewStore,
+  CursorAuthenticator,
+  RecoveryRequestStore,
   ProjectionFreshnessSource,
 } from "@work-fabric/operations-spi";
+import { createOpaqueCursorCodec } from "@work-fabric/operations-spi";
 import {
   loadWfppCommandValidator,
   loadWfppSchemaValidator,
@@ -97,6 +108,9 @@ export interface NodeStorageComposition {
   readonly audit: AuditStore;
   readonly endpointDirectory: EndpointDirectoryStore;
   readonly endpointInbox: EndpointInboxStore;
+  readonly connectorIngress: ConnectorIngressStore;
+  readonly discrepancies: ConnectorDiscrepancyStore;
+  readonly recoveries: RecoveryRequestStore;
   readonly sqlite: SqliteSession | null;
 }
 
@@ -117,6 +131,9 @@ function memoryStorage(): NodeStorageComposition {
     audit: operations.audit,
     endpointDirectory: new MemoryEndpointDirectoryStore(),
     endpointInbox: new MemoryEndpointInboxStore(),
+    connectorIngress: new MemoryConnectorIngressStore(),
+    discrepancies: new MemoryDiscrepancyStore(),
+    recoveries: new MemoryRecoveryStore(),
     sqlite: null,
   };
 }
@@ -144,6 +161,9 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     audit: operations.audit,
     endpointDirectory: createSqliteEndpointDirectoryStore(session, config.tenant_id),
     endpointInbox: createSqliteEndpointInboxStore(session, config.tenant_id),
+    connectorIngress: createSqliteConnectorIngressStore(session, config.tenant_id),
+    discrepancies: operations.discrepancies,
+    recoveries: operations.recoveries,
     sqlite: session,
   };
 }
@@ -177,6 +197,38 @@ class StoreFreshness implements ProjectionFreshnessSource {
       observed_at: clock.now(),
     };
   }
+}
+
+class StoreJournalPositions {
+  constructor(private readonly persistence: ExchangePersistence) {}
+
+  async load(tenantId: string, partitionId: string): Promise<number | null> {
+    let journal = 0;
+    let found = false;
+    for (;;) {
+      const records = await this.persistence.readPartition(partitionId, journal, 1_000);
+      if (records.length === 0) break;
+      if (records.some((record) => record.tenant_id !== tenantId)) throw new Error("partition tenant mismatch");
+      found = true;
+      journal = records.at(-1)?.partition_position ?? journal;
+      if (records.length < 1_000) break;
+    }
+    return found ? journal : null;
+  }
+}
+
+function operationsCursor(secret: string) {
+  const digest = (payload: string) => createHmac("sha256", secret).update(payload).digest();
+  const authenticator: CursorAuthenticator = {
+    async sign(payload) { return digest(payload).toString("base64url"); },
+    async verify(payload, signature) {
+      const expected = digest(payload);
+      let actual: Buffer;
+      try { actual = Buffer.from(signature, "base64url"); } catch { return false; }
+      return expected.length === actual.length && timingSafeEqual(expected, actual);
+    },
+  };
+  return createOpaqueCursorCodec(authenticator, { max_length: 2_048 });
 }
 
 export interface ComposedNodeService {
@@ -247,6 +299,19 @@ export async function composeNodeService(
     new StoreFreshness(storage.persistence, "workfabric.collaboration.visibility.v1"),
   );
   const audit = new OperationAuditRecorder(storage.audit, clock);
+  const operations = new StoreBackedOperationsQueryService({
+    journal_positions: new StoreJournalPositions(storage.persistence),
+    checkpoints: storage.persistence,
+    projection_failures: storage.persistence,
+    subscriptions: storage.subscriptions,
+    delivery_state: storage.persistence,
+    connector_ingress: storage.connectorIngress,
+    discrepancies: storage.discrepancies,
+    audit: storage.audit,
+    cursor: operationsCursor(config.cursor_secret),
+    max_page_limit: 100,
+  });
+  const recovery = new RecoveryService(storage.recoveries, { now: clock.now, audit });
   const endpointDirectory = new EndpointDirectoryService({
     store: storage.endpointDirectory,
     clock,
@@ -278,6 +343,8 @@ export async function composeNodeService(
     schemas,
     collaboration,
     audit,
+    operations,
+    recovery,
     endpoint_directory: endpointDirectory,
     endpoint_inbox: endpointInbox,
     health_probes: [{

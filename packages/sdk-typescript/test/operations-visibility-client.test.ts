@@ -53,6 +53,14 @@ describe("OperationsClient visibility", () => {
         observed_state: "declined", observed_at: "2026-07-16T00:00:00.000Z",
         status: "open", version: 1, acknowledged_at: null, acknowledged_by: null,
       });
+      if (url.includes("/audit")) return response({ items: [{
+        tenant_id: "tenant-1", audit_id: "audit-1", occurred_at: "2026-07-16T00:00:00.000Z",
+        request_id: "request-1", trace_id: null, principal_id: "principal-1",
+        represented_actor: null, represented_endpoint_id: null, delegation_id: null,
+        operation: "workfabric.operations.audit.read.v1", resource_kind: "tenant",
+        resource_id: "tenant-1", authorization_decision: "allowed", outcome: "succeeded",
+        reason_code: null, service_category: "http",
+      }], next_cursor: null });
       return response({ items: [], next_cursor: null });
     }) as unknown as typeof globalThis.fetch;
     const operations = client(fetch).operations;
@@ -66,6 +74,7 @@ describe("OperationsClient visibility", () => {
     await operations.getConnectorIngress({ connectorId: "connector / 1", ingressId: "ingress / 1" });
     await operations.listDiscrepancies({ connectorId: "connector / 1", statuses: ["open"], limit: 5 });
     await operations.getDiscrepancy({ connectorId: "connector / 1", discrepancyId: "discrepancy / 1" });
+    await operations.listAudit({ outcome: "succeeded", limit: 5 });
 
     expect(urls).toEqual([
       "https://fabric.example.test/api/v1/operations/projections/projector%20%2F%201/partitions/partition%20%2F%201",
@@ -77,6 +86,7 @@ describe("OperationsClient visibility", () => {
       "https://fabric.example.test/api/v1/operations/connectors/connector%20%2F%201/ingress/ingress%20%2F%201",
       "https://fabric.example.test/api/v1/operations/discrepancies?connector_id=connector+%2F+1&status=open&limit=5",
       "https://fabric.example.test/api/v1/operations/discrepancies/discrepancy%20%2F%201?connector_id=connector+%2F+1",
+      "https://fabric.example.test/api/v1/operations/audit?outcome=succeeded&limit=5",
     ]);
   });
 

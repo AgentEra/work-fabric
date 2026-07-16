@@ -13,6 +13,9 @@ import type {
   ConnectorDiscrepancyStore,
 } from "@work-fabric/connector-runtime";
 import {
+  type AuditQuery,
+  type AuditRecord,
+  type AuditStore,
   normalizePageLimit,
   type DeadLetterOperationalQuery,
   type DeadLetterView,
@@ -40,6 +43,7 @@ export interface OperationsQueryDependencies {
   readonly delivery_state: DeliveryStateStore;
   readonly connector_ingress?: ConnectorIngressStore;
   readonly discrepancies?: ConnectorDiscrepancyStore;
+  readonly audit?: AuditStore;
   readonly cursor: OpaqueCursorCodec;
   readonly max_page_limit?: number;
 }
@@ -54,6 +58,7 @@ export interface OperationsQueryService {
   listConnectorIngress(tenantId: string, query: ConnectorIngressOperationalQuery): Promise<OperationalPage<ConnectorIngressOperationalView>>;
   getDiscrepancy(tenantId: string, discrepancyId: string): Promise<ConnectorDiscrepancyView | null>;
   listDiscrepancies(tenantId: string, query: ConnectorDiscrepancyOperationalQuery): Promise<OperationalPage<ConnectorDiscrepancyView>>;
+  listAudit(tenantId: string, query: Omit<AuditQuery, "tenant_id">): Promise<OperationalPage<AuditRecord>>;
 }
 
 function identifier(value: unknown, field: string): string {
@@ -164,6 +169,19 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
   constructor(private readonly dependencies: OperationsQueryDependencies) {
     this.maxPageLimit = dependencies.max_page_limit ?? 100;
     positive(this.maxPageLimit, "max_page_limit");
+  }
+
+  async listAudit(
+    tenantId: string,
+    query: Omit<AuditQuery, "tenant_id">,
+  ): Promise<OperationalPage<AuditRecord>> {
+    identifier(tenantId, "tenantId");
+    const limit = normalizePageLimit(query.limit, {
+      default_limit: Math.min(50, this.maxPageLimit),
+      max_limit: this.maxPageLimit,
+    });
+    if (this.dependencies.audit === undefined) return { items: [], next_cursor: null };
+    return this.dependencies.audit.list({ tenant_id: tenantId, ...query, limit });
   }
 
   async getProjectionStatus(

@@ -31,6 +31,7 @@ export type {
   EndpointSession,
 } from "@work-fabric/exchange-spi";
 export type {
+  AuditRecord,
   CollaborationPage,
   ActiveDeliveryView,
   ConnectorDiscrepancyView,

@@ -36,6 +36,7 @@ function fixture() {
     async listConnectorIngress(tenant, input) { calls.push({ method: "ingresses", tenant, input }); return page; },
     async getDiscrepancy(tenant, discrepancyId) { calls.push({ method: "discrepancy", tenant, input: { discrepancyId } }); return null; },
     async listDiscrepancies(tenant, input) { calls.push({ method: "discrepancies", tenant, input }); return page; },
+    async listAudit(tenant, input) { calls.push({ method: "audit", tenant, input }); return page; },
   };
   const grants = [
     ["workfabric.operations.projection.read.v1", "partition-1"],
@@ -43,6 +44,7 @@ function fixture() {
     ["workfabric.operations.delivery.read.v1", "subscription-1"],
     ["workfabric.operations.connector-ingress.read.v1", "connector-1"],
     ["workfabric.operations.discrepancy.read.v1", "connector-1"],
+    ["workfabric.operations.audit.read.v1", "tenant-1"],
   ] as const;
   const authority = new LocalAuthorityPolicy(grants.map(([action, resource_id]) => ({
     tenant_id: "tenant-1", principal_id: "principal-1", actor_id: "actor-1",
@@ -67,13 +69,15 @@ describe("operational visibility routes", () => {
       service.dispatch({ method: "GET", url: "/v1/operations/deliveries/subscription-1/partitions/partition-1", headers }),
       service.dispatch({ method: "GET", url: "/v1/operations/connectors/connector-1/ingress?state=retry_wait", headers }),
       service.dispatch({ method: "GET", url: "/v1/operations/discrepancies?connector_id=connector-1&status=open", headers }),
+      service.dispatch({ method: "GET", url: "/v1/operations/audit?outcome=failed&limit=3", headers }),
     ]);
-    expect(responses.map((response) => response.status_code)).toEqual([200, 200, 404, 200, 200]);
+    expect(responses.map((response) => response.status_code)).toEqual([200, 200, 404, 200, 200, 200]);
     expect(calls).toEqual(expect.arrayContaining([
       { method: "projection", tenant: "tenant-1", input: { projectorId: "projector-1", partitionId: "partition-1" } },
       { method: "failures", tenant: "tenant-1", input: { projector_id: "projector-1", partition_id: "partition-1", limit: 3 } },
       { method: "ingresses", tenant: "tenant-1", input: { connector_id: "connector-1", states: ["retry_wait"], limit: 2 } },
       { method: "discrepancies", tenant: "tenant-1", input: { connector_id: "connector-1", statuses: ["open"], limit: 2 } },
+      { method: "audit", tenant: "tenant-1", input: { outcome: "failed", limit: 3 } },
     ]));
     await service.close();
   });

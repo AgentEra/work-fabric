@@ -10,6 +10,7 @@ import {
 } from "./query-client.js";
 import type {
   DeliveryAttempt,
+  AuditRecord,
   ConnectorDiscrepancyView,
   ConnectorIngressOperationalView,
   DeadLetterView,
@@ -39,6 +40,13 @@ export interface ConnectorIngressGet extends RequestOptions { readonly connector
 export interface DiscrepancyQuery extends OperationalPageOptions { readonly connectorId?: string; readonly statuses?: readonly ConnectorDiscrepancyView["status"][] }
 export interface DiscrepancyGet extends RequestOptions { readonly connectorId: string; readonly discrepancyId: string }
 export interface RecoveryRequestOptions extends RequestOptions { readonly idempotencyKey: string; readonly target: RecoveryTarget; readonly expectedVersion: number; readonly reason: string }
+export interface AuditQueryOptions extends OperationalPageOptions {
+  readonly occurredFrom?: string;
+  readonly occurredTo?: string;
+  readonly principalId?: string;
+  readonly operation?: string;
+  readonly outcome?: AuditRecord["outcome"];
+}
 export interface DependencyHealth { readonly dependency_id: string; readonly status: "healthy" | "unhealthy"; readonly observed_at: string; readonly latency_ms: number }
 export interface HealthReport { readonly status: "ready" | "not_ready"; readonly dependencies: readonly DependencyHealth[] }
 export interface LivenessReport { readonly status: "live" }
@@ -352,6 +360,22 @@ function recoveryResult(value: unknown): SubmitRecoveryResult {
   return { kind: candidate.kind, recovery: recoveryRecord(candidate.recovery) };
 }
 
+function auditRecord(value: unknown): AuditRecord {
+  const candidate = safeObject(value, "audit record");
+  const decision = candidate.authorization_decision;
+  const outcome = candidate.outcome;
+  const category = candidate.service_category;
+  if (decision !== "allowed" && decision !== "denied") throw new TypeError("audit decision is invalid");
+  if (!["succeeded", "failed", "conflicted", "not_found"].includes(outcome as string)) throw new TypeError("audit outcome is invalid");
+  if (!["http", "projector", "delivery", "connector", "recovery"].includes(category as string)) throw new TypeError("audit category is invalid");
+  const represented = candidate.represented_actor;
+  if (represented !== null) {
+    const actor = safeObject(represented, "represented actor");
+    if (!["human", "agent", "system"].includes(actor.actor_type as string)) throw new TypeError("represented actor type is invalid");
+  }
+  return candidate as unknown as AuditRecord;
+}
+
 export class OperationsClient {
   constructor(private readonly transport: SdkTransport, private readonly representation: RepresentationContext) {}
 
@@ -453,6 +477,33 @@ export class OperationsClient {
       retry: "query",
       ...requestOptions(this.representation, options),
       decode: recoveryRecord,
+    });
+  }
+
+  listAudit(input: AuditQueryOptions = {}): Promise<OperationalPage<AuditRecord>> {
+    const limit = positive(input.limit, "limit");
+    const cursor = pageCursor(input.cursor);
+    const outcomes = ["succeeded", "failed", "conflicted", "not_found"] as const;
+    if (input.outcome !== undefined && !outcomes.includes(input.outcome)) throw new TypeError("outcome is invalid");
+    const timestamp = (value: string | undefined, field: string) => {
+      if (value !== undefined && !Number.isFinite(Date.parse(value))) throw new TypeError(`${field} is invalid`);
+      return value;
+    };
+    return this.transport.request({
+      method: "GET",
+      path: ["v1", "operations", "audit"],
+      query: {
+        ...(timestamp(input.occurredFrom, "occurredFrom") === undefined ? {} : { occurred_from: input.occurredFrom }),
+        ...(timestamp(input.occurredTo, "occurredTo") === undefined ? {} : { occurred_to: input.occurredTo }),
+        ...(input.principalId === undefined ? {} : { principal_id: identifier(input.principalId, "principalId") }),
+        ...(input.operation === undefined ? {} : { operation: identifier(input.operation, "operation") }),
+        ...(input.outcome === undefined ? {} : { outcome: input.outcome }),
+        ...(cursor === undefined ? {} : { cursor }),
+        ...(limit === undefined ? {} : { limit }),
+      },
+      retry: "query",
+      ...requestOptions(this.representation, input),
+      decode: (value) => decodePage(value, auditRecord),
     });
   }
 }
