@@ -507,7 +507,7 @@ git commit -m "feat(cluster): adapt partition owner turns"
 - Consumes: Task 1 `PartitionWorkCatalog`, existing tenant session factory and runtime tables.
 - Produces: `PostgresPartitionWorkCatalog` with signed, filter-bound keyset cursors.
 
-- [ ] **Step 1: Write failing fake-client SQL tests**
+- [x] **Step 1: Write failing fake-client SQL tests**
 
 ```ts
 it("pushes tenant, due time, keyset and limit into indexed SQL", async () => {
@@ -524,13 +524,13 @@ it("pushes tenant, due time, keyset and limit into indexed SQL", async () => {
 });
 ```
 
-- [ ] **Step 2: Run and confirm missing catalog failure**
+- [x] **Step 2: Run and confirm missing catalog failure**
 
 Run: `npm test -- packages/adapter-storage-postgres/test/postgres-cluster-runtime.test.ts`
 
 Expected: FAIL because `PostgresPartitionWorkCatalog` is missing.
 
-- [ ] **Step 3: Add migration and catalog**
+- [x] **Step 3: Add migration and catalog**
 
 Migration `008_cluster_runtime` adds only derived readiness/index structures,
 RLS policies and supporting indexes. It must not modify Journal/Handoff
@@ -538,14 +538,14 @@ authority. Catalog SQL uses tenant predicates, due time, stable
 `available_at/partition_id/kind` keysets and `limit + 1`; cursor HMAC material
 never enters SQL or logs.
 
-- [ ] **Step 4: Add live PostgreSQL concurrency proof**
+- [x] **Step 4: Add live PostgreSQL concurrency proof**
 
 Under `PG_TEST_URL`, create two tenant sessions, seed two partitions, race two
 lease owners and prove one winner followed by expiry takeover with a greater
 fencing token. Verify RLS hides the other tenant. Keep the test skipped when
 the environment variable is absent.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `npm run typecheck && npm test -- packages/adapter-storage-postgres/test/postgres-cluster-runtime.test.ts && npm run verify:postgres`
 

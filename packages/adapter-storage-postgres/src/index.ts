@@ -9,3 +9,4 @@ export * from "./postgres-discrepancy-store.js";
 export * from "./postgres-handoff-read-model-store.js";
 export * from "./postgres-recovery-store.js";
 export * from "./postgres-partition-position-source.js";
+export * from "./postgres-partition-work-catalog.js";
