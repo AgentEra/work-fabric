@@ -1,0 +1,13 @@
+{
+  "name": "@work-fabric/cluster-spi",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/exchange-spi": "0.1.0"
+  }
+}

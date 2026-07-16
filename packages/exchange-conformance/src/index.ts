@@ -1,4 +1,5 @@
 export * from "./adapter-profiles.js";
+export * from "./cluster-profile.js";
 export * from "./connector-ingress-profile.js";
 export * from "./operations-profile.js";
 export * from "./durability-profile.js";

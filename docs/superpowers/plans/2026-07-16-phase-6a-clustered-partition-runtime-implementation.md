@@ -81,7 +81,7 @@ tools/
 - Consumes: `ExchangeAdapter`, `WorkerLeaseStore`, canonical UTC timestamp helpers.
 - Produces: `PartitionWorkKind`, `PartitionWorkItem`, `PartitionWorkCatalog`, `PartitionWakeupPublisher`, `PartitionWakeupConsumer`, `WakeupDelivery`, `PartitionTurnContext`, `PartitionTurnHandler`, `validateClusterLimits()`, `verifyClusterProfile()`.
 
-- [ ] **Step 1: Write failing contract tests**
+- [x] **Step 1: Write failing contract tests**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -114,13 +114,13 @@ describe("cluster contracts", () => {
 });
 ```
 
-- [ ] **Step 2: Run the tests and confirm missing package failure**
+- [x] **Step 2: Run the tests and confirm missing package failure**
 
 Run: `npm test -- packages/cluster-spi/test/contracts.test.ts`
 
 Expected: FAIL because `packages/cluster-spi/src/index.ts` does not exist.
 
-- [ ] **Step 3: Implement the closed contracts and validation**
+- [x] **Step 3: Implement the closed contracts and validation**
 
 ```ts
 export const PARTITION_WORK_KINDS = [
@@ -163,7 +163,7 @@ Implement strict IDs (1–128), positive safe positions, canonical timestamps,
 unique non-empty work-kind filters, page limits 1–1,000 and the exact global
 limits from the design.
 
-- [ ] **Step 4: Add reusable catalog/wakeup conformance**
+- [x] **Step 4: Add reusable catalog/wakeup conformance**
 
 The profile must assert tenant isolation, stable keyset order, `limit`, deep
 cloning, duplicate wakeup tolerance, explicit Ack/Retry settlement and
@@ -177,7 +177,7 @@ export async function verifyClusterProfile(
 ): Promise<void>;
 ```
 
-- [ ] **Step 5: Run focused verification**
+- [x] **Step 5: Run focused verification**
 
 Run: `npm run typecheck && npm test -- packages/cluster-spi/test packages/exchange-conformance/test/cluster-profile.test.ts`
 
