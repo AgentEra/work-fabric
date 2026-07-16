@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createPresentation } from "../src/i18n.js";
 import { renderOperations, type OperationsViewModel } from "../src/views/operations.js";
 
 const model: OperationsViewModel = {
@@ -41,8 +42,10 @@ const model: OperationsViewModel = {
 
 describe("operations Console", () => {
   it("shows bounded operational facts and never renders connector payloads", () => {
-    const html = renderOperations(model);
-    expect(html).toContain("1 events awaiting visibility projection");
+    const html = renderOperations(model, createPresentation("zh-CN"));
+    expect(html).toContain("连接健康状态");
+    expect(html).toContain("1 个等待可见性投影的事件");
+    expect(html).toContain("有界审计");
     expect(html).toContain("mapping_invalid");
     expect(html).toContain("discrepancy-a");
     expect(html).toContain("operator-a");
@@ -51,7 +54,8 @@ describe("operations Console", () => {
   });
 
   it("requires fenced, reasoned, explicitly confirmed recovery", () => {
-    const html = renderOperations(model);
+    const html = renderOperations(model, createPresentation("zh-CN"));
+    expect(html).toContain("显式投影恢复");
     expect(html).toContain('name="expectedVersion"');
     expect(html).toContain('name="reason"');
     expect(html).toContain('name="confirmed"');

@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { validateConsoleConfig } from "../src/config.js";
+import { createPresentation } from "../src/i18n.js";
 import { parseRoute, routeHref } from "../src/router.js";
 import { renderHandoffDetail } from "../src/views/handoff-detail.js";
 import { renderResponsibilities } from "../src/views/responsibilities.js";
@@ -65,9 +66,11 @@ describe("Console boundary", () => {
       projected_position: 3,
       journal_position: 4,
       observed_at: "2026-07-16T00:00:01.000Z",
-    });
+    }, createPresentation("zh-CN"));
     expect(html).toContain("handoff-&lt;one&gt;");
-    expect(html).toContain("1 events behind");
+    expect(html).toContain("当前交接");
+    expect(html).toContain("责任主体");
+    expect(html).toContain("1 个事件延迟");
     expect(html).not.toContain("handoff-<one>");
   });
 
@@ -100,8 +103,10 @@ describe("Console boundary", () => {
       target_id: "thread-a",
       stream_version: 2,
       observed_at: "2026-07-16T00:00:00.000Z",
-    }]);
-    expect(html).toContain("agent-a via runtime-a");
+    }], createPresentation("zh-CN"));
+    expect(html).toContain("公开时间线");
+    expect(html).toContain("已接受");
+    expect(html).toContain("agent-a 经由 runtime-a");
     expect(html).toContain("thread-a");
     expect(html).not.toContain("payload");
   });
