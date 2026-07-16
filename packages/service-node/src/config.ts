@@ -43,6 +43,14 @@ function integer(value: unknown, fallback: number, field: string, maximum: numbe
   return normalized as number;
 }
 
+function port(value: unknown): number {
+  const normalized = value ?? 8787;
+  if (!Number.isSafeInteger(normalized) || (normalized as number) < 0 || (normalized as number) > 65_535) {
+    throw new RangeError("listen.port is outside its bound");
+  }
+  return normalized as number;
+}
+
 export function parseServiceConfig(input: unknown): NodeServiceConfig {
   const raw = object(input, "service config");
   if (!["memory-demo", "sqlite-local", "postgres"].includes(String(raw.storage_profile))) {
@@ -78,7 +86,7 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
   const listenRaw = raw.listen === undefined ? {} : object(raw.listen, "listen");
   const listen = {
     host: listenRaw.host === undefined ? "127.0.0.1" : identifier(listenRaw.host, "listen.host"),
-    port: integer(listenRaw.port, 8787, "listen.port", 65_535),
+    port: port(listenRaw.port),
   };
   let sqlite: NodeServiceConfig["sqlite"];
   if (storageProfile === "sqlite-local") {

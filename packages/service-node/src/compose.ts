@@ -33,10 +33,13 @@ import {
 } from "@work-fabric/exchange-core";
 import { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import {
+  CursorPullService,
+  DefaultSubscriptionDeliveryPolicy,
   EndpointInboxQueryService,
   HandoffProjector,
   MemoryHandoffReadModelStore,
   MemorySubscriptionStore,
+  OpaqueCursorCodec as DeliveryCursorCodec,
 } from "@work-fabric/exchange-runtime";
 import type {
   ContextRepository,
@@ -82,7 +85,7 @@ import {
 import type { NodeServiceConfig } from "./config.js";
 
 const clock: Clock = { now: () => new Date().toISOString() };
-const ids: IdGenerator = {
+const defaultIds: IdGenerator = {
   nextId(kind) { return `${kind}_${randomUUID()}`; },
 };
 
@@ -117,6 +120,8 @@ export interface NodeStorageComposition {
 export interface NodeServiceCompositionOptions {
   /** Deployment-owned PostgreSQL adapters; the service never creates credentials. */
   readonly postgres_storage?: NodeStorageComposition;
+  /** Deployment-owned generator; useful for deterministic integration profiles. */
+  readonly ids?: IdGenerator;
 }
 
 function memoryStorage(): NodeStorageComposition {
@@ -237,6 +242,7 @@ export interface ComposedNodeService {
     readonly handoff: Awaited<ReturnType<HandoffProjector["runPartition"]>>;
     readonly collaboration: Awaited<ReturnType<CollaborationProjector["runPartition"]>>;
   }>;
+  rebuildProjection(partitionId: string, limit: number): Promise<void>;
   listen(): Promise<{ readonly origin: string }>;
   close(): Promise<void>;
 }
@@ -269,7 +275,7 @@ export async function composeNodeService(
     context: storage.context,
     validator,
     clock,
-    ids,
+    ids: options.ids ?? defaultIds,
     target_eligibility: explicitTargetEligibility,
   });
   const handoffProjector = new HandoffProjector(
@@ -333,6 +339,17 @@ export async function composeNodeService(
     defaultPageLimit: 25,
     maxPageLimit: 100,
   });
+  const delivery = new CursorPullService(
+    storage.persistence,
+    storage.persistence,
+    storage.subscriptions,
+    new DefaultSubscriptionDeliveryPolicy(),
+    clock,
+    options.ids ?? defaultIds,
+    new DeliveryCursorCodec(new TextEncoder().encode(config.cursor_secret)),
+    schemas,
+    30,
+  );
   const http = createHttpService({
     application,
     authenticator: new BearerAuthenticationEvidenceMapper(),
@@ -347,6 +364,7 @@ export async function composeNodeService(
     recovery,
     endpoint_directory: endpointDirectory,
     endpoint_inbox: endpointInbox,
+    delivery,
     health_probes: [{
       dependency_id: config.storage_profile,
       async check() { return "healthy"; },
@@ -361,6 +379,10 @@ export async function composeNodeService(
         limit,
       );
       return { handoff, collaboration: collaborationResult };
+    },
+    async rebuildProjection(partitionId, limit) {
+      await handoffProjector.rebuildPartition(partitionId, limit);
+      await collaborationProjector.rebuildPartition(config.tenant_id, partitionId, limit);
     },
     listen() { return http.listen(config.listen); },
     async close() {
