@@ -27,6 +27,8 @@
     "@work-fabric/transport-http": "0.1.0"
   },
   "devDependencies": {
-    "@work-fabric/adapter-cluster-memory": "0.1.0"
+    "@work-fabric/adapter-cluster-memory": "0.1.0",
+    "@work-fabric/adapter-signal-in-process": "0.1.0",
+    "@work-fabric/sdk-typescript": "0.1.0"
   }
 }

@@ -10,6 +10,11 @@ SQLite is not the clustered production profile. It does not provide PostgreSQL
 RLS, multi-process worker claims, read replicas or horizontal writer scaling.
 Do not point multiple Work Fabric processes at one file.
 
+`parseServiceConfig` rejects any `cluster` block for `sqlite-local`; the
+`worker` role therefore cannot use SQLite. Use role `all` without cluster for a
+single local process, or move the deployment to an adapter that implements the
+cluster capability profile. A shared filesystem does not change this rule.
+
 ## Requirements and migration
 
 Use the repository-supported Node.js version (22.20 or newer) with built-in

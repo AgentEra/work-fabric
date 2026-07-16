@@ -248,9 +248,17 @@ npm run console:build
 
 Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、运维事实和窄恢复表单。它不是执行过程的必要组件，不保存协议真相，不运行 Agent/自动化，不自动 Ack SSE。部署与认证接入见 [Console 文档](docs/console.md)，运维与恢复见 [Operations 文档](docs/operations.md)，SQLite 本地部署见 [SQLite 文档](docs/sqlite-deployment.md)，性能证据见 [Phase 5 性能基线](docs/performance-baseline.md)。
 
+## 集群分区运行时
+
+阶段 6A 已完成可水平协调的机械 Owner 运行时：数据库 Journal、Outbox、投影检查点、投递位置和租约保持权威；可选 Wakeup 只携带 Tenant、Partition、Work Kind 和观察位置，可以丢失或重复。定期有界扫描恢复丢失提示，Tenant 公平队列合并重复提示，租约与 fencing 阻止过期 Owner 推进状态。
+
+运行时只拥有四类机械 Turn：Outbox Wakeup、Handoff Projection、Collaboration Projection 和 Signal Delivery。它不选择接收方、不拆解 Workflow、不安排 Agent、不调用模型/工具，也不执行参与方工作。`service-node` 支持 `api`、`worker` 和 `all` 角色；Worker 端口与凭据由部署显式注入，`sqlite-local` 明确拒绝集群配置。
+
+真实 HTTP/TypeScript SDK 的五步 Handoff 生命周期已通过双 Host、丢失/重复 Wakeup、外部 Signal Probe 和过期 Owner 接管测试。部署边界见[集群分区运行时](docs/cluster-runtime.md)，可复现开销范围见[阶段 6A 性能基线](docs/performance-cluster-baseline.md)。
+
 ## 当前状态
 
-项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK、阶段 4A 的 Endpoint/Agent 连接边界、阶段 4B 的 generic Connector seam 与飞书 Connector，以及阶段 5 的查询、运维、可观测性、本地 SQLite 组合和 Read-mostly Console。Human、Agent、Connector、Console 和开放服务共享同一个公共协议、HTTP 与 SDK 权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
+项目已经完成阶段 1 的 WFPP v1 Core Protocol Artifacts 与 Exchange Core transport-free 参考实现、阶段 2 的 PostgreSQL Production Persistence Foundation、阶段 3A/3B/3C 的 Target Resolution、HTTP Service Binding 和 TypeScript SDK、阶段 4A 的 Endpoint/Agent 连接边界、阶段 4B 的 generic Connector seam 与飞书 Connector、阶段 5 的查询/运维/Console，以及阶段 6A 的集群分区所有权与数据库恢复基线。Human、Agent、Connector、Console 和开放服务共享同一个公共协议、HTTP 与 SDK 权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
 
 当前阶段路线：
 
@@ -264,7 +272,8 @@ Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、�
 | 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
 | 4B | Generic Connector + 飞书 Connector | 已完成 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
-| 6 | 高吞吐 Signal 与集群分区 | 未开始 |
+| 6A | 集群分区所有权与数据库恢复 | 已完成 |
+| 6B | Broker-backed Signal/Wakeup 加速 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
 阶段严格按顺序推进。Console 没有进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都通过标准 API 提交恢复意图。
@@ -307,7 +316,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-下一步进入阶段 6：在不改变协议、Authority 和交接边界的前提下评估高吞吐 Signal、Broker 加速与集群分区执行。Console 仍不是执行路径，也不拥有状态或管理旁路。Agent Brain、A2A/MCP、其他 Connector 和业务自动化仍是独立外部模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+下一步进入阶段 6B：在不改变数据库权威、协议、Authority 和交接边界的前提下设计 Broker-backed Signal/Wakeup 加速。Console 仍不是执行路径，也不拥有状态或管理旁路。Agent Brain、A2A/MCP、其他 Connector 和业务自动化仍是独立外部模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 
@@ -325,6 +334,8 @@ npm run verify:exchange
 - [SQLite 本地部署](docs/sqlite-deployment.md)
 - [Read-mostly Console](docs/console.md)
 - [Phase 5 性能基线](docs/performance-baseline.md)
+- [集群分区运行时](docs/cluster-runtime.md)
+- [Phase 6A 性能基线](docs/performance-cluster-baseline.md)
 - [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

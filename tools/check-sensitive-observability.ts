@@ -17,6 +17,7 @@ export async function checkSensitiveObservability(root = resolve(".")): Promise<
     "packages/operations-runtime/src/collaboration-projector.ts",
     "packages/operations-runtime/src/recovery-worker.ts",
     "packages/transport-http/src/internal/create-server.ts",
+    "packages/cluster-runtime/src/telemetry.ts",
   ];
   const violations: string[] = [];
   let calls = 0;

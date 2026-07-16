@@ -4,7 +4,7 @@ PostgreSQL is an optional production adapter; the Exchange Core and SPI do not d
 
 ## Migrations
 
-Run `npm run postgres:migrate -- --connection-string "$DATABASE_URL"`. For a plan without connecting, use `--dry-run`. The tool orders common tenant, authority, runtime, hardening, Context, Endpoint, Connector and Phase 5 operability migrations by numeric ID and never prints the connection string. Migration `007_operability.sql` adds collaboration views, append-only audit, discrepancy and recovery persistence without adding a database dependency to Core/SPI.
+Run `npm run postgres:migrate -- --connection-string "$DATABASE_URL"`. For a plan without connecting, use `--dry-run`. The tool orders common tenant, authority, runtime, hardening, Context, Endpoint, Connector, operability and cluster-readiness migrations by numeric ID and never prints the connection string. Migration `007_operability.sql` adds collaboration views, append-only audit, discrepancy and recovery persistence. Migration `008_cluster_runtime.sql` adds an RLS-protected derived readiness table, bounded trigger maintenance and stable tenant/keyset indexes without adding a database dependency to Core/SPI.
 
 For a smoke check, set `PG_TEST_URL` and run `npm run postgres:smoke`. It verifies migrations and, when enabled, that tenant RLS prevents a second tenant from reading the probe row.
 
@@ -27,5 +27,14 @@ Back up authority, outbox and runtime tables together. Monitor outbox age, lease
 Phase 5 stores preserve tenant predicates and RLS on every path. Collaboration projections are rebuildable from Journal/Handoff facts; audit is immutable until a bounded `pruneBefore` retention job; recovery requests use idempotent submit and fenced claims. Do not manually edit these tables to repair Handoff state. Use the authenticated recovery API and worker owners described in [Operations](operations.md).
 
 The `service-node` PostgreSQL profile requires deployment-owned adapters to be injected explicitly. It does not construct a pool from ambient credentials or ship a production Identity/Authority policy. Pool, Identity, Authority, secret resolution, worker topology and TLS remain deployment responsibilities.
+
+For Phase 6A, the deployment must also inject the technology-neutral
+`PartitionWorkCatalog`, wakeup publisher/consumer, tenant-scoped Outbox and
+lease stores, and Signal Dispatcher. Tenant assignment is explicit per Worker
+Host. Every readiness scan enters through `TenantSession`; the application role
+must not bypass RLS. Wakeups are non-authoritative metadata, so database polling
+must remain enabled even when a Broker adapter is later installed. Role,
+configuration, drain and failure semantics are documented in
+[Clustered partition runtime](cluster-runtime.md).
 
 `PG_TEST_URL` integration tests are intentionally skipped when unset; fake-client tests still validate transaction ordering, tenant predicates, cloning, CAS and fencing.

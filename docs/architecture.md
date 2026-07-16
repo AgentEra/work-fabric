@@ -664,6 +664,29 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - `service-node` 是部署组合根；Memory、SQLite 与 PostgreSQL 继续实现同一技术中立 port。SQLite 明确是本地单进程持久化，PostgreSQL 是生产导向基线。
 - Read-mostly Console 只导入公共 TypeScript SDK。认证 SSE 只触发查询失效且不自动 Ack；轮询是有界 fallback。Console 可关闭、可替换，不在 Handoff 必要路径上。
 
+阶段 6A 完成集群分区的机械所有权层，同时保持“连接而非执行”边界：
+
+- `cluster-spi` 只定义 Ready-work Catalog、可选 Wakeup 和有界 Partition Turn；不依赖 PostgreSQL、Broker 或 Node Service。
+- 数据库 Journal、Outbox、Projection Checkpoint、Delivery Position 与 Lease 是权威；Wakeup 是可丢失、可重复、可合并的元数据加速提示。
+- Tenant 公平有界队列避免热租户独占；`PartitionWorker` 在每个 side effect 与 checkpoint 前验证 lease/fencing，过期 Owner 无法推进。
+- `outbox_wakeup`、`handoff_projection`、`collaboration_projection` 和 `signal_delivery` 只调用已有 Owner 逻辑，不增加参与方执行类型。
+- Node 角色明确分为 `api`、`worker`、`all`；Worker 不暴露 HTTP，API 不启动集群 Host，所有生产端口由部署注入。
+- PostgreSQL migration 008 提供 RLS 与稳定 keyset readiness；SQLite 继续是单进程本地形态并拒绝 cluster 配置。
+- Operations 只公开低基数聚合快照，不暴露 Tenant/Partition/Owner/Fencing/Event 身份。
+
+```mermaid
+flowchart LR
+    API6["API role<br/>public HTTP + SDK"] --> Facts6["Authoritative Handoff facts<br/>Journal + Outbox"]
+    Facts6 --> Scan6["Bounded readiness scan"]
+    Facts6 --> Hint6["Optional metadata wakeup"]
+    Scan6 --> Hosts6["Tenant-fair Worker Hosts"]
+    Hint6 --> Hosts6
+    Hosts6 --> Fence6["Lease + fencing"]
+    Fence6 --> Owner6["Outbox / Projection / Signal owners"]
+    Owner6 --> Facts6
+    Owner6 -. "never participant execution" .-> Outside6["External humans / Agents / systems"]
+```
+
 ```mermaid
 flowchart LR
     P["Human / Agent / Connector / Service"] --> SDK["Shared HTTP + TypeScript SDK"]
@@ -679,7 +702,7 @@ flowchart LR
     Owners -. "never participant execution" .-> External["External work systems and Agent runtimes"]
 ```
 
-运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，可复现性能范围见 [Phase 5 性能基线](performance-baseline.md)。
+运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，可复现性能范围见 [Phase 5](performance-baseline.md) 与 [Phase 6A](performance-cluster-baseline.md) 基线。
 
 ## 20. 阶段路线与执行状态
 
@@ -693,7 +716,8 @@ flowchart LR
 | 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
 | 4B | Generic Connector + 飞书 Connector | 已完成 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
-| 6 | 高吞吐 Signal 与集群分区 | 未开始 |
+| 6A | 集群分区所有权与数据库恢复 | 已完成 |
+| 6B | Broker-backed Signal/Wakeup 加速 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B/3C 建立 HTTP Service Binding 和统一 SDK；4A 以真实 HTTP + SDK + Gateway 黑盒流证明外部 Agent 连接；4B 以相同公共 Contract 证明飞书人类通道、外部资源和 Connector Worker 的双向连接；阶段 5 再补齐操作性、可观测性、读投影、SQLite 本地组合、性能基线和可替换 Console。下一步阶段 6 只扩展 Signal 与集群分区的吞吐和部署能力，不改变连接/交接定位。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B/3C 建立 HTTP Service Binding 和统一 SDK；4A/4B 证明 Agent 与飞书 Connector 的公共连接边界；阶段 5 补齐操作性与可替换呈现；阶段 6A 再以双 Host、故障注入和 fencing 证明集群机械所有权。下一步 6B 只能增加 Broker 加速，不能取代数据库权威或改变连接/交接定位。单独维护的阶段状态见 [Roadmap](roadmap.md)。

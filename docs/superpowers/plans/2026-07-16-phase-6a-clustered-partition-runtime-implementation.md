@@ -680,12 +680,12 @@ Run: `npm test -- packages/service-node/test/phase-6a-cluster-roundtrip.integrat
 
 Expected: FAIL until all cluster composition is connected.
 
-- [ ] **Step 3: Complete wiring and pass fault proof**
+- [x] **Step 3: Complete wiring and pass fault proof**
 
 Exercise race, expiry takeover, dropped hint recovery, duplicate hint
 coalescing, hot/quiet tenant fairness and bounded drain without fixed sleeps.
 
-- [ ] **Step 4: Add benchmark and gates**
+- [x] **Step 4: Add benchmark and gates**
 
 `benchmark:cluster` accepts bounded `--partitions`, `--tenants`,
 `--concurrency`, `--samples`; reports environment plus p50/p95/p99 catalog,
@@ -693,14 +693,14 @@ lease, turn, catch-up and fairness. `check:cluster-boundaries` rejects Broker or
 database imports from cluster SPI/runtime, participant-execution vocabulary,
 unbounded `Promise.all` over catalog results and sensitive telemetry labels.
 
-- [ ] **Step 5: Document exact deployment boundary**
+- [x] **Step 5: Document exact deployment boundary**
 
 Document worker roles, configuration bounds, tenant source, RLS, graceful
 drain, fault recovery, why hints are non-authoritative, SQLite rejection and
 the absence of Agent/workflow scheduling. Mark Phase 6A complete and Phase 6B
 next only after verification passes.
 
-- [ ] **Step 6: Run complete verification**
+- [x] **Step 6: Run complete verification**
 
 ```sh
 npm run verify:exchange
@@ -715,7 +715,7 @@ git diff --check
 Expected: all tests PASS, environment-dependent PostgreSQL live tests may
 explicitly SKIP, WFPP conformance is 120/120, gates report no violations.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```sh
 git add README.md docs package.json packages/service-node/test tools
@@ -726,15 +726,15 @@ git commit -m "test(cluster): prove Phase 6A clustered runtime"
 
 ## Completion checklist
 
-- [ ] Cluster SPI and conformance are technology neutral and bounded.
-- [ ] Ready queue is tenant-fair, coalescing and capacity bounded.
-- [ ] Lease loss aborts stale turns and fencing prevents stale progress.
-- [ ] Existing projectors and Signal Dispatcher remain the only owner logic.
-- [ ] Wakeup loss/duplication does not lose authoritative work.
-- [ ] PostgreSQL catalog is RLS/keyset/index based.
-- [ ] SQLite rejects clustered ownership while retaining local operation.
-- [ ] Node roles start and drain only their explicitly configured components.
-- [ ] Operational views and telemetry contain no sensitive/high-cardinality identity.
-- [ ] Two-host HTTP/SDK roundtrip and fault injection pass.
-- [ ] Performance evidence is reproducible and narrowly scoped.
-- [ ] Full repository verification and WFPP 120/120 pass from a clean branch.
+- [x] Cluster SPI and conformance are technology neutral and bounded.
+- [x] Ready queue is tenant-fair, coalescing and capacity bounded.
+- [x] Lease loss aborts stale turns and fencing prevents stale progress.
+- [x] Existing projectors and Signal Dispatcher remain the only owner logic.
+- [x] Wakeup loss/duplication does not lose authoritative work.
+- [x] PostgreSQL catalog is RLS/keyset/index based.
+- [x] SQLite rejects clustered ownership while retaining local operation.
+- [x] Node roles start and drain only their explicitly configured components.
+- [x] Operational views and telemetry contain no sensitive/high-cardinality identity.
+- [x] Two-host HTTP/SDK roundtrip and fault injection pass.
+- [x] Performance evidence is reproducible and narrowly scoped.
+- [x] Full repository verification and WFPP 120/120 pass from a clean branch.

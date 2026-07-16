@@ -14,7 +14,8 @@ and repository verification are implemented.
 | 4A | Endpoint Directory, Inbox, external Agent Gateway | Complete |
 | 4B | Generic Connector seam and Feishu Connector | Complete |
 | 5 | Operations, observability, read projections, read-mostly Console | Complete |
-| 6 | High-throughput Signal and clustered partition execution | Planned |
+| 6A | Clustered partition ownership and database-backed recovery | Complete |
+| 6B | Broker-backed Signal/wakeup acceleration | Planned |
 | 7 | Cross-Exchange federation profile | Planned |
 
 ## Phase 4B completion boundary
@@ -56,10 +57,28 @@ automation, Agent reasoning, model/tool execution, business-content storage or
 an operator bypass. Worker roles run explicit mechanical turns selected by the
 deployment; they are not an internal brain.
 
-## Phase 6 intent
+## Phase 6A completion boundary
 
-Phase 6 may add broker-backed Signal acceleration, horizontally coordinated
-partition ownership, load shedding and production concurrency baselines. It
-must preserve partition ordering, explicit Ack, fenced ownership, the public
-WFPP/SDK contracts and the execution boundary. Scale work is not permission to
-rank targets or decide/perform participant work.
+Phase 6A adds a technology-neutral cluster SPI, tenant-fair bounded queues,
+fenced partition leases, bounded Worker Hosts, PostgreSQL readiness discovery,
+explicit API/worker/all roles and safe aggregate operations visibility.
+Database polling is authoritative; metadata wakeups may be lost or duplicated.
+Two-host fault injection proves polling recovery, duplicate coalescing and stale
+owner rejection through the real HTTP/SDK Handoff lifecycle.
+
+The four work kinds are mechanical owners only: Outbox wakeup, Handoff
+projection, collaboration projection and Signal delivery. Phase 6A does not
+select targets, schedule workflows, execute participant work, run models/tools
+or add an Agent Brain. SQLite remains an explicit single-process profile and
+rejects clustered ownership.
+
+See [Clustered partition runtime](cluster-runtime.md) and the reproducible
+[Phase 6A performance baseline](performance-cluster-baseline.md).
+
+## Phase 6B intent
+
+Phase 6B may add a production Broker adapter for metadata wakeups and Signal
+acceleration. It must keep the Phase 6A catalog and persisted positions as
+authority, preserve partition ordering, explicit Ack, fenced ownership, public
+WFPP/SDK contracts and the execution boundary. Broker work is not permission
+to rank targets or decide/perform participant work.
