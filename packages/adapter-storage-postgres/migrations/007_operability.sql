@@ -1,3 +1,13 @@
+CREATE INDEX IF NOT EXISTS work_fabric_projection_failures_operational_idx
+  ON work_fabric_projection_failures
+  (tenant_id, projector_id, partition_id, position ASC, event_id ASC);
+CREATE INDEX IF NOT EXISTS work_fabric_delivery_attempts_operational_idx
+  ON work_fabric_delivery_attempts
+  (tenant_id, subscription_id, event_id, attempt ASC, attempted_at ASC);
+CREATE INDEX IF NOT EXISTS work_fabric_dead_letters_operational_idx
+  ON work_fabric_dead_letters
+  (tenant_id, subscription_id, work_fabric_timestamp_key(recorded_at) DESC, event_id ASC);
+
 CREATE TABLE IF NOT EXISTS work_fabric_handoff_read_models (
   tenant_id text NOT NULL,
   partition_id text NOT NULL,

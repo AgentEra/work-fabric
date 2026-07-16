@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createOpaqueCursorCodec,
   type CursorAuthenticator,
+  type BoundedOperationalHistoryStore,
 } from "@work-fabric/operations-spi";
 
 import { StoreBackedOperationsQueryService } from "../src/index.js";
@@ -40,7 +41,7 @@ function ingressRecord() {
   };
 }
 
-function fixture() {
+function fixture(boundedHistory?: BoundedOperationalHistoryStore) {
   const failures = [
     {
       projector_id: "projector-1", partition_id: "partition-1", event_id: "event-1",
@@ -172,11 +173,31 @@ function fixture() {
     },
     cursor: cursor(),
     max_page_limit: 10,
+    ...(boundedHistory === undefined ? {} : { bounded_history: boundedHistory }),
   });
   return service;
 }
 
 describe("StoreBackedOperationsQueryService", () => {
+  it("pushes bounded keyset pages into production history adapters", async () => {
+    const calls: Array<{ method: string; input: unknown }> = [];
+    const history: BoundedOperationalHistoryStore = {
+      manifest: { profile: "workfabric.operational-history.v1", adapter: "test", capabilities: { bounded_keyset: true } },
+      async scanProjectionFailures(input) { calls.push({ method: "projection", input }); return []; },
+      async scanDeliveryAttempts(input) { calls.push({ method: "attempt", input }); return []; },
+      async scanDeadLetters(input) { calls.push({ method: "dead-letter", input }); return []; },
+    };
+    const service = fixture(history);
+    await service.listProjectionFailures("tenant-1", { projector_id: "projector-1", partition_id: "partition-1", limit: 1 });
+    await service.listDeliveryAttempts("tenant-1", { subscription_id: "subscription-1", event_id: "event-1", limit: 2 });
+    await service.listDeadLetters("tenant-1", { subscription_id: "subscription-1", limit: 3 });
+    expect(calls).toEqual([
+      { method: "projection", input: { tenant_id: "tenant-1", projector_id: "projector-1", partition_id: "partition-1", after: null, limit: 2 } },
+      { method: "attempt", input: { tenant_id: "tenant-1", subscription_id: "subscription-1", event_id: "event-1", after: null, limit: 3 } },
+      { method: "dead-letter", input: { tenant_id: "tenant-1", subscription_id: "subscription-1", after: null, limit: 4 } },
+    ]);
+  });
+
   it("reports tenant-scoped projection position and redacts failure reasons", async () => {
     const service = fixture();
     await expect(service.getProjectionStatus("tenant-1", "projector-1", "partition-1"))

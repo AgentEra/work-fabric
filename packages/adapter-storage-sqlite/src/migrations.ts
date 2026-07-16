@@ -21,9 +21,18 @@ export const SQLITE_SUPPORTING_STORES_MIGRATION: SqliteMigration = {
   ),
 };
 
+export const SQLITE_OPERATIONAL_HISTORY_MIGRATION: SqliteMigration = {
+  id: "003_operational_history",
+  sql: readFileSync(
+    new URL("../migrations/003_operational_history.sql", import.meta.url),
+    "utf8",
+  ),
+};
+
 export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
   SQLITE_EXCHANGE_MIGRATION,
   SQLITE_SUPPORTING_STORES_MIGRATION,
+  SQLITE_OPERATIONAL_HISTORY_MIGRATION,
 ];
 
 function checksum(sql: string): string {

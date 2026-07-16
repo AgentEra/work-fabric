@@ -7,6 +7,7 @@ import { verifyPersistenceProfile } from "@work-fabric/exchange-conformance";
 import type { AtomicCommitRequest } from "@work-fabric/exchange-spi";
 import {
   SqliteExchangePersistence,
+  SqlitePartitionJournalPositionSource,
   SqliteSession,
   migrateSqlite,
 } from "../src/index.js";
@@ -107,6 +108,88 @@ describe("SQLite Exchange persistence", () => {
     await expect(reopened.commitAtomically(request("tenant-other")))
       .rejects.toThrow(/tenant/i);
     secondSession.close();
+  });
+
+  it("reads partition high-water directly from the journal index", async () => {
+    const session = new SqliteSession({ location: ":memory:" });
+    migrateSqlite(session);
+    const persistence = new SqliteExchangePersistence(session, "tenant-local");
+    await persistence.commitAtomically(request());
+    const positions = new SqlitePartitionJournalPositionSource(
+      session,
+      "tenant-local",
+    );
+
+    await expect(positions.load("tenant-local", "partition-local"))
+      .resolves.toBe(1);
+    await expect(positions.load("tenant-local", "partition-missing"))
+      .resolves.toBeNull();
+    await expect(positions.load("tenant-other", "partition-local"))
+      .resolves.toBeNull();
+    session.close();
+  });
+
+  it("bounds operational history reads with storage-side keysets", async () => {
+    const session = new SqliteSession({ location: ":memory:" });
+    migrateSqlite(session);
+    const persistence = new SqliteExchangePersistence(session, "tenant-local");
+    await persistence.commitAtomically(request());
+    const event = (await persistence.readPartition("partition-local", 0, 1))[0]!;
+    await persistence.putProjectionFailure({
+      projector_id: "projector-local",
+      partition_id: "partition-local",
+      event_id: "event-a",
+      position: 1,
+      reason: "failed-a",
+      recorded_at: "2026-07-16T08:00:01.000Z",
+    });
+    await persistence.putProjectionFailure({
+      projector_id: "projector-local",
+      partition_id: "partition-local",
+      event_id: "event-b",
+      position: 2,
+      reason: "failed-b",
+      recorded_at: "2026-07-16T08:00:02.000Z",
+    });
+    await persistence.recordDeliveryAttempt({
+      subscription_id: "subscription-local",
+      partition_id: "partition-local",
+      event_id: event.event_id,
+      attempt: 1,
+      attempted_at: "2026-07-16T08:00:01.000Z",
+      outcome: "accepted",
+      detail: null,
+      next_attempt_at: null,
+    });
+    await persistence.putDeadLetter({
+      subscription_id: "subscription-local",
+      event,
+      attempts: 2,
+      reason: "delivery failed",
+      recorded_at: "2026-07-16T08:00:03.000Z",
+    });
+
+    await expect(persistence.scanProjectionFailures({
+      tenant_id: "tenant-local",
+      projector_id: "projector-local",
+      partition_id: "partition-local",
+      after: { position: 1, event_id: "event-a" },
+      limit: 1,
+    })).resolves.toMatchObject([{ event_id: "event-b" }]);
+    await expect(persistence.scanDeliveryAttempts({
+      tenant_id: "tenant-local",
+      subscription_id: "subscription-local",
+      event_id: event.event_id,
+      after: null,
+      limit: 1,
+    })).resolves.toHaveLength(1);
+    await expect(persistence.scanDeadLetters({
+      tenant_id: "tenant-local",
+      subscription_id: "subscription-local",
+      after: null,
+      limit: 1,
+    })).resolves.toMatchObject([{ event: { event_id: event.event_id } }]);
+    session.close();
   });
 
   it("rejects a changed migration checksum", () => {

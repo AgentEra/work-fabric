@@ -24,6 +24,7 @@ import {
   PostgresHandoffReadModelStore,
   PostgresRecoveryStore,
   PostgresPartitionJournalPositionSource,
+  PostgresRuntimeState,
 } from "../src/index.js";
 
 const connectionString = process.env.PG_TEST_URL;
@@ -120,6 +121,31 @@ describe("PostgreSQL operability persistence", () => {
     expect(client.calls[1]?.values).toEqual([
       "tenant-1", "2026-07-16T00:00:00.000Z", 10,
     ]);
+  });
+
+  it("pushes operational history keysets and limits into PostgreSQL", async () => {
+    const client = new FakeClient();
+    client.responses.push({ rows: [], rowCount: 0 }, { rows: [], rowCount: 0 }, { rows: [], rowCount: 0 });
+    const runtime = new PostgresRuntimeState(
+      (tenant) => new FakeSession(tenant, client),
+      "tenant-1",
+    );
+    await runtime.scanProjectionFailures({
+      tenant_id: "tenant-1", projector_id: "projector-1", partition_id: "partition-1",
+      after: { position: 9, event_id: "event-9" }, limit: 11,
+    });
+    await runtime.scanDeliveryAttempts({
+      tenant_id: "tenant-1", subscription_id: "subscription-1", event_id: "event-1",
+      after: { attempt: 2, attempted_at: "2026-07-16T00:00:00.000Z" }, limit: 11,
+    });
+    await runtime.scanDeadLetters({
+      tenant_id: "tenant-1", subscription_id: "subscription-1",
+      after: { recorded_at: "2026-07-16T00:00:00.000Z", event_id: "event-1" }, limit: 11,
+    });
+    expect(client.calls.map((call) => call.values?.at(-1))).toEqual([11, 11, 11]);
+    expect(client.calls[0]?.sql).toContain("position>$4");
+    expect(client.calls[1]?.sql).toContain("attempt>$4");
+    expect(client.calls[2]?.sql).toContain("recorded_at)<");
   });
 
   it("binds every store to one tenant and returns cloned payloads", async () => {

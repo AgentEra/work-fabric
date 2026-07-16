@@ -16,6 +16,7 @@ import {
   type AuditQuery,
   type AuditRecord,
   type AuditStore,
+  type BoundedOperationalHistoryStore,
   normalizePageLimit,
   type DeadLetterOperationalQuery,
   type DeadLetterView,
@@ -44,6 +45,7 @@ export interface OperationsQueryDependencies {
   readonly connector_ingress?: ConnectorIngressStore;
   readonly discrepancies?: ConnectorDiscrepancyStore;
   readonly audit?: AuditStore;
+  readonly bounded_history?: BoundedOperationalHistoryStore;
   readonly cursor: OpaqueCursorCodec;
   readonly max_page_limit?: number;
 }
@@ -226,10 +228,21 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
       query.partition_id,
     );
     if (ownership === null) return { items: [], next_cursor: null };
-    const records = await this.dependencies.projection_failures.listProjectionFailures(
-      query.projector_id,
-      query.partition_id,
-    );
+    const sort = "projection_failure_position_asc_event_asc";
+    const filters = { tenant_id: tenantId, projector_id: query.projector_id, partition_id: query.partition_id };
+    const limit = this.pageLimit(query.limit);
+    const position = await this.cursorPosition(query.cursor, sort, filters);
+    const records = this.dependencies.bounded_history === undefined
+      ? await this.dependencies.projection_failures.listProjectionFailures(query.projector_id, query.partition_id)
+      : await this.dependencies.bounded_history.scanProjectionFailures({
+          tenant_id: tenantId, projector_id: query.projector_id, partition_id: query.partition_id,
+          after: position === null ? null : {
+            position: this.cursorNumber(position, "position"),
+            event_id: this.cursorString(position, "event_id"),
+          },
+          limit: limit + 1,
+        });
+    this.bounded(records, limit);
     const values = records.map(failureView);
     if (values.some((value) =>
       value.projector_id !== query.projector_id ||
@@ -242,8 +255,8 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
       values,
       query.limit,
       query.cursor,
-      "projection_failure_position_asc_event_asc",
-      { tenant_id: tenantId, projector_id: query.projector_id, partition_id: query.partition_id },
+      sort,
+      filters,
       (value) => ({ position: value.position, event_id: value.event_id }),
       (value, position) =>
         value.position > this.cursorNumber(position, "position") ||
@@ -288,10 +301,22 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
       return { items: [], next_cursor: null };
     }
     identifier(query.event_id, "event_id");
-    const values = (await this.dependencies.delivery_state.listDeliveryAttempts(
-      query.subscription_id,
-      query.event_id,
-    )).map(attemptView);
+    const sort = "delivery_attempt_asc_time_asc";
+    const filters = { tenant_id: tenantId, subscription_id: query.subscription_id, event_id: query.event_id };
+    const limit = this.pageLimit(query.limit);
+    const position = await this.cursorPosition(query.cursor, sort, filters);
+    const records = this.dependencies.bounded_history === undefined
+      ? await this.dependencies.delivery_state.listDeliveryAttempts(query.subscription_id, query.event_id)
+      : await this.dependencies.bounded_history.scanDeliveryAttempts({
+          tenant_id: tenantId, subscription_id: query.subscription_id, event_id: query.event_id,
+          after: position === null ? null : {
+            attempt: this.cursorNumber(position, "attempt"),
+            attempted_at: this.cursorString(position, "attempted_at"),
+          },
+          limit: limit + 1,
+        });
+    this.bounded(records, limit);
+    const values = records.map(attemptView);
     if (values.some((value) =>
       value.subscription_id !== query.subscription_id || value.event_id !== query.event_id
     )) throw new Error("delivery attempt identity mismatch");
@@ -302,8 +327,8 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
       values,
       query.limit,
       query.cursor,
-      "delivery_attempt_asc_time_asc",
-      { tenant_id: tenantId, subscription_id: query.subscription_id, event_id: query.event_id },
+      sort,
+      filters,
       (value) => ({ attempt: value.attempt, attempted_at: value.attempted_at }),
       (value, position) =>
         value.attempt > this.cursorNumber(position, "attempt") ||
@@ -320,10 +345,22 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
       return { items: [], next_cursor: null };
     }
     if (query.event_id !== undefined) identifier(query.event_id, "event_id");
-    const records = await this.dependencies.delivery_state.listDeadLetters(
-      query.subscription_id,
-      query.event_id,
-    );
+    const sort = "dead_letter_recorded_desc_event_asc";
+    const filters = { tenant_id: tenantId, subscription_id: query.subscription_id, event_id: query.event_id ?? null };
+    const limit = this.pageLimit(query.limit);
+    const position = await this.cursorPosition(query.cursor, sort, filters);
+    const records = this.dependencies.bounded_history === undefined
+      ? await this.dependencies.delivery_state.listDeadLetters(query.subscription_id, query.event_id)
+      : await this.dependencies.bounded_history.scanDeadLetters({
+          tenant_id: tenantId, subscription_id: query.subscription_id,
+          ...(query.event_id === undefined ? {} : { event_id: query.event_id }),
+          after: position === null ? null : {
+            recorded_at: this.cursorString(position, "recorded_at"),
+            event_id: this.cursorString(position, "event_id"),
+          },
+          limit: limit + 1,
+        });
+    this.bounded(records, limit);
     const values = records.map((record): DeadLetterView => {
       if (
         record.subscription_id !== query.subscription_id ||
@@ -350,8 +387,8 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
       values,
       query.limit,
       query.cursor,
-      "dead_letter_recorded_desc_event_asc",
-      { tenant_id: tenantId, subscription_id: query.subscription_id, event_id: query.event_id ?? null },
+      sort,
+      filters,
       (value) => ({ recorded_at: value.recorded_at, event_id: value.event_id }),
       (value, position) =>
         value.recorded_at < this.cursorString(position, "recorded_at") ||
@@ -496,6 +533,29 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
         ? await this.dependencies.cursor.encode({ ...context, position: positionFor(last) })
         : null,
     };
+  }
+
+  private pageLimit(value: number): number {
+    return normalizePageLimit(value, {
+      default_limit: Math.min(25, this.maxPageLimit),
+      max_limit: this.maxPageLimit,
+    });
+  }
+
+  private cursorPosition(
+    cursor: string | undefined,
+    sort: string,
+    filters: JsonObject,
+  ): Promise<JsonObject | null> {
+    return cursor === undefined
+      ? Promise.resolve(null)
+      : this.dependencies.cursor.decode(cursor, { kind: "operations", sort, filters });
+  }
+
+  private bounded(values: readonly unknown[], requestedLimit: number): void {
+    if (this.dependencies.bounded_history !== undefined && values.length > requestedLimit + 1) {
+      throw new Error("bounded operational history exceeded requested limit");
+    }
   }
 
   private cursorString(position: JsonObject, field: string): string {

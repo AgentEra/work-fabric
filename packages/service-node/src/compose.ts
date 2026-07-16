@@ -16,6 +16,7 @@ import { MemoryDiscrepancyStore, MemoryRecoveryStore } from "@work-fabric/adapte
 import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import {
   SqliteExchangePersistence,
+  SqlitePartitionJournalPositionSource,
   SqliteRuntimeState,
   SqliteSession,
   createSqliteContextStore,
@@ -66,6 +67,8 @@ import type {
   AuditStore,
   CollaborationViewStore,
   CursorAuthenticator,
+  BoundedOperationalHistoryStore,
+  PartitionJournalPositionSource,
   RecoveryRequestStore,
   ProjectionFreshnessSource,
 } from "@work-fabric/operations-spi";
@@ -114,6 +117,9 @@ export interface NodeStorageComposition {
   readonly connectorIngress: ConnectorIngressStore;
   readonly discrepancies: ConnectorDiscrepancyStore;
   readonly recoveries: RecoveryRequestStore;
+  readonly boundedHistory?: BoundedOperationalHistoryStore;
+  /** Adapter-native high-water lookup; avoids scanning the journal on reads. */
+  readonly journalPositions?: PartitionJournalPositionSource;
   readonly sqlite: SqliteSession | null;
 }
 
@@ -169,6 +175,11 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     connectorIngress: createSqliteConnectorIngressStore(session, config.tenant_id),
     discrepancies: operations.discrepancies,
     recoveries: operations.recoveries,
+    boundedHistory: persistence,
+    journalPositions: new SqlitePartitionJournalPositionSource(
+      session,
+      config.tenant_id,
+    ),
     sqlite: session,
   };
 }
@@ -177,6 +188,7 @@ class StoreFreshness implements ProjectionFreshnessSource {
   constructor(
     private readonly persistence: ExchangePersistence & ProjectionCheckpointStore,
     private readonly projectorId: string,
+    private readonly journalPositions: PartitionJournalPositionSource,
   ) {}
 
   async load(tenantId: string, partitionId: string) {
@@ -184,16 +196,7 @@ class StoreFreshness implements ProjectionFreshnessSource {
       this.projectorId,
       partitionId,
     );
-    let journal = 0;
-    for (;;) {
-      const records = await this.persistence.readPartition(partitionId, journal, 1_000);
-      if (records.length === 0) break;
-      if (records.some((record) => record.tenant_id !== tenantId)) {
-        throw new Error("partition tenant mismatch");
-      }
-      journal = records.at(-1)?.partition_position ?? journal;
-      if (records.length < 1_000) break;
-    }
+    const journal = await this.journalPositions.load(tenantId, partitionId) ?? 0;
     return {
       projector_id: this.projectorId,
       partition_id: partitionId,
@@ -292,6 +295,8 @@ export async function composeNodeService(
     storage.handoffs,
     storage.collaboration,
     clock,
+    undefined,
+    storage.journalPositions ?? new StoreJournalPositions(storage.persistence),
   );
   const query = new StoreBackedExchangeQueryService(
     storage.persistence,
@@ -302,11 +307,15 @@ export async function composeNodeService(
   );
   const collaboration = new StoreBackedCollaborationQueryService(
     storage.collaboration,
-    new StoreFreshness(storage.persistence, "workfabric.collaboration.visibility.v1"),
+    new StoreFreshness(
+      storage.persistence,
+      "workfabric.collaboration.visibility.v1",
+      storage.journalPositions ?? new StoreJournalPositions(storage.persistence),
+    ),
   );
   const audit = new OperationAuditRecorder(storage.audit, clock);
   const operations = new StoreBackedOperationsQueryService({
-    journal_positions: new StoreJournalPositions(storage.persistence),
+    journal_positions: storage.journalPositions ?? new StoreJournalPositions(storage.persistence),
     checkpoints: storage.persistence,
     projection_failures: storage.persistence,
     subscriptions: storage.subscriptions,
@@ -315,6 +324,7 @@ export async function composeNodeService(
     discrepancies: storage.discrepancies,
     audit: storage.audit,
     cursor: operationsCursor(config.cursor_secret),
+    ...(storage.boundedHistory === undefined ? {} : { bounded_history: storage.boundedHistory }),
     max_page_limit: 100,
   });
   const recovery = new RecoveryService(storage.recoveries, { now: clock.now, audit });

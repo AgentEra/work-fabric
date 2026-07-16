@@ -22,6 +22,7 @@ import {
   type ProjectionFailureStore,
   type SnapshotRecord,
 } from "@work-fabric/exchange-spi";
+import type { BoundedOperationalHistoryStore } from "@work-fabric/operations-spi";
 
 import type { SqliteSession } from "./sqlite-session.js";
 
@@ -60,6 +61,12 @@ function nonNegative(value: unknown, label: string): asserts value is number {
 function positive(value: unknown, label: string): asserts value is number {
   if (!Number.isSafeInteger(value) || (value as number) <= 0) {
     throw new RangeError(`${label} must be a positive safe integer`);
+  }
+}
+
+function scanLimit(value: unknown): asserts value is number {
+  if (!Number.isSafeInteger(value) || (value as number) <= 0 || (value as number) > 1_001) {
+    throw new RangeError("scan limit must be between 1 and 1001");
   }
 }
 
@@ -225,7 +232,8 @@ export class SqliteExchangePersistence
     ExchangePersistence,
     ProjectionCheckpointStore,
     ProjectionFailureStore,
-    DeliveryStateStore
+    DeliveryStateStore,
+    BoundedOperationalHistoryStore
 {
   readonly manifest = clone(manifest);
 
@@ -512,6 +520,43 @@ export class SqliteExchangePersistence
     );
   }
 
+  async scanProjectionFailures(
+    input: Parameters<BoundedOperationalHistoryStore["scanProjectionFailures"]>[0],
+  ): Promise<readonly ProjectionFailureRecord[]> {
+    this.assertTenant(input.tenant_id);
+    identity(input.projector_id, "projector_id");
+    identity(input.partition_id, "partition_id");
+    scanLimit(input.limit);
+    if (input.after !== null) {
+      nonNegative(input.after.position, "after.position");
+      identity(input.after.event_id, "after.event_id");
+    }
+    const after = input.after;
+    const rows = after === null
+      ? this.session.prepare(`
+          SELECT payload FROM work_fabric_projection_failures
+          WHERE tenant_id=? AND projector_id=? AND partition_id=?
+          ORDER BY position,event_id LIMIT ?
+        `).all(this.tenantId, input.projector_id, input.partition_id, input.limit)
+      : this.session.prepare(`
+          SELECT payload FROM work_fabric_projection_failures
+          WHERE tenant_id=? AND projector_id=? AND partition_id=?
+            AND (position>? OR (position=? AND event_id>?))
+          ORDER BY position,event_id LIMIT ?
+        `).all(
+          this.tenantId,
+          input.projector_id,
+          input.partition_id,
+          after.position,
+          after.position,
+          after.event_id,
+          input.limit,
+        );
+    return rows.map((row) =>
+      clone(parseJson<ProjectionFailureRecord>((row as { payload: string }).payload))
+    );
+  }
+
   async loadDeliveryPosition(subscriptionId: string, partitionId: string): Promise<number> {
     identity(subscriptionId, "subscriptionId");
     identity(partitionId, "partitionId");
@@ -564,6 +609,44 @@ export class SqliteExchangePersistence
     );
   }
 
+  async scanDeliveryAttempts(
+    input: Parameters<BoundedOperationalHistoryStore["scanDeliveryAttempts"]>[0],
+  ): Promise<readonly DeliveryAttempt[]> {
+    this.assertTenant(input.tenant_id);
+    identity(input.subscription_id, "subscription_id");
+    identity(input.event_id, "event_id");
+    scanLimit(input.limit);
+    if (input.after !== null) {
+      positive(input.after.attempt, "after.attempt");
+      timestamp(input.after.attempted_at, "after.attempted_at");
+    }
+    const after = input.after;
+    const rows = after === null
+      ? this.session.prepare(`
+          SELECT payload FROM work_fabric_delivery_attempts
+          WHERE tenant_id=? AND subscription_id=? AND event_id=?
+          ORDER BY attempt LIMIT ?
+        `).all(this.tenantId, input.subscription_id, input.event_id, input.limit)
+      : this.session.prepare(`
+          SELECT payload FROM work_fabric_delivery_attempts
+          WHERE tenant_id=? AND subscription_id=? AND event_id=?
+            AND (attempt>? OR
+              (attempt=? AND json_extract(payload,'$.attempted_at')>?))
+          ORDER BY attempt,json_extract(payload,'$.attempted_at') LIMIT ?
+        `).all(
+          this.tenantId,
+          input.subscription_id,
+          input.event_id,
+          after.attempt,
+          after.attempt,
+          after.attempted_at,
+          input.limit,
+        );
+    return rows.map((row) =>
+      clone(parseJson<DeliveryAttempt>((row as { payload: string }).payload))
+    );
+  }
+
   async advanceDeliveryPosition(
     subscriptionId: string,
     partitionId: string,
@@ -594,8 +677,8 @@ export class SqliteExchangePersistence
     validateDeadLetter(record);
     this.session.prepare(`
       INSERT OR IGNORE INTO work_fabric_dead_letters
-        (tenant_id,subscription_id,event_id,partition_id,partition_position,payload)
-      VALUES (?,?,?,?,?,?)
+        (tenant_id,subscription_id,event_id,partition_id,partition_position,payload,recorded_at)
+      VALUES (?,?,?,?,?,?,?)
     `).run(
       this.tenantId,
       record.subscription_id,
@@ -603,6 +686,7 @@ export class SqliteExchangePersistence
       record.event.partition_id,
       record.event.partition_position,
       JSON.stringify(clone(record)),
+      record.recorded_at,
     );
   }
 
@@ -623,6 +707,39 @@ export class SqliteExchangePersistence
           WHERE tenant_id=? AND subscription_id=? AND event_id=?
           ORDER BY partition_id,partition_position,event_id
         `).all(this.tenantId, subscriptionId, eventId);
+    return rows.map((row) =>
+      clone(parseJson<DeadLetterRecord>((row as { payload: string }).payload))
+    );
+  }
+
+  async scanDeadLetters(
+    input: Parameters<BoundedOperationalHistoryStore["scanDeadLetters"]>[0],
+  ): Promise<readonly DeadLetterRecord[]> {
+    this.assertTenant(input.tenant_id);
+    identity(input.subscription_id, "subscription_id");
+    if (input.event_id !== undefined) identity(input.event_id, "event_id");
+    scanLimit(input.limit);
+    if (input.after !== null) {
+      timestamp(input.after.recorded_at, "after.recorded_at");
+      identity(input.after.event_id, "after.event_id");
+    }
+    const rows = this.session.prepare(`
+      SELECT payload FROM work_fabric_dead_letters
+      WHERE tenant_id=? AND subscription_id=?
+        AND (? IS NULL OR event_id=?)
+        AND (? IS NULL OR recorded_at<? OR (recorded_at=? AND event_id>?))
+      ORDER BY recorded_at DESC,event_id ASC LIMIT ?
+    `).all(
+      this.tenantId,
+      input.subscription_id,
+      input.event_id ?? null,
+      input.event_id ?? null,
+      input.after?.recorded_at ?? null,
+      input.after?.recorded_at ?? null,
+      input.after?.recorded_at ?? null,
+      input.after?.event_id ?? null,
+      input.limit,
+    );
     return rows.map((row) =>
       clone(parseJson<DeadLetterRecord>((row as { payload: string }).payload))
     );
@@ -745,8 +862,8 @@ export class SqliteExchangePersistence
           validateDeadLetter(deadLetter);
           this.session.prepare(`
             INSERT OR IGNORE INTO work_fabric_dead_letters
-              (tenant_id,subscription_id,event_id,partition_id,partition_position,payload)
-            VALUES (?,?,?,?,?,?)
+              (tenant_id,subscription_id,event_id,partition_id,partition_position,payload,recorded_at)
+            VALUES (?,?,?,?,?,?,?)
           `).run(
             this.tenantId,
             deadLetter.subscription_id,
@@ -754,6 +871,7 @@ export class SqliteExchangePersistence
             event.partition_id,
             event.partition_position,
             JSON.stringify(deadLetter),
+            deadLetter.recorded_at,
           );
         }
       }
