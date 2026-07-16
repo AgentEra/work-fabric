@@ -68,6 +68,34 @@ describe("semantic telemetry observers", () => {
     }
   });
 
+  it("keeps cluster measurements out of metric attributes", () => {
+    const metricCalls: unknown[][] = [];
+    const meter = {
+      createCounter: () => ({ add: (...input: unknown[]) => metricCalls.push(input) }),
+      createHistogram: () => ({ record: (...input: unknown[]) => metricCalls.push(input) }),
+    } as unknown as Meter;
+    const tracer = { startSpan: () => span() } as unknown as Tracer;
+
+    new OtelSemanticObserver({ meter, tracer }).observe({
+      operation: "cluster_queue_overload",
+      outcome: "retryable",
+      category: "cluster",
+      duration_ms: 0,
+      count: 19,
+    });
+
+    for (const call of metricCalls) {
+      expect(call[1]).toEqual({
+        "workfabric.operation": "cluster_queue_overload",
+        "workfabric.outcome": "retryable",
+        "workfabric.category": "cluster",
+      });
+      expect(JSON.stringify(call[1])).not.toMatch(
+        /tenant|partition|worker|fencing|queue_depth/i,
+      );
+    }
+  });
+
   it("traces only stable semantics and a validated correlation id", () => {
     const spans: Array<{ name: string; attributes: Record<string, unknown>; ended: boolean }> = [];
     const tracer = {

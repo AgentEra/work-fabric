@@ -183,7 +183,7 @@ Run: `npm run typecheck && npm test -- packages/cluster-spi/test packages/exchan
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/cluster-spi packages/exchange-conformance
@@ -257,7 +257,7 @@ Run: `npm run typecheck && npm test -- packages/adapter-cluster-memory/test pack
 
 Expected: PASS including `verifyClusterProfile()`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```sh
 git add packages/adapter-cluster-memory packages/cluster-runtime
@@ -334,7 +334,7 @@ heartbeat, asserts ownership, invokes the matching handler once with
 
 Never return raw exception text.
 
-- [ ] **Step 5: Run focused verification and commit**
+- [x] **Step 5: Run focused verification and commit**
 
 Run: `npm run typecheck && npm test -- packages/cluster-runtime/test`
 
@@ -361,7 +361,7 @@ git commit -m "feat(cluster): fence bounded partition turns"
 - Consumes: Catalog, optional wakeup consumer, ready queue, partition worker and semantic observer.
 - Produces: `ClusterHost.start()`, `pollOnce()`, `ingestOnce()`, `drain()`, `snapshot()`.
 
-- [ ] **Step 1: Write failing host tests**
+- [x] **Step 1: Write failing host tests**
 
 ```ts
 it("bounds concurrency and drains without starting queued work", async () => {
@@ -386,13 +386,13 @@ it("recovers a dropped wakeup through catalog polling", async () => {
 });
 ```
 
-- [ ] **Step 2: Run and confirm missing host failure**
+- [x] **Step 2: Run and confirm missing host failure**
 
 Run: `npm test -- packages/cluster-runtime/test/cluster-host.test.ts`
 
 Expected: FAIL because `ClusterHost` is missing.
 
-- [ ] **Step 3: Implement host state machine**
+- [x] **Step 3: Implement host state machine**
 
 States are `idle | running | draining | stopped`. `pollOnce()` performs at
 most one in-flight scan per configured tenant and feeds the fair queue.
@@ -400,13 +400,13 @@ most one in-flight scan per configured tenant and feeds the fair queue.
 `max_concurrent_turns`. `drain()` stops intake, aborts queued work, waits for
 active promises up to `drain_timeout_seconds`, then leaves leases to expire.
 
-- [ ] **Step 4: Add low-cardinality telemetry vocabulary**
+- [x] **Step 4: Add low-cardinality telemetry vocabulary**
 
 Extend the semantic operation union only with the six names in the design.
 Tests must prove emitted metric attributes remain exactly `operation`,
 `outcome`, `category`; queue sizes and counts are measurements, not labels.
 
-- [ ] **Step 5: Run focused verification and commit**
+- [x] **Step 5: Run focused verification and commit**
 
 Run: `npm run typecheck && npm test -- packages/cluster-runtime/test packages/operations-observability/test/semantic-observer.test.ts`
 

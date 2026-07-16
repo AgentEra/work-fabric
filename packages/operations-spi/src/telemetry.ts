@@ -11,6 +11,12 @@ export const SEMANTIC_OPERATIONS = [
   "connector_mapping",
   "recovery_action",
   "worker_lease_loss",
+  "cluster_catalog_scan",
+  "cluster_lease_acquire",
+  "cluster_lease_lost",
+  "cluster_turn",
+  "cluster_queue_overload",
+  "cluster_drain",
 ] as const;
 
 export const SEMANTIC_OUTCOMES = [
@@ -28,6 +34,7 @@ export const SEMANTIC_CATEGORIES = [
   "delivery",
   "connector",
   "recovery",
+  "cluster",
 ] as const;
 
 export interface SemanticObservation {
