@@ -35,8 +35,10 @@ export interface ParticipantRef {
 }
 
 export interface SafeTargetBinding {
-  readonly actor: ParticipantRef | null;
-  readonly endpoint_id: string | null;
+  readonly target:
+    | { readonly actor_id: string }
+    | { readonly endpoint_id: string };
+  readonly resolver_endpoint_id: string;
   readonly resolved_at: string;
 }
 
@@ -88,7 +90,9 @@ export interface TimelineEntry {
   readonly event_type: string;
   readonly occurred_at: string;
   readonly subject: string;
-  readonly source: ParticipantRef | null;
+  readonly event_source: string;
+  readonly actor_id: string;
+  readonly endpoint_id: string;
   readonly correlation_id: string | null;
   readonly causation_id: string | null;
   readonly change: JsonObject;
@@ -162,7 +166,13 @@ export interface RelationshipQuery {
 export interface CollaborationViewStore extends ExchangeAdapter {
   putResponsibility(view: ResponsibilityView): Promise<void>;
   putTimeline(entry: TimelineEntry): Promise<void>;
-  putRelationship(view: RelationshipView): Promise<void>;
+  replaceHandoffRelationships(
+    tenantId: string,
+    partitionId: string,
+    handoffId: string,
+    streamVersion: number,
+    views: readonly RelationshipView[],
+  ): Promise<void>;
   getResponsibility(
     tenantId: string,
     handoffId: string,

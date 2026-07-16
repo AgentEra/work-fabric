@@ -66,7 +66,9 @@ function timeline(
     event_type: "workfabric.handoff.status_reported.v1",
     occurred_at: `2026-07-16T00:00:0${position}.000Z`,
     subject: "handoff-1",
-    source: { actor_id: "agent-profile", actor_type: "agent" },
+    event_source: "urn:work-fabric:exchange:exchange-profile",
+    actor_id: "agent-profile",
+    endpoint_id: "endpoint-profile",
     correlation_id: null,
     causation_id: null,
     change: { position },
@@ -208,11 +210,15 @@ export async function verifyOperationsStoreProfile(
   assert.deepEqual(timelinePage.items.map((item) => item.event_id), ["event-1"]);
   assert.ok(timelinePage.next_cursor);
 
-  await collaboration.putRelationship(
-    relationship("relationship-2", "2026-07-16T02:00:00.000Z"),
-  );
-  await collaboration.putRelationship(
-    relationship("relationship-1", "2026-07-16T02:00:00.000Z"),
+  await collaboration.replaceHandoffRelationships(
+    "tenant-profile",
+    "partition-profile",
+    "handoff-1",
+    1,
+    [
+      relationship("relationship-2", "2026-07-16T02:00:00.000Z"),
+      relationship("relationship-1", "2026-07-16T02:00:00.000Z"),
+    ],
   );
   const relationshipPage = await collaboration.listRelationships({
     tenant_id: "tenant-profile",
@@ -222,6 +228,27 @@ export async function verifyOperationsStoreProfile(
   assert.deepEqual(
     relationshipPage.items.map((item) => item.relationship_id),
     ["relationship-1", "relationship-2"],
+  );
+  await collaboration.replaceHandoffRelationships(
+    "tenant-profile",
+    "partition-profile",
+    "handoff-1",
+    2,
+    [
+      relationship("relationship-2", "2026-07-16T03:00:00.000Z", {
+        stream_version: 2,
+      }),
+    ],
+  );
+  assert.deepEqual(
+    (
+      await collaboration.listRelationships({
+        tenant_id: "tenant-profile",
+        partition_id: "partition-profile",
+        limit: 10,
+      })
+    ).items.map((item) => item.relationship_id),
+    ["relationship-2"],
   );
 
   const firstAudit = audit("audit-1", "2026-07-16T01:00:00.000Z");

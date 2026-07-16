@@ -29,11 +29,11 @@ function key(...parts: readonly string[]): string {
   return JSON.stringify(parts);
 }
 
-function bounded(value: string, field: string): void {
+function bounded(value: string, field: string, maxLength = 128): void {
   if (
     typeof value !== "string" ||
     value.length === 0 ||
-    value.length > 128 ||
+    value.length > maxLength ||
     value.trim() !== value
   ) throw new TypeError(`${field} is invalid`);
 }
@@ -122,6 +122,7 @@ export class MemoryCollaborationViewStore implements CollaborationViewStore {
   private readonly responsibilities = new Map<string, ResponsibilityView>();
   private readonly timeline = new Map<string, TimelineEntry>();
   private readonly relationships = new Map<string, RelationshipView>();
+  private readonly relationshipVersions = new Map<string, number>();
   private readonly cursor: OpaqueCursorCodec;
   private readonly maxPageLimit: number;
 
@@ -181,7 +182,7 @@ export class MemoryCollaborationViewStore implements CollaborationViewStore {
     const view = structuredClone(input);
     bounded(view.tenant_id, "tenant_id");
     bounded(view.partition_id, "partition_id");
-    bounded(view.relationship_id, "relationship_id");
+    bounded(view.relationship_id, "relationship_id", 255);
     bounded(view.handoff_id, "handoff_id");
     positive(view.stream_version, "stream_version");
     timestamp(view.observed_at, "observed_at");
@@ -197,6 +198,70 @@ export class MemoryCollaborationViewStore implements CollaborationViewStore {
       }
     }
     this.relationships.set(storageKey, view);
+  }
+
+  async replaceHandoffRelationships(
+    tenantId: string,
+    partitionId: string,
+    handoffId: string,
+    streamVersion: number,
+    input: readonly RelationshipView[],
+  ): Promise<void> {
+    bounded(tenantId, "tenantId");
+    bounded(partitionId, "partitionId");
+    bounded(handoffId, "handoffId");
+    positive(streamVersion, "streamVersion");
+    const views = structuredClone(input);
+    const ids = new Set<string>();
+    for (const view of views) {
+      if (
+        view.tenant_id !== tenantId ||
+        view.partition_id !== partitionId ||
+        view.handoff_id !== handoffId ||
+        view.stream_version !== streamVersion
+      ) throw new Error("replacement relationship identity or version is inconsistent");
+      bounded(view.relationship_id, "relationship_id", 255);
+      bounded(view.source_id, "source_id", 255);
+      bounded(view.target_id, "target_id", 255);
+      timestamp(view.observed_at, "observed_at");
+      if (ids.has(view.relationship_id)) {
+        throw new Error("replacement relationship identity is duplicated");
+      }
+      ids.add(view.relationship_id);
+    }
+    const versionKey = key(tenantId, partitionId, handoffId);
+    const existingVersion = this.relationshipVersions.get(versionKey);
+    const existing = [...this.relationships.values()]
+      .filter((view) =>
+        view.tenant_id === tenantId &&
+        view.partition_id === partitionId &&
+        view.handoff_id === handoffId,
+      )
+      .sort((left, right) => left.relationship_id.localeCompare(right.relationship_id));
+    const sorted = [...views].sort((left, right) =>
+      left.relationship_id.localeCompare(right.relationship_id),
+    );
+    if (existingVersion !== undefined) {
+      if (streamVersion < existingVersion) throw new Error("stale relationship version");
+      if (streamVersion === existingVersion) {
+        if (isDeepStrictEqual(existing, sorted)) return;
+        throw new Error("relationship same version conflict");
+      }
+    }
+    for (const [storageKey, view] of this.relationships) {
+      if (
+        view.tenant_id === tenantId &&
+        view.partition_id === partitionId &&
+        view.handoff_id === handoffId
+      ) this.relationships.delete(storageKey);
+    }
+    for (const view of sorted) {
+      this.relationships.set(
+        key(view.tenant_id, view.partition_id, view.relationship_id),
+        view,
+      );
+    }
+    this.relationshipVersions.set(versionKey, streamVersion);
   }
 
   async getResponsibility(tenantId: string, handoffId: string) {
@@ -373,6 +438,12 @@ export class MemoryCollaborationViewStore implements CollaborationViewStore {
     for (const [storageKey, view] of this.relationships) {
       if (view.tenant_id === tenantId && view.partition_id === partitionId) {
         this.relationships.delete(storageKey);
+      }
+    }
+    for (const versionKey of this.relationshipVersions.keys()) {
+      const [tenant, partition] = JSON.parse(versionKey) as readonly string[];
+      if (tenant === tenantId && partition === partitionId) {
+        this.relationshipVersions.delete(versionKey);
       }
     }
   }
