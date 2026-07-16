@@ -10,6 +10,7 @@
   "dependencies": {
     "@work-fabric/exchange-core": "0.1.0",
     "@work-fabric/exchange-spi": "0.1.0",
+    "@work-fabric/operations-spi": "0.1.0",
     "@work-fabric/protocol-runtime": "0.1.0"
   },
   "devDependencies": {

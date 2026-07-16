@@ -6,7 +6,13 @@ import type {
   ProjectionCheckpointStore,
   ProjectionFailureStore,
 } from "@work-fabric/exchange-spi";
-import type { CollaborationViewStore } from "@work-fabric/operations-spi";
+import {
+  observeSemanticSafely,
+  type CollaborationViewStore,
+  type PartitionJournalPositionSource,
+  type SemanticObservation,
+  type SemanticTelemetryObserver,
+} from "@work-fabric/operations-spi";
 import {
   relationshipsFromModel,
   responsibilityFromModel,
@@ -61,9 +67,33 @@ export class CollaborationProjector {
     private readonly handoffs: HandoffReadModelStore,
     private readonly views: CollaborationViewStore,
     private readonly clock: Clock,
+    private readonly telemetry?: SemanticTelemetryObserver,
+    private readonly journalPosition?: PartitionJournalPositionSource,
   ) {}
 
   async runPartition(
+    partitionId: string,
+    limit: number,
+  ): Promise<CollaborationProjectionResult> {
+    const startedAt = performance.now();
+    const result = await this.runPartitionInternal(partitionId, limit);
+    const outcome: SemanticObservation["outcome"] =
+      result.kind === "blocked"
+        ? "failed"
+        : result.kind === "waiting"
+          ? "retryable"
+          : "succeeded";
+    observeSemanticSafely(this.telemetry, {
+      operation: "projection_batch",
+      outcome,
+      category: "projector",
+      duration_ms: Math.max(0, performance.now() - startedAt),
+      count: result.kind === "advanced" ? Math.max(1, result.processed) : 1,
+    });
+    return result;
+  }
+
+  private async runPartitionInternal(
     partitionId: string,
     limit: number,
   ): Promise<CollaborationProjectionResult> {
@@ -75,6 +105,27 @@ export class CollaborationProjector {
     nonNegative(position, "checkpoint position");
     const records = await this.journal.readPartition(partitionId, position, limit);
     if (records.length === 0) return { kind: "idle", position };
+    let observedLag = records.length;
+    if (this.journalPosition !== undefined) {
+      try {
+        const journalPosition = await this.journalPosition.load(
+          records[0]!.tenant_id,
+          partitionId,
+        );
+        if (journalPosition !== null && journalPosition > position) {
+          observedLag = journalPosition - position;
+        }
+      } catch {
+        // Telemetry enrichment cannot block projection progress.
+      }
+    }
+    observeSemanticSafely(this.telemetry, {
+      operation: "projection_lag",
+      outcome: "succeeded",
+      category: "projector",
+      duration_ms: 0,
+      count: observedLag,
+    });
     let processed = 0;
     for (const record of records) {
       if (record.partition_position !== position + 1) {

@@ -13,6 +13,7 @@ import type {
   SubscriptionFilter,
   SubscriptionStore,
 } from "@work-fabric/exchange-spi";
+import type { SemanticObservation, SemanticTelemetryObserver } from "@work-fabric/operations-spi";
 import {
   loadWfppSchemaValidator,
   type WfppSchemaValidator,
@@ -199,6 +200,7 @@ async function fixture(
   ],
   state = new MemoryExchangePersistence(),
   observer?: DispatchObserver,
+  telemetry?: SemanticTelemetryObserver,
 ) {
   const subscriptions = new MemorySubscriptionStore();
   for (const value of subscriptionsToPut) {
@@ -216,11 +218,33 @@ async function fixture(
     { base_delay_seconds: 2, max_delay_seconds: 30 },
     schemas,
     observer,
+    telemetry,
   );
   return { state, subscriptions, signal, clock, dispatcher };
 }
 
 describe("SignalDispatcher", () => {
+  it("emits bounded delivery outcome semantics", async () => {
+    const observed: SemanticObservation[] = [];
+    const { dispatcher } = await fixture(
+      [event(1)],
+      undefined,
+      undefined,
+      undefined,
+      { observe(value) { observed.push(value); } },
+    );
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+
+    expect(observed).toMatchObject([{
+      operation: "delivery_attempt",
+      outcome: "succeeded",
+      category: "delivery",
+      count: 1,
+    }]);
+    expect(JSON.stringify(observed)).not.toMatch(/tenant_01|subscription_01/);
+  });
+
   it.each([
     [
       "event_type",

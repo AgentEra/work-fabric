@@ -3,6 +3,11 @@ import type {
   RecoveryRequestClaim,
   RecoveryRequestStore,
 } from "@work-fabric/operations-spi";
+import {
+  observeSemanticSafely,
+  RecoveryStoreError,
+  type SemanticTelemetryObserver,
+} from "@work-fabric/operations-spi";
 import type { OperationAuditRecorder } from "./audit-recorder.js";
 
 export interface RecoveryActionPort {
@@ -14,6 +19,7 @@ export type RecoveryActionPorts = Readonly<Record<RecoveryKind, RecoveryActionPo
 export interface RecoveryWorkerOptions {
   now(): string;
   readonly audit?: OperationAuditRecorder;
+  readonly telemetry?: SemanticTelemetryObserver;
 }
 
 export interface RunRecoveryWorker {
@@ -47,6 +53,7 @@ export class RecoveryWorker {
     let completed = 0;
     let failed = 0;
     for (const claim of claims) {
+      const startedAt = performance.now();
       try {
         const result = await this.actions[claim.target.kind].execute(
           structuredClone(claim),
@@ -61,8 +68,24 @@ export class RecoveryWorker {
         });
         completed += 1;
         await this.audit(claim, "succeeded", null);
-      } catch {
+        observeSemanticSafely(this.options.telemetry, {
+          operation: "recovery_action",
+          outcome: "succeeded",
+          category: "recovery",
+          duration_ms: Math.max(0, performance.now() - startedAt),
+          count: 1,
+        });
+      } catch (error) {
         failed += 1;
+        if (error instanceof RecoveryStoreError && error.code === "claim_lost") {
+          observeSemanticSafely(this.options.telemetry, {
+            operation: "worker_lease_loss",
+            outcome: "conflicted",
+            category: "recovery",
+            duration_ms: Math.max(0, performance.now() - startedAt),
+            count: 1,
+          });
+        }
         try {
           await this.store.fail({
             tenant_id: claim.tenant_id,
@@ -76,6 +99,13 @@ export class RecoveryWorker {
           // A stale worker must never overwrite the current fenced owner.
         }
         await this.audit(claim, "failed", "recovery_failed");
+        observeSemanticSafely(this.options.telemetry, {
+          operation: "recovery_action",
+          outcome: "failed",
+          category: "recovery",
+          duration_ms: Math.max(0, performance.now() - startedAt),
+          count: 1,
+        });
       }
     }
     return { claimed: claims.length, completed, failed };

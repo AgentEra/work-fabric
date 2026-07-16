@@ -9,6 +9,11 @@ import {
   type ConnectorObservationSink,
 } from "@work-fabric/connector-spi";
 import { parseUtcTimestamp } from "@work-fabric/exchange-spi";
+import {
+  observeSemanticSafely,
+  type SemanticObservation,
+  type SemanticTelemetryObserver,
+} from "@work-fabric/operations-spi";
 
 import { ConnectorWorkerError } from "./errors.js";
 
@@ -49,6 +54,7 @@ export interface ConnectorWorkerOptions {
   readonly retry_policy: ConnectorRetryPolicy;
   readonly scope: ConnectorWorkerScope;
   readonly observer?: ConnectorWorkerObserver;
+  readonly telemetry?: SemanticTelemetryObserver;
 }
 
 export interface ConnectorWorkerBatchResult {
@@ -140,9 +146,34 @@ export class ConnectorWorker {
     };
 
     for (const claim of claims) {
+      const startedAt = performance.now();
       const outcome = await this.processClaim(claim);
       counts[outcome] += 1;
       this.options.observer?.record(outcome);
+      const semanticOutcome: SemanticObservation["outcome"] =
+        outcome === "completed"
+          ? "succeeded"
+          : outcome === "retried"
+            ? "retryable"
+            : outcome === "dead_lettered"
+              ? "dead_lettered"
+              : "conflicted";
+      observeSemanticSafely(this.options.telemetry, {
+        operation: "connector_mapping",
+        outcome: semanticOutcome,
+        category: "connector",
+        duration_ms: Math.max(0, performance.now() - startedAt),
+        count: 1,
+      });
+      if (outcome === "fenced") {
+        observeSemanticSafely(this.options.telemetry, {
+          operation: "worker_lease_loss",
+          outcome: "conflicted",
+          category: "connector",
+          duration_ms: 0,
+          count: 1,
+        });
+      }
       if (outcome === "fenced") break;
     }
     return counts;

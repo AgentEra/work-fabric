@@ -34,6 +34,12 @@ import { registerCollaborationRoutes } from "../routes/collaboration-routes.js";
 import { bindRequestAudit } from "../routes/route-authorization.js";
 import { registerOperationsRoutes } from "../routes/operations-routes.js";
 import { registerRecoveryRoutes } from "../routes/recovery-routes.js";
+import {
+  observeSemanticSafely,
+  safeSemanticCorrelationId,
+  type SemanticObservation,
+  type SemanticTelemetryObserver,
+} from "@work-fabric/operations-spi";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -54,6 +60,25 @@ export interface InternalServerDependencies {
   readonly audit?: OperationAuditRecorder;
   readonly operations?: OperationsQueryService;
   readonly recovery?: RecoveryService;
+  readonly telemetry?: SemanticTelemetryObserver;
+}
+
+function httpOperation(method: string, url: string): SemanticObservation["operation"] {
+  const path = url.split("?", 1)[0] ?? url;
+  if (method === "POST" && path === "/v1/commands") return "command";
+  if (path.startsWith("/v1/collaboration/")) return "collaboration_query";
+  if (path.startsWith("/v1/operations/") || path.startsWith("/v1/admin/")) {
+    return "operations_query";
+  }
+  return "http_request";
+}
+
+function httpOutcome(status: number): SemanticObservation["outcome"] {
+  if (status < 400) return "succeeded";
+  if (status === 401 || status === 403) return "denied";
+  if (status === 409) return "conflicted";
+  if (status === 429 || status >= 500) return "retryable";
+  return "failed";
 }
 
 export function createInternalServer(
@@ -65,6 +90,24 @@ export function createInternalServer(
     requestTimeout: config.request_timeout_ms,
     logger: false,
   });
+  if (dependencies.telemetry !== undefined) {
+    const requestStartedAt = new WeakMap<object, number>();
+    server.addHook("onRequest", async (request) => {
+      requestStartedAt.set(request, performance.now());
+    });
+    server.addHook("onResponse", async (request, reply) => {
+      const startedAt = requestStartedAt.get(request) ?? performance.now();
+      const correlationId = safeSemanticCorrelationId(request.id);
+      observeSemanticSafely(dependencies.telemetry, {
+        operation: httpOperation(request.method, request.url),
+        outcome: httpOutcome(reply.statusCode),
+        category: "http",
+        duration_ms: Math.max(0, performance.now() - startedAt),
+        count: 1,
+        ...(correlationId === undefined ? {} : { correlation_id: correlationId }),
+      });
+    });
+  }
   if (dependencies.audit !== undefined) {
     server.addHook("onRequest", async (request) => {
       bindRequestAudit(request, dependencies.audit as OperationAuditRecorder);

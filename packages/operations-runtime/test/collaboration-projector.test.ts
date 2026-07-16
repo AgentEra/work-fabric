@@ -16,6 +16,7 @@ import {
   MemoryHandoffReadModelStore,
 } from "@work-fabric/exchange-runtime";
 import type { EventJournal, EventRecord } from "@work-fabric/exchange-spi";
+import type { SemanticObservation } from "@work-fabric/operations-spi";
 
 import {
   COLLABORATION_PROJECTOR_ID,
@@ -143,7 +144,10 @@ function records(): readonly EventRecord[] {
   });
 }
 
-function fixture(inputRecords = records()) {
+function fixture(
+  inputRecords = records(),
+  observed: SemanticObservation[] = [],
+) {
   const journal = new StaticJournal(inputRecords);
   const persistence = new MemoryExchangePersistence();
   const models = new MemoryHandoffReadModelStore();
@@ -162,11 +166,26 @@ function fixture(inputRecords = records()) {
     models,
     operations.collaboration,
     clock,
+    { observe(value) { observed.push(value); } },
   );
-  return { persistence, models, operations, handoffProjector, projector };
+  return { persistence, models, operations, handoffProjector, projector, observed };
 }
 
 describe("CollaborationProjector", () => {
+  it("emits bounded batch and lag semantics without projection content", async () => {
+    const { handoffProjector, projector, observed } = fixture();
+    await handoffProjector.runPartition(partitionId, 10);
+    await projector.runPartition(partitionId, 10);
+
+    expect(observed.map(({ operation, outcome, category, count }) => ({
+      operation, outcome, category, count,
+    }))).toEqual([
+      { operation: "projection_lag", outcome: "succeeded", category: "projector", count: 4 },
+      { operation: "projection_batch", outcome: "succeeded", category: "projector", count: 4 },
+    ]);
+    expect(JSON.stringify(observed)).not.toMatch(/private result|tenant-operations|handoff-operations/);
+  });
+
   it("waits without poisoning when the prerequisite Handoff view is behind", async () => {
     const { projector, persistence } = fixture();
 

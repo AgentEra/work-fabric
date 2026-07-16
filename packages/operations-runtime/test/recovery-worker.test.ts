@@ -5,6 +5,7 @@ import {
   MemoryRecoveryStore,
 } from "@work-fabric/adapter-operations-memory";
 import { OperationAuditRecorder, RecoveryWorker } from "../src/index.js";
+import type { SemanticObservation } from "@work-fabric/operations-spi";
 
 const requests = [
   { kind: "connector_requeue" as const, connector_id: "connector-1", ingress_id: "ingress-1", available_at: "2026-07-16T05:01:00.000Z" },
@@ -25,18 +26,27 @@ describe("RecoveryWorker", () => {
       });
     }
     const calls: string[] = [];
+    const observed: SemanticObservation[] = [];
     const worker = new RecoveryWorker(store, {
       connector_requeue: { async execute() { calls.push("connector"); return { outcome_code: "requeued" }; } },
       delivery_replay: { async execute() { calls.push("delivery"); return { outcome_code: "replayed" }; } },
       projection_rebuild: { async execute() { calls.push("projection"); return { outcome_code: "rebuilt" }; } },
       discrepancy_acknowledge: { async execute() { calls.push("discrepancy"); return { outcome_code: "acknowledged" }; } },
-    }, { now: () => "2026-07-16T05:00:10.000Z" });
+    }, {
+      now: () => "2026-07-16T05:00:10.000Z",
+      telemetry: { observe(value) { observed.push(value); } },
+    });
 
     const result = await worker.runOnce({
       tenant_id: "tenant-1", worker_id: "worker-1", lease_seconds: 30, limit: 10,
     });
     expect(result).toEqual({ claimed: 4, completed: 4, failed: 0 });
     expect(calls).toEqual(["connector", "delivery", "projection", "discrepancy"]);
+    expect(observed).toHaveLength(4);
+    expect(observed.every((item) =>
+      item.operation === "recovery_action" && item.outcome === "succeeded"
+    )).toBe(true);
+    expect(JSON.stringify(observed)).not.toContain("recovery-1");
     for (let index = 0; index < 4; index += 1) {
       await expect(store.get("tenant-1", `recovery-${index + 1}`)).resolves.toMatchObject({
         state: "completed",
