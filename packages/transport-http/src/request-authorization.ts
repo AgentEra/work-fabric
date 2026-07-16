@@ -35,7 +35,17 @@ export type HttpAuthorizationResult =
       readonly endpoint_id: string;
       readonly delegation_id: string | null;
     }
-  | { readonly kind: "denied"; readonly problem: ProblemDetails };
+  | {
+      readonly kind: "denied";
+      readonly problem: ProblemDetails;
+      readonly principal?: ResolvedPrincipal;
+      readonly actor?: {
+        readonly actor_id: string;
+        readonly actor_type: "human" | "agent" | "system";
+      };
+      readonly endpoint_id?: string;
+      readonly delegation_id?: string | null;
+    };
 
 function denied(status: 401 | 403, code: string, title: string): HttpAuthorizationResult {
   return { kind: "denied", problem: createProblemDetails(status, code, title) };
@@ -60,11 +70,14 @@ export async function authorizeHttpRequest(
       candidate.endpoint_ids.includes(request.endpoint_id),
   );
   if (claim === undefined) {
-    return denied(
-      403,
-      "permission_denied",
-      "The Principal cannot represent this Actor and Endpoint",
-    );
+    return {
+      ...denied(
+        403,
+        "permission_denied",
+        "The Principal cannot represent this Actor and Endpoint",
+      ),
+      principal,
+    };
   }
   const decision = await dependencies.authority.authorize({
     principal,
@@ -79,7 +92,13 @@ export async function authorizeHttpRequest(
         : request.resource_id,
   });
   if (decision.kind === "deny") {
-    return denied(403, "permission_denied", "The operation is not authorized");
+    return {
+      ...denied(403, "permission_denied", "The operation is not authorized"),
+      principal,
+      actor: { actor_id: claim.actor_id, actor_type: claim.actor_type },
+      endpoint_id: request.endpoint_id,
+      delegation_id: request.delegation_id,
+    };
   }
   return {
     kind: "authorized",

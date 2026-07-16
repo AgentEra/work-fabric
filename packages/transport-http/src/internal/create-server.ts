@@ -29,7 +29,9 @@ import type { EndpointInboxQueryService } from "@work-fabric/exchange-runtime";
 import type { FeishuWebhookDependencies } from "../public-types.js";
 import { registerFeishuWebhookRoute } from "../routes/feishu-webhook-route.js";
 import type { CollaborationQueryService } from "@work-fabric/operations-runtime";
+import type { OperationAuditRecorder } from "@work-fabric/operations-runtime";
 import { registerCollaborationRoutes } from "../routes/collaboration-routes.js";
+import { bindRequestAudit } from "../routes/route-authorization.js";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -47,6 +49,7 @@ export interface InternalServerDependencies {
   readonly endpoint_inbox?: EndpointInboxQueryService;
   readonly feishu_webhook?: FeishuWebhookDependencies;
   readonly collaboration?: CollaborationQueryService;
+  readonly audit?: OperationAuditRecorder;
 }
 
 export function createInternalServer(
@@ -58,6 +61,14 @@ export function createInternalServer(
     requestTimeout: config.request_timeout_ms,
     logger: false,
   });
+  if (dependencies.audit !== undefined) {
+    server.addHook("onRequest", async (request) => {
+      bindRequestAudit(request, dependencies.audit as OperationAuditRecorder);
+    });
+    server.addHook("onResponse", async (request, reply) => {
+      await dependencies.audit?.completeHttp(request.id, reply.statusCode);
+    });
+  }
   server.setErrorHandler((error: FastifyError, request, reply) => {
     const status =
       error.statusCode === 413
@@ -89,7 +100,10 @@ export function createInternalServer(
       .code(status)
       .send(createProblemDetails(status, code, title, { instance: request.url }));
   });
-  registerCommandRoute(server, dependencies.application, dependencies.authenticator);
+  registerCommandRoute(server, dependencies.application, dependencies.authenticator, {
+    ...(dependencies.identity === undefined ? {} : { identity: dependencies.identity }),
+    ...(dependencies.audit === undefined ? {} : { audit: dependencies.audit }),
+  });
   if (dependencies.feishu_webhook !== undefined) {
     registerFeishuWebhookRoute(server, dependencies.feishu_webhook, config);
   }
