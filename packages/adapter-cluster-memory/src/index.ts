@@ -1,5 +1,6 @@
 import {
   CLUSTER_REQUIRED_CAPABILITIES,
+  WAKEUP_TRANSPORT_REQUIRED_CAPABILITIES,
   PARTITION_WORK_KINDS,
   clusterIdentifier,
   clusterTimestamp,
@@ -20,7 +21,8 @@ const manifest: ClusterCapabilityManifest = {
   profile: "workfabric.cluster.v1",
   adapter: "memory",
   capabilities: Object.fromEntries(
-    CLUSTER_REQUIRED_CAPABILITIES.map((capability) => [capability, true]),
+    [...CLUSTER_REQUIRED_CAPABILITIES, ...WAKEUP_TRANSPORT_REQUIRED_CAPABILITIES]
+      .map((capability) => [capability, true]),
   ),
 };
 

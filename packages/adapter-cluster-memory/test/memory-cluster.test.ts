@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
 
-import { verifyClusterProfile } from "@work-fabric/exchange-conformance";
+import {
+  verifyClusterProfile,
+  verifyWakeupTransportProfile,
+} from "@work-fabric/exchange-conformance";
 import { MemoryClusterAdapter } from "../src/index.js";
 
 describe("MemoryClusterAdapter", () => {
   it("satisfies the reusable cluster profile", async () => {
     await verifyClusterProfile((seed) => new MemoryClusterAdapter(seed));
+  });
+
+  it("satisfies the standalone Wakeup transport profile", async () => {
+    await verifyWakeupTransportProfile(() => new MemoryClusterAdapter());
   });
 
   it("rejects invalid scans and wakeups", async () => {

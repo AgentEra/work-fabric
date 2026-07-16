@@ -19,6 +19,16 @@ export const CLUSTER_REQUIRED_CAPABILITIES = [
   "deep_clone",
 ] as const;
 
+export const WAKEUP_TRANSPORT_REQUIRED_CAPABILITIES = [
+  "tenant_isolation",
+  "bounded_delivery",
+  "explicit_settlement",
+  "duplicate_wakeup_tolerance",
+  "lost_wakeup_poll_recovery",
+  "payload_size_limit",
+  "deep_clone",
+] as const;
+
 export interface ClusterCapabilityManifest {
   readonly profile: "workfabric.cluster.v1";
   readonly adapter: string;

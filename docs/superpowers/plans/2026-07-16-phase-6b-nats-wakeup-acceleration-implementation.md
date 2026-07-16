@@ -35,7 +35,7 @@
 - Consumes: existing `PartitionWakeupPublisher`, `PartitionWakeupConsumer`, `PartitionWakeup`, `WakeupDelivery`.
 - Produces: `WAKEUP_TRANSPORT_REQUIRED_CAPABILITIES`, `WakeupTransportProfileSubject`, `WakeupTransportProfileFactory`, `verifyWakeupTransportProfile(factory)`.
 
-- [ ] **Step 1: Write the failing conformance test**
+- [x] **Step 1: Write the failing conformance test**
 
 ```ts
 it("verifies a standalone metadata wakeup transport", async () => {
@@ -49,7 +49,7 @@ The profile must publish the canonical fixture twice, assert immutable cloned
 deliveries, Retry/redelivery, Ack removal, second-settlement rejection,
 pre-aborted `next()` rejection and all required capability flags.
 
-- [ ] **Step 2: Run the red test**
+- [x] **Step 2: Run the red test**
 
 Run:
 
@@ -60,7 +60,7 @@ npx vitest run packages/exchange-conformance/test/wakeup-transport-profile.test.
 Expected: FAIL because `verifyWakeupTransportProfile` and the capability list
 do not exist.
 
-- [ ] **Step 3: Add the technology-neutral capability list**
+- [x] **Step 3: Add the technology-neutral capability list**
 
 ```ts
 export const WAKEUP_TRANSPORT_REQUIRED_CAPABILITIES = [
@@ -78,7 +78,7 @@ Keep `CLUSTER_REQUIRED_CAPABILITIES` for the composite catalog profile and add
 the Wakeup flags to the Memory Adapter manifest without renaming the
 `workfabric.cluster.v1` profile.
 
-- [ ] **Step 4: Implement the reusable profile**
+- [x] **Step 4: Implement the reusable profile**
 
 ```ts
 export type WakeupTransportProfileSubject =
@@ -96,7 +96,7 @@ export async function verifyWakeupTransportProfile(
 Use `node:assert`, the existing canonical cluster fixture and
 `assertCapabilities`. Never inspect Adapter-private queues.
 
-- [ ] **Step 5: Run focused and type verification**
+- [x] **Step 5: Run focused and type verification**
 
 ```sh
 npm run typecheck
@@ -105,7 +105,7 @@ npx vitest run packages/exchange-conformance/test/wakeup-transport-profile.test.
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```sh
 git add packages/cluster-spi packages/exchange-conformance packages/adapter-cluster-memory
