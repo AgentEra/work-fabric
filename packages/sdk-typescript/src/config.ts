@@ -151,7 +151,7 @@ export function normalizeClientOptions(
   if (streamReconnect.baseDelayMs > streamReconnect.maxDelayMs) {
     throw new TypeError("baseDelayMs must not exceed maxDelayMs");
   }
-  const fetchImplementation = input.fetch ?? globalThis.fetch;
+  const fetchImplementation = input.fetch ?? globalThis.fetch?.bind(globalThis);
   if (typeof fetchImplementation !== "function") {
     throw new TypeError("fetch must be available");
   }

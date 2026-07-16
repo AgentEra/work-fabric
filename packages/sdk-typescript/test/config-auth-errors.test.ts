@@ -1,6 +1,6 @@
 import { readFile, readdir } from "node:fs/promises";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   BearerTokenProvider,
@@ -35,6 +35,30 @@ describe("SDK configuration", () => {
     expect(config.requestTimeoutMs).toBeGreaterThan(0);
     expect(config.queryRetry.maxRetries).toBe(2);
     expect(config.streamReconnect.maxReconnects).toBe(5);
+  });
+
+  it("binds the runtime fetch implementation to the global object", async () => {
+    const brandCheckedFetch = vi.fn(function (this: unknown) {
+      if (this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(new Response(null, { status: 204 }));
+    }) as unknown as typeof globalThis.fetch;
+    vi.stubGlobal("fetch", brandCheckedFetch);
+
+    try {
+      const config = normalizeClientOptions({
+        baseUrl: "https://fabric.example.test",
+        tenantId: "tenant_01",
+        exchangeId: "exchange_01",
+        representation,
+        authentication: new BearerTokenProvider("token"),
+      });
+
+      await expect(config.fetch("https://fabric.example.test/health")).resolves.toMatchObject({
+        status: 204,
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each([
