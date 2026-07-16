@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+
 import Fastify, { type FastifyError, type FastifyInstance } from "fastify";
 
 import type { HttpServiceConfig } from "../config.js";
@@ -87,6 +89,7 @@ export function createInternalServer(
 ): FastifyInstance {
   const server = Fastify({
     bodyLimit: config.body_limit_bytes,
+    genReqId: () => `req-${randomUUID()}`,
     requestTimeout: config.request_timeout_ms,
     logger: false,
   });

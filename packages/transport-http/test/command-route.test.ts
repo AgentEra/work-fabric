@@ -57,6 +57,33 @@ const envelope = {
 };
 
 describe("POST /v1/commands", () => {
+  it("generates request identifiers that remain unique across service instances", async () => {
+    const first = fixture().service;
+    const second = fixture().service;
+
+    try {
+      const firstResponse = await first.dispatch({
+        method: "POST",
+        url: "/v1/commands",
+        headers: { "content-type": "application/json" },
+        payload: envelope,
+      });
+      const secondResponse = await second.dispatch({
+        method: "POST",
+        url: "/v1/commands",
+        headers: { "content-type": "application/json" },
+        payload: envelope,
+      });
+
+      expect(firstResponse.headers["x-request-id"]).not.toBe(
+        secondResponse.headers["x-request-id"],
+      );
+    } finally {
+      await first.close();
+      await second.close();
+    }
+  });
+
   it("passes the canonical body and Bearer evidence to ExchangeApplication", async () => {
     const { service, calls } = fixture();
     const response = await service.dispatch({
