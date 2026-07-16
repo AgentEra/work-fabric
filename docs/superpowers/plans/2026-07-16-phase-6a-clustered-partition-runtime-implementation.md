@@ -207,7 +207,7 @@ git commit -m "feat(cluster): define partition runtime contracts"
 - Consumes: Task 1 cluster contracts and conformance.
 - Produces: `MemoryClusterAdapter` and `TenantFairReadyQueue` with `offer()`, `take()`, `size`, `dropped`, `clear()`.
 
-- [ ] **Step 1: Write failing fairness and coalescing tests**
+- [x] **Step 1: Write failing fairness and coalescing tests**
 
 ```ts
 it("coalesces identities and serves tenants round-robin", () => {
@@ -234,20 +234,20 @@ it("drops new identities at capacity without dropping newer coalesced state", ()
 });
 ```
 
-- [ ] **Step 2: Run and confirm missing queue failure**
+- [x] **Step 2: Run and confirm missing queue failure**
 
 Run: `npm test -- packages/cluster-runtime/test/ready-queue.test.ts`
 
 Expected: FAIL because `TenantFairReadyQueue` is missing.
 
-- [ ] **Step 3: Implement queue with bounded maps**
+- [x] **Step 3: Implement queue with bounded maps**
 
 Use one `Map<tenant_id, Map<identity, item>>`, a rotating tenant array and an
 identity key of `tenant_id\u0000partition_id\u0000kind`. Replacing an existing
 identity keeps the greater `observed_position` and later `available_at` while
 not growing queue size.
 
-- [ ] **Step 4: Implement Memory Adapter and run conformance**
+- [x] **Step 4: Implement Memory Adapter and run conformance**
 
 The Adapter stores cloned work items ordered by `available_at`,
 `partition_id`, work-kind order. Its wakeup queue requires exactly one of

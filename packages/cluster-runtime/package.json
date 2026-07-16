@@ -1,0 +1,13 @@
+{
+  "name": "@work-fabric/cluster-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/cluster-spi": "0.1.0"
+  }
+}
