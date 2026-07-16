@@ -521,7 +521,7 @@ and the explicit non-claim that this measures participant work.
 - Consumes: Phase 6A HTTP/SDK lifecycle and Cluster Host; production NATS Adapter via fake-disconnectable lower port for deterministic fault proof.
 - Produces: outage/recovery integration proof, dependency/safety gates and operator documentation.
 
-- [ ] **Step 1: Write the failing fallback integration test**
+- [x] **Step 1: Write the failing fallback integration test**
 
 The test creates authoritative lifecycle events through the real HTTP and
 TypeScript SDK, makes NATS publish/pull unavailable, runs two Cluster Hosts,
@@ -529,7 +529,7 @@ and proves database catalog polling still advances Handoff and collaboration
 projections plus Signal delivery. After Broker recovery, stale/repeated hints
 must not add Signal deliveries or advance checkpoints twice.
 
-- [ ] **Step 2: Run red and connect the Adapter seam**
+- [x] **Step 2: Run red and connect the Adapter seam**
 
 ```sh
 npx vitest run packages/service-node/test/phase-6b-nats-fallback.integration.test.ts
@@ -539,7 +539,7 @@ Expected initial failure: missing NATS Adapter/fault fixture. Implement only
 deployment injection needed by the test; do not add NATS imports or config to
 service-node.
 
-- [ ] **Step 3: Strengthen static boundaries**
+- [x] **Step 3: Strengthen static boundaries**
 
 The gate must enforce:
 
@@ -553,14 +553,14 @@ The gate must enforce:
 
 Add bad fixtures for each dependency and telemetry rule.
 
-- [ ] **Step 4: Document exact operating boundary**
+- [x] **Step 4: Document exact operating boundary**
 
 Document topology planning/apply, separate management/runtime credentials,
 TLS/NKey/JWT responsibility, HMAC subject key handling, rotation via new key
 ID, Tenant assignment, monitoring, Broker degradation, database polling,
 shutdown order and resource retention. Mark 6B complete only after all gates.
 
-- [ ] **Step 5: Run focused verification and commit**
+- [x] **Step 5: Run focused verification and commit**
 
 ```sh
 npm run typecheck

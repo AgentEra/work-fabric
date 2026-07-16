@@ -21,6 +21,16 @@ async function fixture(source: string): Promise<string> {
   return root;
 }
 
+async function writeFixture(
+  root: string,
+  relativePath: string,
+  source: string,
+): Promise<void> {
+  const path = join(root, relativePath);
+  await mkdir(path.slice(0, path.lastIndexOf("/")), { recursive: true });
+  await writeFile(path, source);
+}
+
 describe("Phase 6A release gates", () => {
   it("accepts the repository cluster boundary", async () => {
     await expect(checkClusterBoundaries()).resolves.toMatchObject({
@@ -33,6 +43,38 @@ describe("Phase 6A release gates", () => {
     await expect(checkClusterBoundaries(await fixture(
       'import postgres from "postgres";\nexport const role = "workflow scheduler";\n',
     ))).rejects.toThrow(/deployment technology|participant-execution/);
+  });
+
+  it("rejects NATS leakage, Broker SPI vocabulary and domain-rich wakeup codecs", async () => {
+    const root = await fixture("export {};\n");
+    await writeFixture(
+      root,
+      "packages/other/src/nats-leak.ts",
+      'import { connect } from "@nats-io/transport-node";\nvoid connect;\n',
+    );
+    await writeFixture(
+      root,
+      "packages/cluster-spi/src/broker.ts",
+      "export interface NatsBrokerConsumer {}\n",
+    );
+    await writeFixture(
+      root,
+      "packages/adapter-cluster-nats/src/wakeup-codec.ts",
+      'import type { HandoffResult } from "@work-fabric/exchange-core";\nexport type Bad = HandoffResult;\n',
+    );
+    await expect(checkClusterBoundaries(root)).rejects.toThrow(
+      /NATS outside|Broker vocabulary|domain content/,
+    );
+  });
+
+  it("rejects direct unbounded Broker result batches", async () => {
+    const root = await fixture("export {};\n");
+    await writeFixture(
+      root,
+      "packages/other/src/unbounded.ts",
+      "export async function bad(values: any[]) { await Promise.all(values.map((value) => value.publish())); }\n",
+    );
+    await expect(checkClusterBoundaries(root)).rejects.toThrow(/without a local bound/);
   });
 
   it("runs a bounded clustered runtime benchmark smoke", async () => {

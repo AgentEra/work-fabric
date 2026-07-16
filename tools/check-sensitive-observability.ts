@@ -18,6 +18,7 @@ export async function checkSensitiveObservability(root = resolve(".")): Promise<
     "packages/operations-runtime/src/recovery-worker.ts",
     "packages/transport-http/src/internal/create-server.ts",
     "packages/cluster-runtime/src/telemetry.ts",
+    "packages/adapter-cluster-nats/src/nats-wakeup-consumer.ts",
   ];
   const violations: string[] = [];
   let calls = 0;
@@ -29,7 +30,7 @@ export async function checkSensitiveObservability(root = resolve(".")): Promise<
       for (const required of ["operation", "outcome", "category", "duration_ms", "count"]) {
         if (!new RegExp(`\\b${required}(?:\\s*:|\\s*[,}])`).test(block)) violations.push(`${relative} telemetry is missing ${required}`);
       }
-      if (/\b(?:payload|body|content|message|token|secret|credential|tenant_id|actor_id|endpoint_id|handoff_id|event_id|resource_id)\s*:/.test(block)) {
+      if (/\b(?:payload|body|content|message|token|secret|credential|tenant_id|partition_id|actor_id|endpoint_id|handoff_id|event_id|wakeup_id|resource_id|subject|stream|consumer|url)\s*:/.test(block)) {
         violations.push(`${relative} telemetry contains content or high-cardinality identity`);
       }
     }

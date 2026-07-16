@@ -29,9 +29,10 @@ flowchart LR
 ```
 
 Polling recovers a lost hint. Queue coalescing and owner checkpoints make a
-duplicate hint harmless. The design therefore remains correct without a
-Broker; a later Broker adapter can reduce discovery latency without becoming a
-second source of truth.
+duplicate hint harmless. Phase 6B provides an optional NATS JetStream Adapter
+to reduce discovery latency without becoming a second source of truth. NATS
+is injected only through the existing technology-neutral Publisher/Consumer
+ports; the Host and database scan remain unchanged.
 
 ## Mechanical work kinds
 
@@ -122,9 +123,16 @@ npm run check:sensitive-observability
 npm run benchmark:cluster -- --partitions 100 --tenants 4 --concurrency 8 --samples 3
 npm run verify:exchange
 npm run verify:postgres
+npm run verify:nats:release
 ```
 
 The Phase 6A round-trip uses the real HTTP/TypeScript SDK lifecycle, two
 competing hosts, a lost wakeup, a duplicate wakeup, an external Signal probe
 and forced stale-owner takeover. It requires the verified Handoff, both
 projections and five unique delivered event IDs to agree.
+
+The Phase 6B fallback proof makes publish and pull unavailable, runs two Hosts
+from the authoritative catalog, then recovers the transport and injects stale
+duplicate hints. Handoff/collaboration projection and Signal positions advance
+once. Deployment topology, credentials, key rotation and outage handling are
+documented in [NATS Wakeup deployment](nats-wakeup-deployment.md).

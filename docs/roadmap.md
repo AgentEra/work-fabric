@@ -15,7 +15,7 @@ and repository verification are implemented.
 | 4B | Generic Connector seam and Feishu Connector | Complete |
 | 5 | Operations, observability, read projections, read-mostly Console | Complete |
 | 6A | Clustered partition ownership and database-backed recovery | Complete |
-| 6B | Broker-backed Signal/wakeup acceleration | Planned |
+| 6B | Broker-backed Signal/wakeup acceleration | Complete |
 | 7 | Cross-Exchange federation profile | Planned |
 
 ## Phase 4B completion boundary
@@ -75,10 +75,17 @@ rejects clustered ownership.
 See [Clustered partition runtime](cluster-runtime.md) and the reproducible
 [Phase 6A performance baseline](performance-cluster-baseline.md).
 
-## Phase 6B intent
+## Phase 6B completion boundary
 
-Phase 6B may add a production Broker adapter for metadata wakeups and Signal
-acceleration. It must keep the Phase 6A catalog and persisted positions as
-authority, preserve partition ordering, explicit Ack, fenced ownership, public
-WFPP/SDK contracts and the execution boundary. Broker work is not permission
-to rank targets or decide/perform participant work.
+Phase 6B adds a production NATS JetStream Adapter for strict 4,096-byte
+metadata Wakeups, HMAC-isolated Tenant subjects, bounded explicit settlement,
+declarative non-destructive topology management, official-server integration
+proof and a reproducible performance baseline. The Phase 6A catalog and
+persisted positions remain authoritative, and database polling remains active
+during health, outage and recovery.
+
+No public WFPP, HTTP or SDK contract changed. NATS dependencies are confined
+to the technology-specific Adapter and deployment tools. Phase 6B does not
+rank targets, schedule workflows, reason for Agents, call models/tools or
+perform participant work. See [NATS Wakeup deployment](nats-wakeup-deployment.md)
+and the [performance baseline](performance-nats-wakeup-baseline.md).

@@ -674,6 +674,14 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - PostgreSQL migration 008 提供 RLS 与稳定 keyset readiness；SQLite 继续是单进程本地形态并拒绝 cluster 配置。
 - Operations 只公开低基数聚合快照，不暴露 Tenant/Partition/Owner/Fencing/Event 身份。
 
+阶段 6B 在上述端口外增加可选 NATS JetStream Wakeup 加速：
+
+- Broker 只保存严格、有界的元数据提示；Journal、Outbox、Checkpoint、Delivery Position、Catalog 和 Lease 仍在数据库中权威持久化。
+- Tenant Subject 使用部署密钥的 HMAC token；Topology 由显式 plan/verify/apply 工具管理，任何路径都不自动 delete/purge。
+- Publisher/Consumer 采用 PubAck、durable pull、显式 Ack/延迟 Retry、毒消息终止和单 outstanding pull；丢失、重复、过期均由既有轮询/检查点语义吸收。
+- NATS 类型只存在于 `adapter-cluster-nats` 和部署工具，不进入 Core、Cluster SPI/Runtime、Service、HTTP、SDK 或 WFPP。
+- Broker 故障只降低反应速度，不阻止 Handoff/协作投影和 Signal 投递；它不新增调度、推理或参与方执行职责。
+
 ```mermaid
 flowchart LR
     API6["API role<br/>public HTTP + SDK"] --> Facts6["Authoritative Handoff facts<br/>Journal + Outbox"]
@@ -702,7 +710,7 @@ flowchart LR
     Owners -. "never participant execution" .-> External["External work systems and Agent runtimes"]
 ```
 
-运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，可复现性能范围见 [Phase 5](performance-baseline.md) 与 [Phase 6A](performance-cluster-baseline.md) 基线。
+运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md) 与 [Phase 6B](performance-nats-wakeup-baseline.md) 基线。
 
 ## 20. 阶段路线与执行状态
 
@@ -717,7 +725,7 @@ flowchart LR
 | 4B | Generic Connector + 飞书 Connector | 已完成 |
 | 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
 | 6A | 集群分区所有权与数据库恢复 | 已完成 |
-| 6B | Broker-backed Signal/Wakeup 加速 | 未开始 |
+| 6B | Broker-backed Signal/Wakeup 加速 | 已完成 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B/3C 建立 HTTP Service Binding 和统一 SDK；4A/4B 证明 Agent 与飞书 Connector 的公共连接边界；阶段 5 补齐操作性与可替换呈现；阶段 6A 再以双 Host、故障注入和 fencing 证明集群机械所有权。下一步 6B 只能增加 Broker 加速，不能取代数据库权威或改变连接/交接定位。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+实施严格遵循上述顺序。3A–5 建立公共连接、Agent/Connector 边界与操作性；6A 以双 Host、故障注入和 fencing 证明集群机械所有权；6B 再以官方 NATS Server、断线回退和静态门禁证明 Broker 仅是提示加速。下一步是阶段 7 Federation，仍不能取代 Exchange 权威或改变连接/交接定位。单独维护的阶段状态见 [Roadmap](roadmap.md)。
