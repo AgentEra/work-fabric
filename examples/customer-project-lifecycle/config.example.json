@@ -1,0 +1,37 @@
+{
+  "storage_profile": "sqlite-local",
+  "role": "all",
+  "tenant_id": "replace-with-tenant-id",
+  "exchange_id": "replace-with-exchange-id",
+  "cursor_secret": "replace-with-at-least-32-random-characters",
+  "listen": { "host": "127.0.0.1", "port": 8787 },
+  "sqlite": { "location": "./var/work-fabric.db", "busy_timeout_ms": 5000 },
+  "identities": [
+    {
+      "authentication_evidence": { "bearer_token": "replace-at-runtime" },
+      "principal": {
+        "principal_id": "replace-with-principal-id",
+        "tenant_id": "replace-with-tenant-id",
+        "actor_claims": [
+          {
+            "actor_id": "replace-with-actor-id",
+            "actor_type": "human",
+            "endpoint_ids": ["replace-with-endpoint-id"]
+          }
+        ],
+        "attributes": {}
+      }
+    }
+  ],
+  "authority_rules": [
+    {
+      "tenant_id": "replace-with-tenant-id",
+      "principal_id": "replace-with-principal-id",
+      "actor_id": "replace-with-actor-id",
+      "actor_type": "human",
+      "endpoint_id": "replace-with-endpoint-id",
+      "action": "workfabric.operations.health.read.v1",
+      "resource_id": null
+    }
+  ]
+}

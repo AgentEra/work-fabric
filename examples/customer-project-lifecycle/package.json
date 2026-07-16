@@ -1,0 +1,6 @@
+{
+  "name": "@work-fabric/example-customer-project-lifecycle",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module"
+}
