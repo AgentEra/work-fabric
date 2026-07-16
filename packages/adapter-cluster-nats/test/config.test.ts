@@ -12,7 +12,7 @@ describe("normalizeNatsWakeupRuntimeConfig", () => {
   });
 
   it("rejects every value outside the global bounds", () => {
-    expect(() => normalizeNatsWakeupRuntimeConfig({ pull_expires_ms: 99 }))
+    expect(() => normalizeNatsWakeupRuntimeConfig({ pull_expires_ms: 999 }))
       .toThrow(/pull_expires_ms/);
     expect(() => normalizeNatsWakeupRuntimeConfig({ retry_delay_ms: 60_001 }))
       .toThrow(/retry_delay_ms/);

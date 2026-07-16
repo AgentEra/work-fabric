@@ -286,7 +286,8 @@ export function createNatsWakeupAdapter(
 
 Bounds are:
 
-- pull expiry: 100–30,000 ms, default 1,000 ms;
+- pull expiry: 1,000–30,000 ms, default 1,000 ms (matching the official
+  JetStream pull API minimum);
 - Retry delay: 100–60,000 ms, default 1,000 ms;
 - poison messages terminated per `next()` call: 1–100, default 10.
 

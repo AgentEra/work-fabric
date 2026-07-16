@@ -33,7 +33,7 @@ export function normalizeNatsWakeupRuntimeConfig(
       input.pull_expires_ms,
       1_000,
       "pull_expires_ms",
-      100,
+      1_000,
       30_000,
     ),
     retry_delay_ms: bounded(

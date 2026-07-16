@@ -249,7 +249,7 @@ Expected: PASS.
 - Consumes: Task 1 Wakeup profile; Task 2 codecs/config/errors; injected `NatsConnection`.
 - Produces: internal `WakeupJetStreamPort`, `NatsWakeupPublisher`, `NatsWakeupConsumer`, `createNatsWakeupAdapter(options)`.
 
-- [ ] **Step 1: Write failing Publisher behavior tests**
+- [x] **Step 1: Write failing Publisher behavior tests**
 
 Assert:
 
@@ -265,7 +265,7 @@ Also assert timeout/disconnect/server failures return `retryable_failure`,
 invalid input throws before the fake port is called, and no raw Broker error is
 returned.
 
-- [ ] **Step 2: Run Publisher tests red, then implement minimal Publisher**
+- [x] **Step 2: Run Publisher tests red, then implement minimal Publisher**
 
 ```sh
 npx vitest run packages/adapter-cluster-nats/test/nats-wakeup-publisher.test.ts
@@ -292,13 +292,13 @@ The real implementation wraps the `@nats-io/jetstream` 3.1.0 API over an
 injected `@nats-io/transport-node` connection and owns no
 connection credentials.
 
-- [ ] **Step 3: Write failing Consumer settlement tests**
+- [x] **Step 3: Write failing Consumer settlement tests**
 
 Cover one valid delivery, Ack once, delayed Nak once, mixed/double settlement,
 pre-aborted call, abort during pull, pull expiry, closed Adapter and deep clone.
 The fake message exposes `ack()`, `nak(delayMs)` and `term()` call counts.
 
-- [ ] **Step 4: Implement one-outstanding-pull Consumer**
+- [x] **Step 4: Implement one-outstanding-pull Consumer**
 
 ```ts
 export class NatsWakeupConsumer implements PartitionWakeupConsumer {
@@ -311,14 +311,14 @@ Race the lower-port pull with the caller AbortSignal, but configure the server
 request with `expires_ms` so an aborted request cannot remain unbounded. Guard
 settlement locally before sending Ack/Nak.
 
-- [ ] **Step 5: Add bounded poison handling**
+- [x] **Step 5: Add bounded poison handling**
 
 Within one `next()` call, terminate at most `max_poison_per_pull` malformed,
 oversized or subject-mismatched messages. Return `null` after the bound and emit
 only a fixed semantic outcome through the optional observer. Never include
 subject, Tenant, payload or Broker exception in telemetry.
 
-- [ ] **Step 6: Compose Publisher/Consumer and run conformance**
+- [x] **Step 6: Compose Publisher/Consumer and run conformance**
 
 ```ts
 export async function createNatsWakeupAdapter(
@@ -330,7 +330,7 @@ Two factories sharing one fake stream must pass
 `verifyWakeupTransportProfile`. Keep connection close/drain deployment-owned;
 Adapter `close()` cancels pulls and refuses new operations.
 
-- [ ] **Step 7: Run focused tests and commit**
+- [x] **Step 7: Run focused tests and commit**
 
 ```sh
 npm run typecheck

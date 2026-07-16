@@ -17,6 +17,7 @@ export const SEMANTIC_OPERATIONS = [
   "cluster_turn",
   "cluster_queue_overload",
   "cluster_drain",
+  "cluster_wakeup_transport",
 ] as const;
 
 export const SEMANTIC_OUTCOMES = [
