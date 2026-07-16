@@ -424,14 +424,14 @@ Expected: PASS.
 - Consumes: production topology and Adapter.
 - Produces: `verify:nats`, `benchmark:wakeup`, official temporary NATS Server release runner and recorded baseline.
 
-- [ ] **Step 1: Write the live test behind `NATS_TEST_URL`**
+- [x] **Step 1: Write the live test behind `NATS_TEST_URL`**
 
 Use a cryptographically unique prefix/stream/consumer, provision replicas 1,
 and test Publish/Ack, delayed Retry/redelivery, duplicate message ID tolerance
 and two Adapter instances sharing one durable consumer. Cleanup deletes only
 the exact unique test consumer/stream.
 
-- [ ] **Step 2: Verify explicit skip without a server**
+- [x] **Step 2: Verify explicit skip without a server**
 
 ```sh
 npx vitest run packages/adapter-cluster-nats/test/nats-wakeup.live.test.ts
@@ -440,7 +440,7 @@ npx vitest run packages/adapter-cluster-nats/test/nats-wakeup.live.test.ts
 Expected: one explicit skip when `NATS_TEST_URL` is absent; all non-live tests
 remain executed by `verify:nats`.
 
-- [ ] **Step 3: Add an official release verifier**
+- [x] **Step 3: Add an official release verifier**
 
 `tools/nats-server-release.ts` downloads the exact official NATS Server 2.12.1
 archive for Darwin arm64 or Linux x64/arm64 into an OS temporary directory,
@@ -455,7 +455,7 @@ message rather than silently skipping.
 The unit test covers asset selection, checksum mismatch and cleanup using
 injected downloader/process ports without network access.
 
-- [ ] **Step 4: Run the live proof on the official temporary server**
+- [x] **Step 4: Run the live proof on the official temporary server**
 
 Add these exact scripts:
 
@@ -475,7 +475,7 @@ npm run verify:nats:release
 Expected: all NATS package tests pass and the live test count contains zero
 skips.
 
-- [ ] **Step 5: Implement the bounded live benchmark**
+- [x] **Step 5: Implement the bounded live benchmark**
 
 ```ts
 export interface NatsWakeupBenchmarkOptions {
@@ -491,7 +491,7 @@ metadata only, Ack every delivery, and report environment/configuration,
 PubAck p50/p95/p99, consume-to-Ack p50/p95/p99, throughput, duplicate ratio and
 redelivery count. Use bounded worker loops rather than unbounded Promise arrays.
 
-- [ ] **Step 6: Record the reference run and commit**
+- [x] **Step 6: Record the reference run and commit**
 
 ```sh
 npm run nats:release -- npm run benchmark:wakeup -- --messages 1000 --publishers 4 --consumers 4 --samples 3
