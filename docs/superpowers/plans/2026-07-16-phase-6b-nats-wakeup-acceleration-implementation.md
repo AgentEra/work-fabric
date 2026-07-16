@@ -618,7 +618,7 @@ git add docs/superpowers/plans/2026-07-16-phase-6b-nats-wakeup-acceleration-impl
 git commit -m "test(nats): complete Phase 6B wakeup acceleration"
 ```
 
-- [ ] **Step 4: Push without force**
+- [x] **Step 4: Push without force**
 
 ```sh
 git push -u origin codex/phase-6b-nats-wakeup
