@@ -8,6 +8,7 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
+    "@work-fabric/operations-spi": "0.1.0",
     "@work-fabric/adapter-storage-postgres": "0.1.0",
     "@work-fabric/connector-spi": "0.1.0",
     "@work-fabric/exchange-core": "0.1.0",

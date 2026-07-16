@@ -12,6 +12,21 @@ export const OPERATIONS_STORE_REQUIRED_CAPABILITIES = [
   "append_only_audit",
 ] as const;
 
+export const COLLABORATION_VIEW_REQUIRED_CAPABILITIES = [
+  "tenant_isolation",
+  "monotonic_projection",
+  "partition_reset",
+  "deterministic_cursor_pagination",
+  "immutable_reads",
+] as const;
+
+export const AUDIT_STORE_REQUIRED_CAPABILITIES = [
+  "tenant_isolation",
+  "deterministic_cursor_pagination",
+  "immutable_reads",
+  "append_only_audit",
+] as const;
+
 export type ParticipantType = "human" | "agent" | "system";
 
 export interface ParticipantRef {
@@ -108,6 +123,9 @@ export interface ProjectionFreshness {
 export interface CursorPage<T> {
   readonly items: readonly T[];
   readonly next_cursor: string | null;
+}
+
+export interface CollaborationPage<T> extends CursorPage<T> {
   readonly freshness: ProjectionFreshness;
 }
 

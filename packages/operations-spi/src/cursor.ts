@@ -1,4 +1,5 @@
 import type { JsonObject, JsonValue } from "@work-fabric/exchange-spi";
+import { assertSafeOperationsJson } from "./safe-json.js";
 
 export interface CursorAuthenticator {
   sign(payload: string): Promise<string>;
@@ -173,6 +174,8 @@ export function createOpaqueCursorCodec(
         sort: input.sort,
         filters: input.filters,
       });
+      assertSafeOperationsJson(context.filters, "cursor filters");
+      assertSafeOperationsJson(input.position, "cursor position");
       const payload = canonical({
         version: 1,
         context: contextJson(context),
@@ -217,6 +220,8 @@ export function createOpaqueCursorCodec(
       if (envelope.version !== 1) throw new TypeError("cursor version is invalid");
       const actualContext = validateContext(envelope.context);
       const expected = validateContext(expectedContext);
+      assertSafeOperationsJson(actualContext.filters, "cursor filters");
+      assertSafeOperationsJson(envelope.position as JsonValue, "cursor position");
       if (canonical(contextJson(actualContext)) !== canonical(contextJson(expected))) {
         throw new TypeError("cursor context does not match query");
       }

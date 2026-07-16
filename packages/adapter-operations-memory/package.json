@@ -1,0 +1,13 @@
+{
+  "name": "@work-fabric/adapter-operations-memory",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/operations-spi": "0.1.0"
+  }
+}
