@@ -1,0 +1,61 @@
+export const SEMANTIC_OPERATIONS = [
+  "authentication",
+  "authorization",
+  "command",
+  "collaboration_query",
+  "operations_query",
+  "projection_batch",
+  "delivery_attempt",
+  "connector_mapping",
+  "recovery_action",
+] as const;
+
+export const SEMANTIC_OUTCOMES = [
+  "succeeded",
+  "failed",
+  "denied",
+  "conflicted",
+  "retryable",
+  "dead_lettered",
+] as const;
+
+export const SEMANTIC_CATEGORIES = [
+  "http",
+  "projector",
+  "delivery",
+  "connector",
+  "recovery",
+] as const;
+
+export interface SemanticObservation {
+  readonly operation: (typeof SEMANTIC_OPERATIONS)[number];
+  readonly outcome: (typeof SEMANTIC_OUTCOMES)[number];
+  readonly category: (typeof SEMANTIC_CATEGORIES)[number];
+  readonly duration_ms: number;
+  readonly count: number;
+}
+
+export interface SemanticTelemetryObserver {
+  observe(observation: SemanticObservation): void;
+}
+
+export function validateSemanticObservation(
+  input: SemanticObservation,
+): SemanticObservation {
+  if (!SEMANTIC_OPERATIONS.includes(input.operation)) {
+    throw new TypeError("telemetry operation is invalid");
+  }
+  if (!SEMANTIC_OUTCOMES.includes(input.outcome)) {
+    throw new TypeError("telemetry outcome is invalid");
+  }
+  if (!SEMANTIC_CATEGORIES.includes(input.category)) {
+    throw new TypeError("telemetry category is invalid");
+  }
+  if (!Number.isFinite(input.duration_ms) || input.duration_ms < 0) {
+    throw new TypeError("telemetry duration is invalid");
+  }
+  if (!Number.isSafeInteger(input.count) || input.count <= 0) {
+    throw new TypeError("telemetry count is invalid");
+  }
+  return { ...input };
+}
