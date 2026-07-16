@@ -356,7 +356,7 @@ Expected: PASS.
 - Consumes: subject codec filter subjects and `NatsConnection.jetstreamManager()`.
 - Produces: `desiredNatsWakeupTopology(config)`, `reconcileNatsWakeupTopology(port, desired, mode)`, `npm run nats:wakeup-topology`.
 
-- [ ] **Step 1: Write failing desired-topology tests**
+- [x] **Step 1: Write failing desired-topology tests**
 
 Assert stream limits/file/discard-old/4,096-byte settings and consumer
 explicit-Ack/deliver-new/filter/timing settings exactly match the design.
@@ -364,7 +364,7 @@ Validate max age 60–86,400 seconds, max bytes 1 MiB–10 GiB, replicas 1–5,
 Ack wait 5–300 seconds, MaxDeliver 1–20, MaxAckPending 1–10,000 and MaxWaiting
 1–256.
 
-- [ ] **Step 2: Write failing reconciliation tests**
+- [x] **Step 2: Write failing reconciliation tests**
 
 Use an in-memory management port to prove:
 
@@ -375,7 +375,7 @@ Use an in-memory management port to prove:
   `wakeup_topology_drift`;
 - no path deletes or purges resources.
 
-- [ ] **Step 3: Implement topology normalization and reconciliation**
+- [x] **Step 3: Implement topology normalization and reconciliation**
 
 ```ts
 export type NatsTopologyMode = "plan" | "verify" | "apply";
@@ -390,14 +390,14 @@ export interface NatsTopologyResult {
 
 The result contains no URL, subject key, Tenant ID or raw server response.
 
-- [ ] **Step 4: Add explicit CLI and tests**
+- [x] **Step 4: Add explicit CLI and tests**
 
 CLI accepts `--connection-string`, `--config`, one of `--plan`, `--verify`,
 `--apply`, defaults to plan, loads the subject key only from
 `WORK_FABRIC_NATS_SUBJECT_KEY`, and writes a safe JSON action summary. It must
 never print the connection string or key, including on failure.
 
-- [ ] **Step 5: Run and commit**
+- [x] **Step 5: Run and commit**
 
 ```sh
 npm run typecheck
