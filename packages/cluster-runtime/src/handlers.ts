@@ -223,7 +223,7 @@ export class CollaborationProjectionHandler extends ProjectionHandler {
   readonly kind = "collaboration_projection" as const;
 }
 
-interface SignalDispatcherPort {
+export interface SignalDispatcherPort {
   dispatchPartitionTurn(
     partitionId: string,
     tenantId: string,

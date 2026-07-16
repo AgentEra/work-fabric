@@ -73,4 +73,41 @@ describe("Node service configuration", () => {
       authority_rules: [rule],
     })).toThrow(/connection/i);
   });
+
+  it("rejects clustered SQLite and unbounded worker settings", () => {
+    const cluster = {
+      worker_owner_id: "worker-a",
+      tenant_ids: ["tenant-local"],
+      max_concurrent_turns: 4,
+      max_ready_items: 100,
+      catalog_page_size: 25,
+      turn_item_limit: 100,
+      lease_seconds: 30,
+      drain_timeout_seconds: 30,
+      poll_interval_ms: 1_000,
+      max_tenants_per_host: 10,
+    };
+    expect(() => parseServiceConfig({
+      storage_profile: "sqlite-local",
+      role: "worker",
+      tenant_id: "tenant-local",
+      exchange_id: "exchange-local",
+      cursor_secret: "x".repeat(32),
+      identities: [identity],
+      authority_rules: [rule],
+      sqlite: { location: ":memory:", busy_timeout_ms: 5_000 },
+      cluster,
+    })).toThrow(/single-process/i);
+    expect(() => parseServiceConfig({
+      storage_profile: "postgres",
+      role: "worker",
+      tenant_id: "tenant-local",
+      exchange_id: "exchange-local",
+      cursor_secret: "x".repeat(32),
+      identities: [identity],
+      authority_rules: [rule],
+      postgres: { connection_string: "postgres://deployment-owned" },
+      cluster: { ...cluster, max_concurrent_turns: 0 },
+    })).toThrow(/max_concurrent_turns/);
+  });
 });

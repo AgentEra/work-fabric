@@ -32,6 +32,7 @@ export type {
 } from "@work-fabric/exchange-spi";
 export type {
   AuditRecord,
+  ClusterOperationalSnapshot,
   CollaborationPage,
   ActiveDeliveryView,
   ConnectorDiscrepancyView,

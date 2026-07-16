@@ -172,6 +172,19 @@ function fixture(boundedHistory?: BoundedOperationalHistoryStore) {
       async put() {}, async acknowledge() { return { kind: "not_found" as const }; },
     },
     cursor: cursor(),
+    cluster_snapshot: {
+      async load() {
+        return {
+          state: "running" as const,
+          ready_items: 3,
+          in_flight_turns: 2,
+          completed_turns: 9,
+          lease_losses: 1,
+          dropped_wakeups: 4,
+          observed_at: "2026-07-16T08:00:00.000Z",
+        };
+      },
+    },
     max_page_limit: 10,
     ...(boundedHistory === undefined ? {} : { bounded_history: boundedHistory }),
   });
@@ -179,6 +192,17 @@ function fixture(boundedHistory?: BoundedOperationalHistoryStore) {
 }
 
 describe("StoreBackedOperationsQueryService", () => {
+  it("returns only aggregate cluster metadata", async () => {
+    await expect(fixture().getClusterSnapshot("tenant-1")).resolves.toEqual({
+      state: "running",
+      ready_items: 3,
+      in_flight_turns: 2,
+      completed_turns: 9,
+      lease_losses: 1,
+      dropped_wakeups: 4,
+      observed_at: "2026-07-16T08:00:00.000Z",
+    });
+  });
   it("pushes bounded keyset pages into production history adapters", async () => {
     const calls: Array<{ method: string; input: unknown }> = [];
     const history: BoundedOperationalHistoryStore = {

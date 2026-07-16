@@ -24,6 +24,14 @@ function fixture() {
   const calls: Array<{ method: string; tenant: string; input: unknown }> = [];
   const page = { items: [], next_cursor: null };
   const operations: OperationsQueryService = {
+    async getClusterSnapshot() {
+      calls.push({ method: "cluster", tenant: "tenant-1", input: null });
+      return {
+        state: "running", ready_items: 3, in_flight_turns: 2,
+        completed_turns: 9, lease_losses: 1, dropped_wakeups: 4,
+        observed_at: "2026-07-16T08:00:00.000Z",
+      };
+    },
     async getProjectionStatus(tenant, projectorId, partitionId) {
       calls.push({ method: "projection", tenant, input: { projectorId, partitionId } });
       return { tenant_id: tenant, projector_id: projectorId, partition_id: partitionId, checkpoint_position: 4, journal_position: 5, lag: 1, state: "lagging" };
@@ -45,6 +53,7 @@ function fixture() {
     ["workfabric.operations.connector-ingress.read.v1", "connector-1"],
     ["workfabric.operations.discrepancy.read.v1", "connector-1"],
     ["workfabric.operations.audit.read.v1", "tenant-1"],
+    ["workfabric.operations.cluster.read.v1", "tenant-1"],
   ] as const;
   const authority = new LocalAuthorityPolicy(grants.map(([action, resource_id]) => ({
     tenant_id: "tenant-1", principal_id: "principal-1", actor_id: "actor-1",
@@ -70,14 +79,16 @@ describe("operational visibility routes", () => {
       service.dispatch({ method: "GET", url: "/v1/operations/connectors/connector-1/ingress?state=retry_wait", headers }),
       service.dispatch({ method: "GET", url: "/v1/operations/discrepancies?connector_id=connector-1&status=open", headers }),
       service.dispatch({ method: "GET", url: "/v1/operations/audit?outcome=failed&limit=3", headers }),
+      service.dispatch({ method: "GET", url: "/v1/operations/cluster", headers }),
     ]);
-    expect(responses.map((response) => response.status_code)).toEqual([200, 200, 404, 200, 200, 200]);
+    expect(responses.map((response) => response.status_code)).toEqual([200, 200, 404, 200, 200, 200, 200]);
     expect(calls).toEqual(expect.arrayContaining([
       { method: "projection", tenant: "tenant-1", input: { projectorId: "projector-1", partitionId: "partition-1" } },
       { method: "failures", tenant: "tenant-1", input: { projector_id: "projector-1", partition_id: "partition-1", limit: 3 } },
       { method: "ingresses", tenant: "tenant-1", input: { connector_id: "connector-1", states: ["retry_wait"], limit: 2 } },
       { method: "discrepancies", tenant: "tenant-1", input: { connector_id: "connector-1", statuses: ["open"], limit: 2 } },
       { method: "audit", tenant: "tenant-1", input: { outcome: "failed", limit: 3 } },
+      { method: "cluster", tenant: "tenant-1", input: null },
     ]));
     await service.close();
   });

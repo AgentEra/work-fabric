@@ -13,6 +13,8 @@
     "@work-fabric/adapter-operations-memory": "0.1.0",
     "@work-fabric/adapter-storage-memory": "0.1.0",
     "@work-fabric/adapter-storage-sqlite": "0.1.0",
+    "@work-fabric/cluster-runtime": "0.1.0",
+    "@work-fabric/cluster-spi": "0.1.0",
     "@work-fabric/connector-spi": "0.1.0",
     "@work-fabric/connector-runtime": "0.1.0",
     "@work-fabric/exchange-core": "0.1.0",
@@ -23,5 +25,8 @@
     "@work-fabric/operations-spi": "0.1.0",
     "@work-fabric/protocol-runtime": "0.1.0",
     "@work-fabric/transport-http": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/adapter-cluster-memory": "0.1.0"
   }
 }

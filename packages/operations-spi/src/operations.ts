@@ -137,3 +137,17 @@ export interface ConnectorDiscrepancyOperationalQuery {
 export interface PartitionJournalPositionSource {
   load(tenantId: string, partitionId: string): Promise<number | null>;
 }
+
+export interface ClusterOperationalSnapshot {
+  readonly state: "idle" | "running" | "draining" | "stopped";
+  readonly ready_items: number;
+  readonly in_flight_turns: number;
+  readonly completed_turns: number;
+  readonly lease_losses: number;
+  readonly dropped_wakeups: number;
+  readonly observed_at: string;
+}
+
+export interface ClusterOperationalSnapshotSource {
+  load(tenantId: string): Promise<ClusterOperationalSnapshot | null>;
+}

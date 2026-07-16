@@ -576,7 +576,7 @@ git commit -m "feat(cluster): discover PostgreSQL partition work"
 - Consumes: `ClusterHost`, Adapter catalog/lease factory, existing service storage.
 - Produces: explicit `api | worker | all` service roles, worker lifecycle, `GET /v1/operations/cluster` metadata snapshot and SDK method.
 
-- [ ] **Step 1: Write failing config and composition tests**
+- [x] **Step 1: Write failing config and composition tests**
 
 ```ts
 it("rejects clustered SQLite and unbounded worker settings", () => {
@@ -591,13 +591,13 @@ it("rejects clustered SQLite and unbounded worker settings", () => {
 });
 ```
 
-- [ ] **Step 2: Run and confirm role/config failure**
+- [x] **Step 2: Run and confirm role/config failure**
 
 Run: `npm test -- packages/service-node/test/config.test.ts packages/service-node/test/cluster-composition.integration.test.ts`
 
 Expected: FAIL because `worker` role and cluster configuration are absent.
 
-- [ ] **Step 3: Implement explicit composition**
+- [x] **Step 3: Implement explicit composition**
 
 Add `cluster?: ClusterHostConfig` only for `worker`/`all`. PostgreSQL requires
 deployment-injected catalog, tenant-scoped lease factory, wakeup ports and
@@ -605,7 +605,7 @@ owner ID. `listen()` starts the HTTP service only for `api`/`all`; `start()`
 starts the host only for `worker`/`all`; `close()` drains host before closing
 HTTP/storage. No ambient credentials are loaded.
 
-- [ ] **Step 4: Add metadata-only cluster operations view**
+- [x] **Step 4: Add metadata-only cluster operations view**
 
 Expose only:
 
@@ -624,7 +624,7 @@ interface ClusterOperationalSnapshot {
 Route and SDK use the existing Authority/audit path and never expose owners,
 tokens, Tenant/Partition IDs or raw errors.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `npm run typecheck && npm test -- packages/service-node/test packages/transport-http/test/operations-routes.test.ts packages/sdk-typescript/test/operations-visibility-client.test.ts`
 

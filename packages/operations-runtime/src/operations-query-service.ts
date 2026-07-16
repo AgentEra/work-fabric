@@ -27,6 +27,8 @@ import {
   type ConnectorDiscrepancyView,
   type ConnectorIngressOperationalQuery,
   type ConnectorIngressOperationalView,
+  type ClusterOperationalSnapshot,
+  type ClusterOperationalSnapshotSource,
   type OpaqueCursorCodec,
   type OperationalPage,
   type PartitionJournalPositionSource,
@@ -47,10 +49,12 @@ export interface OperationsQueryDependencies {
   readonly audit?: AuditStore;
   readonly bounded_history?: BoundedOperationalHistoryStore;
   readonly cursor: OpaqueCursorCodec;
+  readonly cluster_snapshot?: ClusterOperationalSnapshotSource;
   readonly max_page_limit?: number;
 }
 
 export interface OperationsQueryService {
+  getClusterSnapshot(tenantId: string): Promise<ClusterOperationalSnapshot | null>;
   getProjectionStatus(tenantId: string, projectorId: string, partitionId: string): Promise<ProjectionOperationalStatus | null>;
   listProjectionFailures(tenantId: string, query: ProjectionFailureOperationalQuery): Promise<OperationalPage<ProjectionFailureView>>;
   getDeliveryState(tenantId: string, subscriptionId: string, partitionId: string): Promise<DeliveryOperationalState | null>;
@@ -171,6 +175,28 @@ export class StoreBackedOperationsQueryService implements OperationsQueryService
   constructor(private readonly dependencies: OperationsQueryDependencies) {
     this.maxPageLimit = dependencies.max_page_limit ?? 100;
     positive(this.maxPageLimit, "max_page_limit");
+  }
+
+  async getClusterSnapshot(
+    tenantId: string,
+  ): Promise<ClusterOperationalSnapshot | null> {
+    identifier(tenantId, "tenantId");
+    const value = await this.dependencies.cluster_snapshot?.load(tenantId) ?? null;
+    if (value === null) return null;
+    if (!["idle", "running", "draining", "stopped"].includes(value.state)) {
+      throw new TypeError("cluster state is invalid");
+    }
+    for (const [field, count] of Object.entries({
+      ready_items: value.ready_items,
+      in_flight_turns: value.in_flight_turns,
+      completed_turns: value.completed_turns,
+      lease_losses: value.lease_losses,
+      dropped_wakeups: value.dropped_wakeups,
+    })) nonNegative(count, field);
+    if (!Number.isFinite(Date.parse(value.observed_at))) {
+      throw new TypeError("cluster observed_at is invalid");
+    }
+    return structuredClone(value);
   }
 
   async listAudit(

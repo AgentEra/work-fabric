@@ -2,9 +2,18 @@ import type {
   LocalAuthorityAllowRule,
   LocalIdentityRecord,
 } from "@work-fabric/adapter-identity-local";
+import {
+  validateClusterLimits,
+  type ClusterHostLimits,
+} from "@work-fabric/cluster-spi";
 
 export type ServiceStorageProfile = "memory-demo" | "sqlite-local" | "postgres";
-export type ServiceRole = "all" | "api" | "projector" | "delivery" | "connector";
+export type ServiceRole = "all" | "api" | "worker";
+
+export interface ClusterHostConfig extends ClusterHostLimits {
+  readonly worker_owner_id: string;
+  readonly tenant_ids: readonly string[];
+}
 
 export interface NodeServiceConfig {
   readonly storage_profile: ServiceStorageProfile;
@@ -18,6 +27,7 @@ export interface NodeServiceConfig {
   readonly authority_rules: readonly LocalAuthorityAllowRule[];
   readonly sqlite?: { readonly location: string; readonly busy_timeout_ms: number };
   readonly postgres?: { readonly connection_string: string };
+  readonly cluster?: ClusterHostConfig;
 }
 
 function identifier(value: unknown, field: string): string {
@@ -58,7 +68,7 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
   }
   const storageProfile = raw.storage_profile as ServiceStorageProfile;
   const role = (raw.role ?? "all") as ServiceRole;
-  if (!["all", "api", "projector", "delivery", "connector"].includes(role)) {
+  if (!["all", "api", "worker"].includes(role)) {
     throw new TypeError("role is invalid");
   }
   const tenantId = identifier(raw.tenant_id, "tenant_id");
@@ -107,6 +117,41 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
     }
     postgres = { connection_string: value.connection_string };
   }
+  let cluster: ClusterHostConfig | undefined;
+  if (raw.cluster !== undefined) {
+    if (role === "api") throw new TypeError("cluster is only valid for worker or all roles");
+    if (storageProfile === "sqlite-local") {
+      throw new TypeError("SQLite is single-process and cannot use clustered ownership");
+    }
+    const value = object(raw.cluster, "cluster");
+    const limits = validateClusterLimits({
+      max_concurrent_turns: value.max_concurrent_turns as number,
+      max_ready_items: value.max_ready_items as number,
+      catalog_page_size: value.catalog_page_size as number,
+      turn_item_limit: value.turn_item_limit as number,
+      lease_seconds: value.lease_seconds as number,
+      drain_timeout_seconds: value.drain_timeout_seconds as number,
+      poll_interval_ms: value.poll_interval_ms as number,
+      max_tenants_per_host: value.max_tenants_per_host as number,
+    });
+    const tenantInput = value.tenant_ids ?? [tenantId];
+    if (!Array.isArray(tenantInput) || tenantInput.length === 0) {
+      throw new TypeError("cluster.tenant_ids must be non-empty");
+    }
+    const tenantIds = tenantInput.map((value) => identifier(value, "cluster.tenant_id"));
+    if (
+      new Set(tenantIds).size !== tenantIds.length ||
+      tenantIds.length > limits.max_tenants_per_host
+    ) throw new RangeError("cluster.tenant_ids exceeds its bound or contains duplicates");
+    cluster = {
+      worker_owner_id: identifier(value.worker_owner_id, "cluster.worker_owner_id"),
+      tenant_ids: tenantIds,
+      ...limits,
+    };
+  }
+  if (role === "worker" && cluster === undefined) {
+    throw new TypeError("worker role requires cluster configuration");
+  }
   return {
     storage_profile: storageProfile,
     role,
@@ -119,5 +164,6 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
     authority_rules: authorityRules,
     ...(sqlite === undefined ? {} : { sqlite }),
     ...(postgres === undefined ? {} : { postgres }),
+    ...(cluster === undefined ? {} : { cluster }),
   };
 }

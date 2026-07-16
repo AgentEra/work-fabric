@@ -31,6 +31,11 @@ describe("OperationsClient visibility", () => {
     const fetch = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       urls.push(url);
+      if (url.endsWith("/operations/cluster")) return response({
+        state: "running", ready_items: 3, in_flight_turns: 2,
+        completed_turns: 9, lease_losses: 1, dropped_wakeups: 4,
+        observed_at: "2026-07-16T08:00:00.000Z",
+      });
       if (url.includes("/projections/")) return response({
         tenant_id: "tenant-1", projector_id: "projector / 1", partition_id: "partition / 1",
         checkpoint_position: 4, journal_position: 5, lag: 1, state: "lagging",
@@ -75,6 +80,10 @@ describe("OperationsClient visibility", () => {
     await operations.listDiscrepancies({ connectorId: "connector / 1", statuses: ["open"], limit: 5 });
     await operations.getDiscrepancy({ connectorId: "connector / 1", discrepancyId: "discrepancy / 1" });
     await operations.listAudit({ outcome: "succeeded", limit: 5 });
+    await expect(operations.getClusterSnapshot()).resolves.toMatchObject({
+      state: "running",
+      ready_items: 3,
+    });
 
     expect(urls).toEqual([
       "https://fabric.example.test/api/v1/operations/projections/projector%20%2F%201/partitions/partition%20%2F%201",
@@ -87,6 +96,7 @@ describe("OperationsClient visibility", () => {
       "https://fabric.example.test/api/v1/operations/discrepancies?connector_id=connector+%2F+1&status=open&limit=5",
       "https://fabric.example.test/api/v1/operations/discrepancies/discrepancy%20%2F%201?connector_id=connector+%2F+1",
       "https://fabric.example.test/api/v1/operations/audit?outcome=succeeded&limit=5",
+      "https://fabric.example.test/api/v1/operations/cluster",
     ]);
   });
 

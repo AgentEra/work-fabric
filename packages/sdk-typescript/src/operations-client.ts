@@ -11,6 +11,7 @@ import {
 import type {
   DeliveryAttempt,
   AuditRecord,
+  ClusterOperationalSnapshot,
   ConnectorDiscrepancyView,
   ConnectorIngressOperationalView,
   DeadLetterView,
@@ -171,6 +172,23 @@ function projectionStatus(value: unknown): ProjectionOperationalStatus {
     journal_position: integerField(candidate, "journal_position"),
     lag: integerField(candidate, "lag"),
     state,
+  };
+}
+
+function clusterSnapshot(value: unknown): ClusterOperationalSnapshot {
+  const candidate = safeObject(value, "cluster snapshot");
+  const state = candidate.state;
+  if (state !== "idle" && state !== "running" && state !== "draining" && state !== "stopped") {
+    throw new TypeError("cluster state is invalid");
+  }
+  return {
+    state,
+    ready_items: integerField(candidate, "ready_items"),
+    in_flight_turns: integerField(candidate, "in_flight_turns"),
+    completed_turns: integerField(candidate, "completed_turns"),
+    lease_losses: integerField(candidate, "lease_losses"),
+    dropped_wakeups: integerField(candidate, "dropped_wakeups"),
+    observed_at: timestampField(candidate, "observed_at"),
   };
 }
 
@@ -378,6 +396,16 @@ function auditRecord(value: unknown): AuditRecord {
 
 export class OperationsClient {
   constructor(private readonly transport: SdkTransport, private readonly representation: RepresentationContext) {}
+
+  getClusterSnapshot(options: RequestOptions = {}): Promise<ClusterOperationalSnapshot> {
+    return this.transport.request({
+      method: "GET",
+      path: ["v1", "operations", "cluster"],
+      retry: "query",
+      ...requestOptions(this.representation, options),
+      decode: clusterSnapshot,
+    });
+  }
 
   listSubscriptions(options: PageOptions = {}): Promise<readonly RuntimeSubscription[]> {
     const limit = positive(options.limit, "limit");

@@ -109,6 +109,23 @@ export function registerOperationsRoutes(
   dependencies: Dependencies,
   config: HttpServiceConfig,
 ): void {
+  server.get("/v1/operations/cluster", async (request, reply) => {
+    const auth = await authorized(
+      request,
+      reply,
+      dependencies,
+      "workfabric.operations.cluster.read.v1",
+      (resolved) => resolved.tenant_id,
+    );
+    if (auth === null) return;
+    const snapshot = await dependencies.operations.getClusterSnapshot(
+      auth.principal.tenant_id,
+    );
+    return snapshot === null
+      ? missing(reply, request.url, "Cluster runtime not available")
+      : reply.send(snapshot);
+  });
+
   server.get<{ Querystring: {
     occurred_from?: QueryValue; occurred_to?: QueryValue; principal_id?: QueryValue;
     operation?: QueryValue; outcome?: QueryValue; cursor?: QueryValue; limit?: QueryValue;

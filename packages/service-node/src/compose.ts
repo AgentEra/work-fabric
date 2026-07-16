@@ -15,6 +15,20 @@ import { MemoryOperationsFixture } from "@work-fabric/adapter-operations-memory"
 import { MemoryDiscrepancyStore, MemoryRecoveryStore } from "@work-fabric/adapter-operations-memory";
 import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import {
+  ClusterHost,
+  CollaborationProjectionHandler,
+  HandoffProjectionHandler,
+  OutboxWakeupHandler,
+  PartitionWorker,
+  SignalDeliveryHandler,
+  type SignalDispatcherPort,
+} from "@work-fabric/cluster-runtime";
+import type {
+  PartitionWakeupConsumer,
+  PartitionWakeupPublisher,
+  PartitionWorkCatalog,
+} from "@work-fabric/cluster-spi";
+import {
   SqliteExchangePersistence,
   SqlitePartitionJournalPositionSource,
   SqliteRuntimeState,
@@ -53,7 +67,10 @@ import type {
   ProjectionFailureStore,
   SubscriptionStore,
   TargetEligibilityVerifier,
+  OutboxStore,
+  WorkerLeaseStore,
 } from "@work-fabric/exchange-spi";
+import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 import type { ConnectorIngressStore } from "@work-fabric/connector-spi";
 import type { ConnectorDiscrepancyStore } from "@work-fabric/connector-runtime";
 import {
@@ -71,6 +88,8 @@ import type {
   PartitionJournalPositionSource,
   RecoveryRequestStore,
   ProjectionFreshnessSource,
+  ClusterOperationalSnapshot,
+  ClusterOperationalSnapshotSource,
 } from "@work-fabric/operations-spi";
 import { createOpaqueCursorCodec } from "@work-fabric/operations-spi";
 import {
@@ -128,6 +147,21 @@ export interface NodeServiceCompositionOptions {
   readonly postgres_storage?: NodeStorageComposition;
   /** Deployment-owned generator; useful for deterministic integration profiles. */
   readonly ids?: IdGenerator;
+  readonly cluster_worker?: NodeClusterWorkerDependencies;
+  readonly cluster_snapshot?: ClusterOperationalSnapshotSource;
+}
+
+export interface NodeClusterWorkerDependencies {
+  readonly catalog: PartitionWorkCatalog;
+  readonly wakeup_publisher: PartitionWakeupPublisher;
+  readonly wakeup_consumer?: PartitionWakeupConsumer;
+  readonly outbox_store_for_tenant: (
+    tenantId: string,
+  ) => OutboxStore | Promise<OutboxStore>;
+  readonly lease_store_for_tenant: (
+    tenantId: string,
+  ) => WorkerLeaseStore | Promise<WorkerLeaseStore>;
+  readonly signal_dispatcher: SignalDispatcherPort;
 }
 
 function memoryStorage(): NodeStorageComposition {
@@ -246,6 +280,8 @@ export interface ComposedNodeService {
     readonly collaboration: Awaited<ReturnType<CollaborationProjector["runPartition"]>>;
   }>;
   rebuildProjection(partitionId: string, limit: number): Promise<void>;
+  start(): void;
+  clusterSnapshot(): Promise<ClusterOperationalSnapshot | null>;
   listen(): Promise<{ readonly origin: string }>;
   close(): Promise<void>;
 }
@@ -298,6 +334,70 @@ export async function composeNodeService(
     undefined,
     storage.journalPositions ?? new StoreJournalPositions(storage.persistence),
   );
+  let clusterHost: ClusterHost | undefined;
+  if (config.cluster !== undefined) {
+    const workerDependencies = options.cluster_worker;
+    if (workerDependencies === undefined) {
+      throw new Error(
+        "cluster composition requires deployment-injected catalog, lease, Outbox, wakeup and Signal ports",
+      );
+    }
+    const handlers = [
+      new OutboxWakeupHandler({
+        store_for_tenant: workerDependencies.outbox_store_for_tenant,
+        publisher: workerDependencies.wakeup_publisher,
+        clock,
+        retry_policy: {
+          nextAttemptAt(attempt, now) {
+            const exponent = Math.min(Math.max(0, attempt - 1), 8);
+            return addUtcTimestampSeconds(now, Math.min(300, 2 ** exponent));
+          },
+        },
+        row_lease_seconds: config.cluster.lease_seconds,
+      }),
+      new HandoffProjectionHandler(handoffProjector),
+      new CollaborationProjectionHandler(collaborationProjector),
+      new SignalDeliveryHandler(workerDependencies.signal_dispatcher),
+    ];
+    const worker = new PartitionWorker({
+      owner: config.cluster.worker_owner_id,
+      clock,
+      lease_store_for_tenant: workerDependencies.lease_store_for_tenant,
+      handlers,
+      lease_seconds: config.cluster.lease_seconds,
+      turn_item_limit: config.cluster.turn_item_limit,
+    });
+    clusterHost = new ClusterHost({
+      catalog: workerDependencies.catalog,
+      ...(workerDependencies.wakeup_consumer === undefined
+        ? {}
+        : { wakeup_consumer: workerDependencies.wakeup_consumer }),
+      tenant_ids: config.cluster.tenant_ids,
+      worker,
+      clock,
+    }, config.cluster);
+  }
+  const localClusterSnapshot: ClusterOperationalSnapshotSource | undefined =
+    clusterHost === undefined || config.cluster === undefined
+      ? undefined
+      : {
+        async load(tenantId) {
+          if (!config.cluster?.tenant_ids.includes(tenantId)) return null;
+          const snapshot = clusterHost?.snapshot();
+          if (snapshot === undefined) return null;
+          return {
+            state: snapshot.state,
+            ready_items: snapshot.queue_depth,
+            in_flight_turns: snapshot.in_flight_turns,
+            completed_turns: snapshot.completed_turns,
+            lease_losses: snapshot.lease_losses,
+            dropped_wakeups: snapshot.dropped_hints,
+            observed_at: clock.now(),
+          };
+        },
+      };
+  const operationalClusterSnapshot =
+    options.cluster_snapshot ?? localClusterSnapshot;
   const query = new StoreBackedExchangeQueryService(
     storage.persistence,
     storage.handoffs,
@@ -324,6 +424,9 @@ export async function composeNodeService(
     discrepancies: storage.discrepancies,
     audit: storage.audit,
     cursor: operationsCursor(config.cursor_secret),
+    ...(operationalClusterSnapshot === undefined
+      ? {}
+      : { cluster_snapshot: operationalClusterSnapshot }),
     ...(storage.boundedHistory === undefined ? {} : { bounded_history: storage.boundedHistory }),
     max_page_limit: 100,
   });
@@ -394,8 +497,22 @@ export async function composeNodeService(
       await handoffProjector.rebuildPartition(partitionId, limit);
       await collaborationProjector.rebuildPartition(config.tenant_id, partitionId, limit);
     },
-    listen() { return http.listen(config.listen); },
+    start() {
+      if (config.role === "worker" || config.role === "all") {
+        clusterHost?.start();
+      }
+    },
+    async clusterSnapshot() {
+      return operationalClusterSnapshot?.load(config.tenant_id) ?? null;
+    },
+    listen() {
+      if (config.role === "worker") {
+        return Promise.reject(new Error("worker role does not expose HTTP"));
+      }
+      return http.listen(config.listen);
+    },
     async close() {
+      await clusterHost?.drain();
       await http.close();
       storage.sqlite?.close();
     },
