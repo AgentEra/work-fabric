@@ -1,8 +1,15 @@
 import type { WorkFabricClient } from "@work-fabric/sdk-typescript";
 import { createConsoleClient } from "./client.js";
 import { loadConsoleConfig, type ConsoleRuntimeConfig } from "./config.js";
+import {
+  createPresentation,
+  readLocale,
+  saveLocale,
+  type ConsoleLocale,
+} from "./i18n.js";
 import { consumeInvalidations, LiveRefresh } from "./live-refresh.js";
 import { parseRoute, routeHref } from "./router.js";
+import { renderShell } from "./shell.js";
 import { renderHandoffDetail } from "./views/handoff-detail.js";
 import { renderOperations, type OperationsViewModel } from "./views/operations.js";
 import { renderResponsibilities } from "./views/responsibilities.js";
@@ -17,6 +24,7 @@ let runtimeConfig: ConsoleRuntimeConfig;
 let refresh: LiveRefresh | null = null;
 let streamAbort: AbortController | null = null;
 let streamPartition: string | null = null;
+let presentation = createPresentation("en");
 
 function escapeHtml(value: unknown): string {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -24,8 +32,16 @@ function escapeHtml(value: unknown): string {
   })[character]!);
 }
 
-function shell(content: string, partitionId: string): string {
-  return `<div class="shell"><header><a class="brand" href="${routeHref("/", partitionId)}"><span class="brand-mark">WF</span><span>Work Fabric<small>connection console</small></span></a><nav aria-label="Primary"><a href="${routeHref("/", partitionId)}">Handoffs</a><a href="${routeHref("/operations", partitionId)}">Operations</a></nav><form id="partition-form"><label>Partition<input name="partition" value="${escapeHtml(partitionId)}" /></label><button>Open</button></form></header><main id="main" tabindex="-1">${content}</main><footer>Protocol facts, handoffs and operational visibility. Participant execution stays external.</footer></div>`;
+function browserStorage(): Pick<Storage, "getItem" | "setItem"> | undefined {
+  try {
+    return window.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+function browserLanguages(): readonly string[] {
+  return navigator.languages.length > 0 ? navigator.languages : [navigator.language];
 }
 
 function queryValue(name: string): string | undefined {
@@ -61,31 +77,39 @@ async function operationsModel(partitionId: string, signal?: AbortSignal): Promi
 
 async function load(signal?: AbortSignal): Promise<void> {
   const route = parseRoute(new URL(location.href));
-  root.innerHTML = shell(`<div class="loading" role="status">Loading connection facts…</div>`, route.partitionId);
+  root.innerHTML = renderShell(`<div class="loading" role="status">${escapeHtml(presentation.text.loading)}</div>`, route.partitionId, presentation);
   try {
     if (route.kind === "responsibilities") {
       const page = await client.collaboration.listResponsibilities({
         partitionId: route.partitionId, limit: 50, ...(signal === undefined ? {} : { signal }),
       });
-      root.innerHTML = shell(renderResponsibilities(page.items, route.partitionId, page.freshness), route.partitionId);
+      root.innerHTML = renderShell(renderResponsibilities(page.items, route.partitionId, page.freshness, presentation), route.partitionId, presentation);
     } else if (route.kind === "handoff") {
       const [timeline, relationships] = await Promise.all([
         client.collaboration.listTimeline({ partitionId: route.partitionId, handoffId: route.handoffId, limit: 100, ...(signal === undefined ? {} : { signal }) }),
         client.collaboration.listRelationships({ partitionId: route.partitionId, handoffId: route.handoffId, limit: 100, ...(signal === undefined ? {} : { signal }) }),
       ]);
-      root.innerHTML = shell(renderHandoffDetail(route.handoffId, timeline.items, relationships.items), route.partitionId);
+      root.innerHTML = renderShell(renderHandoffDetail(route.handoffId, timeline.items, relationships.items, presentation), route.partitionId, presentation);
     } else {
-      root.innerHTML = shell(renderOperations(await operationsModel(route.partitionId, signal)), route.partitionId);
+      root.innerHTML = renderShell(renderOperations(await operationsModel(route.partitionId, signal), presentation), route.partitionId, presentation);
     }
   } catch (error) {
     if (signal?.aborted) return;
-    root.innerHTML = shell(`<div class="error" role="alert"><strong>Unable to load Work Fabric facts</strong><p>${escapeHtml(error instanceof Error ? error.message : "Unknown error")}</p><button id="retry">Retry</button></div>`, route.partitionId);
+    root.innerHTML = renderShell(`<div class="error" role="alert"><strong>${escapeHtml(presentation.text.loadErrorTitle)}</strong><p>${escapeHtml(error instanceof Error ? error.message : presentation.text.unknownError)}</p><button id="retry">${escapeHtml(presentation.text.retry)}</button></div>`, route.partitionId, presentation);
   }
   bindInteractions(route.partitionId);
   syncInvalidation(route.partitionId);
 }
 
 function bindInteractions(partitionId: string): void {
+  root.querySelector<HTMLSelectElement>("#locale-select")?.addEventListener("change", (event) => {
+    const value = (event.currentTarget as HTMLSelectElement).value;
+    if (value !== "en" && value !== "zh-CN") return;
+    presentation = createPresentation(value as ConsoleLocale);
+    saveLocale(browserStorage(), presentation.locale);
+    document.documentElement.lang = presentation.locale;
+    refresh?.invalidate();
+  });
   root.querySelector<HTMLFormElement>("#partition-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
     const form = event.currentTarget as HTMLFormElement;
@@ -117,11 +141,11 @@ function bindInteractions(partitionId: string): void {
         target: { kind: "projection_rebuild", projector_id: "workfabric.collaboration.visibility.v1", partition_id: partitionId },
         expectedVersion: Number(data.get("expectedVersion")), reason: String(data.get("reason")),
       });
-      root.querySelector("main")?.insertAdjacentHTML("afterbegin", `<div class="notice" role="status">Recovery ${escapeHtml(result.kind)}.</div>`);
+      root.querySelector("main")?.insertAdjacentHTML("afterbegin", `<div class="notice" role="status">${escapeHtml(presentation.text.recoveryResultPrefix)} ${escapeHtml(result.kind)}.</div>`);
       form.reset();
       refresh?.invalidate();
     } catch (error) {
-      root.querySelector("main")?.insertAdjacentHTML("afterbegin", `<div class="error" role="alert">${escapeHtml(error instanceof Error ? error.message : "Recovery denied")}</div>`);
+      root.querySelector("main")?.insertAdjacentHTML("afterbegin", `<div class="error" role="alert">${escapeHtml(error instanceof Error ? error.message : presentation.text.recoveryDenied)}</div>`);
     } finally {
       if (button !== null) button.disabled = false;
     }
@@ -153,6 +177,8 @@ function syncInvalidation(partitionId: string): void {
 }
 
 async function start(): Promise<void> {
+  presentation = createPresentation(readLocale(browserStorage(), browserLanguages()));
+  document.documentElement.lang = presentation.locale;
   runtimeConfig = await loadConsoleConfig();
   client = createConsoleClient(runtimeConfig);
   window.addEventListener("popstate", () => { refresh?.invalidate(); });
@@ -162,5 +188,5 @@ async function start(): Promise<void> {
 }
 
 start().catch((error: unknown) => {
-  root.innerHTML = `<main class="fatal"><h1>Console unavailable</h1><p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p></main>`;
+  root.innerHTML = `<main class="fatal"><h1>${escapeHtml(presentation.text.fatalTitle)}</h1><p>${escapeHtml(error instanceof Error ? error.message : String(error))}</p></main>`;
 });

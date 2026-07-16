@@ -15,6 +15,9 @@ nav a:hover, nav a:focus-visible { background:var(--accent-soft); color:var(--ac
 #partition-form { margin-left:auto; display:flex; align-items:end; gap:.5rem; }
 label { display:grid; gap:.3rem; color:var(--muted); font-size:.75rem; font-weight:650; }
 input { border:1px solid var(--line); border-radius:.5rem; padding:.62rem .7rem; background:#fff; color:var(--ink); }
+.locale-control { display:block; }
+.locale-control select { border:1px solid var(--line); border-radius:.5rem; padding:.62rem 2rem .62rem .7rem; background:#fff; color:var(--ink); font:inherit; font-weight:650; }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
 button { border:0; border-radius:.5rem; padding:.65rem .9rem; color:#fff; background:var(--accent); font-weight:700; cursor:pointer; }
 button:hover { background:#18553f; }
 button:disabled { cursor:wait; opacity:.55; }
@@ -61,5 +64,5 @@ tr:last-child td { border-bottom:0; }
 .error { background:#f5dedb; color:#7b2921; }
 footer { padding:2rem; text-align:center; color:var(--muted); font-size:.75rem; }
 :focus-visible { outline:3px solid #61aa86; outline-offset:3px; }
-@media (max-width:760px) { header { flex-wrap:wrap; gap:.8rem; } #partition-form { order:3; width:100%; margin:0; } #partition-form label { flex:1; } .detail-grid,.metric-grid,.recovery-panel,.operations-grid,.filter-panel { grid-template-columns:1fr; } .section-heading { align-items:start; flex-direction:column; gap:0; } }
+@media (max-width:760px) { header { flex-wrap:wrap; gap:.8rem; } .locale-control { margin-left:auto; } #partition-form { order:3; width:100%; margin:0; } #partition-form label { flex:1; } .detail-grid,.metric-grid,.recovery-panel,.operations-grid,.filter-panel { grid-template-columns:1fr; } .section-heading { align-items:start; flex-direction:column; gap:0; } }
 @media (prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important; transition:none!important; animation:none!important; } }
