@@ -29,6 +29,7 @@ import {
   assertRuntimeSubscription,
   compareTimestamps,
 } from "./validation.js";
+import type { RuntimeOwnershipFence } from "../runtime-ownership-fence.js";
 
 export interface RetryPolicy {
   readonly base_delay_seconds: number;
@@ -37,6 +38,10 @@ export interface RetryPolicy {
 
 export interface DispatchObserver {
   afterDelivery(eventId: string, subscriptionId: string): Promise<void>;
+}
+
+export interface SignalDispatchTurnResult {
+  readonly processed: number;
 }
 
 export class SignalDispatcher {
@@ -63,12 +68,24 @@ export class SignalDispatcher {
     partitionId: string,
     tenantId: string,
     limit: number,
+    fence?: RuntimeOwnershipFence,
   ): Promise<void> {
+    await this.dispatchPartitionTurn(partitionId, tenantId, limit, fence);
+  }
+
+  async dispatchPartitionTurn(
+    partitionId: string,
+    tenantId: string,
+    limit: number,
+    fence?: RuntimeOwnershipFence,
+  ): Promise<SignalDispatchTurnResult> {
     assertOpaqueId(partitionId, "partition_id");
     assertOpaqueId(tenantId, "tenant_id");
     assertPositiveSafeInteger(limit, "limit");
     const subscriptions = await this.subscriptions.listActiveSubscriptions(tenantId);
+    let processed = 0;
     for (const subscription of subscriptions) {
+      if (processed >= limit) break;
       try {
         assertRuntimeSubscription(subscription);
         if (
@@ -78,18 +95,26 @@ export class SignalDispatcher {
         ) {
           continue;
         }
-        await this.dispatchSubscription(subscription, partitionId, limit);
+        processed += await this.dispatchSubscription(
+          subscription,
+          partitionId,
+          limit - processed,
+          fence,
+        );
       } catch {
+        await fence?.assertOwnership();
         // A Subscription-specific adapter or state failure must not block peers.
       }
     }
+    return { processed };
   }
 
   private async dispatchSubscription(
     subscription: RuntimeSubscription,
     partitionId: string,
     limit: number,
-  ): Promise<void> {
+    fence?: RuntimeOwnershipFence,
+  ): Promise<number> {
     assertRuntimeSubscription(subscription);
     assertPositiveSafeInteger(subscription.max_attempts, "max_attempts");
     const now = this.clock.now();
@@ -101,6 +126,7 @@ export class SignalDispatcher {
     assertNonNegativeSafeInteger(position, "delivery position");
     const events = await this.journal.readPartition(partitionId, position, limit);
     let previousJournalPosition = position;
+    let processed = 0;
 
     for (const event of events) {
       this.validateJournalEvent(event, partitionId, previousJournalPosition);
@@ -118,14 +144,16 @@ export class SignalDispatcher {
         ? await this.policy.authorizeDelivery(subscription, event)
         : { kind: "deny" as const };
       if (!filtered || authorized.kind !== "allow") {
+        await fence?.assertOwnership();
         const advanced = await this.deliveryState.advanceDeliveryPosition(
           subscription.subscription_id,
           partitionId,
           position,
           event.partition_position,
         );
-        if (!advanced) return;
+        if (!advanced) return processed;
         position = event.partition_position;
+        processed += 1;
         continue;
       }
 
@@ -145,12 +173,13 @@ export class SignalDispatcher {
         if (
           compareTimestamps(now, previous.next_attempt_at) < 0
         ) {
-          return;
+          return processed;
         }
       }
       const attemptNumber = attempts.length + 1;
       assertPositiveSafeInteger(attemptNumber, "delivery attempt");
       const deliveryStartedAt = performance.now();
+      await fence?.assertOwnership();
       const result = await this.signal.deliver(
         protocolEvent,
         subscription.destination,
@@ -183,6 +212,7 @@ export class SignalDispatcher {
         detail: result.kind === "accepted" ? null : result.detail.slice(0, 512),
         next_attempt_at: nextAttemptAt,
       };
+      await fence?.assertOwnership();
       await this.deliveryState.recordDeliveryAttempt(attempt);
       await this.observer?.afterDelivery(
         event.event_id,
@@ -196,8 +226,9 @@ export class SignalDispatcher {
         if (attemptNumber < subscription.max_attempts) {
           semanticOutcome = "retryable";
           this.observeDelivery(event, semanticOutcome, deliveryStartedAt);
-          return;
+          return processed + 1;
         }
+        await fence?.assertOwnership();
         await this.deadLetter(
           subscription,
           event,
@@ -206,6 +237,7 @@ export class SignalDispatcher {
           now,
         );
       } else if (result.kind === "permanent_failure") {
+        await fence?.assertOwnership();
         await this.deadLetter(
           subscription,
           event,
@@ -216,15 +248,18 @@ export class SignalDispatcher {
       }
       this.observeDelivery(event, semanticOutcome, deliveryStartedAt);
 
+      await fence?.assertOwnership();
       const advanced = await this.deliveryState.advanceDeliveryPosition(
         subscription.subscription_id,
         partitionId,
         position,
         event.partition_position,
       );
-      if (!advanced) return;
+      if (!advanced) return processed + 1;
       position = event.partition_position;
+      processed += 1;
     }
+    return processed;
   }
 
   private observeDelivery(

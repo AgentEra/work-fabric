@@ -433,7 +433,7 @@ git commit -m "feat(cluster): coordinate bounded worker hosts"
 - Consumes: existing projectors, `SignalDispatcher`, Outbox Store and wakeup publisher.
 - Produces: `OutboxWakeupHandler`, `HandoffProjectionHandler`, `CollaborationProjectionHandler`, `SignalDeliveryHandler`.
 
-- [ ] **Step 1: Write failing stale-owner tests**
+- [x] **Step 1: Write failing stale-owner tests**
 
 ```ts
 it("checks ownership before Signal side effect and cursor advance", async () => {
@@ -452,13 +452,13 @@ it("publishes metadata wakeups without protocol payload", async () => {
 });
 ```
 
-- [ ] **Step 2: Run and confirm signature/handler failures**
+- [x] **Step 2: Run and confirm signature/handler failures**
 
 Run: `npm test -- packages/cluster-runtime/test/handlers.test.ts packages/exchange-runtime/test/signal-dispatcher.test.ts`
 
 Expected: FAIL because handlers and fence hooks are missing.
 
-- [ ] **Step 3: Add optional owner fence hooks**
+- [x] **Step 3: Add optional owner fence hooks**
 
 Define the local structural type:
 
@@ -473,14 +473,14 @@ Projectors call it before each read-model write and checkpoint CAS.
 before Delivery position advance/dead-letter settlement. Existing callers may
 omit the fence and preserve Phase 1–5 behavior.
 
-- [ ] **Step 4: Implement handlers**
+- [x] **Step 4: Implement handlers**
 
 Each handler validates `context.item.kind`, asserts ownership, calls one owner
 turn and maps its result to the closed `PartitionTurnOutcome`. The Outbox
 handler uses row owner/fencing CAS and emits exactly three metadata wakeups per
 claimed row, then marks the row published only after all three are accepted.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run: `npm run typecheck && npm test -- packages/cluster-runtime/test/handlers.test.ts packages/exchange-runtime/test packages/operations-runtime/test/collaboration-projector.test.ts`
 

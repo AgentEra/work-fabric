@@ -358,6 +358,28 @@ describe("HandoffProjector", () => {
     ).toBe(0);
   });
 
+  it("checks ownership before model mutation and checkpoint advancement", async () => {
+    const { persistence, models, projector } = fixture([
+      record(offered(), 1, 1),
+    ]);
+    let calls = 0;
+    const fence = {
+      async assertOwnership() {
+        calls += 1;
+        if (calls >= 2) throw new Error("partition_lease_lost");
+      },
+    };
+
+    await expect(projector.runPartition(partitionId, 10, fence)).rejects.toThrow(
+      /partition_lease_lost/,
+    );
+    expect(await models.getHandoff(parentId)).not.toBeNull();
+    expect(await persistence.loadProjectionCheckpoint(
+      HANDOFF_PROJECTOR_ID,
+      partitionId,
+    )).toBe(0);
+  });
+
   it("projects Offer and derives only the Initiator Assignment", async () => {
     const { models, projector } = fixture([record(offered(), 1, 1)]);
 

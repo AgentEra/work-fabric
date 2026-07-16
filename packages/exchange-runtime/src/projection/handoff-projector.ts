@@ -15,6 +15,7 @@ import type {
   ProjectionCheckpointStore,
   ProjectionFailureStore,
 } from "@work-fabric/exchange-spi";
+import type { RuntimeOwnershipFence } from "../runtime-ownership-fence.js";
 
 export const HANDOFF_PROJECTOR_ID = "workfabric.handoff.read-model.v1";
 
@@ -142,6 +143,7 @@ export class HandoffProjector {
   async runPartition(
     partitionId: string,
     limit: number,
+    fence?: RuntimeOwnershipFence,
   ): Promise<ProjectionRunResult> {
     requirePositiveInteger(limit, "limit");
     let position = await this.checkpoints.loadProjectionCheckpoint(
@@ -169,6 +171,7 @@ export class HandoffProjector {
             "partition position gap",
             new Error(`expected ${position + 1}, received ${record.partition_position}`),
           ),
+          fence,
         );
       }
 
@@ -181,6 +184,7 @@ export class HandoffProjector {
           position,
           record,
           failureReason("model read", error),
+          fence,
         );
       }
 
@@ -196,6 +200,7 @@ export class HandoffProjector {
           position,
           record,
           failureReason("decode", error),
+          fence,
         );
       }
 
@@ -212,6 +217,7 @@ export class HandoffProjector {
                 `expected ${expectedVersion}, received ${record.stream_version}`,
               ),
             ),
+            fence,
           );
         }
 
@@ -224,6 +230,7 @@ export class HandoffProjector {
             position,
             record,
             failureReason("decode", error),
+            fence,
           );
         }
         const nextModel: HandoffReadModel = {
@@ -237,6 +244,7 @@ export class HandoffProjector {
               ? event.status
               : (model?.latest_status ?? null),
         };
+        await fence?.assertOwnership();
         try {
           await this.models.putHandoff(nextModel);
         } catch (error) {
@@ -245,11 +253,13 @@ export class HandoffProjector {
             position,
             record,
             failureReason("model write", error),
+            fence,
           );
         }
       }
 
       let advanced: boolean;
+      await fence?.assertOwnership();
       try {
         advanced = await this.checkpoints.advanceProjectionCheckpoint(
           HANDOFF_PROJECTOR_ID,
@@ -263,6 +273,7 @@ export class HandoffProjector {
           position,
           record,
           failureReason("checkpoint advance", error),
+          fence,
         );
       }
       if (!advanced) {
@@ -274,6 +285,7 @@ export class HandoffProjector {
             "checkpoint advance",
             new Error("compare-and-advance returned false"),
           ),
+          fence,
         );
       }
       position = record.partition_position;
@@ -312,7 +324,9 @@ export class HandoffProjector {
     position: number,
     record: EventRecord,
     reason: string,
+    fence?: RuntimeOwnershipFence,
   ): Promise<ProjectionRunResult> {
+    await fence?.assertOwnership();
     await this.failures.putProjectionFailure({
       projector_id: HANDOFF_PROJECTOR_ID,
       partition_id: partitionId,

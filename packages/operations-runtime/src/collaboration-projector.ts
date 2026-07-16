@@ -1,4 +1,5 @@
 import type { Clock } from "@work-fabric/exchange-core";
+import type { RuntimeOwnershipFence } from "@work-fabric/exchange-runtime";
 import type {
   EventJournal,
   EventRecord,
@@ -74,9 +75,10 @@ export class CollaborationProjector {
   async runPartition(
     partitionId: string,
     limit: number,
+    fence?: RuntimeOwnershipFence,
   ): Promise<CollaborationProjectionResult> {
     const startedAt = performance.now();
-    const result = await this.runPartitionInternal(partitionId, limit);
+    const result = await this.runPartitionInternal(partitionId, limit, fence);
     const outcome: SemanticObservation["outcome"] =
       result.kind === "blocked"
         ? "failed"
@@ -96,6 +98,7 @@ export class CollaborationProjector {
   private async runPartitionInternal(
     partitionId: string,
     limit: number,
+    fence?: RuntimeOwnershipFence,
   ): Promise<CollaborationProjectionResult> {
     positive(limit, "limit");
     let position = await this.checkpoints.loadProjectionCheckpoint(
@@ -134,6 +137,7 @@ export class CollaborationProjector {
           position,
           record,
           `partition position gap: expected ${position + 1}, received ${record.partition_position}`,
+          fence,
         );
       }
       const model = await this.handoffs.getHandoff(record.handoff_id);
@@ -155,14 +159,18 @@ export class CollaborationProjector {
           position,
           record,
           "model identity: Handoff projection does not match Journal record",
+          fence,
         );
       }
       try {
         const responsibility = responsibilityFromModel(model);
         const timeline = timelineFromRecord(record);
         const relationships = relationshipsFromModel(model);
+        await fence?.assertOwnership();
         await this.views.putResponsibility(responsibility);
+        await fence?.assertOwnership();
         await this.views.putTimeline(timeline);
+        await fence?.assertOwnership();
         await this.views.replaceHandoffRelationships(
           model.tenant_id,
           model.partition_id,
@@ -171,14 +179,17 @@ export class CollaborationProjector {
           relationships,
         );
       } catch (error) {
+        await fence?.assertOwnership();
         return this.block(
           partitionId,
           position,
           record,
           safeReason("view write", error),
+          fence,
         );
       }
       let advanced: boolean;
+      await fence?.assertOwnership();
       try {
         advanced = await this.checkpoints.advanceProjectionCheckpoint(
           COLLABORATION_PROJECTOR_ID,
@@ -192,6 +203,7 @@ export class CollaborationProjector {
           position,
           record,
           safeReason("checkpoint advance", error),
+          fence,
         );
       }
       if (!advanced) {
@@ -200,6 +212,7 @@ export class CollaborationProjector {
           position,
           record,
           "checkpoint advance: compare-and-advance returned false",
+          fence,
         );
       }
       position = record.partition_position;
@@ -240,7 +253,9 @@ export class CollaborationProjector {
     position: number,
     record: EventRecord,
     reason: string,
+    fence?: RuntimeOwnershipFence,
   ): Promise<CollaborationProjectionResult> {
+    await fence?.assertOwnership();
     await this.failures.putProjectionFailure({
       projector_id: COLLABORATION_PROJECTOR_ID,
       partition_id: partitionId,

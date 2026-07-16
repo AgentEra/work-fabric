@@ -209,6 +209,26 @@ describe("CollaborationProjector", () => {
     ).toEqual([]);
   });
 
+  it("checks ownership before every view write and checkpoint advancement", async () => {
+    const { persistence, handoffProjector, projector } = fixture();
+    await handoffProjector.runPartition(partitionId, 10);
+    let calls = 0;
+    const fence = {
+      async assertOwnership() {
+        calls += 1;
+        if (calls >= 2) throw new Error("partition_lease_lost");
+      },
+    };
+
+    await expect(projector.runPartition(partitionId, 10, fence)).rejects.toThrow(
+      /partition_lease_lost/,
+    );
+    expect(await persistence.loadProjectionCheckpoint(
+      COLLABORATION_PROJECTOR_ID,
+      partitionId,
+    )).toBe(0);
+  });
+
   it("projects safe responsibility, public timeline, and only current relations", async () => {
     const { persistence, operations, handoffProjector, projector } = fixture();
     await handoffProjector.runPartition(partitionId, 10);

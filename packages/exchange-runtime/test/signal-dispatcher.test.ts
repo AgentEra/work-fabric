@@ -245,6 +245,26 @@ describe("SignalDispatcher", () => {
     expect(JSON.stringify(observed)).not.toMatch(/tenant_01|subscription_01/);
   });
 
+  it("checks ownership before Signal side effects and position advance", async () => {
+    const { dispatcher, state, signal } = await fixture([event(1)]);
+    let calls = 0;
+    const fence = {
+      async assertOwnership() {
+        calls += 1;
+        if (calls >= 2) throw new Error("partition_lease_lost");
+      },
+    };
+
+    await expect(dispatcher.dispatchPartition(
+      partitionId,
+      tenantId,
+      10,
+      fence,
+    )).rejects.toThrow(/partition_lease_lost/);
+    expect(signal.observed).toHaveLength(1);
+    expect(await state.loadDeliveryPosition("subscription_01", partitionId)).toBe(0);
+  });
+
   it.each([
     [
       "event_type",
