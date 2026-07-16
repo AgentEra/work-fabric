@@ -142,6 +142,11 @@ export class MemoryRecoveryStore implements RecoveryRequestStore {
   private readonly idempotency = new Map<string, string>();
   private readonly claims = new Map<string, ActiveClaim>();
   private readonly fencing = new Map<string, number>();
+  private readonly claimTokenFactory: () => string;
+
+  constructor(options: { readonly claim_token_factory?: () => string } = {}) {
+    this.claimTokenFactory = options.claim_token_factory ?? randomUUID;
+  }
 
   async submit(input: SubmitRecoveryRequest): Promise<SubmitRecoveryResult> {
     const request = validateSubmit(input);
@@ -211,7 +216,7 @@ export class MemoryRecoveryStore implements RecoveryRequestStore {
       ).toISOString();
       const claim: ActiveClaim = {
         owner: input.worker_id,
-        token: `claim_${randomUUID()}`,
+        token: `claim_${this.claimTokenFactory()}`,
         fencing,
         lease_expires_at: leaseExpires,
       };

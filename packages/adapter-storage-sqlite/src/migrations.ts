@@ -13,8 +13,17 @@ export const SQLITE_EXCHANGE_MIGRATION: SqliteMigration = {
   sql: readFileSync(new URL("../migrations/001_exchange.sql", import.meta.url), "utf8"),
 };
 
+export const SQLITE_SUPPORTING_STORES_MIGRATION: SqliteMigration = {
+  id: "002_supporting_stores",
+  sql: readFileSync(
+    new URL("../migrations/002_supporting_stores.sql", import.meta.url),
+    "utf8",
+  ),
+};
+
 export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
   SQLITE_EXCHANGE_MIGRATION,
+  SQLITE_SUPPORTING_STORES_MIGRATION,
 ];
 
 function checksum(sql: string): string {
