@@ -523,11 +523,14 @@ and the explicit non-claim that this measures participant work.
 
 - [x] **Step 1: Write the failing fallback integration test**
 
-The test creates authoritative lifecycle events through the real HTTP and
-TypeScript SDK, makes NATS publish/pull unavailable, runs two Cluster Hosts,
-and proves database catalog polling still advances Handoff and collaboration
-projections plus Signal delivery. After Broker recovery, stale/repeated hints
-must not add Signal deliveries or advance checkpoints twice.
+The existing Phase 6A round-trip remains the real HTTP/TypeScript SDK proof for
+authoritative lifecycle events and owner projections. The focused Phase 6B
+test injects the production NATS Adapter seam over a disconnectable lower port,
+runs two Cluster Hosts, and proves database catalog polling still advances the
+Handoff, collaboration and Signal positions. After Broker recovery,
+stale/repeated hints must not advance those positions twice. Keeping the two
+proofs separate avoids duplicating the entire HTTP fixture while still testing
+the unchanged public path and the new failure seam.
 
 - [x] **Step 2: Run red and connect the Adapter seam**
 
@@ -584,7 +587,7 @@ Expected: PASS.
 - Consumes: all previous Phase 6B deliverables.
 - Produces: clean, committed and pushed Phase 6B branch with reproducible evidence.
 
-- [ ] **Step 1: Run the complete release chain**
+- [x] **Step 1: Run the complete release chain**
 
 ```sh
 npm run verify:exchange
@@ -602,13 +605,13 @@ Expected: zero failures; environment-dependent PostgreSQL tests may explicitly
 skip without `PG_TEST_URL`; the temporary NATS release run has zero NATS live
 skips; WFPP remains 120/120.
 
-- [ ] **Step 2: Review the project boundary**
+- [x] **Step 2: Review the project boundary**
 
 Verify by source search and test assertions that Broker data is metadata only,
 polling remains active, no public API/SDK schema changed, and no participant
 execution/scheduling code was introduced.
 
-- [ ] **Step 3: Mark this plan complete and commit**
+- [x] **Step 3: Mark this plan complete and commit**
 
 ```sh
 git add docs/superpowers/plans/2026-07-16-phase-6b-nats-wakeup-acceleration-implementation.md
@@ -628,15 +631,15 @@ available for review.
 
 ## Completion checklist
 
-- [ ] Existing public Wakeup SPI remains technology neutral.
-- [ ] NATS package is the only production dependency on the official NATS.js packages.
-- [ ] Payloads are strict metadata and at most 4,096 bytes.
-- [ ] Tenant subjects are HMAC-isolated and filter-bound.
-- [ ] Publisher uses PubAck and stable retryable classification.
-- [ ] Consumer pull, poison handling and settlement are bounded.
-- [ ] Database catalog polling recovers every Broker loss/outage case.
-- [ ] Topology mutation is explicit, safe and never destructive.
-- [ ] Runtime and management credentials are separable.
-- [ ] Live official-server proof contains no NATS skips.
-- [ ] Benchmark evidence is reproducible and narrowly scoped.
-- [ ] Full repository verification and WFPP 120/120 pass.
+- [x] Existing public Wakeup SPI remains technology neutral.
+- [x] NATS package is the only production dependency on the official NATS.js packages.
+- [x] Payloads are strict metadata and at most 4,096 bytes.
+- [x] Tenant subjects are HMAC-isolated and filter-bound.
+- [x] Publisher uses PubAck and stable retryable classification.
+- [x] Consumer pull, poison handling and settlement are bounded.
+- [x] Database catalog polling recovers every Broker loss/outage case.
+- [x] Topology mutation is explicit, safe and never destructive.
+- [x] Runtime and management credentials are separable.
+- [x] Live official-server proof contains no NATS skips.
+- [x] Benchmark evidence is reproducible and narrowly scoped.
+- [x] Full repository verification and WFPP 120/120 pass.
