@@ -116,7 +116,8 @@ Memory and NATS Adapters both run the profile.
 
 ### 4.3 `@work-fabric/adapter-cluster-nats`
 
-This is the only production package importing `nats`. It contains six focused
+This is the only production package importing `@nats-io/transport-node` and
+`@nats-io/jetstream`. It contains six focused
 units:
 
 - `wakeup-codec.ts` — strict canonical JSON encode/decode and size enforcement;
@@ -126,8 +127,8 @@ units:
 - `topology.ts` — desired stream/consumer configuration and drift validation;
 - `index.ts` — public factory and exported technology-specific configuration.
 
-The initial dependency is locked to `nats` 3.1.0 and supports NATS Server 2.10
-or newer. Server
+The initial dependencies are locked to `@nats-io/transport-node` 3.1.0 and
+`@nats-io/jetstream` 3.1.0 and support NATS Server 2.10 or newer. Server
 2.10 is the floor because the consumer uses multiple filter subjects for an
 explicit bounded tenant assignment. Runtime code accepts an injected NATS
 connection and never reads URLs, credentials, JWTs, NKeys or TLS material from

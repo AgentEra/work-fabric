@@ -6,7 +6,7 @@
 
 **Architecture:** Keep the Phase 6A database catalog, Journal, Outbox, checkpoints, delivery positions and leases authoritative. A technology-specific NATS package implements the existing wakeup Publisher/Consumer ports using strict metadata encoding, HMAC tenant subjects, a pre-provisioned stream and durable pull consumer; service-node remains NATS-free and database polling always remains active.
 
-**Tech Stack:** TypeScript 7, Node.js 22.20+, Vitest 4, `nats` 3.1.0, NATS Server 2.10+ (release proof on 2.12.1), existing Work Fabric cluster SPI/runtime and semantic telemetry.
+**Tech Stack:** TypeScript 7, Node.js 22.20+, Vitest 4, `@nats-io/transport-node` 3.1.0, `@nats-io/jetstream` 3.1.0, NATS Server 2.10+ (release proof on 2.12.1), existing Work Fabric cluster SPI/runtime and semantic telemetry.
 
 ## Global Constraints
 
@@ -131,7 +131,7 @@ git commit -m "feat(cluster): define wakeup transport profile"
 - Consumes: `validatePartitionWakeup`, `PARTITION_WORK_KINDS`.
 - Produces: `NatsWakeupError`, `encodeWakeup`, `decodeWakeup`, `HmacWakeupSubjectCodec`, `normalizeNatsWakeupRuntimeConfig`.
 
-- [ ] **Step 1: Add the workspace package and write failing codec tests**
+- [x] **Step 1: Add the workspace package and write failing codec tests**
 
 Package manifest:
 
@@ -144,9 +144,10 @@ Package manifest:
   "exports": { ".": "./src/index.ts" },
   "types": "./src/index.ts",
   "dependencies": {
+    "@nats-io/jetstream": "3.1.0",
+    "@nats-io/transport-node": "3.1.0",
     "@work-fabric/cluster-spi": "0.1.0",
-    "@work-fabric/exchange-spi": "0.1.0",
-    "nats": "3.1.0"
+    "@work-fabric/exchange-spi": "0.1.0"
   },
   "devDependencies": {
     "@work-fabric/exchange-conformance": "0.1.0"
@@ -158,7 +159,7 @@ Tests assert exact JSON round-trip, unknown field rejection, missing field
 rejection, invalid timestamp/position rejection, arbitrary `content` and
 `credential` rejection, oversized bytes rejection and defensive cloning.
 
-- [ ] **Step 2: Run the red codec tests**
+- [x] **Step 2: Run the red codec tests**
 
 ```sh
 npm install
@@ -167,7 +168,7 @@ npx vitest run packages/adapter-cluster-nats/test/wakeup-codec.test.ts packages/
 
 Expected: FAIL because codec modules do not exist.
 
-- [ ] **Step 3: Implement closed-shape payload encoding**
+- [x] **Step 3: Implement closed-shape payload encoding**
 
 ```ts
 export const NATS_WAKEUP_SCHEMA = "workfabric.partition-wakeup.v1";
@@ -181,7 +182,7 @@ Require exactly `schema` plus the seven Wakeup fields via sorted key equality.
 Parse UTF-8 with fatal decoding, reject non-object/array values, validate with
 `validatePartitionWakeup`, and clone all returned values.
 
-- [ ] **Step 4: Implement HMAC tenant subjects**
+- [x] **Step 4: Implement HMAC tenant subjects**
 
 ```ts
 export class HmacWakeupSubjectCodec {
@@ -203,7 +204,7 @@ comparison, validate literal NATS tokens, sort/deduplicate Tenant IDs and emit
 exactly Tenant × four work-kind filters. Reject keys outside 32–128 bytes and
 Tenant sets outside 1–250.
 
-- [ ] **Step 5: Implement stable local errors and normalized bounds**
+- [x] **Step 5: Implement stable local errors and normalized bounds**
 
 ```ts
 export type NatsWakeupErrorCode =
@@ -218,7 +219,7 @@ export type NatsWakeupErrorCode =
 Errors expose only the stable code. Runtime configuration defaults are pull
 1,000 ms, Retry 1,000 ms and poison limit 10, with exact design bounds.
 
-- [ ] **Step 6: Run green tests and commit**
+- [x] **Step 6: Run green tests and commit**
 
 ```sh
 npm run typecheck
@@ -287,7 +288,8 @@ export interface WakeupJetStreamPort {
 }
 ```
 
-The real implementation wraps the `nats` 3.1.0 JetStream API and owns no
+The real implementation wraps the `@nats-io/jetstream` 3.1.0 API over an
+injected `@nats-io/transport-node` connection and owns no
 connection credentials.
 
 - [ ] **Step 3: Write failing Consumer settlement tests**
@@ -541,8 +543,8 @@ service-node.
 
 The gate must enforce:
 
-- `nats` imports exist only under `packages/adapter-cluster-nats` and the two
-  NATS tools;
+- `@nats-io/transport-node` and `@nats-io/jetstream` imports exist only under
+  `packages/adapter-cluster-nats` and the two NATS tools;
 - no Broker vocabulary enters `cluster-spi` public identifiers;
 - NATS payload codec cannot import Handoff/Context/Result domain types;
 - no unbounded `Promise.all` over pull or publish result sets;
@@ -627,7 +629,7 @@ available for review.
 ## Completion checklist
 
 - [ ] Existing public Wakeup SPI remains technology neutral.
-- [ ] NATS package is the only production dependency on `nats`.
+- [ ] NATS package is the only production dependency on the official NATS.js packages.
 - [ ] Payloads are strict metadata and at most 4,096 bytes.
 - [ ] Tenant subjects are HMAC-isolated and filter-bound.
 - [ ] Publisher uses PubAck and stable retryable classification.
