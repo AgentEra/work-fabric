@@ -107,6 +107,7 @@ export type RelationshipKind =
 export interface RelationshipView {
   readonly tenant_id: string;
   readonly partition_id: string;
+  readonly thread_id: string;
   readonly relationship_id: string;
   readonly relationship_kind: RelationshipKind;
   readonly source_id: string;

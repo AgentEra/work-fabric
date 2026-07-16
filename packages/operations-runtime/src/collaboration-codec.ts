@@ -82,6 +82,7 @@ export function timelineFromRecord(record: EventRecord): TimelineEntry {
 
 function relation(
   model: HandoffReadModel,
+  threadId: string,
   kind: RelationshipView["relationship_kind"],
   suffix: string,
   sourceId: string,
@@ -91,6 +92,7 @@ function relation(
   return {
     tenant_id: model.tenant_id,
     partition_id: model.partition_id,
+    thread_id: threadId,
     relationship_id: `${model.handoff_id}:${suffix}`,
     relationship_kind: kind,
     source_id: sourceId,
@@ -109,6 +111,7 @@ export function relationshipsFromModel(
   const views: RelationshipView[] = [
     relation(
       model,
+      state.thread_id,
       "thread_membership",
       "thread",
       source,
@@ -120,6 +123,7 @@ export function relationshipsFromModel(
     views.push(
       relation(
         model,
+        state.thread_id,
         "responsibility",
         "responsibility",
         source,
@@ -133,6 +137,7 @@ export function relationshipsFromModel(
     views.push(
       relation(
         model,
+        state.thread_id,
         "target",
         "target",
         source,
@@ -147,6 +152,7 @@ export function relationshipsFromModel(
     views.push(
       relation(
         model,
+        state.thread_id,
         "parent_child",
         "parent",
         `handoff:${state.parent_handoff_id}`,
@@ -158,6 +164,7 @@ export function relationshipsFromModel(
     views.push(
       relation(
         model,
+        state.thread_id,
         "parent_child",
         "child",
         source,

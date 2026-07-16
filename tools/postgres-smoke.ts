@@ -21,7 +21,7 @@ export async function runPostgresSmoke(options: PostgresSmokeOptions): Promise<{
         await owner.withTransaction((client) => client.query("DELETE FROM work_fabric_tenant_probe WHERE tenant_id=$1 AND probe_id=$2", [options.tenant_id, probeId]).then(() => undefined));
       }
     }
-    return { migrations: migration.migrations, profiles: ["exchange.durability.v1", "exchange.projection.v1", "exchange.subscription.v1", "exchange.persistence.v1", "exchange.context.v1", "connector.ingress.v1"] };
+    return { migrations: migration.migrations, profiles: ["exchange.durability.v1", "exchange.projection.v1", "exchange.subscription.v1", "exchange.persistence.v1", "exchange.context.v1", "connector.ingress.v1", "workfabric.collaboration-view.v1", "workfabric.operation-audit.v1"] };
   } finally { if (options.pool === undefined) await pool.end(); }
 }
 

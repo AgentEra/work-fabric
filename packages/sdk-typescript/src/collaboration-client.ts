@@ -248,6 +248,7 @@ function relationship(value: unknown): RelationshipView {
   return structuredClone({
     tenant_id: stringField(candidate, "tenant_id"),
     partition_id: stringField(candidate, "partition_id"),
+    thread_id: stringField(candidate, "thread_id"),
     relationship_id: stringField(candidate, "relationship_id"),
     relationship_kind: kind,
     source_id: stringField(candidate, "source_id"),

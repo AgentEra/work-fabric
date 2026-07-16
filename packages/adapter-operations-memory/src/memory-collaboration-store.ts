@@ -182,6 +182,7 @@ export class MemoryCollaborationViewStore implements CollaborationViewStore {
     const view = structuredClone(input);
     bounded(view.tenant_id, "tenant_id");
     bounded(view.partition_id, "partition_id");
+    bounded(view.thread_id, "thread_id");
     bounded(view.relationship_id, "relationship_id", 255);
     bounded(view.handoff_id, "handoff_id");
     positive(view.stream_version, "stream_version");
@@ -220,6 +221,7 @@ export class MemoryCollaborationViewStore implements CollaborationViewStore {
         view.handoff_id !== handoffId ||
         view.stream_version !== streamVersion
       ) throw new Error("replacement relationship identity or version is inconsistent");
+      bounded(view.thread_id, "thread_id");
       bounded(view.relationship_id, "relationship_id", 255);
       bounded(view.source_id, "source_id", 255);
       bounded(view.target_id, "target_id", 255);
@@ -397,9 +399,7 @@ export class MemoryCollaborationViewStore implements CollaborationViewStore {
         view.tenant_id === query.tenant_id &&
         view.partition_id === query.partition_id &&
         (query.handoff_id === undefined || view.handoff_id === query.handoff_id) &&
-        (query.thread_id === undefined ||
-          view.relationship_kind !== "thread_membership" ||
-          view.target_id === query.thread_id) &&
+        (query.thread_id === undefined || view.thread_id === query.thread_id) &&
         (observedAt === null || relationshipId === null ||
           afterDescTimeId(
             view.observed_at,

@@ -84,6 +84,7 @@ function relationship(
   return {
     tenant_id: "tenant-profile",
     partition_id: "partition-profile",
+    thread_id: "thread-profile",
     relationship_id: relationshipId,
     relationship_kind: "responsibility",
     source_id: "handoff-1",
@@ -252,6 +253,17 @@ export async function verifyOperationsStoreProfile(
       })
     ).items.map((item) => item.relationship_id),
     ["relationship-2"],
+  );
+  assert.deepEqual(
+    (
+      await collaboration.listRelationships({
+        tenant_id: "tenant-profile",
+        partition_id: "partition-profile",
+        thread_id: "different-thread",
+        limit: 10,
+      })
+    ).items,
+    [],
   );
 
   const firstAudit = audit("audit-1", "2026-07-16T01:00:00.000Z");

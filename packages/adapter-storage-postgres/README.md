@@ -6,6 +6,9 @@ It provides:
 
 - atomic event, command and outbox commits;
 - projection checkpoints and immutable first-write failures;
+- tenant-scoped Handoff read models plus responsibility, timeline and current
+  relationship projections with index-backed cursor queries;
+- append-only operation audit with bounded retention pruning;
 - tenant-scoped subscriptions;
 - cursor delivery positions, active-delivery CAS, attempts and dead letters;
 - fenced outbox and worker leases;
@@ -17,7 +20,8 @@ The adapter never executes a participant's work. It records handoffs, statuses, 
 
 Use `EXCHANGE_AUTHORITY_MIGRATION`, `RUNTIME_STATE_MIGRATION`,
 `RUNTIME_STATE_HARDENING_MIGRATION`, `ENDPOINT_BOUNDARY_MIGRATION`,
-`CONNECTOR_INGRESS_MIGRATION`, `CONNECTOR_INGRESS_HARDENING_MIGRATION`, and the
-common tenant migration with the shared migration runner. The hardening
+`CONNECTOR_INGRESS_MIGRATION`, `CONNECTOR_INGRESS_HARDENING_MIGRATION`,
+`OPERABILITY_MIGRATION`, and the common tenant migration with the shared
+migration runner. The hardening
 migration converts hot queue timestamps to indexed `timestamptz` columns; run
 `pruneExpired()` in bounded tenant/connector batches for retention cleanup.

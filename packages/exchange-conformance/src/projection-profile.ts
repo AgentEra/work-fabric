@@ -206,3 +206,50 @@ export async function verifyProjectionProfile(
     }
   }
 }
+
+export type TenantScopedProjectionStoreFactory = (
+  tenantId: string,
+) => HandoffReadModelStore;
+
+/**
+ * Verifies adapters whose read methods are intentionally bound to one trusted
+ * tenant session (for example a database adapter using RLS). This preserves the
+ * same monotonic/immutable semantics without requiring one store instance to
+ * switch tenant context after construction.
+ */
+export async function verifyTenantScopedProjectionProfile(
+  factory: TenantScopedProjectionStoreFactory,
+): Promise<void> {
+  const tenantOne = "tenant_scoped_01";
+  const tenantTwo = "tenant_scoped_02";
+  const first = factory(tenantOne);
+  assert.equal(first.manifest.profile, "exchange.projection.v1");
+  assertCapabilities(first.manifest, PROJECTION_REQUIRED_CAPABILITIES);
+  const original = model("handoff_scoped", "partition_scoped", 1, tenantOne);
+  await first.putHandoff(original);
+  await first.putHandoff(structuredClone(original));
+  const loaded = await first.getHandoff(original.handoff_id);
+  assert.deepEqual(loaded, original);
+  if (loaded !== null) {
+    (loaded.state.opaque as { marker: string }).marker = "mutated";
+  }
+  assert.deepEqual(await first.getHandoff(original.handoff_id), original);
+  await assert.rejects(
+    first.putHandoff({ ...original, latest_status: { progress: 99 } }),
+  );
+  const newer = model("handoff_scoped", "partition_scoped", 2, tenantOne);
+  await first.putHandoff(newer);
+  await assert.rejects(first.putHandoff(original));
+  assert.deepEqual(await first.listHandoffs("partition_scoped"), [newer]);
+
+  const second = factory(tenantTwo);
+  assert.equal(await second.getHandoff(original.handoff_id), null);
+  const other = model("handoff_scoped", "partition_scoped", 1, tenantTwo);
+  await second.putHandoff(other);
+  assert.deepEqual(await second.getHandoff(other.handoff_id), other);
+  assert.deepEqual(await first.getHandoff(newer.handoff_id), newer);
+
+  await first.clearPartition("partition_scoped");
+  assert.deepEqual(await first.listHandoffs("partition_scoped"), []);
+  assert.deepEqual(await second.listHandoffs("partition_scoped"), [other]);
+}
