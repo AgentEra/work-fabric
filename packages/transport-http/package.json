@@ -8,6 +8,8 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
+    "@work-fabric/connector-feishu": "0.1.0",
+    "@work-fabric/connector-spi": "0.1.0",
     "@work-fabric/exchange-core": "0.1.0",
     "@work-fabric/endpoint-directory": "0.1.0",
     "@work-fabric/exchange-runtime": "0.1.0",
@@ -16,6 +18,7 @@
     "fastify": "5.10.0"
   },
   "devDependencies": {
+    "@work-fabric/adapter-connector-memory": "0.1.0",
     "@work-fabric/adapter-endpoint-memory": "0.1.0",
     "@work-fabric/adapter-identity-local": "0.1.0"
   }

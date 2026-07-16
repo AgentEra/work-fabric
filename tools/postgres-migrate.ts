@@ -1,5 +1,5 @@
 import { createPgPool, runMigrations, TENANT_CONTEXT_MIGRATION, type MigrationSource, type PostgresPool } from "@work-fabric/adapter-postgres-common";
-import { ENDPOINT_BOUNDARY_MIGRATION, EXCHANGE_AUTHORITY_MIGRATION, RUNTIME_STATE_HARDENING_MIGRATION, RUNTIME_STATE_MIGRATION } from "@work-fabric/adapter-storage-postgres";
+import { CONNECTOR_INGRESS_HARDENING_MIGRATION, CONNECTOR_INGRESS_MIGRATION, ENDPOINT_BOUNDARY_MIGRATION, EXCHANGE_AUTHORITY_MIGRATION, RUNTIME_STATE_HARDENING_MIGRATION, RUNTIME_STATE_MIGRATION } from "@work-fabric/adapter-storage-postgres";
 import { CONTEXT_MIGRATION } from "@work-fabric/adapter-context-postgres";
 
 export const POSTGRES_MIGRATIONS: readonly MigrationSource[] = [
@@ -9,6 +9,8 @@ export const POSTGRES_MIGRATIONS: readonly MigrationSource[] = [
   RUNTIME_STATE_HARDENING_MIGRATION,
   CONTEXT_MIGRATION,
   ENDPOINT_BOUNDARY_MIGRATION,
+  CONNECTOR_INGRESS_MIGRATION,
+  CONNECTOR_INGRESS_HARDENING_MIGRATION,
 ];
 
 export interface PostgresMigrateOptions { readonly connection_string: string; readonly dry_run?: boolean; readonly pool?: PostgresPool; }

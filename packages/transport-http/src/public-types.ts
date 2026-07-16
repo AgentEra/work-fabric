@@ -1,4 +1,6 @@
 import type { JsonObject } from "@work-fabric/exchange-spi";
+import type { ConnectorIngressStore } from "@work-fabric/connector-spi";
+import type { FeishuCredentialProvider } from "@work-fabric/connector-feishu";
 
 export interface HttpAuthenticationMetadata {
   readonly authorization: string | null;
@@ -39,4 +41,28 @@ export interface HttpService {
     readonly port: number;
   }): Promise<{ readonly origin: string }>;
   close(): Promise<void>;
+}
+
+export interface FeishuWebhookBinding {
+  readonly route_connector_id: string;
+  readonly tenant_id: string;
+  readonly connector_id: string;
+  readonly external_tenant_id: string;
+  readonly credential_ref: string;
+}
+
+export interface FeishuWebhookBindingResolver {
+  resolve(routeConnectorId: string): Promise<FeishuWebhookBinding | null>;
+}
+
+export interface FeishuWebhookClock {
+  now(): string;
+  nowEpochSeconds(): number;
+}
+
+export interface FeishuWebhookDependencies {
+  readonly ingress: ConnectorIngressStore;
+  readonly credential_provider: FeishuCredentialProvider;
+  readonly binding_resolver: FeishuWebhookBindingResolver;
+  readonly clock: FeishuWebhookClock;
 }

@@ -17,7 +17,7 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
-Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B 已在 Core 之外增加 HTTP Service Binding，阶段 3C 又以统一 TypeScript SDK 把外部参与方接到同一命令、查询、订阅和事件契约；阶段 4A 在这些公共边界上增加 Endpoint Directory、Inbox 和只依赖 SDK 的 Agent Gateway。Core 仍只完成授权后的目标校验、责任移交和权威记录，外部 Runtime 仍拥有决策与执行。
+Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A 增加 Endpoint Directory、Inbox 和只依赖 SDK 的 Agent Gateway；阶段 4B 又在 Core 外增加 durable Connector ingress、映射 worker、reconciliation 和飞书边缘适配。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
 
 ### Work Fabric 原生负责
 
@@ -106,6 +106,8 @@ Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具�
 
 外部系统通过 Connector Adapter 接入。Connector 映射资源、事件、状态和动作结果，并负责外部状态对账。外部系统继续持有原始内容和权威业务事实。
 
+阶段 4B 的飞书实现证明了这条连接边界：Webhook 或可选长连接只完成安全校验、归一化和 durable accept；异步 Connector Worker 通过公开 TypeScript SDK 提交显式操作；出站事件复用既有 Subscription/SignalDispatcher；文档只作为版本化外部引用。Connector receipt、mapping completion、Signal delivery 和 Handoff responsibility acceptance 是四个独立事实。
+
 ## 4. Unified Participation Protocol
 
 统一参与协议是 Work Fabric 的核心产品。它统一协作语义，而不是强制统一传输方式。
@@ -142,7 +144,7 @@ L0  Transport Bindings
     HTTP / gRPC / WebSocket / Webhook / Broker / Local IPC / SDK
 ```
 
-当前已实现 L0 的 HTTP 命令/查询绑定、复用 Durable Subscription 的 Cursor Pull/Ack 和 SSE 呈现，以及覆盖这些公共 Contract 的统一 TypeScript SDK。Phase 4A 的 Agent Gateway 是 SDK 上的外部 Runtime 连接库，不是新的协议层，也不形成旁路状态。WebSocket、Webhook Worker 与其他 Binding 仍是独立后续模块；它们必须复用同一 WFPP 语义和交付位置。
+当前已实现 L0 的 HTTP 命令/查询绑定、复用 Durable Subscription 的 Cursor Pull/Ack 和 SSE 呈现，以及覆盖这些公共 Contract 的统一 TypeScript SDK。Phase 4A 的 Agent Gateway 是 SDK 上的外部 Runtime 连接库；Phase 4B 的飞书 Webhook/长连接和 SignalAdapter 是 Connector edge binding。它们都不是新的协议层，也不形成旁路状态。WebSocket 与其他 Binding 仍是独立后续模块，并且必须复用同一 WFPP 语义和交付位置。
 
 不同传输绑定必须保持相同的领域语义和状态机。例如，飞书卡片点击和 Agent 的流式 `accept` 消息都可以表达 `RESPONSIBILITY_ACCEPTED`，但交互方式不同。
 
@@ -515,6 +517,24 @@ Connector 使用五个明确边界：
 4. Command/Result Mapping
 5. Reconciliation Policy
 
+阶段 4B 将这些边界落实为通用 SPI 和可独立扩容的 runtime：
+
+```mermaid
+flowchart LR
+    Source["External event source"] --> Verify["Channel verify + normalize"]
+    Verify --> Ingress["Durable Connector ingress"]
+    Ingress --> Worker["Fenced mapping worker"]
+    Worker --> SDK["Public TypeScript SDK"]
+    SDK --> Exchange["Handoff Exchange"]
+    Exchange --> Signal["Subscription + SignalDispatcher"]
+    Signal --> Adapter["Channel SignalAdapter"]
+    Adapter --> External["External system"]
+    External -. "status observation" .-> Reconcile["Comparison-only reconciliation"]
+    Reconcile -. "visible discrepancy" .-> Operator["Human or external Agent"]
+```
+
+Ingress 以 tenant、connector、source 和 source-specific dedupe identity 原子去重，并通过 lease、claim token 和 fencing 支持水平扩展和崩溃恢复。HTTP/WebSocket/SDK 细节不进入 SPI；Memory 与 PostgreSQL 可以实现同一 conformance profile。外部事件的任意内容不会直接成为命令，外部身份也不会自动成为 Actor。
+
 ### Agent 扩展
 
 Agent Endpoint 使用 Capability Descriptor 声明输入、结果、限制、交互模式和协议版本。能力发现只负责协作接入，不要求 Work Fabric 理解 Agent 内部实现。
@@ -620,7 +640,20 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - `@work-fabric/agent-gateway` 只依赖公开 SDK，负责租约续期、Inbox 刷新、多分区 SSE 汇聚和有界背压；它不自动 Ack、Accept 或执行。
 - Memory Endpoint Adapter 用于本地参考；PostgreSQL Endpoint Directory/Inbox 通过同一 SPI 提供 RLS、CAS/fencing、索引和持久恢复。
 
-详细边界、序列、配置和错误模型见 [Endpoint 与外部 Agent Runtime 接入](endpoint-agent-boundary.md)。飞书 Connector、Webhook Worker、生产身份 Adapter 和真正的本地 Agent Runtime 仍是外部或后续独立模块；所有模块只增强接入和运行能力，不改变 Core 的职责边界。
+阶段 4B 完成 Generic Connector 与飞书连接边界：
+
+- `connector-spi` 定义技术中立 ingress/mapping/identity/resource/reconciliation ports，Core/SPI 不依赖飞书、HTTP 或 PostgreSQL。
+- Memory 与 PostgreSQL ingress store 共享 durable accept、去重、claim、lease/fencing、retry、dead-letter、requeue 和租户隔离行为。
+- Connector Worker 将受限 mapping outcome 交给 SDK command sink；Webhook 与可选长连接不在线执行协议命令。
+- 飞书 callback 支持 raw-body 验签、时间窗口、加密体、verification、challenge、消息/卡片归一化和稳定幂等。
+- 飞书用户必须显式映射到已有 Work Fabric 身份；Connector 签发的 action reference 经过认证、范围绑定、过期和 expected-version 约束。
+- 飞书文档使用 revision-aware canonical reference，内容只按需、有界获取；outbound 通知复用既有 SignalDispatcher。
+- Reconciliation 只保存 discrepancy；不静默修改任一侧。
+- Worker 在公共 side effect 前续租并校验 fencing；PostgreSQL 使用可索引时间列、生命周期 retention deadline 和有界租户清理。
+- 卡片动作绑定签发时的 Actor/Endpoint/Delegation 快照；文档 resolver 绑定 tenant/connector/credential scope，并在原文读取前再次授权。
+- 真实 HTTP + SDK + Exchange + Subscription integration test 证明了卡片 Offer/Accept/状态回传闭环，且权威事件不含凭据。
+
+详细 Endpoint 边界见 [Endpoint 与外部 Agent Runtime 接入](endpoint-agent-boundary.md)，飞书部署组合见 [Feishu Connector 示例](../examples/feishu-connector/README.md)，完整业务连接场景见 [飞书客户项目生命周期示例](feishu-customer-lifecycle-example.md)。生产身份 Adapter 和真正的本地 Agent Runtime 仍是部署或外部模块；所有连接模块都不改变 Core 的职责边界。
 
 ## 20. 阶段路线与执行状态
 
@@ -632,9 +665,9 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 | 3B | HTTP Service Binding | 已完成 |
 | 3C | TypeScript SDK | 已完成 |
 | 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
-| 4B | 飞书 Connector | 下一步 |
-| 5 | 查询、运维、可观测性与 Read-mostly Console | 未开始 |
+| 4B | Generic Connector + 飞书 Connector | 已完成 |
+| 5 | 查询、运维、可观测性与 Read-mostly Console | 下一步 |
 | 6 | 高吞吐 Signal 与集群分区 | 未开始 |
 | 7 | 跨 Exchange Federation Profile | 未开始 |
 
-实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B 已建立可监听、可关闭、可通过 Canonical API 使用的 HTTP Service Binding；3C 已基于同一 Contract 提供统一 TypeScript SDK。4A 又以真实 HTTP + SDK + Gateway 黑盒流验证 Provision、Session、未排序 Discovery、显式 Resolve、Inbox、SSE、Ack 与外部 Accept/Status/Result，并证明执行回调不进入 Work Fabric。4B 下一步接入飞书，仍复用同一 Contract。阶段 5 的 Console 是 Read Projection 与 Query API 的外围客户端，以协作状态、事件时间线、运行健康和审计呈现为主；Console 不承载领域状态机，不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。
+实施严格遵循上述顺序。3A 已补齐 Capability Target 对外开放所需的协议与 Core 语义；3B/3C 建立 HTTP Service Binding 和统一 SDK；4A 以真实 HTTP + SDK + Gateway 黑盒流证明外部 Agent 连接；4B 以相同公共 Contract 证明飞书人类通道、外部资源和 Connector Worker 的双向连接。阶段 5 下一步补齐操作性、可观测性、读投影和性能基线；Console 是这些 Query API 的外围客户端，不承载领域状态机、不直接访问数据库，也不成为人、Agent 或外部系统完成交接的必要路径。单独维护的阶段状态见 [Roadmap](roadmap.md)。
