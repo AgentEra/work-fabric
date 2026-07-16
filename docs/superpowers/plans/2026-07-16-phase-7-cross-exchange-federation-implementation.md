@@ -26,7 +26,7 @@ execution/scheduling responsibility.
 - [x] Add two-Exchange in-process Offer/Receipt, retry and lost-Receipt proof.
 - [x] Add dependency/observability gates and deployment documentation.
 - [x] Update architecture, roadmap and README with the exact completion boundary.
-- [ ] Run full verification, commit and push without force.
+- [x] Run full verification, commit and push without force.
 
 ## Completion checklist
 
@@ -38,3 +38,13 @@ execution/scheduling responsibility.
 - [x] No Core/HTTP/SDK/Cluster dependency on Federation Runtime.
 - [x] No target selection, workflow scheduling, Agent reasoning or execution.
 - [x] WFPP conformance remains complete (126/126 after Federation fixtures).
+
+## Release evidence
+
+- `npm run verify`: 165 test files passed, 5 environment-gated files skipped;
+  1,091 tests passed, 10 skipped; WFPP 126/126.
+- `npm run verify:exchange`: 145 package test files passed, 5 skipped;
+  922 tests passed, 9 skipped; WFPP 126/126.
+- Federation, Cluster and sensitive-observability static gates passed.
+- Implementation commit `785123f` was pushed without force to
+  `origin/codex/phase-7-federation`.
