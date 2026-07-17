@@ -1,0 +1,113 @@
+api_version: workfabric.config/v1
+
+service:
+  storage_profile: sqlite-local
+  role: all
+  development_mode: false
+  tenant_id: tenant-local
+  exchange_id: exchange-local
+  cursor_secret: ${WORK_FABRIC_CURSOR_SECRET}
+
+  listen:
+    host: 127.0.0.1
+    port: 8787
+
+  sqlite:
+    location: ./var/work-fabric.db
+    busy_timeout_ms: 5000
+
+  identities:
+    - authentication_evidence:
+        bearer_token: ${FEISHU_CONNECTOR_ACCESS_TOKEN}
+      principal:
+        principal_id: principal-feishu-connector
+        tenant_id: tenant-local
+        actor_claims:
+          - actor_id: actor-feishu-user
+            actor_type: human
+            endpoint_ids: [endpoint-feishu-user]
+        attributes: {}
+
+    - authentication_evidence:
+        bearer_token: ${INTAKE_AGENT_ACCESS_TOKEN}
+      principal:
+        principal_id: principal-intake-agent
+        tenant_id: tenant-local
+        actor_claims:
+          - actor_id: actor-intake-agent
+            actor_type: agent
+            endpoint_ids: [endpoint-intake-agent]
+        attributes: {}
+
+  authority_rules:
+    - tenant_id: tenant-local
+      principal_id: principal-feishu-connector
+      actor_id: actor-feishu-user
+      actor_type: human
+      endpoint_id: endpoint-feishu-user
+      action: workfabric.handoff.offer.v1
+      resource_id: null
+
+    - tenant_id: tenant-local
+      principal_id: principal-feishu-connector
+      actor_id: actor-feishu-user
+      actor_type: human
+      endpoint_id: endpoint-feishu-user
+      action: workfabric.operations.health.read.v1
+      resource_id: tenant-local
+
+plugins:
+  instances:
+    feishu-primary:
+      type: collaboration-channel.feishu
+      enabled: true
+      config:
+        connector_id: feishu-primary
+        external_tenant_id: tenant-key-example
+        bot_open_id: ou-bot-example
+
+        credentials:
+          app_id: ${FEISHU_APP_ID}
+          app_secret: ${FEISHU_APP_SECRET}
+          work_fabric_access_token: ${FEISHU_CONNECTOR_ACCESS_TOKEN}
+
+        inbound:
+          enabled: true
+          transport: long_connection
+          mention_only: true
+          intake_target:
+            actor_id: actor-intake-agent
+            endpoint_id: endpoint-intake-agent
+          accept_within_seconds: 86400
+          result_due_within_seconds: 604800
+
+        outbound:
+          enabled: true
+          default_render_mode: card
+          channels:
+            project-notifications:
+              receive_id_type: chat_id
+              receive_id: oc-project-example
+          subscriptions:
+            project-results:
+              channel_ref: project-notifications
+              owner:
+                actor_id: actor-feishu-user
+                actor_type: human
+                endpoint_id: endpoint-feishu-user
+              filter:
+                event_types:
+                  - workfabric.handoff.result_returned.v1
+                  - workfabric.handoff.verified.v1
+
+        identities:
+          - external_open_id: ou-user-example
+            actor_id: actor-feishu-user
+            actor_type: human
+            endpoint_id: endpoint-feishu-user
+
+        worker:
+          poll_interval_ms: 1000
+          lease_seconds: 30
+          batch_limit: 100
+          max_attempts: 8

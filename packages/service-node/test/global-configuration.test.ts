@@ -1,10 +1,43 @@
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { loadNodeConfiguration } from "../src/index.js";
 
 describe("global node configuration", () => {
+  it("loads the runnable SQLite Feishu long-connection example with only applicable secrets", async () => {
+    const path = fileURLToPath(new URL(
+      "../../../examples/config/service-feishu-long-connection.yaml",
+      import.meta.url,
+    ));
+    const loaded = await loadNodeConfiguration({
+      WORK_FABRIC_CONFIG: path,
+      WORK_FABRIC_CURSOR_SECRET: "x".repeat(32),
+      FEISHU_APP_ID: "synthetic-app-id",
+      FEISHU_APP_SECRET: "synthetic-app-secret",
+      FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
+      INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
+    });
+
+    expect(loaded.service).toMatchObject({
+      storage_profile: "sqlite-local",
+      role: "all",
+    });
+    const plugin = loaded.plugins["feishu-primary"]?.config;
+    expect(plugin).toMatchObject({
+      credentials: {
+        app_id: "synthetic-app-id",
+        app_secret: "synthetic-app-secret",
+        work_fabric_access_token: "synthetic-connector-token",
+      },
+      inbound: { transport: "long_connection" },
+    });
+    expect(plugin).not.toHaveProperty("credentials.verification_token");
+    expect(plugin).not.toHaveProperty("credentials.encrypt_key");
+    expect(plugin).not.toHaveProperty("inbound.route_id");
+  });
+
   it("loads service and plugin instances from one YAML Provider with declared environment secrets", async () => {
     const path = join(await mkdtemp(join(tmpdir(), "wf-config-")), "work-fabric.yaml");
     await writeFile(path, `

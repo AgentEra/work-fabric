@@ -55,7 +55,7 @@ implements FeishuLongConnectionClientFactory {
 }
 
 describe("Feishu long connection collaboration channel E2E", () => {
-  it("connects one duplicate-safe explicit mention to durable ingress, one Intake Handoff, and both chat routes", async () => {
+  it("connects one duplicate-safe explicit mention to durable ingress and both chat routes without a Webhook endpoint", async () => {
     const sent: Array<Record<string, unknown>> = [];
     const localRequests: Array<{
       method: string;
@@ -240,6 +240,14 @@ describe("Feishu long connection collaboration channel E2E", () => {
     };
 
     try {
+      const webhookCallback = await service.http.dispatch({
+        method: "POST",
+        url: "/v1/connectors/feishu/feishu-primary/events",
+        headers: { "content-type": "application/json" },
+        payload: event,
+      });
+      expect(webhookCallback.status_code).toBe(404);
+
       await expect(client.emit(event)).resolves.toMatchObject({
         accepted: true,
         duplicate: false,
@@ -308,5 +316,6 @@ describe("Feishu long connection collaboration channel E2E", () => {
 
     expect(longConnections.clients).toHaveLength(1);
     expect(client.status()).toMatchObject({ state: "stopped", code: "stopped" });
+    expect(sent).toHaveLength(2);
   }, 10_000);
 });

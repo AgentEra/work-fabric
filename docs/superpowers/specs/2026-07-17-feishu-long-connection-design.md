@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 
-**Status:** Design confirmed; implementation planned
+**Status:** Implemented and verified
 
 ## 1. Goal
 
