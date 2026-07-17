@@ -228,6 +228,8 @@ Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
 
 部署组合、权限、凭据、保留策略和本地验证见 [Feishu Connector 示例](examples/feishu-connector/README.md)；客户意向到交付运维的完整连接场景见 [飞书客户项目生命周期示例](docs/feishu-customer-lifecycle-example.md)。
 
+内置的 `collaboration-channel.feishu` 插件进一步提供可直接启动的双向协作通道：全局配置通过可替换的 Configuration Provider 加载，飞书 `@机器人` 文本进入一个外部 Agent 的 Intake Handoff，后续 Handoff 事件通过 canonical Subscription 返回原会话。插件只做连接和交接，不做自然语言理解或需求创建。完整配置见 [飞书协作通道接入](docs/guides/feishu-collaboration-channel.md)。
+
 ## 查询、运维与 Console
 
 阶段 5 已完成责任、时间线和关系投影，以及 Projection、Delivery、Connector、差异和审计的有界运维视图。所有能力都通过同一 HTTP/TypeScript SDK 暴露，Human、Agent、Connector、客户服务与可选 Console 只有身份和 Authority 差异，没有专用数据旁路。
@@ -241,7 +243,7 @@ Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
 - `postgres`：由部署注入既有生产适配器，不隐式读取凭据。
 
 ```bash
-export WORK_FABRIC_CONFIG=/absolute/path/work-fabric.json
+export WORK_FABRIC_CONFIG=/absolute/path/work-fabric.yaml
 npm run service:start
 npm run console:build
 ```

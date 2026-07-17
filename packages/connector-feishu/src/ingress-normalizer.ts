@@ -31,6 +31,25 @@ function string(value: JsonValue | undefined, label: string): string {
   return value;
 }
 
+function optionalString(value: JsonValue | undefined, label: string): string | undefined {
+  return value === undefined ? undefined : string(value, label);
+}
+
+function mentions(value: JsonValue | undefined): readonly JsonObject[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new FeishuIngressError("invalid_event", "mentions is invalid");
+  }
+  return value.map((item, index) => {
+    const mention = object(item, `mentions[${index}]`);
+    const id = object(mention.id, `mentions[${index}].id`);
+    return {
+      key: string(mention.key, `mentions[${index}].key`),
+      open_id: string(id.open_id, `mentions[${index}].id.open_id`),
+    };
+  });
+}
+
 function occurredAt(header: JsonObject, fallback: string): string {
   const value = header.create_time;
   if (value === undefined) return fallback;
@@ -56,6 +75,9 @@ function messageEnvelope(
   const senderId = object(sender.sender_id, "event.sender.sender_id");
   const messageId = string(message.message_id, "message_id");
   const chatId = string(message.chat_id, "chat_id");
+  const eventTime = occurredAt(header, scope.received_at);
+  const rootId = optionalString(message.root_id, "root_id");
+  const parentId = optionalString(message.parent_id, "parent_id");
   return {
     tenant_id: scope.tenant_id,
     connector_id: scope.connector_id,
@@ -65,8 +87,8 @@ function messageEnvelope(
     dedupe_key: `message:${messageId}`,
     event_type: "im.message.receive_v1",
     partition_key: `chat:${chatId}`,
-    occurred_at: occurredAt(header, scope.received_at),
-    received_at: scope.received_at,
+    occurred_at: eventTime,
+    received_at: eventTime,
     payload: {
       message_id: messageId,
       chat_id: chatId,
@@ -75,6 +97,9 @@ function messageEnvelope(
       content: string(message.content, "content"),
       sender_open_id: string(senderId.open_id, "sender open_id"),
       sender_type: string(sender.sender_type, "sender_type"),
+      mentions: mentions(message.mentions),
+      ...(rootId === undefined ? {} : { root_id: rootId }),
+      ...(parentId === undefined ? {} : { parent_id: parentId }),
     },
     trace_context: {
       correlation_id: string(header.event_id, "event_id"),
@@ -93,6 +118,7 @@ function cardEnvelope(
   const value = object(action.value, "event.action.value");
   const context = object(event.context, "event.context");
   const eventId = string(header.event_id, "event_id");
+  const eventTime = occurredAt(header, scope.received_at);
   const actionRef = string(value.action_ref, "action_ref");
   const messageId = string(context.open_message_id, "open_message_id");
   const actionDigest = createHash("sha256").update(actionRef).digest("hex");
@@ -105,8 +131,8 @@ function cardEnvelope(
     dedupe_key: `card:${eventId}:${actionDigest}`,
     event_type: "card.action.trigger",
     partition_key: `message:${messageId}`,
-    occurred_at: occurredAt(header, scope.received_at),
-    received_at: scope.received_at,
+    occurred_at: eventTime,
+    received_at: eventTime,
     payload: {
       operator_open_id: string(operatorId.open_id, "operator open_id"),
       action_ref: actionRef,

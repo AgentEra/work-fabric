@@ -12,7 +12,7 @@ function operation(status: "accepted" | "conflict" | "temporarily_unavailable") 
     spec_version: "1.0",
     request_message_id: "message-1",
     operation_status: status,
-    resource: status === "accepted" ? { resource_id: "handoff-1" } : null,
+    resource: status === "accepted" ? { resource_type: "handoff", resource_id: "handoff-1", resource_version: 1 } : null,
     receipt: status === "accepted" ? { receipt_id: "receipt-1" } : null,
     error: status === "accepted" ? null : { code: status },
   };
@@ -65,6 +65,7 @@ describe("ConnectorSdkCommandSink", () => {
       kind: "accepted",
       receipt_id: "receipt-1",
       event_ids: [],
+      resource: { resource_type: "handoff", resource_id: "handoff-1", resource_version: 1 },
     });
     const request = fetch.mock.calls[0]?.[1] as RequestInit;
     const body = JSON.parse(String(request.body));
@@ -76,6 +77,31 @@ describe("ConnectorSdkCommandSink", () => {
       idempotency_key: "connector:action-1",
       payload: { handoff_id: "handoff-1" },
     });
+  });
+
+  it("offers a new Handoff without pretending an existing version exists", async () => {
+    const { adapter, fetch } = sink("accepted");
+    await expect(adapter.execute({
+      ...execution(),
+      command: {
+        operation: "handoff.offer",
+        idempotency_key: "connector:message-1",
+        identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
+        input: {
+          work_reference: { uri: "feishu://message/om_1" },
+          target: { kind: "explicit", actor_id: "agent-1", endpoint_id: "agent-endpoint-1" },
+          intent: [{ text: "create a requirement" }], authority_scope: {},
+          acceptance_criteria: [], verifier: { mode: "initiator" }, priority: "normal",
+          accept_by: "2026-07-18T00:00:00.000Z", result_due_at: "2026-07-19T00:00:00.000Z",
+        },
+      },
+    })).resolves.toMatchObject({
+      kind: "accepted",
+      resource: { resource_id: "handoff-1", resource_version: 1 },
+    });
+    const body = JSON.parse(String((fetch.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.message_type).toBe("workfabric.handoff.offer.v1");
+    expect(body.expected_version).toBeUndefined();
   });
 
   it.each([

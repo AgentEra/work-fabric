@@ -79,6 +79,11 @@ export type ConnectorCommandResult =
       readonly kind: "accepted";
       readonly receipt_id: string;
       readonly event_ids: readonly string[];
+      readonly resource?: {
+        readonly resource_type: "handoff";
+        readonly resource_id: string;
+        readonly resource_version: number;
+      };
     }
   | {
       readonly kind: "retryable_failure";
@@ -94,6 +99,25 @@ export type ConnectorCommandResult =
 export interface ConnectorCommandSink extends ExchangeAdapter {
   readonly manifest: CapabilityManifest;
   execute(input: ConnectorCommandExecution): Promise<ConnectorCommandResult>;
+}
+
+export type ConnectorAcceptedCommandResult = Extract<
+  ConnectorCommandResult,
+  { readonly kind: "accepted" }
+>;
+
+export interface ConnectorAcceptedReceipt {
+  readonly tenant_id: string;
+  readonly connector_id: string;
+  readonly ingress_id: string;
+  readonly claim: ConnectorIngressClaim;
+  readonly command: ConnectorCommandDescriptor;
+  readonly accepted: ConnectorAcceptedCommandResult;
+}
+
+export interface ConnectorAcceptedReceiptHandler extends ExchangeAdapter {
+  readonly manifest: CapabilityManifest;
+  record(input: ConnectorAcceptedReceipt): Promise<ConnectorCommandResult>;
 }
 
 export type ConnectorObservation = Extract<

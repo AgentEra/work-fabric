@@ -12,6 +12,11 @@ describe("PostgreSQL tooling", () => {
     await expect(migratePostgres({ connection_string: "postgres://secret", dry_run: true })).resolves.toMatchObject({ migrations: 0 });
   });
 
+  it("includes durable channel routes in the production migration plan", async () => {
+    await expect(migratePostgres({ connection_string: "postgres://unused", dry_run: true }))
+      .resolves.toMatchObject({ ordered_ids: expect.arrayContaining(["009_channel_routes"]) });
+  });
+
   it("rejects missing connection strings before any external call", async () => {
     await expect(migratePostgres({ connection_string: "" })).rejects.toThrow("connection_string");
     await expect(runPostgresSmoke({ connection_string: "", tenant_id: "tenant", verify_rls: false })).rejects.toThrow("connection_string");

@@ -108,6 +108,8 @@ Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具�
 
 阶段 4B 的飞书实现证明了这条连接边界：Webhook 或可选长连接只完成安全校验、归一化和 durable accept；异步 Connector Worker 通过公开 TypeScript SDK 提交显式操作；出站事件复用既有 Subscription/SignalDispatcher；文档只作为版本化外部引用。Connector receipt、mapping completion、Signal delivery 和 Handoff responsibility acceptance 是四个独立事实。
 
+阶段 8 在 Core 外增加 Provider-backed 全局配置、可信多实例插件生命周期和持久化 Channel Route。内置飞书协作通道仅把明确 `@机器人` 的消息映射成面向已配置外部 Agent 的 Intake Handoff，并通过 canonical Subscription 把协议事件送回原会话或显式固定频道。YAML 只是首个 Configuration Provider；插件与消费方不依赖文件实现。该层不解释意图、不选择目标、不调用模型/工具，也不创建外部需求或执行工作。
+
 ## 4. Unified Participation Protocol
 
 统一参与协议是 Work Fabric 的核心产品。它统一协作语义，而不是强制统一传输方式。

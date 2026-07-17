@@ -17,6 +17,21 @@ and repository verification are implemented.
 | 6A | Clustered partition ownership and database-backed recovery | Complete |
 | 6B | Broker-backed Signal/wakeup acceleration | Complete |
 | 7 | Cross-Exchange federation profile | Complete |
+| 8 | Provider-backed configuration and collaboration-channel plugin runtime | Complete |
+
+## Phase 8 completion boundary
+
+Phase 8 adds a source-neutral immutable Configuration Provider, a strict YAML
+adapter, declared environment secret resolution, trusted multi-instance plugin
+lifecycle, durable channel routes for Memory/SQLite/PostgreSQL, and the built-in
+Feishu collaboration-channel plugin. One explicit `@bot` message becomes one
+Intake Handoff through the public TypeScript SDK, and canonical Handoff events
+return to the original conversation through Subscription and Signal delivery.
+
+The phase does not add intent inference, Agent reasoning, target ranking,
+workflow automation, requirement-system writes, model/tool invocation or task
+execution. Those remain responsibilities of the configured external Agent and
+connected work systems.
 
 ## Phase 4B completion boundary
 

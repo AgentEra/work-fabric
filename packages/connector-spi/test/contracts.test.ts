@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   CONNECTOR_INGRESS_REQUIRED_CAPABILITIES,
   type ConnectorCommandSink,
+  type ConnectorAcceptedReceiptHandler,
   type ConnectorEventMapper,
   type ConnectorIdentityResolver,
   type ConnectorIngressEnvelope,
@@ -58,6 +59,7 @@ describe("Connector SPI contracts", () => {
     expect(compileOnly<ConnectorIngressStore>).toBeTypeOf("function");
     expect(compileOnly<ConnectorEventMapper>).toBeTypeOf("function");
     expect(compileOnly<ConnectorCommandSink>).toBeTypeOf("function");
+    expect(compileOnly<ConnectorAcceptedReceiptHandler>).toBeTypeOf("function");
     expect(compileOnly<ConnectorIdentityResolver>).toBeTypeOf("function");
     expect(compileOnly<ConnectorResourceResolver>).toBeTypeOf("function");
   });

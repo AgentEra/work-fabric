@@ -1,6 +1,7 @@
-import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
+import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
 
 import { MemoryContextRepository } from "@work-fabric/adapter-context-memory";
 import {
@@ -39,10 +40,12 @@ import {
   createSqliteEndpointInboxStore,
   createSqliteHandoffReadModelStore,
   createSqliteOperationsStores,
+  SqliteChannelRouteStore,
   migrateSqlite,
 } from "@work-fabric/adapter-storage-sqlite";
 import {
   ExchangeApplication,
+  canonicalJson,
   type Clock,
   type IdGenerator,
 } from "@work-fabric/exchange-core";
@@ -54,6 +57,7 @@ import {
   HandoffProjector,
   MemoryHandoffReadModelStore,
   MemorySubscriptionStore,
+  SignalDispatcher,
   OpaqueCursorCodec as DeliveryCursorCodec,
 } from "@work-fabric/exchange-runtime";
 import type {
@@ -72,6 +76,8 @@ import type {
 } from "@work-fabric/exchange-spi";
 import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 import type { ConnectorIngressStore } from "@work-fabric/connector-spi";
+import type { ConnectorCommandExecution, ConnectorCommandResult, ConnectorCommandSink } from "@work-fabric/connector-spi";
+import type { ChannelRouteStore } from "@work-fabric/channel-spi";
 import type { ConnectorDiscrepancyStore } from "@work-fabric/connector-runtime";
 import {
   CollaborationProjector,
@@ -103,6 +109,9 @@ import {
   normalizeHttpServiceConfig,
   type HttpService,
 } from "@work-fabric/transport-http";
+import { BearerTokenProvider, ConnectorSdkCommandSink, WorkFabricClient } from "@work-fabric/sdk-typescript";
+import { FeishuPluginFactory, FeishuWebhookRegistry, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 
 import type { NodeServiceConfig } from "./config.js";
 
@@ -134,6 +143,7 @@ export interface NodeStorageComposition {
   readonly endpointDirectory: EndpointDirectoryStore;
   readonly endpointInbox: EndpointInboxStore;
   readonly connectorIngress: ConnectorIngressStore;
+  readonly channelRoutes?: ChannelRouteStore;
   readonly discrepancies: ConnectorDiscrepancyStore;
   readonly recoveries: RecoveryRequestStore;
   readonly boundedHistory?: BoundedOperationalHistoryStore;
@@ -149,6 +159,10 @@ export interface NodeServiceCompositionOptions {
   readonly ids?: IdGenerator;
   readonly cluster_worker?: NodeClusterWorkerDependencies;
   readonly cluster_snapshot?: ClusterOperationalSnapshotSource;
+  readonly configuration_revision?: string;
+  readonly plugins?: PluginHostConfiguration;
+  readonly fetch?: typeof globalThis.fetch;
+  readonly channel_signal_router?: ChannelSignalRouter;
 }
 
 export interface NodeClusterWorkerDependencies {
@@ -177,6 +191,7 @@ function memoryStorage(): NodeStorageComposition {
     endpointDirectory: new MemoryEndpointDirectoryStore(),
     endpointInbox: new MemoryEndpointInboxStore(),
     connectorIngress: new MemoryConnectorIngressStore(),
+    channelRoutes: new MemoryChannelRouteStore(),
     discrepancies: new MemoryDiscrepancyStore(),
     recoveries: new MemoryRecoveryStore(),
     sqlite: null,
@@ -207,6 +222,7 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     endpointDirectory: createSqliteEndpointDirectoryStore(session, config.tenant_id),
     endpointInbox: createSqliteEndpointInboxStore(session, config.tenant_id),
     connectorIngress: createSqliteConnectorIngressStore(session, config.tenant_id),
+    channelRoutes: new SqliteChannelRouteStore(session),
     discrepancies: operations.discrepancies,
     recoveries: operations.recoveries,
     boundedHistory: persistence,
@@ -273,6 +289,42 @@ function operationsCursor(secret: string) {
   return createOpaqueCursorCodec(authenticator, { max_length: 2_048 });
 }
 
+function handoffPartitionId(tenantId: string, handoffId: string): string {
+  return `partition:${createHash("sha256").update(canonicalJson({ tenant_id: tenantId, root_handoff_id: handoffId }), "utf8").digest("hex")}`;
+}
+
+class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
+  readonly manifest = { profile: "connector.command-sink.v1", adapter: "deferred-work-fabric-typescript-sdk", capabilities: { public_sdk_only: true, representation_binding: true, outcome_classification: true } } as const;
+  private readonly sinks = new Map<string, ConnectorSdkCommandSink>();
+  constructor(
+    private readonly config: NodeServiceConfig,
+    private readonly plugins: PluginHostConfiguration,
+    private readonly fetch: typeof globalThis.fetch,
+  ) {}
+  activate(origin: string): void {
+    for (const [instanceId, instance] of Object.entries(this.plugins)) {
+      if (!instance.enabled || instance.type !== "collaboration-channel.feishu") continue;
+      const plugin = instance.config as FeishuPluginConfig;
+      const client = new WorkFabricClient({
+        baseUrl: origin,
+        authentication: new BearerTokenProvider(plugin.credentials.work_fabric_access_token),
+        representation: { actorId: "connector-bootstrap", endpointId: `connector:${instanceId}` },
+        tenantId: this.config.tenant_id,
+        exchangeId: this.config.exchange_id,
+        fetch: this.fetch,
+        clock,
+      });
+      this.sinks.set(instanceId, new ConnectorSdkCommandSink(client));
+    }
+  }
+  async execute(input: ConnectorCommandExecution): Promise<ConnectorCommandResult> {
+    const sink = this.sinks.get(input.connector_id);
+    return sink === undefined
+      ? { kind: "retryable_failure", error_code: "sdk_service_not_ready" }
+      : sink.execute(input);
+  }
+}
+
 export interface ComposedNodeService {
   readonly http: HttpService;
   runProjection(partitionId: string, limit: number): Promise<{
@@ -280,7 +332,7 @@ export interface ComposedNodeService {
     readonly collaboration: Awaited<ReturnType<CollaborationProjector["runPartition"]>>;
   }>;
   rebuildProjection(partitionId: string, limit: number): Promise<void>;
-  start(): void;
+  start(): Promise<void>;
   clusterSnapshot(): Promise<ClusterOperationalSnapshot | null>;
   listen(): Promise<{ readonly origin: string }>;
   close(): Promise<void>;
@@ -300,6 +352,16 @@ export async function composeNodeService(
       "PostgreSQL composition requires injected deployment-owned adapters; no implicit credentials are loaded",
     );
   }
+  const pluginConfiguration = options.plugins ?? {};
+  const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
+  if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
+    throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
+  }
+  const channelRoutes = storage.channelRoutes ?? new MemoryChannelRouteStore();
+  const channelSignalRouter = options.channel_signal_router ?? new ChannelSignalRouter();
+  const webhookRegistry = new FeishuWebhookRegistry();
+  const runtimeFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const connectorCommandSink = new DeferredConnectorSdkCommandSink(config, pluginConfiguration, runtimeFetch);
   const schemas = await loadWfppSchemaValidator("protocol/schemas/v1");
   const validator = await loadWfppCommandValidator(
     schemas,
@@ -334,6 +396,49 @@ export async function composeNodeService(
     undefined,
     storage.journalPositions ?? new StoreJournalPositions(storage.persistence),
   );
+  const localSignalDispatcher = new SignalDispatcher(
+    storage.persistence,
+    storage.persistence,
+    storage.subscriptions,
+    new DefaultSubscriptionDeliveryPolicy(),
+    channelSignalRouter,
+    clock,
+    { base_delay_seconds: 2, max_delay_seconds: 300 },
+    schemas,
+  );
+  let localPump: LocalMechanicalPump | undefined;
+  if (config.cluster === undefined && config.storage_profile !== "postgres") {
+    localPump = new LocalMechanicalPump({
+      poll_interval_ms: 100,
+      max_work_keys: 10_000,
+      turn_limit: 100,
+      async turn(partitionId, limit) {
+        await handoffProjector.runPartition(partitionId, limit);
+        await collaborationProjector.runPartition(partitionId, limit);
+        await localSignalDispatcher.dispatchPartitionTurn(partitionId, config.tenant_id, limit);
+      },
+    });
+  }
+  const pluginServices = new Map<string, unknown>([
+    ["workfabric.tenant_id", config.tenant_id],
+    ["channel.routes", channelRoutes],
+    ["exchange.subscriptions", storage.subscriptions],
+    ["connector.ingress", storage.connectorIngress],
+    ["connector.command_sink", connectorCommandSink],
+    ["channel.signal_registry", channelSignalRouter],
+    ["feishu.webhook_registry", webhookRegistry],
+    ["runtime.clock", { now: clock.now, nowEpochSeconds: () => Math.floor(Date.parse(clock.now()) / 1000) }],
+    ["runtime.fetch", runtimeFetch],
+    ["runtime.handoff_wakeup", (handoffId: string) => localPump?.wake(handoffPartitionId(config.tenant_id, handoffId))],
+  ]);
+  const pluginHost = new PluginHost({
+    registry: new PluginRegistry([new FeishuPluginFactory()]),
+    context: {
+      configuration_revision: options.configuration_revision ?? "direct-composition",
+      service: { get<T>(capability: string): T { if (!pluginServices.has(capability)) throw new Error(`plugin service unavailable: ${capability}`); return pluginServices.get(capability) as T; } },
+    },
+    configuration: pluginConfiguration,
+  });
   let clusterHost: ClusterHost | undefined;
   if (config.cluster !== undefined) {
     const workerDependencies = options.cluster_worker;
@@ -478,11 +583,29 @@ export async function composeNodeService(
     endpoint_directory: endpointDirectory,
     endpoint_inbox: endpointInbox,
     delivery,
+    feishu_webhook: {
+      ingress: storage.connectorIngress,
+      credential_provider: webhookRegistry,
+      binding_resolver: webhookRegistry,
+      clock: { now: clock.now, nowEpochSeconds: () => Math.floor(Date.parse(clock.now()) / 1000) },
+    },
     health_probes: [{
       dependency_id: config.storage_profile,
       async check() { return "healthy"; },
+    }, {
+      dependency_id: "collaboration-channel-plugins",
+      async check() {
+        const health = await pluginHost.health();
+        return health.every((item) => item.state === "healthy") ? "healthy" : "unhealthy";
+      },
     }],
   }, normalizeHttpServiceConfig({}));
+  try {
+    await pluginHost.prepare();
+  } catch (error) {
+    storage.sqlite?.close();
+    throw error;
+  }
   return {
     http,
     async runProjection(partitionId, limit) {
@@ -497,21 +620,27 @@ export async function composeNodeService(
       await handoffProjector.rebuildPartition(partitionId, limit);
       await collaborationProjector.rebuildPartition(config.tenant_id, partitionId, limit);
     },
-    start() {
+    async start() {
       if (config.role === "worker" || config.role === "all") {
         clusterHost?.start();
       }
+      localPump?.start();
+      await pluginHost.start();
     },
     async clusterSnapshot() {
       return operationalClusterSnapshot?.load(config.tenant_id) ?? null;
     },
-    listen() {
+    async listen() {
       if (config.role === "worker") {
-        return Promise.reject(new Error("worker role does not expose HTTP"));
+        throw new Error("worker role does not expose HTTP");
       }
-      return http.listen(config.listen);
+      const result = await http.listen(config.listen);
+      connectorCommandSink.activate(result.origin);
+      return result;
     },
     async close() {
+      await pluginHost.stop();
+      await localPump?.stop();
       await clusterHost?.drain();
       await http.close();
       storage.sqlite?.close();

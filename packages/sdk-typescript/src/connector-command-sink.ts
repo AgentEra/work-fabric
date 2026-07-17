@@ -9,6 +9,7 @@ import type { WorkFabricClient } from "./client.js";
 import type { OperationResult } from "./protocol-types.js";
 
 const SUPPORTED = new Set([
+  "handoff.offer",
   "handoff.accept",
   "handoff.decline",
   "handoff.expire",
@@ -28,6 +29,21 @@ function detail(result: OperationResult): string | undefined {
 function classify(result: OperationResult): ConnectorCommandResult {
   if (result.operation_status === "accepted") {
     const value = result.receipt?.receipt_id;
+    const resource = result.resource;
+    const acceptedResource =
+      resource !== null &&
+      resource.resource_type === "handoff" &&
+      typeof resource.resource_id === "string" &&
+      resource.resource_id.length > 0 &&
+      resource.resource_id.length <= 128 &&
+      Number.isSafeInteger(resource.resource_version) &&
+      (resource.resource_version as number) > 0
+        ? {
+            resource_type: "handoff" as const,
+            resource_id: resource.resource_id,
+            resource_version: resource.resource_version as number,
+          }
+        : undefined;
     return {
       kind: "accepted",
       receipt_id:
@@ -35,6 +51,7 @@ function classify(result: OperationResult): ConnectorCommandResult {
           ? value
           : `operation:${result.request_message_id}`,
       event_ids: [],
+      ...(acceptedResource === undefined ? {} : { resource: acceptedResource }),
     };
   }
   const errorDetail = detail(result);
@@ -76,7 +93,8 @@ export class ConnectorSdkCommandSink implements ConnectorCommandSink {
     if (
       !SUPPORTED.has(command.operation) ||
       command.identity.endpoint_id === undefined ||
-      command.expected_version === undefined
+      (command.operation !== "handoff.offer" && command.expected_version === undefined) ||
+      (command.operation === "handoff.offer" && command.expected_version !== undefined)
     ) {
       return {
         kind: "permanent_failure",
@@ -92,24 +110,29 @@ export class ConnectorSdkCommandSink implements ConnectorCommandSink {
           : { delegationId: command.identity.delegation_id }),
       }).handoffs;
       const options = {
-        expectedVersion: command.expected_version,
+        expectedVersion: command.expected_version!,
         idempotencyKey: command.idempotency_key,
         correlationId: execution.ingress_id,
       };
-      const id = handoffId(command.input);
       let result: OperationResult;
       switch (command.operation) {
+        case "handoff.offer":
+          result = await handoffs.offer(command.input as never, {
+            idempotencyKey: command.idempotency_key,
+            correlationId: execution.ingress_id,
+          });
+          break;
         case "handoff.accept":
-          result = await handoffs.accept({ handoff_id: id }, options);
+          result = await handoffs.accept({ handoff_id: handoffId(command.input) }, options);
           break;
         case "handoff.decline":
-          result = await handoffs.decline({ handoff_id: id }, options);
+          result = await handoffs.decline({ handoff_id: handoffId(command.input) }, options);
           break;
         case "handoff.expire":
-          result = await handoffs.expire({ handoff_id: id }, options);
+          result = await handoffs.expire({ handoff_id: handoffId(command.input) }, options);
           break;
         case "handoff.close":
-          result = await handoffs.close({ handoff_id: id }, options);
+          result = await handoffs.close({ handoff_id: handoffId(command.input) }, options);
           break;
         case "handoff.cancel":
           result = await handoffs.cancel(command.input as never, options);
