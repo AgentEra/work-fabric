@@ -5,15 +5,18 @@ import {
   FeishuEventMapper,
   FeishuEventRenderer,
   FeishuIdentityMapper,
+  FeishuLongConnectionSource,
   FeishuOpenApiClient,
   FeishuSignalAdapter,
   FeishuTenantAccessTokenProvider,
+  type FeishuLongConnectionClient,
+  type FeishuLongConnectionClientFactory,
 } from "@work-fabric/connector-feishu";
 import { ConnectorWorker } from "@work-fabric/connector-runtime";
 import type { ConnectorCommandSink, ConnectorIngressStore, ConnectorObservationSink } from "@work-fabric/connector-spi";
 import type { RuntimeSubscription, SignalAdapter, SubscriptionStore } from "@work-fabric/exchange-spi";
 import type { PluginContext, PluginFactory, PluginHealth, PluginInstance, PluginInstanceConfiguration } from "@work-fabric/plugin-spi";
-import { validateFeishuPluginConfig, type FeishuPluginConfig, type FeishuStaticChannelConfig, type FeishuStaticSubscriptionConfig, type FeishuWebhookCredentials } from "./config.js";
+import { validateFeishuPluginConfig, type FeishuPluginConfig, type FeishuStaticChannelConfig, type FeishuStaticSubscriptionConfig } from "./config.js";
 import { FeishuIntakeMessagePolicy } from "./intake-message-policy.js";
 import { FeishuIntakeReceiptHandler } from "./intake-receipt-handler.js";
 import { FeishuRouteAwareSignalAdapter } from "./route-aware-signal-adapter.js";
@@ -24,6 +27,15 @@ export interface ChannelSignalRegistration {
   unregister(instanceId: string): void;
 }
 interface RuntimeClock { now(): string; nowEpochSeconds(): number; }
+
+type FeishuWebhookPluginConfig = Extract<
+  FeishuPluginConfig,
+  { readonly inbound: { readonly transport: "webhook" } }
+>;
+
+function isWebhookConfig(config: FeishuPluginConfig): config is FeishuWebhookPluginConfig {
+  return config.inbound.transport === "webhook";
+}
 
 function addSeconds(timestamp: string, seconds: number): string {
   return new Date(Date.parse(timestamp) + seconds * 1000).toISOString();
@@ -66,7 +78,7 @@ class FeishuPluginInstance implements PluginInstance {
   private active: Promise<void> | null = null;
   private stopped = false;
   private prepared = false;
-  private healthValue: PluginHealth = { state: "healthy", code: "ready" };
+  private workerHealthValue: PluginHealth = { state: "healthy", code: "ready" };
   constructor(
     private readonly instanceId: string,
     private readonly tenantId: string,
@@ -77,15 +89,16 @@ class FeishuPluginInstance implements PluginInstance {
     private readonly webhooks: FeishuWebhookRegistry,
     private readonly subscriptions: SubscriptionStore,
     private readonly clock: RuntimeClock,
+    private readonly longConnection: FeishuLongConnectionClient | undefined,
+    private readonly longConnectionSource: FeishuLongConnectionSource | undefined,
   ) { this.signal_adapter = signalAdapter; }
   async prepare(): Promise<void> {
     if (this.prepared) return;
-    if (this.config.inbound.enabled) {
-      const credentials = this.config.credentials as FeishuWebhookCredentials;
+    if (this.config.inbound.enabled && isWebhookConfig(this.config)) {
       this.webhooks.register(this.instanceId, {
         tenant_id: this.tenantId, connector_id: this.config.connector_id,
         external_tenant_id: this.config.external_tenant_id, credential_ref: `feishu:${this.instanceId}`,
-        credentials: { verification_token: credentials.verification_token, ...(credentials.encrypt_key === undefined ? {} : { encrypt_key: credentials.encrypt_key }) },
+        credentials: { verification_token: this.config.credentials.verification_token, ...(this.config.credentials.encrypt_key === undefined ? {} : { encrypt_key: this.config.credentials.encrypt_key }) },
       });
     }
     if (this.config.outbound.enabled) {
@@ -102,11 +115,17 @@ class FeishuPluginInstance implements PluginInstance {
     }
     this.prepared = true;
   }
-  async start(): Promise<void> { if (!this.prepared) throw new Error("feishu_plugin_not_prepared"); this.stopped = false; if (this.config.inbound.enabled) this.schedule(0); }
+  async start(): Promise<void> { if (!this.prepared) throw new Error("feishu_plugin_not_prepared"); this.stopped = false; await this.longConnectionSource?.start(); if (this.config.inbound.enabled) this.schedule(0); }
   private schedule(delay: number): void { if (this.stopped) return; this.timer = setTimeout(() => { this.active = this.turn().finally(() => { this.active = null; this.schedule(this.config.worker.poll_interval_ms); }); }, delay); }
-  private async turn(): Promise<void> { try { await this.worker.runBatch(); this.healthValue = { state: "healthy", code: "ready" }; } catch { this.healthValue = { state: "degraded", code: "connector_turn_failed" }; } }
-  async health(): Promise<PluginHealth> { return this.healthValue; }
-  async stop(): Promise<void> { this.stopped = true; if (this.timer !== undefined) clearTimeout(this.timer); this.timer = undefined; await this.active; if (this.prepared) { this.signals.unregister(this.instanceId); this.webhooks.unregister(this.instanceId); } this.prepared = false; }
+  private async turn(): Promise<void> { try { await this.worker.runBatch(); this.workerHealthValue = { state: "healthy", code: "ready" }; } catch { this.workerHealthValue = { state: "degraded", code: "connector_turn_failed" }; } }
+  async health(): Promise<PluginHealth> {
+    if (this.longConnection === undefined) return this.workerHealthValue;
+    const connectionState = this.longConnection.status().state;
+    if (connectionState === "failed") return { state: "unhealthy", code: "feishu_long_connection_failed" };
+    if (connectionState === "connected") return this.workerHealthValue;
+    return { state: "degraded", code: `feishu_long_connection_${connectionState}` };
+  }
+  async stop(): Promise<void> { this.stopped = true; if (this.timer !== undefined) clearTimeout(this.timer); this.timer = undefined; await this.longConnectionSource?.stop(); await this.active; if (this.prepared) { if (this.config.outbound.enabled) this.signals.unregister(this.instanceId); if (this.config.inbound.enabled && isWebhookConfig(this.config)) this.webhooks.unregister(this.instanceId); } this.prepared = false; }
 }
 
 export class FeishuPluginFactory implements PluginFactory {
@@ -123,6 +142,25 @@ export class FeishuPluginFactory implements PluginFactory {
     const signals = context.service.get<ChannelSignalRegistration>("channel.signal_registry");
     const webhooks = context.service.get<FeishuWebhookRegistry>("feishu.webhook_registry");
     const clock = context.service.get<RuntimeClock>("runtime.clock");
+    const longConnection = config.inbound.enabled && config.inbound.transport === "long_connection"
+      ? context.service.get<FeishuLongConnectionClientFactory>("feishu.long_connection_client_factory").create({
+          app_id: config.credentials.app_id,
+          app_secret: config.credentials.app_secret,
+          instance_id: instance.instance_id,
+        })
+      : undefined;
+    const longConnectionSource = longConnection === undefined
+      ? undefined
+      : new FeishuLongConnectionSource({
+          client: longConnection,
+          ingress,
+          scope: {
+            tenant_id: tenantId,
+            connector_id: config.connector_id,
+            expected_external_tenant_id: config.external_tenant_id,
+          },
+          clock,
+        });
     const wakeHandoff = context.service.get<(handoffId: string) => void>("runtime.handoff_wakeup");
     const fetch = context.service.get<typeof globalThis.fetch>("runtime.fetch");
     const identities = new Map(config.identities.map((item) => [item.external_open_id, item]));
@@ -140,6 +178,6 @@ export class FeishuPluginFactory implements PluginFactory {
     const messages = new FeishuOpenApiClient({ token_provider: tokenProvider, fetch, base_url: "https://open.feishu.cn", request_timeout_ms: 10_000, max_response_bytes: 64_000 });
     const delegate = new FeishuSignalAdapter({ messages, renderer: new FeishuEventRenderer({ action_codec: actionCodec, clock, max_text_bytes: 100_000, max_card_bytes: 25_000 }) });
     const routeAdapter = new FeishuRouteAwareSignalAdapter({ tenant_id: tenantId, plugin_instance_id: instance.instance_id, connector_id: config.connector_id, external_tenant_id: config.external_tenant_id, credential_ref: credentialRef, render_mode: config.outbound.default_render_mode, actor_id: config.inbound.intake_target.actor_id, endpoint_id: config.inbound.intake_target.endpoint_id, routes, static_channels: config.outbound.channels satisfies Readonly<Record<string, FeishuStaticChannelConfig>>, delegate });
-    return new FeishuPluginInstance(instance.instance_id, tenantId, config, worker, routeAdapter, signals, webhooks, subscriptions, clock);
+    return new FeishuPluginInstance(instance.instance_id, tenantId, config, worker, routeAdapter, signals, webhooks, subscriptions, clock, longConnection, longConnectionSource);
   }
 }

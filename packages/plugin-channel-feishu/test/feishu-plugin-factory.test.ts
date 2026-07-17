@@ -1,7 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
 import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
+import type {
+  FeishuLongConnectionClient,
+  FeishuLongConnectionClientFactory,
+  FeishuLongConnectionHandler,
+  FeishuLongConnectionState,
+  FeishuLongConnectionStatus,
+} from "@work-fabric/connector-feishu";
 import { MemorySubscriptionStore } from "@work-fabric/exchange-runtime";
+import type { JsonObject } from "@work-fabric/exchange-spi";
 import type { SignalAdapter } from "@work-fabric/exchange-spi";
 import { FeishuPluginFactory, FeishuWebhookRegistry } from "../src/index.js";
 
@@ -12,6 +20,117 @@ const config = () => ({
   outbound: { enabled: true, default_render_mode: "card", channels: {}, subscriptions: {} },
   identities: [{ external_open_id: "ou-human", actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" }],
   worker: { poll_interval_ms: 1000, lease_seconds: 30, batch_limit: 100, max_attempts: 8 },
+});
+
+const longConnectionConfig = (enabled = true) => ({
+  ...config(),
+  credentials: {
+    app_id: "app-id",
+    app_secret: "app-secret",
+    work_fabric_access_token: "wf-token",
+  },
+  inbound: {
+    enabled,
+    transport: "long_connection",
+    mention_only: true,
+    intake_target: { actor_id: "actor-agent", endpoint_id: "endpoint-agent" },
+  },
+});
+
+const longConnectionBody: JsonObject = {
+  schema: "2.0",
+  header: {
+    event_id: "event-message-1",
+    event_type: "im.message.receive_v1",
+    create_time: "1784160000000",
+    tenant_key: "tenant-key-1",
+  },
+  event: {
+    sender: {
+      sender_id: { open_id: "ou-human" },
+      sender_type: "user",
+    },
+    message: {
+      message_id: "om-message-1",
+      chat_id: "oc-chat-1",
+      chat_type: "group",
+      message_type: "text",
+      content: "{\"text\":\"hello\"}",
+    },
+  },
+};
+
+function statusFor(state: FeishuLongConnectionState): FeishuLongConnectionStatus {
+  return {
+    state,
+    code: state === "failed" ? "connection_failed" : state,
+    reconnect_attempts: 0,
+    changed_at: "2026-07-17T00:00:00.000Z",
+  };
+}
+
+class FakeLongConnectionClient implements FeishuLongConnectionClient {
+  handler: FeishuLongConnectionHandler | undefined;
+  state: FeishuLongConnectionState = "connecting";
+  startCalls = 0;
+  stopCalls = 0;
+  onStop: (() => Promise<void>) | undefined;
+
+  async start(handler: FeishuLongConnectionHandler): Promise<void> {
+    this.handler = handler;
+    this.startCalls += 1;
+  }
+
+  status(): FeishuLongConnectionStatus {
+    return statusFor(this.state);
+  }
+
+  async stop(): Promise<void> {
+    this.stopCalls += 1;
+    await this.onStop?.();
+  }
+}
+
+function createLongConnectionFixture(options: {
+  readonly enabled?: boolean;
+  readonly ingress?: MemoryConnectorIngressStore;
+  readonly signalEvents?: string[];
+} = {}) {
+  const client = new FakeLongConnectionClient();
+  const createClient = vi.fn(() => client);
+  const clientFactory: FeishuLongConnectionClientFactory = { create: createClient };
+  const ingress = options.ingress ?? new MemoryConnectorIngressStore();
+  const webhook = new FeishuWebhookRegistry();
+  const signalEvents = options.signalEvents ?? [];
+  const requested: string[] = [];
+  const services = new Map<string, unknown>([
+    ["workfabric.tenant_id", "tenant-1"],
+    ["channel.routes", new MemoryChannelRouteStore()],
+    ["exchange.subscriptions", new MemorySubscriptionStore()],
+    ["connector.ingress", ingress],
+    ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
+    ["channel.signal_registry", { register() { signalEvents.push("signal_register"); }, unregister() { signalEvents.push("signal_unregister"); } }],
+    ["feishu.webhook_registry", webhook],
+    ["feishu.long_connection_client_factory", clientFactory],
+    ["runtime.clock", { now: () => "2026-07-17T00:00:00.000Z", nowEpochSeconds: () => 1_784_275_200 }],
+    ["runtime.fetch", vi.fn()],
+    ["runtime.handoff_wakeup", () => {}],
+  ]);
+  const context = {
+    configuration_revision: "1",
+    service: {
+      get<T>(key: string) {
+        requested.push(key);
+        if (!services.has(key)) throw new Error(key);
+        return services.get(key) as T;
+      },
+    },
+  };
+  return { client, createClient, ingress, webhook, requested, signalEvents, context };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("FeishuPluginFactory", () => {
@@ -32,7 +151,9 @@ describe("FeishuPluginFactory", () => {
       ["runtime.handoff_wakeup", () => {}],
     ]);
     const factory = new FeishuPluginFactory();
-    const instance = await factory.create({ configuration_revision: "1", service: { get<T>(key: string) { if (!services.has(key)) throw new Error(key); return services.get(key) as T; } } }, { instance_id: "feishu-primary", type: factory.type, config: factory.validate(config()) });
+    const requested: string[] = [];
+    const instance = await factory.create({ configuration_revision: "1", service: { get<T>(key: string) { requested.push(key); if (!services.has(key)) throw new Error(key); return services.get(key) as T; } } }, { instance_id: "feishu-primary", type: factory.type, config: factory.validate(config()) });
+    expect(requested).not.toContain("feishu.long_connection_client_factory");
     await instance.prepare();
     expect(await webhook.resolve("feishu-primary")).toMatchObject({ tenant_id: "tenant-1" });
     expect(signals.has("feishu-primary")).toBe(true);
@@ -41,6 +162,151 @@ describe("FeishuPluginFactory", () => {
     expect(await webhook.resolve("feishu-primary")).toBeNull();
     expect(signals.has("feishu-primary")).toBe(false);
     expect(await instance.health()).toMatchObject({ state: "healthy" });
+  });
+
+  it("composes enabled long connection credentials without preparing network resources", async () => {
+    const fixture = createLongConnectionFixture();
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(longConnectionConfig()),
+    });
+
+    expect(fixture.requested.filter((key) => key === "feishu.long_connection_client_factory")).toHaveLength(1);
+    expect(fixture.createClient).toHaveBeenCalledWith({
+      app_id: "app-id",
+      app_secret: "app-secret",
+      instance_id: "feishu-primary",
+    });
+    await instance.prepare();
+    expect(fixture.client.startCalls).toBe(0);
+    expect(await fixture.webhook.resolve("feishu-primary")).toBeNull();
+  });
+
+  it("starts the long source and worker and persists delivered bodies in real ingress", async () => {
+    vi.useFakeTimers();
+    const fixture = createLongConnectionFixture();
+    const claim = vi.spyOn(fixture.ingress, "claim");
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(longConnectionConfig()),
+    });
+
+    await instance.prepare();
+    await instance.start();
+    expect(fixture.client.startCalls).toBe(1);
+    await expect(fixture.client.handler?.(longConnectionBody)).resolves.toMatchObject({
+      accepted: true,
+      duplicate: false,
+    });
+    expect((await fixture.ingress.list({
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      limit: 10,
+    })).items).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(claim).toHaveBeenCalledTimes(1);
+    await instance.stop();
+  });
+
+  it("combines long connection and worker health independently", async () => {
+    vi.useFakeTimers();
+    const fixture = createLongConnectionFixture();
+    vi.spyOn(fixture.ingress, "claim").mockRejectedValueOnce(new Error("worker unavailable"));
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(longConnectionConfig()),
+    });
+    await instance.prepare();
+    await instance.start();
+
+    expect(await instance.health()).toEqual({
+      state: "degraded",
+      code: "feishu_long_connection_connecting",
+    });
+    fixture.client.state = "connected";
+    expect(await instance.health()).toEqual({ state: "healthy", code: "ready" });
+    fixture.client.state = "failed";
+    expect(await instance.health()).toEqual({
+      state: "unhealthy",
+      code: "feishu_long_connection_failed",
+    });
+
+    fixture.client.state = "connected";
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await instance.health()).toEqual({
+      state: "degraded",
+      code: "connector_turn_failed",
+    });
+    await instance.stop();
+  });
+
+  it("stops the long source, drains the worker, then unregisters prepared resources", async () => {
+    vi.useFakeTimers();
+    const events: string[] = [];
+    const fixture = createLongConnectionFixture({ signalEvents: events });
+    let releaseWorker!: (claims: readonly []) => void;
+    const workerDrain = new Promise<readonly []>((resolve) => { releaseWorker = resolve; });
+    vi.spyOn(fixture.ingress, "claim").mockImplementationOnce(async () => {
+      events.push("worker_started");
+      return workerDrain;
+    });
+    let releaseSource!: () => void;
+    const sourceDrain = new Promise<void>((resolve) => { releaseSource = resolve; });
+    fixture.client.onStop = async () => {
+      events.push("source_stop_started");
+      await sourceDrain;
+      events.push("source_stopped");
+    };
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(longConnectionConfig()),
+    });
+    await instance.prepare();
+    await instance.start();
+    vi.advanceTimersByTime(0);
+    await Promise.resolve();
+    expect(events).toContain("worker_started");
+
+    const stopping = instance.stop();
+    expect(events).toContain("source_stop_started");
+    expect(events).not.toContain("signal_unregister");
+    releaseSource();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(events).toContain("source_stopped");
+    expect(events).not.toContain("signal_unregister");
+    releaseWorker([]);
+    await stopping;
+    expect(events.indexOf("source_stopped")).toBeLessThan(events.indexOf("signal_unregister"));
+  });
+
+  it("does not create a long client or schedule a worker when inbound is disabled", async () => {
+    vi.useFakeTimers();
+    const fixture = createLongConnectionFixture({ enabled: false });
+    const factory = new FeishuPluginFactory();
+    const configured = longConnectionConfig(false);
+    configured.outbound.enabled = false;
+    const instance = await factory.create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(configured),
+    });
+    await instance.prepare();
+    await instance.start();
+
+    expect(fixture.requested).not.toContain("feishu.long_connection_client_factory");
+    expect(fixture.createClient).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0);
+    await instance.stop();
   });
 
   it("provisions configured static channels as canonical idempotent subscriptions", async () => {
