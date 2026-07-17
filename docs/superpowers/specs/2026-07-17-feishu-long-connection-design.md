@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-17
 
-**Status:** Design confirmed; written-spec review pending
+**Status:** Design confirmed; implementation planned
 
 ## 1. Goal
 
