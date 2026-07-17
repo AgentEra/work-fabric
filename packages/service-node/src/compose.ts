@@ -110,10 +110,13 @@ import {
   type HttpService,
 } from "@work-fabric/transport-http";
 import { BearerTokenProvider, ConnectorSdkCommandSink, WorkFabricClient } from "@work-fabric/sdk-typescript";
+import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
+import type { FeishuLongConnectionClientFactory } from "@work-fabric/connector-feishu";
 import { FeishuPluginFactory, FeishuWebhookRegistry, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
 import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 
 import type { NodeServiceConfig } from "./config.js";
+import { assertFeishuPluginRole } from "./feishu-plugin-composition.js";
 
 const clock: Clock = { now: () => new Date().toISOString() };
 const defaultIds: IdGenerator = {
@@ -163,6 +166,7 @@ export interface NodeServiceCompositionOptions {
   readonly plugins?: PluginHostConfiguration;
   readonly fetch?: typeof globalThis.fetch;
   readonly channel_signal_router?: ChannelSignalRouter;
+  readonly feishu_long_connection_client_factory?: FeishuLongConnectionClientFactory;
 }
 
 export interface NodeClusterWorkerDependencies {
@@ -353,6 +357,7 @@ export async function composeNodeService(
     );
   }
   const pluginConfiguration = options.plugins ?? {};
+  assertFeishuPluginRole(config.role, pluginConfiguration);
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
   if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
     throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
@@ -427,6 +432,11 @@ export async function composeNodeService(
     ["connector.command_sink", connectorCommandSink],
     ["channel.signal_registry", channelSignalRouter],
     ["feishu.webhook_registry", webhookRegistry],
+    [
+      "feishu.long_connection_client_factory",
+      options.feishu_long_connection_client_factory
+        ?? new NodeFeishuLongConnectionClientFactory(),
+    ],
     ["runtime.clock", { now: clock.now, nowEpochSeconds: () => Math.floor(Date.parse(clock.now()) / 1000) }],
     ["runtime.fetch", runtimeFetch],
     ["runtime.handoff_wakeup", (handoffId: string) => localPump?.wake(handoffPartitionId(config.tenant_id, handoffId))],
