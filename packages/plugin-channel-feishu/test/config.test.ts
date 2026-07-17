@@ -34,4 +34,34 @@ describe("Feishu plugin configuration", () => {
     expect(() => validateFeishuPluginConfig({ ...valid(), identities: [...valid().identities, ...valid().identities] })).toThrow(/duplicate/);
     expect(() => validateFeishuPluginConfig({ ...valid(), worker: { ...valid().worker, batch_limit: 1001 } })).toThrow(/batch_limit/);
   });
+
+  it("normalizes strict static channels and canonical subscription filters", () => {
+    const parsed = validateFeishuPluginConfig({
+      ...valid(),
+      outbound: {
+        enabled: true,
+        default_render_mode: "card",
+        channels: { project: { receive_id_type: "chat_id", receive_id: "oc-project", render_mode: "text" } },
+        subscriptions: {
+          results: {
+            channel_ref: "project",
+            owner: { actor_id: "actor-owner", actor_type: "human", endpoint_id: "endpoint-owner" },
+            filter: { event_types: ["workfabric.handoff.result_returned.v1"] },
+          },
+        },
+      },
+    });
+    expect(parsed.outbound.subscriptions.results).toMatchObject({
+      channel_ref: "project",
+      filter: {
+        event_types: ["workfabric.handoff.result_returned.v1"],
+        actor_ids: [], endpoint_ids: [], thread_ids: [], handoff_ids: [],
+        work_reference_uris: [], capability_ids: [], lifecycle_states: [],
+      },
+    });
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      outbound: { ...valid().outbound, subscriptions: { bad: { channel_ref: "missing", owner: { actor_id: "a", actor_type: "human", endpoint_id: "e" }, filter: {} } } },
+    })).toThrow(/channel_ref/);
+  });
 });

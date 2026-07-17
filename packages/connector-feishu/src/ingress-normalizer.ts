@@ -75,6 +75,7 @@ function messageEnvelope(
   const senderId = object(sender.sender_id, "event.sender.sender_id");
   const messageId = string(message.message_id, "message_id");
   const chatId = string(message.chat_id, "chat_id");
+  const eventTime = occurredAt(header, scope.received_at);
   const rootId = optionalString(message.root_id, "root_id");
   const parentId = optionalString(message.parent_id, "parent_id");
   return {
@@ -86,8 +87,8 @@ function messageEnvelope(
     dedupe_key: `message:${messageId}`,
     event_type: "im.message.receive_v1",
     partition_key: `chat:${chatId}`,
-    occurred_at: occurredAt(header, scope.received_at),
-    received_at: scope.received_at,
+    occurred_at: eventTime,
+    received_at: eventTime,
     payload: {
       message_id: messageId,
       chat_id: chatId,
@@ -117,6 +118,7 @@ function cardEnvelope(
   const value = object(action.value, "event.action.value");
   const context = object(event.context, "event.context");
   const eventId = string(header.event_id, "event_id");
+  const eventTime = occurredAt(header, scope.received_at);
   const actionRef = string(value.action_ref, "action_ref");
   const messageId = string(context.open_message_id, "open_message_id");
   const actionDigest = createHash("sha256").update(actionRef).digest("hex");
@@ -129,8 +131,8 @@ function cardEnvelope(
     dedupe_key: `card:${eventId}:${actionDigest}`,
     event_type: "card.action.trigger",
     partition_key: `message:${messageId}`,
-    occurred_at: occurredAt(header, scope.received_at),
-    received_at: scope.received_at,
+    occurred_at: eventTime,
+    received_at: eventTime,
     payload: {
       operator_open_id: string(operatorId.open_id, "operator open_id"),
       action_ref: actionRef,

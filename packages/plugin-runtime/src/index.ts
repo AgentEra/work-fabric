@@ -1,5 +1,6 @@
 export * from "./channel-signal-router.js";
 export * from "./errors.js";
+export * from "./local-mechanical-pump.js";
 export * from "./plugin-host.js";
 export * from "./plugin-registry.js";
 

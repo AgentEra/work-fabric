@@ -9,6 +9,7 @@ export interface FeishuIntakeReceiptHandlerOptions {
   readonly subscriptions: SubscriptionStore;
   readonly actor_type_for: (actorId: string) => "human" | "agent" | "system";
   readonly max_delivery_attempts: number;
+  readonly on_handoff_ready?: (handoffId: string) => void;
 }
 const string = (value: unknown): string => { if (typeof value !== "string" || value.length === 0 || value.length > 512) throw new TypeError("route field invalid"); return value; };
 const subscriptionId = (tenant: string, plugin: string, handoff: string) => `channel_${createHash("sha256").update(tenant).update("\0").update(plugin).update("\0").update(handoff).digest("base64url")}`;
@@ -41,6 +42,7 @@ export class FeishuIntakeReceiptHandler implements ConnectorAcceptedReceiptHandl
         created_at: input.claim.accepted_at, updated_at: input.claim.accepted_at,
       };
       await this.options.subscriptions.putSubscription(subscription);
+      this.options.on_handoff_ready?.(resource.resource_id);
       return { kind: "accepted", receipt_id: `channel-route:${resource.resource_id}`, event_ids: [] };
     } catch (error) {
       return error instanceof ChannelRouteStoreError && error.code === "route_conflict" || error instanceof TypeError || error instanceof RangeError

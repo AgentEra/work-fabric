@@ -18,16 +18,18 @@ describe("FeishuPluginFactory", () => {
   it("composes isolated inbound and outbound seams and cleans registrations", async () => {
     const webhook = new FeishuWebhookRegistry();
     const signals = new Map<string, SignalAdapter>();
+    const subscriptions = new MemorySubscriptionStore();
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
-      ["exchange.subscriptions", new MemorySubscriptionStore()],
+      ["exchange.subscriptions", subscriptions],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
       ["channel.signal_registry", { register(id: string, adapter: SignalAdapter) { signals.set(id, adapter); }, unregister(id: string) { signals.delete(id); } }],
       ["feishu.webhook_registry", webhook],
       ["runtime.clock", { now: () => "2026-07-17T00:00:00.000Z", nowEpochSeconds: () => 1_784_275_200 }],
       ["runtime.fetch", vi.fn(async () => new Response('{"code":0,"tenant_access_token":"token","expire":7200}', { status: 200 }))],
+      ["runtime.handoff_wakeup", () => {}],
     ]);
     const factory = new FeishuPluginFactory();
     const instance = await factory.create({ configuration_revision: "1", service: { get<T>(key: string) { if (!services.has(key)) throw new Error(key); return services.get(key) as T; } } }, { instance_id: "feishu-primary", type: factory.type, config: factory.validate(config()) });
@@ -39,5 +41,53 @@ describe("FeishuPluginFactory", () => {
     expect(await webhook.resolve("feishu-primary")).toBeNull();
     expect(signals.has("feishu-primary")).toBe(false);
     expect(await instance.health()).toMatchObject({ state: "healthy" });
+  });
+
+  it("provisions configured static channels as canonical idempotent subscriptions", async () => {
+    const subscriptions = new MemorySubscriptionStore();
+    const services = new Map<string, unknown>([
+      ["workfabric.tenant_id", "tenant-1"],
+      ["channel.routes", new MemoryChannelRouteStore()],
+      ["exchange.subscriptions", subscriptions],
+      ["connector.ingress", new MemoryConnectorIngressStore()],
+      ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
+      ["channel.signal_registry", { register() {}, unregister() {} }],
+      ["feishu.webhook_registry", new FeishuWebhookRegistry()],
+      ["runtime.clock", { now: () => "2026-07-17T00:00:00.000Z", nowEpochSeconds: () => 1_784_275_200 }],
+      ["runtime.fetch", vi.fn()],
+      ["runtime.handoff_wakeup", () => {}],
+    ]);
+    const configured = config();
+    configured.outbound = {
+      enabled: true,
+      default_render_mode: "card",
+      channels: { project: { receive_id_type: "chat_id", receive_id: "oc-project" } },
+      subscriptions: {
+        results: {
+          channel_ref: "project",
+          owner: { actor_id: "actor-owner", actor_type: "human", endpoint_id: "endpoint-owner" },
+          filter: { event_types: ["workfabric.handoff.result_returned.v1"] },
+        },
+      },
+    };
+    const factory = new FeishuPluginFactory();
+    const context = { configuration_revision: "1", service: { get<T>(key: string) { if (!services.has(key)) throw new Error(key); return services.get(key) as T; } } };
+    const instance = await factory.create(context, { instance_id: "feishu-primary", type: factory.type, config: factory.validate(configured) });
+    await instance.prepare();
+    await instance.stop();
+    const active = await subscriptions.listActiveSubscriptions("tenant-1");
+    expect(active).toHaveLength(1);
+    expect(active[0]).toMatchObject({
+      owner: { actor_id: "actor-owner", actor_type: "human" },
+      endpoint_id: "endpoint-owner",
+      filter: { event_types: ["workfabric.handoff.result_returned.v1"] },
+      destination: { binding: "collaboration-channel", configuration: { plugin_instance_id: "feishu-primary", route_mode: "static", channel_ref: "project" } },
+      delivery_mode: "webhook",
+    });
+
+    const restarted = await factory.create(context, { instance_id: "feishu-primary", type: factory.type, config: factory.validate(configured) });
+    await restarted.prepare();
+    await restarted.stop();
+    expect(await subscriptions.listActiveSubscriptions("tenant-1")).toHaveLength(1);
   });
 });

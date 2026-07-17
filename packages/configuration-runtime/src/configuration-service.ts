@@ -52,6 +52,11 @@ function nonEmpty(value: unknown, path: string): string {
   return value;
 }
 
+function exactKeys(value: Record<string, unknown>, allowed: readonly string[], path: string): void {
+  const unknown = Object.keys(value).find((key) => !allowed.includes(key));
+  if (unknown !== undefined) throw new ConfigurationError("unknown_key", `${path}.${unknown}`);
+}
+
 function deepFreeze<T>(value: T): T {
   if (typeof value !== "object" || value === null || Object.isFrozen(value)) return value;
   Object.freeze(value);
@@ -82,6 +87,7 @@ export class ConfigurationService<Service = unknown> {
         throw new ConfigurationError("invalid_source_revision", "revision");
       }
       const root = record(document.value, "$" );
+      exactKeys(root, ["api_version", "service", "plugins"], "$");
       if (root.api_version !== "workfabric.config/v1") {
         throw new ConfigurationError("unsupported_api_version", "api_version");
       }
@@ -89,6 +95,7 @@ export class ConfigurationService<Service = unknown> {
       const pluginRoot = root.plugins === undefined
         ? { instances: {} }
         : record(root.plugins, "plugins");
+      exactKeys(pluginRoot, ["instances"], "plugins");
       const instances = record(pluginRoot.instances ?? {}, "plugins.instances");
       const validators = new Map(this.options.plugin_validators.map((item) => [item.type, item]));
       if (validators.size !== this.options.plugin_validators.length) {
@@ -99,6 +106,7 @@ export class ConfigurationService<Service = unknown> {
         nonEmpty(instanceId, `plugins.instances.${instanceId}`);
         const path = `plugins.instances.${instanceId}`;
         const instance = record(instances[instanceId], path);
+        exactKeys(instance, ["type", "enabled", "config"], path);
         const type = nonEmpty(instance.type, `${path}.type`);
         if (typeof instance.enabled !== "boolean") {
           throw new ConfigurationError("invalid_enabled_flag", `${path}.enabled`);

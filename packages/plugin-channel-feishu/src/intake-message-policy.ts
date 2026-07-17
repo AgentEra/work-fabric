@@ -65,19 +65,25 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
     const reference = `feishu://${encodeURIComponent(claim.envelope.external_tenant_id)}/message/${encodeURIComponent(messageId)}`;
     const input: JsonObject = {
       work_reference: { uri: reference, extensions: {
-        connector_id: claim.envelope.connector_id,
-        external_event_id: claim.envelope.external_event_id,
-        ...(typeof payload.root_id === "string" ? { root_id: payload.root_id } : {}),
-        ...(typeof payload.parent_id === "string" ? { parent_id: payload.parent_id } : {}),
+        "workfabric.dev/connector_id": claim.envelope.connector_id,
+        "workfabric.dev/external_event_id": claim.envelope.external_event_id,
+        ...(typeof payload.root_id === "string" ? { "workfabric.dev/root_id": payload.root_id } : {}),
+        ...(typeof payload.parent_id === "string" ? { "workfabric.dev/parent_id": payload.parent_id } : {}),
       } },
-      target: { actor_id: this.options.target.actor_id, endpoint_id: this.options.target.endpoint_id },
+      target: { actor_id: this.options.target.actor_id },
       intent: [{ kind: "text", media_type: "text/plain", text }],
       authority_scope: {
         delegation_id: `intake-${createHash("sha256").update(messageId).digest("hex").slice(0, 24)}`,
-        scopes: [], resource_refs: [reference],
+        scopes: ["work:read"], resource_refs: [reference],
         expires_at: addSeconds(now, this.options.result_due_within_seconds), may_redelegate: false,
       },
-      acceptance_criteria: [],
+      acceptance_criteria: [{
+        criterion_id: "intake_outcome_reported",
+        description: "The external intake participant reports an outcome",
+        required: true,
+        result_schema_ref: null,
+        required_evidence_types: [],
+      }],
       verifier: { actor_id: identity.actor_id, actor_type: "human" },
       priority: "normal",
       accept_by: addSeconds(now, this.options.accept_within_seconds),

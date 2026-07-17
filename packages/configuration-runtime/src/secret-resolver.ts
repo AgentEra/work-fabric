@@ -31,29 +31,39 @@ function object(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+function child(container: Record<string, unknown> | unknown[], segment: string): unknown {
+  if (!Array.isArray(container)) return container[segment];
+  if (!/^\d+$/.test(segment)) return undefined;
+  return container[Number(segment)];
+}
+
 async function resolveAtPath(
   root: Record<string, unknown>,
   path: string,
   options: ResolveDeclaredSecretsOptions,
 ): Promise<void> {
   const segments = path.split(".");
-  let cursor = root;
+  let cursor: Record<string, unknown> | unknown[] = root;
   for (const segment of segments.slice(0, -1)) {
-    const next = cursor[segment];
-    if (!object(next)) throw new ConfigurationError("secret_path_missing", path);
+    const next: unknown = child(cursor, segment);
+    if (!object(next) && !Array.isArray(next)) throw new ConfigurationError("secret_path_missing", path);
     cursor = next;
   }
   const leaf = segments.at(-1);
-  if (leaf === undefined || !Object.hasOwn(cursor, leaf)) {
+  if (leaf === undefined || (Array.isArray(cursor) && !/^\d+$/.test(leaf))) {
     throw new ConfigurationError("secret_path_missing", path);
   }
-  const value = cursor[leaf];
+  const leafKey = Array.isArray(cursor) ? Number(leaf) : leaf;
+  if (!Object.hasOwn(cursor, leafKey)) throw new ConfigurationError("secret_path_missing", path);
+  const value = Array.isArray(cursor) ? cursor[leafKey as number] : cursor[leafKey as string];
   if (typeof value !== "string" || value.length === 0) {
     throw new ConfigurationError("invalid_secret_reference", path);
   }
   const match = referencePattern.exec(value);
   if (match !== null) {
-    cursor[leaf] = await options.resolver.resolve({ environment: match[1]! }, path);
+    const resolved = await options.resolver.resolve({ environment: match[1]! }, path);
+    if (Array.isArray(cursor)) cursor[leafKey as number] = resolved;
+    else cursor[leafKey as string] = resolved;
     return;
   }
   if (value.includes("${")) {

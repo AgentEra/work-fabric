@@ -50,7 +50,7 @@ describe("FeishuIntakeMessagePolicy", () => {
         identity: { actor_id: "actor-human", endpoint_id: "endpoint-human" },
         input: {
           work_reference: { uri: "feishu://tenant-key-1/message/om-1" },
-          target: { actor_id: "actor-agent", endpoint_id: "endpoint-agent" },
+          target: { actor_id: "actor-agent" },
           intent: [{ kind: "text", media_type: "text/plain", text: "create a requirement" }],
           verifier: { actor_id: "actor-human", actor_type: "human" },
         },

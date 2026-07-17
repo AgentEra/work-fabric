@@ -108,4 +108,15 @@ describe("ConfigurationService", () => {
 
     await expect(service.load()).rejects.toMatchObject({ code: "unsupported_api_version" });
   });
+
+  it("rejects unknown configuration envelope and plugin wrapper keys", async () => {
+    const create = (value: unknown) => new ConfigurationService({
+      provider: { async load() { return { revision: "strict:1", value }; } },
+      clock: { now: () => "2026-07-17T01:02:03.000Z" },
+      validate_service: (candidate) => candidate,
+      plugin_validators: [validator("known")],
+    });
+    await expect(create({ api_version: "workfabric.config/v1", service: {}, plugins: { instances: {} }, typo: true }).load()).rejects.toMatchObject({ code: "unknown_key", path: "$.typo" });
+    await expect(create({ api_version: "workfabric.config/v1", service: {}, plugins: { instances: { one: { type: "known", enabled: true, config: {}, typo: true } } } }).load()).rejects.toMatchObject({ code: "unknown_key", path: "plugins.instances.one.typo" });
+  });
 });
