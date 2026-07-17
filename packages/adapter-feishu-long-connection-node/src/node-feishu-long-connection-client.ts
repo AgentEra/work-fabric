@@ -16,6 +16,7 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_TIMEOUT_MS = 60_000;
+const FEISHU_APP_ID_PATTERN = /^cli_[0-9a-fA-F]{16}$/;
 
 export interface NodeFeishuLongConnectionClientFactoryOptions {
   readonly clock?: { now(): string };
@@ -87,6 +88,13 @@ class NodeFeishuLongConnectionClient implements FeishuLongConnectionClient {
   async start(handler: FeishuLongConnectionHandler): Promise<void> {
     if (this.started || this.stopping || this.stopped) return;
     this.started = true;
+    if (
+      !FEISHU_APP_ID_PATTERN.test(this.input.app_id)
+      || this.input.app_secret.length === 0
+    ) {
+      this.transition("failed", "connection_failed");
+      return;
+    }
     this.accepting = true;
     this.transition("connecting", "connecting");
 

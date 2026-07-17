@@ -106,7 +106,7 @@ function createClient(
       ? {}
       : { run_settle_timeout_ms: options.run_settle_timeout_ms }),
   }).create({
-    app_id: "app-id",
+    app_id: "cli_0123456789abcdef",
     app_secret: "app-secret",
     instance_id: "instance-1",
   });
@@ -160,6 +160,25 @@ describe("NodeFeishuLongConnectionClient", () => {
     expect(sdk.createClientCalls).toBe(0);
     expect(sdk.startCalls).toBe(0);
     expect(client.status()).toMatchObject({ state: "stopped", code: "stopped" });
+  });
+
+  it("reports invalid app configuration as a stable failure without SDK launch", async () => {
+    const sdk = new FakeRuntime();
+    const client = new NodeFeishuLongConnectionClientFactory({ sdk }).create({
+      app_id: "invalid-app-id",
+      app_secret: "app-secret",
+      instance_id: "instance-1",
+    });
+
+    await client.start(async () => acceptance);
+
+    expect(sdk.createClientCalls).toBe(0);
+    expect(sdk.startCalls).toBe(0);
+    expect(client.status()).toMatchObject({
+      state: "failed",
+      code: "connection_failed",
+    });
+    await client.stop();
   });
 
   it("tracks ready, reconnecting, reconnected, and error using stable status snapshots", async () => {
