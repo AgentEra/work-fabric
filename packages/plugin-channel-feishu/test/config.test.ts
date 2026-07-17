@@ -17,14 +17,89 @@ const valid = () => ({
   worker: { poll_interval_ms: 1000, lease_seconds: 30, batch_limit: 100, max_attempts: 8 },
 });
 
+const longConnection = () => ({
+  connector_id: "feishu-primary",
+  external_tenant_id: "tenant-key-1",
+  bot_open_id: "ou-bot",
+  credentials: {
+    app_id: "${FEISHU_APP_ID}",
+    app_secret: "${FEISHU_APP_SECRET}",
+    work_fabric_access_token: "${FEISHU_CONNECTOR_ACCESS_TOKEN}",
+  },
+  inbound: {
+    enabled: true,
+    transport: "long_connection",
+    mention_only: true,
+    intake_target: {
+      actor_id: "actor-agent",
+      endpoint_id: "endpoint-agent",
+    },
+  },
+  outbound: valid().outbound,
+  identities: valid().identities,
+  worker: valid().worker,
+});
+
 describe("Feishu plugin configuration", () => {
-  it("strictly validates a bounded instance and declares secret paths", () => {
+  it("keeps valid Webhook configuration source-compatible", () => {
     const parsed = validateFeishuPluginConfig(valid());
     expect(parsed.inbound.intake_target.actor_id).toBe("actor-agent");
     expect(feishuSecretPaths("plugins.instances.feishu-primary.config", parsed)).toEqual([
       "plugins.instances.feishu-primary.config.credentials.app_id",
       "plugins.instances.feishu-primary.config.credentials.app_secret",
       "plugins.instances.feishu-primary.config.credentials.verification_token",
+      "plugins.instances.feishu-primary.config.credentials.work_fabric_access_token",
+    ]);
+  });
+
+  it("accepts long connection without Webhook-only fields", () => {
+    expect(validateFeishuPluginConfig(longConnection())).toMatchObject({
+      credentials: {
+        app_id: "${FEISHU_APP_ID}",
+        app_secret: "${FEISHU_APP_SECRET}",
+        work_fabric_access_token: "${FEISHU_CONNECTOR_ACCESS_TOKEN}",
+      },
+      inbound: { transport: "long_connection" },
+    });
+  });
+
+  it.each([
+    ["verification_token", { credentials: { ...longConnection().credentials, verification_token: "verify" } }],
+    ["encrypt_key", { credentials: { ...longConnection().credentials, encrypt_key: "encrypt" } }],
+    ["route_id", { inbound: { ...longConnection().inbound, route_id: "primary" } }],
+  ])("rejects Webhook-only %s for long connection", (_field, replacement) => {
+    expect(() => validateFeishuPluginConfig({ ...longConnection(), ...replacement })).toThrow(/unknown key/);
+  });
+
+  it("still requires verification_token for Webhook", () => {
+    const { verification_token: _verificationToken, ...credentials } = valid().credentials;
+    expect(() => validateFeishuPluginConfig({ ...valid(), credentials })).toThrow(/verification_token/);
+  });
+
+  it("still requires route_id for Webhook", () => {
+    const { route_id: _routeId, ...inbound } = valid().inbound;
+    expect(() => validateFeishuPluginConfig({ ...valid(), inbound })).toThrow(/route_id/);
+  });
+
+  it("rejects unsupported transports", () => {
+    expect(() => validateFeishuPluginConfig({
+      ...longConnection(),
+      inbound: { ...longConnection().inbound, transport: "polling" },
+    })).toThrow(/transport/);
+  });
+
+  it("rejects unknown keys in long-connection branches", () => {
+    expect(() => validateFeishuPluginConfig({
+      ...longConnection(),
+      credentials: { ...longConnection().credentials, surprise: true },
+    })).toThrow(/unknown key surprise/);
+  });
+
+  it("declares only common secret paths for long connection", () => {
+    const parsed = validateFeishuPluginConfig(longConnection());
+    expect(feishuSecretPaths("plugins.instances.feishu-primary.config", parsed)).toEqual([
+      "plugins.instances.feishu-primary.config.credentials.app_id",
+      "plugins.instances.feishu-primary.config.credentials.app_secret",
       "plugins.instances.feishu-primary.config.credentials.work_fabric_access_token",
     ]);
   });

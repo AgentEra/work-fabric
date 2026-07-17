@@ -13,7 +13,7 @@ import { ConnectorWorker } from "@work-fabric/connector-runtime";
 import type { ConnectorCommandSink, ConnectorIngressStore, ConnectorObservationSink } from "@work-fabric/connector-spi";
 import type { RuntimeSubscription, SignalAdapter, SubscriptionStore } from "@work-fabric/exchange-spi";
 import type { PluginContext, PluginFactory, PluginHealth, PluginInstance, PluginInstanceConfiguration } from "@work-fabric/plugin-spi";
-import { validateFeishuPluginConfig, type FeishuPluginConfig, type FeishuStaticChannelConfig, type FeishuStaticSubscriptionConfig } from "./config.js";
+import { validateFeishuPluginConfig, type FeishuPluginConfig, type FeishuStaticChannelConfig, type FeishuStaticSubscriptionConfig, type FeishuWebhookCredentials } from "./config.js";
 import { FeishuIntakeMessagePolicy } from "./intake-message-policy.js";
 import { FeishuIntakeReceiptHandler } from "./intake-receipt-handler.js";
 import { FeishuRouteAwareSignalAdapter } from "./route-aware-signal-adapter.js";
@@ -80,11 +80,14 @@ class FeishuPluginInstance implements PluginInstance {
   ) { this.signal_adapter = signalAdapter; }
   async prepare(): Promise<void> {
     if (this.prepared) return;
-    if (this.config.inbound.enabled) this.webhooks.register(this.instanceId, {
-      tenant_id: this.tenantId, connector_id: this.config.connector_id,
-      external_tenant_id: this.config.external_tenant_id, credential_ref: `feishu:${this.instanceId}`,
-      credentials: { verification_token: this.config.credentials.verification_token, ...(this.config.credentials.encrypt_key === undefined ? {} : { encrypt_key: this.config.credentials.encrypt_key }) },
-    });
+    if (this.config.inbound.enabled) {
+      const credentials = this.config.credentials as FeishuWebhookCredentials;
+      this.webhooks.register(this.instanceId, {
+        tenant_id: this.tenantId, connector_id: this.config.connector_id,
+        external_tenant_id: this.config.external_tenant_id, credential_ref: `feishu:${this.instanceId}`,
+        credentials: { verification_token: credentials.verification_token, ...(credentials.encrypt_key === undefined ? {} : { encrypt_key: credentials.encrypt_key }) },
+      });
+    }
     if (this.config.outbound.enabled) {
       for (const [name, subscriptionConfig] of Object.entries(this.config.outbound.subscriptions).sort(([left], [right]) => left.localeCompare(right))) {
         const id = staticSubscriptionId(this.tenantId, this.instanceId, name);
