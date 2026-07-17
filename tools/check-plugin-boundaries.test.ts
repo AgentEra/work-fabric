@@ -1,10 +1,13 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkPluginBoundaries } from "./check-plugin-boundaries.js";
+import {
+  checkPluginBoundaries,
+  isProductionSourcePath,
+} from "./check-plugin-boundaries.js";
 
 const temporary: string[] = [];
 
@@ -80,8 +83,19 @@ describe("configuration and collaboration-channel boundaries", () => {
     const repositoryPath = "packages/adapter-feishu-long-connection-node/src/agent-brain.ts";
     await expect(checkPluginBoundaries(await fixture({
       ...allowedSdkImport,
-      [repositoryPath]: "export const responsibility = 'agent brain';\n",
+      [repositoryPath]: "export function agentBrain(): void {}\n",
     }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("ignores responsibility phrases in comments and ordinary strings", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "packages/adapter-feishu-long-connection-node/src/notes.ts": [
+        "// function agentBrain() {}",
+        'export const note = "model inference and target selection";',
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ responsibility_violations: 0 });
   });
 
   it.each([
@@ -110,6 +124,14 @@ describe("configuration and collaboration-channel boundaries", () => {
     }))).rejects.toThrow(repositoryPath);
   });
 
+  it("rejects a parenthesized Feishu-specific webhook selector", async () => {
+    const repositoryPath = "packages/connector-runtime/src/feishu-transport.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: 'export const selected = (input.feishu_transport) === "webhook";\n',
+    }))).rejects.toThrow(repositoryPath);
+  });
+
   it("preserves generic HTTP webhook delivery behavior", async () => {
     await expect(checkPluginBoundaries(await fixture({
       ...allowedSdkImport,
@@ -122,11 +144,134 @@ describe("configuration and collaboration-channel boundaries", () => {
     await expect(checkPluginBoundaries(await fixture({
       ...allowedSdkImport,
       "packages/transport-http/src/routes.ts": [
-        "export const feishu = true;",
-        `const padding = "${"x".repeat(300)}";`,
-        'export const push = subscription.delivery_mode === "webhook";',
+        "declare const feishuEnabled: boolean;",
+        "declare const subscription: { delivery_mode: string };",
+        'export const push = feishuEnabled && subscription.delivery_mode === "webhook";',
         "",
       ].join("\n"),
     }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+
+  it("ignores transport conditionals in comments and ordinary strings", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "packages/exchange-core/src/notes.ts": [
+        '// if (input.feishu_transport === "webhook") select();',
+        'export const note = "transport === long_connection or websocket";',
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+
+  it.each([
+    ["Feishu webhook switch", 'switch (input.feishu_transport) { case "webhook": break; }'],
+    ["long-connection comparison", 'input.transport === "long_connection";'],
+    ["WebSocket switch", 'switch (input.transport) { case "websocket": break; }'],
+  ])("rejects structural %s selection", async (_name, source) => {
+    const repositoryPath = "packages/connector-runtime/src/transport.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: `${source}\n`,
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("allows a generic webhook switch despite unrelated Feishu identifiers", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "packages/transport-http/src/switch.ts": [
+        "declare const feishuEnabled: boolean;",
+        "declare const subscription: { delivery_mode: string };",
+        'if (feishuEnabled) {} switch (subscription.delivery_mode) { case "webhook": break; }',
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+});
+
+describe("repository source discovery and import syntax", () => {
+  it("scans production source outside packages", async () => {
+    const repositoryPath = "tools/sdk-leak.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: 'import lark from "@larksuiteoapi/node-sdk";\n',
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it.each([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"])(
+    "scans production %s source",
+    async (extension) => {
+      const repositoryPath = `packages/connector-runtime/src/sdk-leak${extension}`;
+      await expect(checkPluginBoundaries(await fixture({
+        ...allowedSdkImport,
+        [repositoryPath]: 'import lark from "@larksuiteoapi/node-sdk";\n',
+      }))).rejects.toThrow(repositoryPath);
+    },
+  );
+
+  it.each([
+    ["normal import", 'import lark from "@larksuiteoapi/node-sdk";'],
+    ["side-effect import", 'import "@larksuiteoapi/node-sdk";'],
+    ["dynamic import", 'void import("@larksuiteoapi/node-sdk");'],
+    ["CommonJS require", 'require("@larksuiteoapi/node-sdk");'],
+  ])("detects a %s", async (_name, source) => {
+    const repositoryPath = "packages/connector-runtime/src/sdk-leak.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: `${source}\n`,
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("ignores import-like comments and ordinary strings", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "tools/import-notes.ts": [
+        '// import lark from "@larksuiteoapi/node-sdk";',
+        'const normal = "import \\\"@larksuiteoapi/node-sdk\\\"";',
+        'const dynamic = "import(\\\"@larksuiteoapi/node-sdk\\\")";',
+        'const commonjs = "require(\\\"@larksuiteoapi/node-sdk\\\")";',
+        "export { normal, dynamic, commonjs };",
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+
+  it("ignores import-like text inside a regular expression literal", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "tools/import-pattern.ts":
+        'export const pattern = /import\\(\"@larksuiteoapi\\/node-sdk\"\\)|agentBrain|long_connection/;\n',
+    }))).resolves.toMatchObject({ sdk_imports: 1, responsibility_violations: 0 });
+  });
+
+  it("excludes standard test and generated directories", async () => {
+    const leak = 'import lark from "@larksuiteoapi/node-sdk";\n';
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "packages/example/test/sdk-leak.ts": leak,
+      "packages/example/tests/sdk-leak.js": leak,
+      "packages/example/__tests__/sdk-leak.mts": leak,
+      "packages/example/src/sdk-leak.test.tsx": leak,
+      "packages/example/src/sdk-leak.spec.cjs": leak,
+      "packages/example/dist/sdk-leak.ts": leak,
+      "packages/example/build/sdk-leak.js": leak,
+      "node_modules/example/sdk-leak.ts": leak,
+    }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+
+  it("rejects source-directory symlinks instead of allowing a scan bypass", async () => {
+    const root = await fixture(allowedSdkImport);
+    await mkdir(join(root, "tools"), { recursive: true });
+    await symlink(
+      join(root, "packages/adapter-feishu-long-connection-node/src"),
+      join(root, "tools/linked-source"),
+      "dir",
+    );
+    await expect(checkPluginBoundaries(root)).rejects.toThrow("tools/linked-source");
+  });
+
+  it("classifies Windows-style test and production paths through the POSIX seam", () => {
+    expect(isProductionSourcePath("packages\\connector-runtime\\tests\\sdk-leak.ts")).toBe(false);
+    expect(isProductionSourcePath("packages\\connector-runtime\\src\\sdk-leak.spec.mjs")).toBe(false);
+    expect(isProductionSourcePath("packages\\connector-runtime\\src\\sdk-runtime.js")).toBe(true);
   });
 });
