@@ -68,6 +68,15 @@ describe("configuration and collaboration-channel boundaries", () => {
     }))).rejects.toThrow(repositoryPath);
   });
 
+  it("detects a static import whose local alias is the from keyword", async () => {
+    const repositoryPath = "packages/connector-runtime/src/sdk-alias.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]:
+        'import { WSClient as from } from "@larksuiteoapi/node-sdk";\nvoid from;\n',
+    }))).rejects.toThrow(repositoryPath);
+  });
+
   it("requires exactly one production SDK import", async () => {
     await expect(checkPluginBoundaries(await fixture({
       "packages/exchange-core/src/empty.ts": "export {};\n",
@@ -132,6 +141,35 @@ describe("configuration and collaboration-channel boundaries", () => {
     }))).rejects.toThrow(repositoryPath);
   });
 
+  it.each([
+    [
+      "parenthesized literal",
+      'input.feishu_transport === ("webhook");',
+    ],
+    [
+      "as-wrapped operands",
+      '(input.feishu_transport as string) === ("webhook" as string);',
+    ],
+    [
+      "reversed non-null selector",
+      '"webhook" === (input.feishu_transport!);',
+    ],
+    [
+      "satisfies-wrapped operands",
+      '(input.feishu_transport satisfies string) === ("webhook" satisfies string);',
+    ],
+    [
+      "type-asserted operands",
+      '<string>input.feishu_transport === <string>"webhook";',
+    ],
+  ])("rejects %s in a Feishu webhook comparison", async (_name, source) => {
+    const repositoryPath = "packages/connector-runtime/src/wrapped-transport.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: `${source}\n`,
+    }))).rejects.toThrow(repositoryPath);
+  });
+
   it("preserves generic HTTP webhook delivery behavior", async () => {
     await expect(checkPluginBoundaries(await fixture({
       ...allowedSdkImport,
@@ -172,6 +210,42 @@ describe("configuration and collaboration-channel boundaries", () => {
     await expect(checkPluginBoundaries(await fixture({
       ...allowedSdkImport,
       [repositoryPath]: `${source}\n`,
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("finds a forbidden comparison inside an outer switch body", async () => {
+    const repositoryPath = "packages/exchange-core/src/nested-transport.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: [
+        'switch (input.kind) { case "message":',
+        '  input.feishu_transport === ("webhook");',
+        "  break;",
+        "}",
+        "",
+      ].join("\n"),
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("finds forbidden cases in a nested switch", async () => {
+    const repositoryPath = "packages/exchange-core/src/nested-switch.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: [
+        'switch (input.kind) { case "message":',
+        '  switch (input.transport) { case "long_connection": break; }',
+        "}",
+        "",
+      ].join("\n"),
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("unwraps switch selectors and case literals", async () => {
+    const repositoryPath = "packages/exchange-core/src/wrapped-switch.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]:
+        'switch ((input.feishu_transport as string)) { case ("webhook" as string): break; }\n',
     }))).rejects.toThrow(repositoryPath);
   });
 
@@ -243,6 +317,47 @@ describe("repository source discovery and import syntax", () => {
     }))).resolves.toMatchObject({ sdk_imports: 1, responsibility_violations: 0 });
   });
 
+  it("ignores SDK require text in a regex after a control-statement parenthesis", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "tools/control-pattern.ts": [
+        "declare const ready: boolean;",
+        "declare const value: string;",
+        'if (ready) /require\\(\"@larksuiteoapi\\/node-sdk\"\\)/.test(value);',
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+
+  it("ignores responsibility text in a regex after a control-statement parenthesis", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "packages/adapter-feishu-long-connection-node/src/control-pattern.ts": [
+        "declare const ready: boolean;",
+        "declare const value: string;",
+        "if (ready) /agentBrain/.test(value);",
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ responsibility_violations: 0 });
+  });
+
+  it.each([".tsx", ".jsx"])("ignores responsibility vocabulary in %s JSX text", async (extension) => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [`packages/adapter-feishu-long-connection-node/src/view${extension}`]:
+        "export const view = <div>agentBrain modelInference targetSelection</div>;\n",
+    }))).resolves.toMatchObject({ responsibility_violations: 0 });
+  });
+
+  it.each([".tsx", ".jsx"])("still rejects executable responsibility identifiers in %s", async (extension) => {
+    const repositoryPath = `packages/adapter-feishu-long-connection-node/src/execution${extension}`;
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]:
+        "const agentBrain = (): void => {}; agentBrain(); export const view = <div />;\n",
+    }))).rejects.toThrow(repositoryPath);
+  });
+
   it("excludes standard test and generated directories", async () => {
     const leak = 'import lark from "@larksuiteoapi/node-sdk";\n';
     await expect(checkPluginBoundaries(await fixture({
@@ -257,6 +372,17 @@ describe("repository source discovery and import syntax", () => {
       "node_modules/example/sdk-leak.ts": leak,
     }))).resolves.toMatchObject({ sdk_imports: 1 });
   });
+
+  it.each(["vendor", "build", "dist"])(
+    "scans production source beneath src/%s",
+    async (directory) => {
+      const repositoryPath = `packages/example/src/${directory}/sdk-leak.js`;
+      await expect(checkPluginBoundaries(await fixture({
+        ...allowedSdkImport,
+        [repositoryPath]: 'import lark from "@larksuiteoapi/node-sdk";\n',
+      }))).rejects.toThrow(repositoryPath);
+    },
+  );
 
   it("rejects source-directory symlinks instead of allowing a scan bypass", async () => {
     const root = await fixture(allowedSdkImport);
