@@ -7,7 +7,15 @@ import {
   FeishuLongConnectionSource,
   type FeishuLongConnectionClient,
   type FeishuLongConnectionHandler,
+  type FeishuLongConnectionStatus,
 } from "../src/index.js";
+
+const status: FeishuLongConnectionStatus = {
+  state: "connected",
+  code: "connected",
+  reconnect_attempts: 0,
+  changed_at: "2026-07-17T00:00:00.000Z",
+};
 
 const body: JsonObject = {
   schema: "2.0",
@@ -36,29 +44,61 @@ class FakeLongConnection implements FeishuLongConnectionClient {
   handler: FeishuLongConnectionHandler | undefined;
   started = 0;
   stopped = 0;
-  async start(handler: FeishuLongConnectionHandler): Promise<void> {
+  start(handler: FeishuLongConnectionHandler): Promise<void> {
     this.handler = handler;
     this.started += 1;
+    return Promise.resolve();
   }
-  async stop(): Promise<void> { this.stopped += 1; }
+  status(): FeishuLongConnectionStatus { return status; }
+  stop(): Promise<void> { this.stopped += 1; return Promise.resolve(); }
+}
+
+function createFixture() {
+  const client = new FakeLongConnection();
+  const store = new MemoryConnectorIngressStore();
+  const source = new FeishuLongConnectionSource({
+    client,
+    ingress: store,
+    scope: {
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      expected_external_tenant_id: "tenant-key-1",
+    },
+    clock: { now: () => "2026-07-16T00:00:01Z" },
+  });
+  return { client, source, store };
 }
 
 describe("FeishuLongConnectionSource", () => {
-  it("uses the same normalizer and durable dedupe without mapping inline", async () => {
+  it("returns a bounded client status snapshot", () => {
     const client = new FakeLongConnection();
-    const store = new MemoryConnectorIngressStore();
-    const source = new FeishuLongConnectionSource({
-      client,
-      ingress: store,
-      scope: {
-        tenant_id: "tenant-1",
-        connector_id: "feishu-primary",
-        expected_external_tenant_id: "tenant-key-1",
-      },
-      clock: { now: () => "2026-07-16T00:00:01Z" },
-    });
+
+    expect(client.status()).toEqual(status);
+  });
+
+  it("starts the client once when started twice", async () => {
+    const { client, source } = createFixture();
+
     await source.start();
+    await source.start();
+
     expect(client.started).toBe(1);
+  });
+
+  it("stops the client once when stopped twice", async () => {
+    const { client, source } = createFixture();
+
+    await source.start();
+    await source.stop();
+    await source.stop();
+
+    expect(client.stopped).toBe(1);
+  });
+
+  it("uses the same normalizer and durable dedupe without mapping inline", async () => {
+    const { client, source, store } = createFixture();
+
+    await source.start();
     await expect(client.handler?.(body)).resolves.toMatchObject({
       accepted: true,
       duplicate: false,
@@ -73,7 +113,5 @@ describe("FeishuLongConnectionSource", () => {
       limit: 10,
     });
     expect(page.items).toHaveLength(1);
-    await source.stop();
-    expect(client.stopped).toBe(1);
   });
 });

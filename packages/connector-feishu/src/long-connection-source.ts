@@ -13,9 +13,41 @@ export type FeishuLongConnectionHandler = (
   verifiedBody: JsonObject,
 ) => Promise<FeishuLongConnectionAcceptance>;
 
+export type FeishuLongConnectionState =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "failed"
+  | "stopped";
+
+export type FeishuLongConnectionStatusCode =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "connection_failed"
+  | "stopped";
+
+export interface FeishuLongConnectionStatus {
+  readonly state: FeishuLongConnectionState;
+  readonly code: FeishuLongConnectionStatusCode;
+  readonly reconnect_attempts: number;
+  readonly changed_at: string;
+}
+
 export interface FeishuLongConnectionClient {
   start(handler: FeishuLongConnectionHandler): Promise<void>;
+  status(): FeishuLongConnectionStatus;
   stop(): Promise<void>;
+}
+
+export interface FeishuLongConnectionClientFactory {
+  create(input: {
+    readonly app_id: string;
+    readonly app_secret: string;
+    readonly instance_id: string;
+  }): FeishuLongConnectionClient;
 }
 
 export interface FeishuLongConnectionSourceOptions {
