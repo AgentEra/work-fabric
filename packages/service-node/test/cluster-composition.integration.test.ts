@@ -81,7 +81,13 @@ describe("clustered Node composition", () => {
     });
 
     await expect(service.listen()).rejects.toThrow(/worker.*http|http.*worker/i);
-    service.start();
+    const firstStart = service.start();
+    await firstStart;
+    const secondStart = service.start();
+    const sharedStart = secondStart === firstStart;
+    const [secondOutcome] = await Promise.allSettled([secondStart]);
+    expect(sharedStart).toBe(true);
+    expect(secondOutcome).toEqual({ status: "fulfilled", value: undefined });
     expect(await service.clusterSnapshot()).toMatchObject({
       state: "running",
       ready_items: 0,

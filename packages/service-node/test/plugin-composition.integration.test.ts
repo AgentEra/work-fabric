@@ -44,6 +44,36 @@ class FakeLongConnectionClient implements FeishuLongConnectionClient {
   }
 }
 
+const longConnectionPlugin = {
+  ...plugin,
+  credentials: {
+    app_id: plugin.credentials.app_id,
+    app_secret: plugin.credentials.app_secret,
+    work_fabric_access_token: plugin.credentials.work_fabric_access_token,
+  },
+  inbound: {
+    enabled: true,
+    transport: "long_connection",
+    mention_only: true,
+    intake_target: plugin.inbound.intake_target,
+  },
+  outbound: { ...plugin.outbound, enabled: false },
+};
+
+async function composeLongConnectionService(client: FakeLongConnectionClient) {
+  return composeNodeService(serviceConfig("api"), {
+    configuration_revision: "test:long-connection",
+    plugins: {
+      "feishu-primary": {
+        type: "collaboration-channel.feishu",
+        enabled: true,
+        config: longConnectionPlugin,
+      },
+    },
+    feishu_long_connection_client_factory: { create: () => client },
+  });
+}
+
 describe("service plugin composition", () => {
   it("prepares the configured Feishu webhook route without making Console part of execution", async () => {
     const create = vi.fn(() => {
@@ -65,21 +95,6 @@ describe("service plugin composition", () => {
     const client = new FakeLongConnectionClient();
     const create = vi.fn(() => client);
     const factory: FeishuLongConnectionClientFactory = { create };
-    const longConnectionPlugin = {
-      ...plugin,
-      credentials: {
-        app_id: plugin.credentials.app_id,
-        app_secret: plugin.credentials.app_secret,
-        work_fabric_access_token: plugin.credentials.work_fabric_access_token,
-      },
-      inbound: {
-        enabled: true,
-        transport: "long_connection",
-        mention_only: true,
-        intake_target: plugin.inbound.intake_target,
-      },
-      outbound: { ...plugin.outbound, enabled: false },
-    };
     const service = await composeNodeService(serviceConfig("api"), {
       configuration_revision: "test:long-connection",
       plugins: {
@@ -126,34 +141,143 @@ describe("service plugin composition", () => {
 
   it("releases a prepared long connection client when closed before start", async () => {
     const client = new FakeLongConnectionClient();
-    const service = await composeNodeService(serviceConfig("api"), {
-      plugins: {
-        "feishu-primary": {
-          type: "collaboration-channel.feishu",
-          enabled: true,
-          config: {
-            ...plugin,
-            credentials: {
-              app_id: "app",
-              app_secret: "secret",
-              work_fabric_access_token: "connector-token",
-            },
-            inbound: {
-              enabled: true,
-              transport: "long_connection",
-              mention_only: true,
-              intake_target: plugin.inbound.intake_target,
-            },
-          },
-        },
-      },
-      feishu_long_connection_client_factory: { create: () => client },
-    });
+    const service = await composeLongConnectionService(client);
 
     await service.close();
     await service.close();
 
     expect(client.start).not.toHaveBeenCalled();
     expect(client.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a started service healthy when start is called again", async () => {
+    vi.useFakeTimers();
+    const client = new FakeLongConnectionClient();
+    client.state = "connected";
+    const service = await composeLongConnectionService(client);
+
+    try {
+      const first = service.start();
+      await first;
+      const runningTimers = vi.getTimerCount();
+      expect(runningTimers).toBe(2);
+
+      const second = service.start();
+      const sharedStart = second === first;
+      const [secondOutcome] = await Promise.allSettled([second]);
+
+      expect(sharedStart).toBe(true);
+      expect(secondOutcome).toEqual({ status: "fulfilled", value: undefined });
+      expect(client.start).toHaveBeenCalledTimes(1);
+      expect(client.stop).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(runningTimers);
+      await expect(service.http.dispatch({ method: "GET", url: "/health/ready" }))
+        .resolves.toMatchObject({ status_code: 200 });
+    } finally {
+      await service.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares one launch across concurrent start calls", async () => {
+    vi.useFakeTimers();
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const client = new FakeLongConnectionClient();
+    client.state = "connected";
+    client.start.mockImplementation(() => startGate);
+    const service = await composeLongConnectionService(client);
+
+    try {
+      const first = service.start();
+      const second = service.start();
+      const sharedStart = second === first;
+      expect(client.start).toHaveBeenCalledTimes(1);
+
+      releaseStart();
+      const outcomes = await Promise.allSettled([first, second]);
+
+      expect(sharedStart).toBe(true);
+      expect(outcomes).toEqual([
+        { status: "fulfilled", value: undefined },
+        { status: "fulfilled", value: undefined },
+      ]);
+      expect(client.start).toHaveBeenCalledTimes(1);
+      expect(client.stop).not.toHaveBeenCalled();
+      expect(vi.getTimerCount()).toBe(2);
+      await expect(service.http.dispatch({ method: "GET", url: "/health/ready" }))
+        .resolves.toMatchObject({ status_code: 200 });
+    } finally {
+      releaseStart();
+      await service.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("replays the original failed start without rolling back twice", async () => {
+    const failure = new Error("long start failed");
+    const client = new FakeLongConnectionClient();
+    client.start.mockRejectedValue(failure);
+    const service = await composeLongConnectionService(client);
+
+    await expect(service.start()).rejects.toBe(failure);
+    expect(client.stop).toHaveBeenCalledTimes(1);
+    await expect(service.start()).rejects.toBe(failure);
+
+    expect(client.start).toHaveBeenCalledTimes(1);
+    expect(client.stop).toHaveBeenCalledTimes(1);
+    await service.close();
+  });
+
+  it("waits for an in-flight start before closing and never restarts while closing", async () => {
+    vi.useFakeTimers();
+    let releaseStart!: () => void;
+    const startGate = new Promise<void>((resolve) => { releaseStart = resolve; });
+    const client = new FakeLongConnectionClient();
+    client.start.mockImplementation(() => startGate);
+    const service = await composeLongConnectionService(client);
+
+    const starting = service.start();
+    const closing = service.close();
+    const lateStart = service.start();
+    const sharedClose = lateStart === closing;
+
+    try {
+      releaseStart();
+      const outcomes = await Promise.allSettled([starting, closing, lateStart]);
+
+      expect(sharedClose).toBe(true);
+      expect(outcomes).toEqual([
+        { status: "fulfilled", value: undefined },
+        { status: "fulfilled", value: undefined },
+        { status: "fulfilled", value: undefined },
+      ]);
+      expect(client.start).toHaveBeenCalledTimes(1);
+      expect(client.stop).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      releaseStart();
+      await service.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not revive a service after close", async () => {
+    vi.useFakeTimers();
+    const client = new FakeLongConnectionClient();
+    const service = await composeLongConnectionService(client);
+
+    try {
+      await service.close();
+      const closed = service.start();
+      await expect(closed).resolves.toBeUndefined();
+
+      expect(client.start).not.toHaveBeenCalled();
+      expect(client.stop).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await service.close();
+      vi.useRealTimers();
+    }
   });
 });
