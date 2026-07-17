@@ -13,41 +13,66 @@ function tooLarge(): never {
   throw new RangeError("feishu_long_connection_event_too_large");
 }
 
-function assertJsonValue(value: unknown, ancestors: Set<object>): asserts value is JsonValue {
+function snapshotJsonValue(value: unknown, ancestors: Set<object>): JsonValue {
   if (
     value === null
     || typeof value === "string"
     || typeof value === "boolean"
-  ) return;
+  ) return value;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) invalid();
-    return;
+    return value;
   }
   if (typeof value !== "object") invalid();
   if (ancestors.has(value)) invalid();
 
   const prototype = Object.getPrototypeOf(value);
-  if (
-    !Array.isArray(value)
-    && prototype !== Object.prototype
-    && prototype !== null
-  ) invalid();
-  if (Object.getOwnPropertySymbols(value).length !== 0) invalid();
+  const array = Array.isArray(value);
+  if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) {
+    invalid();
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  const keys = Reflect.ownKeys(descriptors);
+  if (keys.some((key) => typeof key === "symbol")) invalid();
 
   ancestors.add(value);
-  for (const item of Array.isArray(value) ? value : Object.values(value)) {
-    assertJsonValue(item, ancestors);
+  if (array) {
+    const lengthDescriptor = descriptors.length;
+    if (lengthDescriptor === undefined || !("value" in lengthDescriptor)) invalid();
+    const length = lengthDescriptor.value;
+    if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0) invalid();
+    if (keys.length !== length + 1 || !keys.includes("length")) invalid();
+    const snapshot: JsonValue[] = [];
+    for (let index = 0; index < length; index += 1) {
+      const descriptor = descriptors[String(index)];
+      if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) {
+        invalid();
+      }
+      snapshot.push(snapshotJsonValue(descriptor.value, ancestors));
+    }
+    ancestors.delete(value);
+    return Object.freeze(snapshot);
+  }
+
+  const snapshot: Record<string, JsonValue> = Object.create(null) as Record<string, JsonValue>;
+  for (const key of keys) {
+    if (typeof key !== "string") invalid();
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) invalid();
+    snapshot[key] = snapshotJsonValue(descriptor.value, ancestors);
   }
   ancestors.delete(value);
+  return Object.freeze(snapshot);
 }
 
 function boundedJsonObject(value: unknown): JsonObject {
   try {
-    assertJsonValue(value, new Set());
-    if (value === null || typeof value !== "object" || Array.isArray(value)) invalid();
-    const serialized = JSON.stringify(value);
+    const snapshot = snapshotJsonValue(value, new Set());
+    if (snapshot === null || typeof snapshot !== "object" || Array.isArray(snapshot)) invalid();
+    const serialized = JSON.stringify(snapshot);
     if (Buffer.byteLength(serialized, "utf8") > MAX_EVENT_BYTES) tooLarge();
-    return value as JsonObject;
+    return snapshot as JsonObject;
   } catch (error) {
     if (
       error instanceof TypeError
@@ -80,6 +105,9 @@ function optionalString(value: JsonValue | undefined, maxLength: number): string
 function mentions(value: JsonValue | undefined): readonly JsonObject[] | undefined {
   if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.length > MAX_MENTIONS) invalid();
+  for (let index = 0; index < value.length; index += 1) {
+    if (!Object.hasOwn(value, index)) invalid();
+  }
   return value.map((item) => {
     const mention = object(item);
     const id = object(mention.id);
