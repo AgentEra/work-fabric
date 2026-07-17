@@ -346,6 +346,8 @@ export async function composeNodeService(
   config: NodeServiceConfig,
   options: NodeServiceCompositionOptions = {},
 ): Promise<ComposedNodeService> {
+  const pluginConfiguration = options.plugins ?? {};
+  assertFeishuPluginRole(config.role, pluginConfiguration);
   const storage = config.storage_profile === "memory-demo"
     ? memoryStorage()
     : config.storage_profile === "sqlite-local"
@@ -356,8 +358,6 @@ export async function composeNodeService(
       "PostgreSQL composition requires injected deployment-owned adapters; no implicit credentials are loaded",
     );
   }
-  const pluginConfiguration = options.plugins ?? {};
-  assertFeishuPluginRole(config.role, pluginConfiguration);
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
   if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
     throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
@@ -631,11 +631,18 @@ export async function composeNodeService(
       await collaborationProjector.rebuildPartition(config.tenant_id, partitionId, limit);
     },
     async start() {
-      if (config.role === "worker" || config.role === "all") {
-        clusterHost?.start();
+      try {
+        if (config.role === "worker" || config.role === "all") {
+          clusterHost?.start();
+        }
+        localPump?.start();
+        await pluginHost.start();
+      } catch (error) {
+        await pluginHost.stop().catch(() => undefined);
+        await localPump?.stop().catch(() => undefined);
+        await clusterHost?.drain().catch(() => undefined);
+        throw error;
       }
-      localPump?.start();
-      await pluginHost.start();
     },
     async clusterSnapshot() {
       return operationalClusterSnapshot?.load(config.tenant_id) ?? null;

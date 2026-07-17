@@ -63,11 +63,12 @@ export interface FeishuLongConnectionSourceOptions {
 
 export class FeishuLongConnectionSource {
   private startAttempted = false;
+  private released = false;
 
   constructor(private readonly options: FeishuLongConnectionSourceOptions) {}
 
   async start(): Promise<void> {
-    if (this.startAttempted) return;
+    if (this.released || this.startAttempted) return;
     this.startAttempted = true;
     await this.options.client.start(async (verifiedBody) => {
       const envelope = normalizeFeishuEvent(verifiedBody, {
@@ -84,8 +85,8 @@ export class FeishuLongConnectionSource {
   }
 
   async stop(): Promise<void> {
-    if (!this.startAttempted) return;
+    if (this.released) return;
     await this.options.client.stop();
-    this.startAttempted = false;
+    this.released = true;
   }
 }

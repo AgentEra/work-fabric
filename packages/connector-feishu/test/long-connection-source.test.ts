@@ -45,6 +45,7 @@ class FakeLongConnection implements FeishuLongConnectionClient {
   started = 0;
   stopped = 0;
   startError: Error | undefined;
+  stopError: Error | undefined;
   start(handler: FeishuLongConnectionHandler): Promise<void> {
     this.handler = handler;
     this.started += 1;
@@ -53,7 +54,12 @@ class FakeLongConnection implements FeishuLongConnectionClient {
       : Promise.reject(this.startError);
   }
   status(): FeishuLongConnectionStatus { return status; }
-  stop(): Promise<void> { this.stopped += 1; return Promise.resolve(); }
+  stop(): Promise<void> {
+    this.stopped += 1;
+    return this.stopError === undefined
+      ? Promise.resolve()
+      : Promise.reject(this.stopError);
+  }
 }
 
 function createFixture() {
@@ -96,6 +102,28 @@ describe("FeishuLongConnectionSource", () => {
     await source.stop();
 
     expect(client.stopped).toBe(1);
+  });
+
+  it("releases an owned client once when stopped before start", async () => {
+    const { client, source } = createFixture();
+
+    await source.stop();
+    await source.stop();
+
+    expect(client.started).toBe(0);
+    expect(client.stopped).toBe(1);
+  });
+
+  it("retries client release after stop rejects", async () => {
+    const { client, source } = createFixture();
+    client.stopError = new Error("client stop failed");
+
+    await expect(source.stop()).rejects.toThrow("client stop failed");
+    client.stopError = undefined;
+    await source.stop();
+    await source.stop();
+
+    expect(client.stopped).toBe(2);
   });
 
   it("stops a client whose start installed resources before rejecting", async () => {

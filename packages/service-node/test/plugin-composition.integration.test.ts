@@ -106,6 +106,10 @@ describe("service plugin composition", () => {
     await expect(service.http.dispatch({ method: "GET", url: "/health/ready" }))
       .resolves.toMatchObject({ status_code: 503 });
 
+    client.state = "reconnecting";
+    await expect(service.http.dispatch({ method: "GET", url: "/health/ready" }))
+      .resolves.toMatchObject({ status_code: 503 });
+
     client.state = "failed";
     await expect(service.http.dispatch({ method: "GET", url: "/health/live" }))
       .resolves.toMatchObject({ status_code: 200 });
@@ -117,6 +121,39 @@ describe("service plugin composition", () => {
       .resolves.toMatchObject({ status_code: 200 });
 
     await service.close();
+    expect(client.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a prepared long connection client when closed before start", async () => {
+    const client = new FakeLongConnectionClient();
+    const service = await composeNodeService(serviceConfig("api"), {
+      plugins: {
+        "feishu-primary": {
+          type: "collaboration-channel.feishu",
+          enabled: true,
+          config: {
+            ...plugin,
+            credentials: {
+              app_id: "app",
+              app_secret: "secret",
+              work_fabric_access_token: "connector-token",
+            },
+            inbound: {
+              enabled: true,
+              transport: "long_connection",
+              mention_only: true,
+              intake_target: plugin.inbound.intake_target,
+            },
+          },
+        },
+      },
+      feishu_long_connection_client_factory: { create: () => client },
+    });
+
+    await service.close();
+    await service.close();
+
+    expect(client.start).not.toHaveBeenCalled();
     expect(client.stop).toHaveBeenCalledTimes(1);
   });
 });
