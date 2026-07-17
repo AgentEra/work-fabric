@@ -4,6 +4,7 @@ import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memo
 import { ConnectorIngressStoreError } from "@work-fabric/connector-spi";
 import type {
   ConnectorCommandResult,
+  ConnectorAcceptedReceiptHandler,
   ConnectorCommandSink,
   ConnectorEventMapper,
   ConnectorIngressEnvelope,
@@ -103,6 +104,7 @@ function worker(
   sink: ConnectorCommandSink,
   clock: ConnectorWorkerClock,
   telemetry?: SemanticTelemetryObserver,
+  receiptHandler?: ConnectorAcceptedReceiptHandler,
 ) {
   return new ConnectorWorker({
     store,
@@ -126,7 +128,18 @@ function worker(
       max_error_detail_length: 80,
     },
     ...(telemetry === undefined ? {} : { telemetry }),
+    ...(receiptHandler === undefined ? {} : { accepted_receipt_handler: receiptHandler }),
   });
+}
+
+class ReceiptHandler implements ConnectorAcceptedReceiptHandler {
+  readonly manifest = manifest("connector.accepted-receipt.v1");
+  readonly calls: string[] = [];
+  constructor(private readonly result: ConnectorCommandResult) {}
+  async record(input: { readonly ingress_id: string }): Promise<ConnectorCommandResult> {
+    this.calls.push(input.ingress_id);
+    return this.result;
+  }
 }
 
 describe("ConnectorWorker", () => {
@@ -216,6 +229,48 @@ describe("ConnectorWorker", () => {
       connector_id: "connector-1",
       ingress_id: accepted.record.ingress_id,
     }))?.state).toBe("completed");
+  });
+
+  it("records an accepted resource receipt before completing ingress", async () => {
+    const store = new MemoryConnectorIngressStore();
+    const accepted = await store.accept(envelope("offer-receipt"));
+    const receipt = new ReceiptHandler({
+      kind: "accepted", receipt_id: "route-ready", event_ids: [],
+    });
+    const runtime = worker(
+      store,
+      new QueueMapper([{ kind: "command", command: {
+        operation: "handoff.offer", idempotency_key: "connector:message-1",
+        identity: { actor_id: "actor-1" }, input: { work_reference: {} },
+      } }]),
+      new QueueSink([{
+        kind: "accepted", receipt_id: "receipt-1", event_ids: [],
+        resource: { resource_type: "handoff", resource_id: "handoff-new", resource_version: 1 },
+      }]),
+      new MutableClock("2026-07-15T00:00:00Z"),
+      undefined,
+      receipt,
+    );
+
+    await expect(runtime.runBatch()).resolves.toMatchObject({ completed: 1 });
+    expect(receipt.calls).toEqual([accepted.record.ingress_id]);
+  });
+
+  it("retries ingress when accepted receipt provisioning is temporarily unavailable", async () => {
+    const store = new MemoryConnectorIngressStore();
+    await store.accept(envelope("receipt-retry"));
+    const receipt = new ReceiptHandler({
+      kind: "retryable_failure", error_code: "route_store_unavailable",
+    });
+    const runtime = worker(
+      store,
+      new QueueMapper([acceptedCommand]),
+      new QueueSink([{ kind: "accepted", receipt_id: "receipt-1", event_ids: [] }]),
+      new MutableClock("2026-07-15T00:00:00Z"),
+      undefined,
+      receipt,
+    );
+    await expect(runtime.runBatch()).resolves.toMatchObject({ retried: 1 });
   });
 
   it("schedules retryable outcomes and dead-letters the terminal attempt", async () => {

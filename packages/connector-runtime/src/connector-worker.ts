@@ -1,6 +1,7 @@
 import {
   ConnectorIngressStoreError,
   type ConnectorCommandResult,
+  type ConnectorAcceptedReceiptHandler,
   type ConnectorCommandSink,
   type ConnectorEventMapper,
   type ConnectorIngressClaim,
@@ -50,6 +51,7 @@ export interface ConnectorWorkerOptions {
   readonly mapper: ConnectorEventMapper;
   readonly command_sink: ConnectorCommandSink;
   readonly observation_sink: ConnectorObservationSink;
+  readonly accepted_receipt_handler?: ConnectorAcceptedReceiptHandler;
   readonly clock: ConnectorWorkerClock;
   readonly retry_policy: ConnectorRetryPolicy;
   readonly scope: ConnectorWorkerScope;
@@ -223,6 +225,25 @@ export class ConnectorWorker {
               this.options.scope.max_error_detail_length,
             ),
           );
+        }
+        if (this.options.accepted_receipt_handler !== undefined) {
+          const renewedForReceipt = await this.renewBeforeSideEffect(claim);
+          if (renewedForReceipt === null) return "fenced";
+          claim = renewedForReceipt;
+          const receipt = await this.options.accepted_receipt_handler.record({
+            tenant_id: claim.envelope.tenant_id,
+            connector_id: claim.envelope.connector_id,
+            ingress_id: claim.ingress_id,
+            claim: structuredClone(claim),
+            command: structuredClone(mapping.command),
+            accepted: structuredClone(result),
+          });
+          if (receipt.kind !== "accepted") {
+            return this.settleFailure(
+              claim,
+              classifyResult(receipt, this.options.scope.max_error_detail_length),
+            );
+          }
         }
       } else if (
         mapping.kind === "reference_observed" ||
