@@ -78,6 +78,8 @@ class FeishuPluginInstance implements PluginInstance {
   private active: Promise<void> | null = null;
   private stopped = false;
   private prepared = false;
+  private signalRegistrationAttempted = false;
+  private webhookRegistrationAttempted = false;
   private workerHealthValue: PluginHealth = { state: "healthy", code: "ready" };
   constructor(
     private readonly instanceId: string,
@@ -94,13 +96,6 @@ class FeishuPluginInstance implements PluginInstance {
   ) { this.signal_adapter = signalAdapter; }
   async prepare(): Promise<void> {
     if (this.prepared) return;
-    if (this.config.inbound.enabled && isWebhookConfig(this.config)) {
-      this.webhooks.register(this.instanceId, {
-        tenant_id: this.tenantId, connector_id: this.config.connector_id,
-        external_tenant_id: this.config.external_tenant_id, credential_ref: `feishu:${this.instanceId}`,
-        credentials: { verification_token: this.config.credentials.verification_token, ...(this.config.credentials.encrypt_key === undefined ? {} : { encrypt_key: this.config.credentials.encrypt_key }) },
-      });
-    }
     if (this.config.outbound.enabled) {
       for (const [name, subscriptionConfig] of Object.entries(this.config.outbound.subscriptions).sort(([left], [right]) => left.localeCompare(right))) {
         const id = staticSubscriptionId(this.tenantId, this.instanceId, name);
@@ -111,6 +106,17 @@ class FeishuPluginInstance implements PluginInstance {
           await this.subscriptions.putSubscription(existing === null ? desired : { ...desired, updated_at: increasingTimestamp(now, existing.updated_at) });
         }
       }
+    }
+    if (this.config.inbound.enabled && isWebhookConfig(this.config)) {
+      this.webhookRegistrationAttempted = true;
+      this.webhooks.register(this.instanceId, {
+        tenant_id: this.tenantId, connector_id: this.config.connector_id,
+        external_tenant_id: this.config.external_tenant_id, credential_ref: `feishu:${this.instanceId}`,
+        credentials: { verification_token: this.config.credentials.verification_token, ...(this.config.credentials.encrypt_key === undefined ? {} : { encrypt_key: this.config.credentials.encrypt_key }) },
+      });
+    }
+    if (this.config.outbound.enabled) {
+      this.signalRegistrationAttempted = true;
       this.signals.register(this.instanceId, this.signal_adapter);
     }
     this.prepared = true;
@@ -125,7 +131,28 @@ class FeishuPluginInstance implements PluginInstance {
     if (connectionState === "connected") return this.workerHealthValue;
     return { state: "degraded", code: `feishu_long_connection_${connectionState}` };
   }
-  async stop(): Promise<void> { this.stopped = true; if (this.timer !== undefined) clearTimeout(this.timer); this.timer = undefined; await this.longConnectionSource?.stop(); await this.active; if (this.prepared) { if (this.config.outbound.enabled) this.signals.unregister(this.instanceId); if (this.config.inbound.enabled && isWebhookConfig(this.config)) this.webhooks.unregister(this.instanceId); } this.prepared = false; }
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+    const failures: unknown[] = [];
+    try { await this.longConnectionSource?.stop(); } catch (error) { failures.push(error); }
+    try { await this.active; } catch (error) { failures.push(error); }
+    if (this.signalRegistrationAttempted) {
+      try {
+        this.signals.unregister(this.instanceId);
+        this.signalRegistrationAttempted = false;
+      } catch (error) { failures.push(error); }
+    }
+    if (this.webhookRegistrationAttempted) {
+      try {
+        this.webhooks.unregister(this.instanceId);
+        this.webhookRegistrationAttempted = false;
+      } catch (error) { failures.push(error); }
+    }
+    this.prepared = false;
+    if (failures.length > 0) throw new Error("feishu_plugin_cleanup_failed");
+  }
 }
 
 export class FeishuPluginFactory implements PluginFactory {

@@ -74,11 +74,13 @@ class FakeLongConnectionClient implements FeishuLongConnectionClient {
   state: FeishuLongConnectionState = "connecting";
   startCalls = 0;
   stopCalls = 0;
+  onStart: (() => Promise<void>) | undefined;
   onStop: (() => Promise<void>) | undefined;
 
   async start(handler: FeishuLongConnectionHandler): Promise<void> {
     this.handler = handler;
     this.startCalls += 1;
+    await this.onStart?.();
   }
 
   status(): FeishuLongConnectionStatus {
@@ -307,6 +309,158 @@ describe("FeishuPluginFactory", () => {
     expect(fixture.createClient).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     await instance.stop();
+  });
+
+  it("rolls back Webhook registration when subscription preparation fails", async () => {
+    const webhook = new FeishuWebhookRegistry();
+    const subscriptions = new MemorySubscriptionStore();
+    vi.spyOn(subscriptions, "getSubscription").mockRejectedValueOnce(new Error("subscription unavailable"));
+    const services = new Map<string, unknown>([
+      ["workfabric.tenant_id", "tenant-1"],
+      ["channel.routes", new MemoryChannelRouteStore()],
+      ["exchange.subscriptions", subscriptions],
+      ["connector.ingress", new MemoryConnectorIngressStore()],
+      ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
+      ["channel.signal_registry", { register() {}, unregister() {} }],
+      ["feishu.webhook_registry", webhook],
+      ["runtime.clock", { now: () => "2026-07-17T00:00:00.000Z", nowEpochSeconds: () => 1_784_275_200 }],
+      ["runtime.fetch", vi.fn()],
+      ["runtime.handoff_wakeup", () => {}],
+    ]);
+    const configured = config();
+    configured.outbound.channels = { project: { receive_id_type: "chat_id", receive_id: "oc-project" } };
+    configured.outbound.subscriptions = {
+      results: {
+        channel_ref: "project",
+        owner: { actor_id: "actor-owner", actor_type: "human", endpoint_id: "endpoint-owner" },
+        filter: {},
+      },
+    };
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create({ configuration_revision: "1", service: { get<T>(key: string) { if (!services.has(key)) throw new Error(key); return services.get(key) as T; } } }, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(configured),
+    });
+
+    await expect(instance.prepare()).rejects.toThrow("subscription unavailable");
+    await instance.stop();
+
+    expect(await webhook.resolve("feishu-primary")).toBeNull();
+  });
+
+  it("rolls back partially installed Signal and Webhook registrations", async () => {
+    const webhook = new FeishuWebhookRegistry();
+    const signals = new Set<string>();
+    const services = new Map<string, unknown>([
+      ["workfabric.tenant_id", "tenant-1"],
+      ["channel.routes", new MemoryChannelRouteStore()],
+      ["exchange.subscriptions", new MemorySubscriptionStore()],
+      ["connector.ingress", new MemoryConnectorIngressStore()],
+      ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
+      ["channel.signal_registry", {
+        register(id: string) { signals.add(id); throw new Error("signal register failed"); },
+        unregister(id: string) { signals.delete(id); },
+      }],
+      ["feishu.webhook_registry", webhook],
+      ["runtime.clock", { now: () => "2026-07-17T00:00:00.000Z", nowEpochSeconds: () => 1_784_275_200 }],
+      ["runtime.fetch", vi.fn()],
+      ["runtime.handoff_wakeup", () => {}],
+    ]);
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create({ configuration_revision: "1", service: { get<T>(key: string) { if (!services.has(key)) throw new Error(key); return services.get(key) as T; } } }, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(config()),
+    });
+
+    await expect(instance.prepare()).rejects.toThrow("signal register failed");
+    await instance.stop();
+
+    expect(signals.has("feishu-primary")).toBe(false);
+    expect(await webhook.resolve("feishu-primary")).toBeNull();
+  });
+
+  it("stops a long client after start rejects and preserves the start failure", async () => {
+    vi.useFakeTimers();
+    const fixture = createLongConnectionFixture();
+    fixture.client.onStart = () => Promise.reject(new Error("long start failed"));
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(longConnectionConfig()),
+    });
+    await instance.prepare();
+
+    await expect(instance.start()).rejects.toThrow("long start failed");
+    await instance.stop();
+
+    expect(fixture.client.stopCalls).toBe(1);
+    expect(fixture.signalEvents).toContain("signal_unregister");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("drains registrations before surfacing a stable source cleanup failure", async () => {
+    vi.useFakeTimers();
+    const fixture = createLongConnectionFixture();
+    let releaseWorker!: (claims: readonly []) => void;
+    const workerDrain = new Promise<readonly []>((resolve) => { releaseWorker = resolve; });
+    vi.spyOn(fixture.ingress, "claim").mockImplementationOnce(() => workerDrain);
+    fixture.client.onStop = () => Promise.reject(new Error("private source cleanup detail"));
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(longConnectionConfig()),
+    });
+    await instance.prepare();
+    await instance.start();
+    vi.advanceTimersByTime(0);
+    await Promise.resolve();
+
+    let cleanupResult: Error | undefined;
+    const stopping = instance.stop().catch((error: unknown) => {
+      cleanupResult = error instanceof Error ? error : new Error("unexpected cleanup failure");
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(cleanupResult).toBeUndefined();
+    expect(fixture.signalEvents).not.toContain("signal_unregister");
+
+    releaseWorker([]);
+    await stopping;
+
+    expect(cleanupResult?.message).toBe("feishu_plugin_cleanup_failed");
+    expect(fixture.signalEvents).toContain("signal_unregister");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("continues Webhook cleanup when Signal unregister throws", async () => {
+    const webhook = new FeishuWebhookRegistry();
+    const services = new Map<string, unknown>([
+      ["workfabric.tenant_id", "tenant-1"],
+      ["channel.routes", new MemoryChannelRouteStore()],
+      ["exchange.subscriptions", new MemorySubscriptionStore()],
+      ["connector.ingress", new MemoryConnectorIngressStore()],
+      ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
+      ["channel.signal_registry", { register() {}, unregister() { throw new Error("private signal cleanup detail"); } }],
+      ["feishu.webhook_registry", webhook],
+      ["runtime.clock", { now: () => "2026-07-17T00:00:00.000Z", nowEpochSeconds: () => 1_784_275_200 }],
+      ["runtime.fetch", vi.fn()],
+      ["runtime.handoff_wakeup", () => {}],
+    ]);
+    const factory = new FeishuPluginFactory();
+    const instance = await factory.create({ configuration_revision: "1", service: { get<T>(key: string) { if (!services.has(key)) throw new Error(key); return services.get(key) as T; } } }, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate(config()),
+    });
+    await instance.prepare();
+
+    await expect(instance.stop()).rejects.toThrow(/^feishu_plugin_cleanup_failed$/);
+
+    expect(await webhook.resolve("feishu-primary")).toBeNull();
   });
 
   it("provisions configured static channels as canonical idempotent subscriptions", async () => {

@@ -44,10 +44,13 @@ class FakeLongConnection implements FeishuLongConnectionClient {
   handler: FeishuLongConnectionHandler | undefined;
   started = 0;
   stopped = 0;
+  startError: Error | undefined;
   start(handler: FeishuLongConnectionHandler): Promise<void> {
     this.handler = handler;
     this.started += 1;
-    return Promise.resolve();
+    return this.startError === undefined
+      ? Promise.resolve()
+      : Promise.reject(this.startError);
   }
   status(): FeishuLongConnectionStatus { return status; }
   stop(): Promise<void> { this.stopped += 1; return Promise.resolve(); }
@@ -90,6 +93,16 @@ describe("FeishuLongConnectionSource", () => {
 
     await source.start();
     await source.stop();
+    await source.stop();
+
+    expect(client.stopped).toBe(1);
+  });
+
+  it("stops a client whose start installed resources before rejecting", async () => {
+    const { client, source } = createFixture();
+    client.startError = new Error("client start failed");
+
+    await expect(source.start()).rejects.toThrow("client start failed");
     await source.stop();
 
     expect(client.stopped).toBe(1);

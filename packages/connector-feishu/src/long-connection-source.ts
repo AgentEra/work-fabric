@@ -62,12 +62,13 @@ export interface FeishuLongConnectionSourceOptions {
 }
 
 export class FeishuLongConnectionSource {
-  private started = false;
+  private startAttempted = false;
 
   constructor(private readonly options: FeishuLongConnectionSourceOptions) {}
 
   async start(): Promise<void> {
-    if (this.started) return;
+    if (this.startAttempted) return;
+    this.startAttempted = true;
     await this.options.client.start(async (verifiedBody) => {
       const envelope = normalizeFeishuEvent(verifiedBody, {
         ...this.options.scope,
@@ -80,12 +81,11 @@ export class FeishuLongConnectionSource {
         ingress_id: result.record.ingress_id,
       };
     });
-    this.started = true;
   }
 
   async stop(): Promise<void> {
-    if (!this.started) return;
+    if (!this.startAttempted) return;
     await this.options.client.stop();
-    this.started = false;
+    this.startAttempted = false;
   }
 }
