@@ -10,21 +10,29 @@ describe("createFeishuSdkLogger", () => {
       warn: (code) => calls.push(["warn", code]),
       info: (code) => calls.push(["info", code]),
     });
-    const secret = "app-secret-value";
-    const message = "private message text";
+    const sensitiveValues = [
+      "app-secret-value",
+      "tenant-access-key-value",
+      "sender-open-id-value",
+      "chat-id-value",
+      "private-message-text-value",
+    ] as const;
+    const [appSecret, tenantKey, senderOpenId, chatId, messageText] = sensitiveValues;
 
-    logger.error(secret, { message });
-    logger.warn(message, secret);
-    logger.info({ secret, message });
-    logger.debug(secret, message);
-    logger.trace(message, secret);
+    logger.error(appSecret, { tenantKey, senderOpenId, chatId, messageText });
+    logger.warn(messageText, tenantKey, { senderOpenId });
+    logger.info({ appSecret, tenantKey, senderOpenId, chatId, messageText });
+    logger.debug(appSecret, tenantKey, senderOpenId, chatId, messageText);
+    logger.trace(messageText, chatId, senderOpenId, tenantKey, appSecret);
 
     expect(calls).toEqual([
       ["error", "feishu_sdk_error"],
       ["warn", "feishu_sdk_warning"],
       ["info", "feishu_sdk_info"],
     ]);
-    expect(JSON.stringify(calls)).not.toContain(secret);
-    expect(JSON.stringify(calls)).not.toContain(message);
+    const serializedCalls = JSON.stringify(calls);
+    for (const sensitiveValue of sensitiveValues) {
+      expect(serializedCalls).not.toContain(sensitiveValue);
+    }
   });
 });
