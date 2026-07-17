@@ -8,20 +8,26 @@ import {
   isBinaryExpression,
   isCallExpression,
   isCaseClause,
+  isComputedPropertyName,
   isElementAccessExpression,
   isExportDeclaration,
   isExternalModuleReference,
+  isGetAccessorDeclaration,
   isIdentifier,
   isImportDeclaration,
   isImportEqualsDeclaration,
   isJSDoc,
+  isMethodDeclaration,
   isNoSubstitutionTemplateLiteral,
   isNonNullExpression,
   isParenthesizedExpression,
   isPartiallyEmittedExpression,
   isPrivateIdentifier,
   isPropertyAccessExpression,
+  isPropertyAssignment,
+  isPropertyDeclaration,
   isSatisfiesExpression,
+  isSetAccessorDeclaration,
   isStringLiteral,
   isSwitchStatement,
   isTypeAssertion,
@@ -75,7 +81,6 @@ const outputDirectories = new Set([
   "coverage",
   "dist",
   "out",
-  "vendor",
 ]);
 
 export function normalizeRepositoryPath(path: string): string {
@@ -99,7 +104,8 @@ function isConventionalOutputDirectory(repositoryPath: string): boolean {
   if (!outputDirectories.has(directoryName)) return false;
   if (segments.includes("src")) return false;
   return segments.length === 1 ||
-    (segments.length === 3 && segments[0] === "packages");
+    (segments.length === 3 &&
+      (segments[0] === "packages" || segments[0] === "examples"));
 }
 
 async function discoverSources(root: string): Promise<SourceDiscovery> {
@@ -158,6 +164,22 @@ function stringLiteralText(expression: Expression | undefined): string | undefin
     : undefined;
 }
 
+function isCommonJsRequireCallee(expression: Expression): boolean {
+  const unwrapped = unwrapExpression(expression);
+  if (isIdentifier(unwrapped)) return unwrapped.text === "require";
+  if (isPropertyAccessExpression(unwrapped)) {
+    const receiver = unwrapExpression(unwrapped.expression);
+    return isIdentifier(receiver) && receiver.text === "module" &&
+      unwrapped.name.text === "require";
+  }
+  if (isElementAccessExpression(unwrapped)) {
+    const receiver = unwrapExpression(unwrapped.expression);
+    return isIdentifier(receiver) && receiver.text === "module" &&
+      stringLiteralText(unwrapped.argumentExpression) === "require";
+  }
+  return false;
+}
+
 function normalizedIdentifier(value: string): string {
   return value
     .replace(/^#/, "")
@@ -184,6 +206,15 @@ const forbiddenResponsibilities = new Set([
 
 function responsibilityIdentifier(value: string): boolean {
   return forbiddenResponsibilities.has(normalizedIdentifier(value));
+}
+
+function propertyNameContainsResponsibility(name: Node): boolean {
+  if (isIdentifier(name) || isPrivateIdentifier(name) || isStringLiteral(name) ||
+    isNoSubstitutionTemplateLiteral(name)) {
+    return responsibilityIdentifier(name.text);
+  }
+  return isComputedPropertyName(name) &&
+    responsibilityIdentifier(stringLiteralText(name.expression) ?? "");
 }
 
 function propertyAccessParts(expression: Expression): string[] {
@@ -279,7 +310,7 @@ function analyzeSourceFile(sourceFile: SourceFile): SourceAnalysis {
       if (node.expression.kind === SyntaxKind.ImportKeyword) {
         const specifier = stringLiteralText(firstArgument);
         if (specifier !== undefined) moduleSpecifiers.push(specifier);
-      } else if (isIdentifier(node.expression) && node.expression.text === "require") {
+      } else if (isCommonJsRequireCallee(node.expression)) {
         const specifier = stringLiteralText(firstArgument);
         if (specifier !== undefined) moduleSpecifiers.push(specifier);
       }
@@ -292,6 +323,16 @@ function analyzeSourceFile(sourceFile: SourceFile): SourceAnalysis {
     if (
       isPropertyAccessExpression(node) &&
       propertyAccessContainsResponsibility(node)
+    ) forbiddenResponsibility = true;
+    if (
+      isElementAccessExpression(node) &&
+      responsibilityIdentifier(stringLiteralText(node.argumentExpression) ?? "")
+    ) forbiddenResponsibility = true;
+    if (
+      (isPropertyAssignment(node) || isPropertyDeclaration(node) ||
+        isMethodDeclaration(node) || isGetAccessorDeclaration(node) ||
+        isSetAccessorDeclaration(node)) &&
+      propertyNameContainsResponsibility(node.name)
     ) forbiddenResponsibility = true;
 
     if (isBinaryExpression(node) && equalityOperators.has(node.operatorToken.kind)) {

@@ -108,6 +108,33 @@ describe("configuration and collaboration-channel boundaries", () => {
   });
 
   it.each([
+    ["object property", 'export const handlers = { "agentBrain": () => {} };'],
+    ["class method", 'export class Adapter { "agentBrain"(): void {} }'],
+    ["class property", 'export class Adapter { "agentBrain" = (): void => {}; }'],
+    [
+      "element access",
+      'declare const adapter: Record<string, () => void>; adapter["agentBrain"](); export { adapter };',
+    ],
+  ])("rejects an executable string-named responsibility %s", async (_name, source) => {
+    const repositoryPath =
+      "packages/adapter-feishu-long-connection-node/src/string-responsibility.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: `${source}\n`,
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("keeps exact responsibility vocabulary inert in ordinary string data", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "packages/adapter-feishu-long-connection-node/src/string-data.ts": [
+        'export const labels = ["agentBrain", { label: "agentBrain" }];',
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ responsibility_violations: 0 });
+  });
+
+  it.each([
     "packages/protocol-runtime/src/transport.ts",
     "packages/exchange-core/src/transport.ts",
     "packages/adapter-storage-memory/src/transport.ts",
@@ -287,6 +314,8 @@ describe("repository source discovery and import syntax", () => {
     ["side-effect import", 'import "@larksuiteoapi/node-sdk";'],
     ["dynamic import", 'void import("@larksuiteoapi/node-sdk");'],
     ["CommonJS require", 'require("@larksuiteoapi/node-sdk");'],
+    ["CommonJS module.require", 'module.require("@larksuiteoapi/node-sdk");'],
+    ["CommonJS module element require", 'module["require"]("@larksuiteoapi/node-sdk");'],
   ])("detects a %s", async (_name, source) => {
     const repositoryPath = "packages/connector-runtime/src/sdk-leak.ts";
     await expect(checkPluginBoundaries(await fixture({
@@ -304,6 +333,18 @@ describe("repository source discovery and import syntax", () => {
         'const dynamic = "import(\\\"@larksuiteoapi/node-sdk\\\")";',
         'const commonjs = "require(\\\"@larksuiteoapi/node-sdk\\\")";',
         "export { normal, dynamic, commonjs };",
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+
+  it("does not treat unrelated require properties as CommonJS loading", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "tools/custom-loader.ts": [
+        "declare const customLoader: { require(value: string): unknown };",
+        'customLoader.require("@larksuiteoapi/node-sdk");',
+        'export const note = "module.require(\\\"@larksuiteoapi/node-sdk\\\")";',
         "",
       ].join("\n"),
     }))).resolves.toMatchObject({ sdk_imports: 1 });
@@ -369,8 +410,20 @@ describe("repository source discovery and import syntax", () => {
       "packages/example/src/sdk-leak.spec.cjs": leak,
       "packages/example/dist/sdk-leak.ts": leak,
       "packages/example/build/sdk-leak.js": leak,
+      "packages/example/out/sdk-leak.mjs": leak,
+      "examples/example/dist/sdk-leak.ts": leak,
+      "examples/example/build/sdk-leak.js": leak,
+      "examples/example/out/sdk-leak.mjs": leak,
       "node_modules/example/sdk-leak.ts": leak,
     }))).resolves.toMatchObject({ sdk_imports: 1 });
+  });
+
+  it("scans production source beneath a package vendor directory", async () => {
+    const repositoryPath = "packages/example/vendor/sdk-leak.js";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: 'import lark from "@larksuiteoapi/node-sdk";\n',
+    }))).rejects.toThrow(repositoryPath);
   });
 
   it.each(["vendor", "build", "dist"])(
