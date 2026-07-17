@@ -11,7 +11,12 @@ const messageFixture = JSON.parse(readFileSync(
 
 describe("Feishu ingress normalizer", () => {
   it("uses message_id for received-message deduplication", () => {
-    const result = normalizeFeishuEvent(messageFixture, {
+    const withMentions = structuredClone(messageFixture);
+    const message = ((withMentions.event as JsonObject).message as unknown as Record<string, unknown>);
+    message.root_id = "om-root-1";
+    message.parent_id = "om-parent-1";
+    message.mentions = [{ key: "@_user_1", id: { open_id: "ou-bot-1" }, name: "Work Fabric" }];
+    const result = normalizeFeishuEvent(withMentions, {
       tenant_id: "tenant-1",
       connector_id: "feishu-primary",
       expected_external_tenant_id: "tenant-key-1",
@@ -25,6 +30,9 @@ describe("Feishu ingress normalizer", () => {
       payload: {
         message_id: "om-message-1",
         sender_open_id: "ou-human-1",
+        root_id: "om-root-1",
+        parent_id: "om-parent-1",
+        mentions: [{ key: "@_user_1", open_id: "ou-bot-1" }],
       },
     });
     expect(result.payload).not.toHaveProperty("token");

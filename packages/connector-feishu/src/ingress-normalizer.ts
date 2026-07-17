@@ -31,6 +31,25 @@ function string(value: JsonValue | undefined, label: string): string {
   return value;
 }
 
+function optionalString(value: JsonValue | undefined, label: string): string | undefined {
+  return value === undefined ? undefined : string(value, label);
+}
+
+function mentions(value: JsonValue | undefined): readonly JsonObject[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 100) {
+    throw new FeishuIngressError("invalid_event", "mentions is invalid");
+  }
+  return value.map((item, index) => {
+    const mention = object(item, `mentions[${index}]`);
+    const id = object(mention.id, `mentions[${index}].id`);
+    return {
+      key: string(mention.key, `mentions[${index}].key`),
+      open_id: string(id.open_id, `mentions[${index}].id.open_id`),
+    };
+  });
+}
+
 function occurredAt(header: JsonObject, fallback: string): string {
   const value = header.create_time;
   if (value === undefined) return fallback;
@@ -56,6 +75,8 @@ function messageEnvelope(
   const senderId = object(sender.sender_id, "event.sender.sender_id");
   const messageId = string(message.message_id, "message_id");
   const chatId = string(message.chat_id, "chat_id");
+  const rootId = optionalString(message.root_id, "root_id");
+  const parentId = optionalString(message.parent_id, "parent_id");
   return {
     tenant_id: scope.tenant_id,
     connector_id: scope.connector_id,
@@ -75,6 +96,9 @@ function messageEnvelope(
       content: string(message.content, "content"),
       sender_open_id: string(senderId.open_id, "sender open_id"),
       sender_type: string(sender.sender_type, "sender_type"),
+      mentions: mentions(message.mentions),
+      ...(rootId === undefined ? {} : { root_id: rootId }),
+      ...(parentId === undefined ? {} : { parent_id: parentId }),
     },
     trace_context: {
       correlation_id: string(header.event_id, "event_id"),
