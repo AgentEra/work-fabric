@@ -124,6 +124,37 @@ describe("configuration and collaboration-channel boundaries", () => {
     }))).rejects.toThrow(repositoryPath);
   });
 
+  it.each([
+    [
+      "string property",
+      'declare const adapter: Record<string, unknown>; const { "agentBrain": brain } = adapter; export { brain };',
+    ],
+    [
+      "computed string property",
+      'declare const adapter: Record<string, unknown>; const { ["agentBrain"]: brain } = adapter; export { brain };',
+    ],
+  ])("rejects a responsibility-named object binding %s", async (_name, source) => {
+    const repositoryPath =
+      "packages/adapter-feishu-long-connection-node/src/destructured-responsibility.ts";
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      [repositoryPath]: `${source}\n`,
+    }))).rejects.toThrow(repositoryPath);
+  });
+
+  it("allows ordinary object bindings and inert responsibility string data", async () => {
+    await expect(checkPluginBoundaries(await fixture({
+      ...allowedSdkImport,
+      "packages/adapter-feishu-long-connection-node/src/ordinary-binding.ts": [
+        "declare const adapter: { label: unknown };",
+        "const { label: value } = adapter;",
+        'export const note = "agentBrain";',
+        "export { value };",
+        "",
+      ].join("\n"),
+    }))).resolves.toMatchObject({ responsibility_violations: 0 });
+  });
+
   it("keeps exact responsibility vocabulary inert in ordinary string data", async () => {
     await expect(checkPluginBoundaries(await fixture({
       ...allowedSdkImport,

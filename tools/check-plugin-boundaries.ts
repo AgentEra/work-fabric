@@ -6,6 +6,7 @@ import {
   type Expression,
   isAsExpression,
   isBinaryExpression,
+  isBindingElement,
   isCallExpression,
   isCaseClause,
   isComputedPropertyName,
@@ -333,6 +334,10 @@ function analyzeSourceFile(sourceFile: SourceFile): SourceAnalysis {
         isMethodDeclaration(node) || isGetAccessorDeclaration(node) ||
         isSetAccessorDeclaration(node)) &&
       propertyNameContainsResponsibility(node.name)
+    ) forbiddenResponsibility = true;
+    if (
+      isBindingElement(node) && node.propertyName !== undefined &&
+      propertyNameContainsResponsibility(node.propertyName)
     ) forbiddenResponsibility = true;
 
     if (isBinaryExpression(node) && equalityOperators.has(node.operatorToken.kind)) {
