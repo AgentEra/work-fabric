@@ -12,10 +12,13 @@
 
 1. 在飞书开放平台创建企业自建应用并启用机器人。
 2. 在事件订阅中选择 `使用长连接接收事件`，订阅 `im.message.receive_v1`，并配置读取群消息事件与机器人发送消息所需的最小权限。
-3. 打开 [service-feishu-long-connection.yaml](../../examples/config/service-feishu-long-connection.yaml)，替换 `external_tenant_id`、`bot_open_id` 和 `identities[].external_open_id` 的 `*-example` 值。最后一个值必须是允许进入 Work Fabric 的映射用户 open_id。
-4. 设置环境变量并启动：
+3. 打开 [service-feishu-long-connection.yaml](../../examples/config/service-feishu-long-connection.yaml)，替换 `external_tenant_id`、`bot_open_id`、`identities[].external_open_id` 和 `outbound.channels.project-notifications.receive_id` 的 `*-example` 值（包括 `oc-project-example`）。`external_open_id` 必须是允许进入 Work Fabric 的映射用户 open_id；固定项目通知不是必需功能，不需要时应同时删除 `outbound.channels.project-notifications` 和引用它的 `outbound.subscriptions.project-results`。
+4. 明确进入仓库根目录，创建 SQLite 父目录，再设置环境变量并启动：
 
 ```bash
+REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPOSITORY_ROOT"
+mkdir -p "$PWD/var"
 export WORK_FABRIC_CONFIG="$PWD/examples/config/service-feishu-long-connection.yaml"
 export WORK_FABRIC_CURSOR_SECRET="$(openssl rand -hex 32)"
 export FEISHU_APP_ID="cli_..."

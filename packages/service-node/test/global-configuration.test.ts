@@ -1,11 +1,75 @@
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import {
+  cp,
+  copyFile,
+  mkdir,
+  mkdtemp,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { loadNodeConfiguration } from "../src/index.js";
 
+const execFileAsync = promisify(execFile);
+
 describe("global node configuration", () => {
+  it("starts the real SQLite long-connection example from an isolated repository root", async () => {
+    const repository = await mkdtemp(join(tmpdir(), "wf-feishu-checkout-"));
+    const source = fileURLToPath(new URL(
+      "../../../examples/config/service-feishu-long-connection.yaml",
+      import.meta.url,
+    ));
+    const protocol = fileURLToPath(new URL("../../../protocol", import.meta.url));
+    const configuration = join(
+      repository,
+      "examples/config/service-feishu-long-connection.yaml",
+    );
+    const helper = fileURLToPath(new URL(
+      "./helpers/feishu-long-connection-example-start.ts",
+      import.meta.url,
+    ));
+    const tsx = fileURLToPath(new URL(
+      "../../../node_modules/tsx/dist/cli.mjs",
+      import.meta.url,
+    ));
+
+    try {
+      await mkdir(join(repository, "examples/config"), { recursive: true });
+      await mkdir(join(repository, "var"), { recursive: true });
+      await cp(protocol, join(repository, "protocol"), { recursive: true });
+      await copyFile(source, configuration);
+      const { stdout, stderr } = await execFileAsync(
+        process.execPath,
+        [tsx, helper],
+        {
+          cwd: repository,
+          env: {
+            PATH: process.env.PATH ?? "",
+            WORK_FABRIC_CONFIG: configuration,
+            WORK_FABRIC_CURSOR_SECRET: "x".repeat(32),
+            FEISHU_APP_ID: "cli_0123456789abcdef",
+            FEISHU_APP_SECRET: "synthetic-app-secret",
+            FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
+            INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
+          },
+        },
+      );
+
+      expect(stderr).toBe("");
+      expect(stdout).toBe('{"started":true}\n');
+      const database = await stat(join(repository, "var/work-fabric.db"));
+      expect(database.isFile()).toBe(true);
+      expect(database.size).toBeGreaterThan(0);
+    } finally {
+      await rm(repository, { recursive: true, force: true });
+    }
+  });
+
   it("loads the runnable SQLite Feishu long-connection example with only applicable secrets", async () => {
     const path = fileURLToPath(new URL(
       "../../../examples/config/service-feishu-long-connection.yaml",
@@ -14,7 +78,7 @@ describe("global node configuration", () => {
     const loaded = await loadNodeConfiguration({
       WORK_FABRIC_CONFIG: path,
       WORK_FABRIC_CURSOR_SECRET: "x".repeat(32),
-      FEISHU_APP_ID: "synthetic-app-id",
+      FEISHU_APP_ID: "cli_0123456789abcdef",
       FEISHU_APP_SECRET: "synthetic-app-secret",
       FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
       INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
@@ -27,7 +91,7 @@ describe("global node configuration", () => {
     const plugin = loaded.plugins["feishu-primary"]?.config;
     expect(plugin).toMatchObject({
       credentials: {
-        app_id: "synthetic-app-id",
+        app_id: "cli_0123456789abcdef",
         app_secret: "synthetic-app-secret",
         work_fabric_access_token: "synthetic-connector-token",
       },
