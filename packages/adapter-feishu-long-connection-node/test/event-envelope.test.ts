@@ -327,6 +327,46 @@ describe("reconstructFeishuMessageEvent", () => {
     );
   });
 
+  it("rejects deeply nested metadata with a stable size error before stack growth", () => {
+    const input = validEvent();
+    let nested: unknown = null;
+    for (let index = 0; index < 600; index += 1) nested = [nested];
+    input.metadata = nested;
+
+    expect(() => reconstructFeishuMessageEvent(input)).toThrow(
+      new RangeError("feishu_long_connection_event_too_large"),
+    );
+  });
+
+  it("rejects wide metadata before traversing a late hostile branch", () => {
+    const input = validEvent();
+    const metadata: Record<string, unknown> = {};
+    for (let index = 0; index < 40_000; index += 1) {
+      metadata[`field_${index}`] = "1234567890";
+    }
+    metadata.late = new Proxy({}, {
+      ownKeys() {
+        throw new Error("late_branch_must_not_be_traversed");
+      },
+    });
+    input.metadata = metadata;
+
+    expect(() => reconstructFeishuMessageEvent(input)).toThrow(
+      new RangeError("feishu_long_connection_event_too_large"),
+    );
+  });
+
+  it("rejects cyclic metadata with the stable invalid error", () => {
+    const input = validEvent();
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    input.metadata = cycle;
+
+    expect(() => reconstructFeishuMessageEvent(input)).toThrow(
+      new TypeError("feishu_long_connection_event_invalid"),
+    );
+  });
+
   it("applies the raw input bound in UTF-8 bytes", () => {
     const input = validEvent();
     input.metadata = "界".repeat(90_000);

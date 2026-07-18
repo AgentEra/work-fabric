@@ -1,7 +1,7 @@
 import { request as httpsRequest, type Agent } from "node:https";
 import { createServer } from "node:net";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   createFeishuNodeNetworkGuard,
@@ -67,7 +67,7 @@ function dependencies() {
       close: (closeInput) => {
         closeInputs.push(closeInput);
       },
-      getConnectionStatus: () => ({ state: "connecting" }),
+      getConnectionStatus: () => ({ state: "connecting", reconnectAttempts: 0 }),
     }),
     createMessageDispatcher: () => ({ kind: "dispatcher" }),
     infoLoggerLevel: 3,
@@ -84,7 +84,105 @@ function dependencies() {
   };
 }
 
+afterEach(() => {
+  vi.useRealTimers();
+});
+
 describe("Feishu production SDK runtime lifecycle adaptation", () => {
+  it("uses a bounded pong watchdog and exposes reconnect state after a blackhole", async () => {
+    vi.useFakeTimers();
+    const guardIdle = deferred<void>();
+    let rawStatus: {
+      state: "idle" | "connecting" | "connected" | "reconnecting" | "failed";
+      reconnectAttempts: number;
+      lastConnectTime: number;
+      nextConnectTime: number;
+      requestId?: string;
+      detail?: string;
+    } = {
+      state: "connected" as const,
+      reconnectAttempts: 0,
+      lastConnectTime: 123,
+      nextConnectTime: 456,
+      requestId: "request-must-not-cross-seam",
+      detail: "private sdk detail",
+    };
+    let recover!: () => void;
+    const sdk: FeishuNodeSdkRuntimeDependencies = {
+      request: async () => ({ code: 0, data: {}, msg: "ok" }),
+      createNetworkGuard: () => ({
+        agent: {},
+        stop: () => undefined,
+        whenIdle: () => guardIdle.promise,
+      }),
+      createClient: (input) => ({
+        start: () => {
+          input.onReady();
+          setTimeout(() => {
+            rawStatus = {
+              state: "reconnecting",
+              reconnectAttempts: 1,
+              lastConnectTime: 789,
+              nextConnectTime: 999,
+            };
+            input.onReconnecting();
+          }, input.wsConfig.pingTimeout * 1_000);
+          recover = () => {
+            rawStatus = {
+              state: "connected",
+              reconnectAttempts: 0,
+              lastConnectTime: 1_000,
+              nextConnectTime: 0,
+            };
+            input.onReconnected();
+          };
+          return Promise.resolve();
+        },
+        close: () => undefined,
+        getConnectionStatus: () => rawStatus,
+      }),
+      createMessageDispatcher: () => ({}),
+      infoLoggerLevel: 3,
+    };
+    const transitions: string[] = [];
+    const client = createFeishuNodeSdkRuntime(sdk).createClient({
+      app_id: "cli_0123456789abcdef",
+      app_secret: "secret",
+      callbacks: {
+        onReady: () => transitions.push("connected"),
+        onError: () => transitions.push("failed"),
+        onReconnecting: () => transitions.push("reconnecting"),
+        onReconnected: () => transitions.push("reconnected"),
+      },
+    });
+
+    const run = client.start({ eventDispatcher: {} });
+    expect(client.getConnectionStatus()).toEqual({
+      state: "connected",
+      reconnect_attempts: 0,
+    });
+
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(transitions).toEqual(["connected"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(transitions).toEqual(["connected", "reconnecting"]);
+    expect(client.getConnectionStatus()).toEqual({
+      state: "reconnecting",
+      reconnect_attempts: 1,
+    });
+
+    recover();
+    expect(transitions).toEqual(["connected", "reconnecting", "reconnected"]);
+    expect(client.getConnectionStatus()).toEqual({
+      state: "connected",
+      reconnect_attempts: 0,
+    });
+
+    client.close();
+    guardIdle.resolve(undefined);
+    await run;
+  });
+
   it("force-terminates a socket stalled in the TLS handshake", async () => {
     const sockets = new Set<import("node:net").Socket>();
     let resolveConnected!: () => void;
@@ -222,7 +320,7 @@ describe("Feishu production SDK runtime lifecycle adaptation", () => {
             reconnectTimer = undefined;
           }
         },
-        getConnectionStatus: () => ({ state: "connecting" }),
+        getConnectionStatus: () => ({ state: "connecting", reconnectAttempts: 0 }),
       }),
       createMessageDispatcher: () => ({}),
       infoLoggerLevel: 3,

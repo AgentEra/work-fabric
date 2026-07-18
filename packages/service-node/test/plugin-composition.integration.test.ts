@@ -3,6 +3,7 @@ import type {
   FeishuLongConnectionClientFactory,
   FeishuLongConnectionState,
 } from "@work-fabric/connector-feishu";
+import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
 import { describe, expect, it, vi } from "vitest";
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
 
@@ -60,7 +61,7 @@ const longConnectionPlugin = {
   outbound: { ...plugin.outbound, enabled: false },
 };
 
-async function composeLongConnectionService(client: FakeLongConnectionClient) {
+async function composeLongConnectionService(client: FeishuLongConnectionClient) {
   return composeNodeService(serviceConfig("api"), {
     configuration_revision: "test:long-connection",
     plugins: {
@@ -75,6 +76,56 @@ async function composeLongConnectionService(client: FakeLongConnectionClient) {
 }
 
 describe("service plugin composition", () => {
+  it("marks readiness unavailable when the SDK detects a pong blackhole and recovers after reconnect", async () => {
+    let sdkStatus: {
+      state: "idle" | "connecting" | "connected" | "reconnecting" | "failed";
+      reconnect_attempts: number;
+    } = { state: "connecting", reconnect_attempts: 0 };
+    let callbacks: {
+      readonly onReady: () => void;
+      readonly onError: () => void;
+      readonly onReconnecting: () => void;
+      readonly onReconnected: () => void;
+    } | undefined;
+    let settleRun!: () => void;
+    const run = new Promise<void>((resolve) => { settleRun = resolve; });
+    const factory = new NodeFeishuLongConnectionClientFactory({
+      sdk: {
+        createClient(input) {
+          callbacks = input.callbacks;
+          return {
+            start: () => run,
+            close: () => settleRun(),
+            getConnectionStatus: () => ({ ...sdkStatus }),
+          };
+        },
+        createMessageDispatcher: () => ({}),
+      },
+    });
+    const client = factory.create({
+      app_id: "cli_0123456789abcdef",
+      app_secret: "secret",
+      instance_id: "feishu-primary",
+    });
+    const service = await composeLongConnectionService(client);
+
+    await service.start();
+    sdkStatus = { state: "connected", reconnect_attempts: 0 };
+    callbacks?.onReady();
+    await expect(service.http.dispatch({ method: "GET", url: "/health/ready" }))
+      .resolves.toMatchObject({ status_code: 200 });
+
+    sdkStatus = { state: "reconnecting", reconnect_attempts: 1 };
+    await expect(service.http.dispatch({ method: "GET", url: "/health/ready" }))
+      .resolves.toMatchObject({ status_code: 503 });
+
+    sdkStatus = { state: "connected", reconnect_attempts: 0 };
+    await expect(service.http.dispatch({ method: "GET", url: "/health/ready" }))
+      .resolves.toMatchObject({ status_code: 200 });
+
+    await service.close();
+  });
+
   it("prepares the configured Feishu webhook route without making Console part of execution", async () => {
     const create = vi.fn(() => {
       throw new Error("webhook composition must not create a long connection client");

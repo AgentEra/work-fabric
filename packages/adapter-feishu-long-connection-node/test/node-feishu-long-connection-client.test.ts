@@ -5,6 +5,7 @@ import { NodeFeishuLongConnectionClientFactory } from "../src/node-feishu-long-c
 import type {
   FeishuNodeSdkCallbacks,
   FeishuNodeSdkRuntime,
+  FeishuNodeSdkStatus,
   FeishuNodeWsClient,
 } from "../src/sdk-runtime.js";
 
@@ -54,6 +55,11 @@ class FakeRuntime implements FeishuNodeSdkRuntime {
   throwDuringDispatcherCreation = false;
   settleRunOnClose = true;
   readonly run = deferred<void>();
+  throwStatus = false;
+  sdkStatus: FeishuNodeSdkStatus = {
+    state: "connecting" as const,
+    reconnect_attempts: 0,
+  };
 
   createClient(input: {
     readonly app_id: string;
@@ -72,7 +78,10 @@ class FakeRuntime implements FeishuNodeSdkRuntime {
         this.closeCalls += 1;
         if (this.settleRunOnClose) this.run.resolve(undefined);
       },
-      getConnectionStatus: () => "connecting",
+      getConnectionStatus: () => {
+        if (this.throwStatus) throw new Error("private status failure");
+        return { ...this.sdkStatus };
+      },
     };
   }
 
@@ -205,6 +214,7 @@ describe("NodeFeishuLongConnectionClient", () => {
       changed_at: "connecting-at",
     });
 
+    sdk.sdkStatus = { state: "connected", reconnect_attempts: 0 };
     sdk.callbacks?.onReady();
     expect(client.status()).toEqual({
       state: "connected",
@@ -213,6 +223,7 @@ describe("NodeFeishuLongConnectionClient", () => {
       changed_at: "connected-at",
     });
 
+    sdk.sdkStatus = { state: "reconnecting", reconnect_attempts: 1 };
     sdk.callbacks?.onReconnecting();
     const reconnecting = client.status();
     expect(reconnecting).toEqual({
@@ -221,6 +232,7 @@ describe("NodeFeishuLongConnectionClient", () => {
       reconnect_attempts: 1,
       changed_at: "reconnecting-at",
     });
+    sdk.sdkStatus = { state: "reconnecting", reconnect_attempts: 2 };
     sdk.callbacks?.onReconnecting();
     expect(client.status()).toEqual({
       state: "reconnecting",
@@ -229,6 +241,7 @@ describe("NodeFeishuLongConnectionClient", () => {
       changed_at: "reconnecting-at",
     });
 
+    sdk.sdkStatus = { state: "connected", reconnect_attempts: 0 };
     sdk.callbacks?.onReconnected();
     expect(client.status()).toEqual({
       state: "connected",
@@ -244,6 +257,78 @@ describe("NodeFeishuLongConnectionClient", () => {
       reconnect_attempts: 2,
       changed_at: "failed-at",
     });
+
+    await client.stop();
+  });
+
+  it("reconciles callback and polled SDK state without decreasing attempts or changing timestamps for counters", async () => {
+    const sdk = new FakeRuntime();
+    let clockIndex = 0;
+    const times = ["idle-at", "connecting-at", "connected-at", "reconnecting-at", "failed-at"];
+    const client = createClient(sdk, { now: () => times[clockIndex++] ?? "unexpected-at" });
+    await client.start(async () => acceptance);
+
+    sdk.sdkStatus = { state: "connected", reconnect_attempts: 0 };
+    sdk.callbacks?.onReady();
+    expect(client.status()).toMatchObject({
+      state: "connected",
+      reconnect_attempts: 0,
+      changed_at: "connected-at",
+    });
+
+    sdk.sdkStatus = { state: "reconnecting", reconnect_attempts: 4 };
+    expect(client.status()).toEqual({
+      state: "reconnecting",
+      code: "reconnecting",
+      reconnect_attempts: 4,
+      changed_at: "reconnecting-at",
+    });
+
+    sdk.sdkStatus = { state: "reconnecting", reconnect_attempts: 2 };
+    expect(client.status()).toEqual({
+      state: "reconnecting",
+      code: "reconnecting",
+      reconnect_attempts: 4,
+      changed_at: "reconnecting-at",
+    });
+
+    sdk.sdkStatus = { state: "failed", reconnect_attempts: 5 };
+    expect(client.status()).toEqual({
+      state: "failed",
+      code: "connection_failed",
+      reconnect_attempts: 5,
+      changed_at: "failed-at",
+    });
+
+    sdk.sdkStatus = { state: "connected", reconnect_attempts: 0 };
+    sdk.callbacks?.onReconnected();
+    expect(client.status()).toEqual({
+      state: "failed",
+      code: "connection_failed",
+      reconnect_attempts: 5,
+      changed_at: "failed-at",
+    });
+
+    await client.stop();
+    expect(client.status()).toMatchObject({ state: "stopped", reconnect_attempts: 5 });
+    sdk.sdkStatus = { state: "connected", reconnect_attempts: 0 };
+    expect(client.status()).toMatchObject({ state: "stopped", reconnect_attempts: 5 });
+  });
+
+  it("keeps the last bounded status when SDK polling throws", async () => {
+    const sdk = new FakeRuntime();
+    const client = createClient(sdk);
+    await client.start(async () => acceptance);
+    sdk.sdkStatus = { state: "connected", reconnect_attempts: 0 };
+    sdk.callbacks?.onReady();
+    sdk.throwStatus = true;
+
+    expect(client.status()).toMatchObject({
+      state: "connected",
+      code: "connected",
+      reconnect_attempts: 0,
+    });
+    expect(JSON.stringify(client.status())).not.toContain("private status failure");
 
     await client.stop();
   });

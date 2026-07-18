@@ -5,6 +5,12 @@ import * as lark from "@larksuiteoapi/node-sdk";
 
 import { createFeishuSdkLogger } from "./redacting-logger.js";
 
+const SDK_HANDSHAKE_TIMEOUT_MS = 15_000 as const;
+// The pinned SDK keeps heartbeat cadence server-controlled; this only bounds
+// the wait for inbound proof-of-life after each SDK ping.
+const SDK_PONG_TIMEOUT_SECONDS = 15 as const;
+const MAX_SDK_RECONNECT_ATTEMPTS = 1_000_000;
+
 export interface FeishuNodeSdkCallbacks {
   readonly onReady: () => void;
   readonly onError: () => void;
@@ -12,15 +18,20 @@ export interface FeishuNodeSdkCallbacks {
   readonly onReconnected: () => void;
 }
 
-export interface FeishuNodeWsClient {
-  start(input: { readonly eventDispatcher: unknown }): Promise<void>;
-  close(): void;
-  getConnectionStatus():
+export interface FeishuNodeSdkStatus {
+  readonly state:
     | "idle"
     | "connecting"
     | "connected"
     | "reconnecting"
     | "failed";
+  readonly reconnect_attempts: number;
+}
+
+export interface FeishuNodeWsClient {
+  start(input: { readonly eventDispatcher: unknown }): Promise<void>;
+  close(): void;
+  getConnectionStatus(): FeishuNodeSdkStatus | undefined;
 }
 
 export interface FeishuNodeSdkRuntime {
@@ -54,6 +65,7 @@ interface FeishuRawWsClient {
       | "connected"
       | "reconnecting"
       | "failed";
+    readonly reconnectAttempts: number;
   };
 }
 
@@ -67,7 +79,8 @@ export interface FeishuNodeSdkRuntimeDependencies {
     readonly appId: string;
     readonly appSecret: string;
     readonly autoReconnect: true;
-    readonly handshakeTimeoutMs: 15_000;
+    readonly handshakeTimeoutMs: typeof SDK_HANDSHAKE_TIMEOUT_MS;
+    readonly wsConfig: { readonly pingTimeout: typeof SDK_PONG_TIMEOUT_SECONDS };
     readonly logger: ReturnType<typeof createFeishuSdkLogger>;
     readonly loggerLevel: unknown;
     readonly onReady: () => void;
@@ -211,6 +224,7 @@ const productionDependencies: FeishuNodeSdkRuntimeDependencies = {
     appSecret: input.appSecret,
     autoReconnect: input.autoReconnect,
     handshakeTimeoutMs: input.handshakeTimeoutMs,
+    wsConfig: input.wsConfig,
     logger: input.logger,
     loggerLevel: input.loggerLevel as lark.LoggerLevel,
     onReady: input.onReady,
@@ -240,7 +254,8 @@ export function createFeishuNodeSdkRuntime(
         appId: app_id,
         appSecret: app_secret,
         autoReconnect: true,
-        handshakeTimeoutMs: 15_000,
+        handshakeTimeoutMs: SDK_HANDSHAKE_TIMEOUT_MS,
+        wsConfig: { pingTimeout: SDK_PONG_TIMEOUT_SECONDS },
         logger: createFeishuSdkLogger(console),
         loggerLevel: dependencies.infoLoggerLevel,
         onReady: callbacks.onReady,
@@ -298,7 +313,26 @@ export function createFeishuNodeSdkRuntime(
             }
           })();
         },
-        getConnectionStatus: () => client.getConnectionStatus().state,
+        getConnectionStatus: () => {
+          try {
+            const snapshot = client.getConnectionStatus();
+            if (
+              !["idle", "connecting", "connected", "reconnecting", "failed"]
+                .includes(snapshot.state)
+              || !Number.isSafeInteger(snapshot.reconnectAttempts)
+              || snapshot.reconnectAttempts < 0
+            ) return undefined;
+            return {
+              state: snapshot.state,
+              reconnect_attempts: Math.min(
+                snapshot.reconnectAttempts,
+                MAX_SDK_RECONNECT_ATTEMPTS,
+              ),
+            };
+          } catch {
+            return undefined;
+          }
+        },
       };
     },
     createMessageDispatcher: dependencies.createMessageDispatcher,

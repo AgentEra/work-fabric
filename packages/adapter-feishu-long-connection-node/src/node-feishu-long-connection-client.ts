@@ -104,7 +104,7 @@ class NodeFeishuLongConnectionClient implements FeishuLongConnectionClient {
         app_secret: this.input.app_secret,
         callbacks: {
           onReady: () => {
-            if (!this.stopping && !this.stopped) {
+            if (!this.stopping && !this.stopped && this.currentStatus.state !== "failed") {
               this.transition("connected", "connected");
             }
           },
@@ -112,7 +112,7 @@ class NodeFeishuLongConnectionClient implements FeishuLongConnectionClient {
             if (!this.stopped) this.transition("failed", "connection_failed");
           },
           onReconnecting: () => {
-            if (this.stopping || this.stopped) return;
+            if (this.stopping || this.stopped || this.currentStatus.state === "failed") return;
             this.transition(
               "reconnecting",
               "reconnecting",
@@ -120,7 +120,7 @@ class NodeFeishuLongConnectionClient implements FeishuLongConnectionClient {
             );
           },
           onReconnected: () => {
-            if (!this.stopping && !this.stopped) {
+            if (!this.stopping && !this.stopped && this.currentStatus.state !== "failed") {
               this.transition("connected", "connected");
             }
           },
@@ -147,6 +147,7 @@ class NodeFeishuLongConnectionClient implements FeishuLongConnectionClient {
   }
 
   status(): FeishuLongConnectionStatus {
+    this.reconcileSdkStatus();
     return Object.freeze({ ...this.currentStatus });
   }
 
@@ -216,6 +217,29 @@ class NodeFeishuLongConnectionClient implements FeishuLongConnectionClient {
       reconnect_attempts: reconnectAttempts,
       changed_at: changed ? this.options.clock.now() : this.currentStatus.changed_at,
     };
+  }
+
+  private reconcileSdkStatus(): void {
+    if (
+      this.currentStatus.state === "failed"
+      || this.currentStatus.state === "stopped"
+    ) return;
+    let snapshot: ReturnType<FeishuNodeWsClient["getConnectionStatus"]>;
+    try {
+      snapshot = this.sdkClient?.getConnectionStatus();
+    } catch {
+      return;
+    }
+    if (snapshot === undefined) return;
+    const reconnectAttempts = Math.max(
+      this.currentStatus.reconnect_attempts,
+      snapshot.reconnect_attempts,
+    );
+    if (snapshot.state === "failed") {
+      this.transition("failed", "connection_failed", reconnectAttempts);
+      return;
+    }
+    this.transition(snapshot.state, snapshot.state, reconnectAttempts);
   }
 }
 

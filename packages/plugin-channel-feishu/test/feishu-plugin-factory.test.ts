@@ -234,6 +234,13 @@ describe("FeishuPluginFactory", () => {
     });
     fixture.client.state = "connected";
     expect(await instance.health()).toEqual({ state: "healthy", code: "ready" });
+    fixture.client.state = "reconnecting";
+    expect(await instance.health()).toEqual({
+      state: "degraded",
+      code: "feishu_long_connection_reconnecting",
+    });
+    fixture.client.state = "connected";
+    expect(await instance.health()).toEqual({ state: "healthy", code: "ready" });
     fixture.client.state = "failed";
     expect(await instance.health()).toEqual({
       state: "unhealthy",
