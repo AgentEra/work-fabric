@@ -85,9 +85,7 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
     }
     if (compiled === null) return this.unavailable("policy_unavailable");
 
-    if (!sameScope(compiled.policy, request)) {
-      return this.recordScopeMismatch(compiled.policy, request);
-    }
+    const scopeMatches = sameScope(compiled.policy, request);
 
     let fingerprint: string;
     try {
@@ -103,6 +101,10 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
       return this.unavailable("store_unavailable");
     }
     if (existing !== null) return this.resultForRecord(existing, request);
+
+    if (!scopeMatches) {
+      return this.recordTerminal(request, fingerprint, this.deny(compiled.policy, "scope_mismatch"));
+    }
 
     if (compiled.exact_deny.has(request.external_subject_id)) {
       return this.recordTerminal(request, fingerprint, this.deny(compiled.policy, "explicit_deny"));
@@ -136,7 +138,7 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
     const load = this.options.policies.load(policyId).then((policy) => {
       if (policy === null) return null;
       if (policy.policy_id !== policyId) throw new TypeError("policy_id mismatch");
-      const key = `${policy.policy_id}\0${policy.revision}`;
+      const key = JSON.stringify([policy.policy_id, policy.revision]);
       let compiled = this.compiledPolicies.get(key);
       if (compiled === undefined) {
         compiled = compileAdmissionPolicy(policy);
@@ -149,16 +151,6 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
     });
     this.policyLoads.set(policyId, load);
     return load;
-  }
-
-  private async recordScopeMismatch(policy: AdmissionPolicy, request: AdmissionRequest): Promise<AdmissionResult> {
-    let fingerprint: string;
-    try {
-      fingerprint = this.options.fingerprinter.fingerprint(request);
-    } catch {
-      return this.unavailable("store_unavailable");
-    }
-    return this.recordTerminal(request, fingerprint, this.deny(policy, "scope_mismatch"));
   }
 
   private async resolveEvidence(

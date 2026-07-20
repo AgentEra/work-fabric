@@ -80,6 +80,7 @@ describe("BoundedEvidenceCache", () => {
   });
 
   it.each([
+    { tenant_id: "tenant-2" },
     { connector_id: "connector-2" },
     { source_system: "source-2" },
     { external_tenant_id: "external-tenant-2" },
@@ -90,6 +91,17 @@ describe("BoundedEvidenceCache", () => {
     const cache = new BoundedEvidenceCache(2);
     cache.put(key(), evidence(), 10, 2, epoch);
     expect(cache.get(key(override), epoch)).toBeNull();
+  });
+
+  it("does not collide when NUL occurs in different tuple components", () => {
+    const cache = new BoundedEvidenceCache(2);
+    const first = key({ tenant_id: "a\0b", connector_id: "c" });
+    const second = key({ tenant_id: "a", connector_id: "b\0c" });
+
+    cache.put(first, evidence(), 10, 2, epoch);
+
+    expect(cache.get(second, epoch)).toBeNull();
+    expect(cache.get(first, epoch)).toEqual(evidence());
   });
 
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])("rejects invalid maximum size %s", (maximum) => {

@@ -306,15 +306,18 @@ describe("DefaultCollaborationAdmissionService decision matrix", () => {
     expect(env.grants.calls).toHaveLength(scenario.expectedKind === "allow" ? 1 : 0);
   });
 
-  it("scope mismatch is an auditable deny before ingress, evidence, or binding lookup", async () => {
+  it("scope mismatch reuses the canonical ingress deny without evidence or binding lookup", async () => {
     const env = fixture();
     const mismatched = request({ tenant_id: "tenant-other" });
 
-    const result = await env.service.admit("policy-1", mismatched);
+    const first = await env.service.admit("policy-1", mismatched);
+    const second = await env.service.admit("policy-1", mismatched);
 
-    expect(result.decision).toMatchObject({ kind: "deny", reason_code: "scope_mismatch" });
-    expect(env.fingerprints).toEqual([mismatched]);
-    expect(env.decisions.findCalls).toHaveLength(0);
+    expect(first.decision).toMatchObject({ kind: "deny", reason_code: "scope_mismatch" });
+    expect(second.decision).toEqual(first.decision);
+    expect(env.fingerprints).toEqual([mismatched, mismatched]);
+    expect(env.decisions.findCalls).toHaveLength(2);
+    expect(env.decisions.recordCalls).toHaveLength(1);
     expect(env.decisions.recordCalls[0]).toMatchObject({
       scope: {
         tenant_id: "tenant-other",
@@ -398,6 +401,31 @@ describe("DefaultCollaborationAdmissionService orchestration", () => {
     await env.service.admit("policy-2", request({ ingress_id: "ingress-3" }));
     await env.service.admit("policy-2", request({ ingress_id: "ingress-4" }));
     expect(policies.calls).toEqual(["policy-1", "policy-2"]);
+  });
+
+  it("does not substitute compiled policies whose ID/revision tuples contain NUL", async () => {
+    const firstPolicy = policy({
+      policy_id: "a\0b",
+      revision: "c",
+      deny: { external_subject_ids: ["subject-1"] },
+    });
+    const secondPolicy = policy({
+      policy_id: "a",
+      revision: "b\0c",
+      allow: { all_internal_members: false, external_subject_ids: ["subject-1"] },
+      deny: { external_subject_ids: [] },
+    });
+    const policies = new TestPolicyProvider(new Map([
+      [firstPolicy.policy_id, firstPolicy],
+      [secondPolicy.policy_id, secondPolicy],
+    ]));
+    const env = fixture({ policies });
+
+    const first = await env.service.admit(firstPolicy.policy_id, request({ ingress_id: "ingress-first" }));
+    const second = await env.service.admit(secondPolicy.policy_id, request({ ingress_id: "ingress-second" }));
+
+    expect(first.decision).toMatchObject({ kind: "deny", policy_id: firstPolicy.policy_id });
+    expect(second.decision).toMatchObject({ kind: "allow", policy_id: secondPolicy.policy_id });
   });
 
   it("keeps the first compiled process snapshot isolated from provider mutation", async () => {

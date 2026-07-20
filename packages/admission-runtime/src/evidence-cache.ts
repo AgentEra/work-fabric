@@ -22,7 +22,7 @@ function positiveSafeInteger(value: number, name: string): void {
 }
 
 function cacheKey(key: EvidenceCacheKey): string {
-  return [
+  return JSON.stringify([
     key.tenant_id,
     key.connector_id,
     key.source_system,
@@ -30,7 +30,7 @@ function cacheKey(key: EvidenceCacheKey): string {
     key.subject_type,
     key.subject_fingerprint,
     key.provider_ref,
-  ].join("\0");
+  ]);
 }
 
 export class BoundedEvidenceCache {
