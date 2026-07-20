@@ -2,6 +2,39 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
 import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
+import {
+  ConfigurationAdmissionPolicyProvider,
+  type AdmissionConfigurationSection,
+} from "@work-fabric/adapter-admission-configuration";
+import {
+  MemoryAdmissionDecisionStore,
+  MemoryParticipantBindingStore,
+} from "@work-fabric/adapter-admission-memory";
+import {
+  SQLITE_ADMISSION_MIGRATION,
+  SqliteAdmissionDecisionStore,
+  SqliteParticipantBindingStore,
+} from "@work-fabric/adapter-admission-sqlite";
+import {
+  AdmissionAuthorityPolicy,
+  CompositeAuthorityPolicy,
+  type AdmissionAuthorityRule,
+} from "@work-fabric/adapter-authority-admission";
+import { FeishuDirectoryEvidenceProvider } from "@work-fabric/adapter-directory-feishu";
+import {
+  AdmissionIdentityProvider,
+  AdmissionPrincipalTrust,
+  CompositeIdentityProvider,
+  HmacRepresentationGrants,
+  HmacSubjectFingerprinter,
+} from "@work-fabric/adapter-identity-admission";
+import { DefaultCollaborationAdmissionService } from "@work-fabric/admission-runtime";
+import type {
+  AdmissionDecisionStore,
+  CollaborationAdmissionService,
+  ExternalSubjectEvidenceProvider,
+  ParticipantBindingStore,
+} from "@work-fabric/admission-spi";
 
 import { MemoryContextRepository } from "@work-fabric/adapter-context-memory";
 import {
@@ -34,6 +67,7 @@ import {
   SqlitePartitionJournalPositionSource,
   SqliteRuntimeState,
   SqliteSession,
+  SQLITE_MIGRATIONS,
   createSqliteContextStore,
   createSqliteConnectorIngressStore,
   createSqliteEndpointDirectoryStore,
@@ -112,10 +146,11 @@ import {
 import { BearerTokenProvider, ConnectorSdkCommandSink, WorkFabricClient } from "@work-fabric/sdk-typescript";
 import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
 import type { FeishuLongConnectionClientFactory } from "@work-fabric/connector-feishu";
-import { FeishuPluginFactory, FeishuWebhookRegistry, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import { FeishuPluginFactory, FeishuWebhookRegistry, validateFeishuPluginConfig, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import { FeishuOpenApiClient, FeishuTenantAccessTokenProvider, type FeishuTenantTokenProvider } from "@work-fabric/connector-feishu";
 import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 
-import type { NodeServiceConfig } from "./config.js";
+import { NodeConfigurationError, type NodeServiceConfig } from "./config.js";
 import { assertFeishuPluginRole } from "./feishu-plugin-composition.js";
 
 const clock: Clock = { now: () => new Date().toISOString() };
@@ -146,6 +181,8 @@ export interface NodeStorageComposition {
   readonly endpointDirectory: EndpointDirectoryStore;
   readonly endpointInbox: EndpointInboxStore;
   readonly connectorIngress: ConnectorIngressStore;
+  readonly admissionBindings: ParticipantBindingStore;
+  readonly admissionDecisions: AdmissionDecisionStore;
   readonly channelRoutes?: ChannelRouteStore;
   readonly discrepancies: ConnectorDiscrepancyStore;
   readonly recoveries: RecoveryRequestStore;
@@ -164,6 +201,7 @@ export interface NodeServiceCompositionOptions {
   readonly cluster_snapshot?: ClusterOperationalSnapshotSource;
   readonly configuration_revision?: string;
   readonly plugins?: PluginHostConfiguration;
+  readonly admission?: AdmissionConfigurationSection;
   readonly fetch?: typeof globalThis.fetch;
   readonly channel_signal_router?: ChannelSignalRouter;
   readonly feishu_long_connection_client_factory?: FeishuLongConnectionClientFactory;
@@ -195,6 +233,8 @@ function memoryStorage(): NodeStorageComposition {
     endpointDirectory: new MemoryEndpointDirectoryStore(),
     endpointInbox: new MemoryEndpointInboxStore(),
     connectorIngress: new MemoryConnectorIngressStore(),
+    admissionBindings: new MemoryParticipantBindingStore(),
+    admissionDecisions: new MemoryAdmissionDecisionStore(),
     channelRoutes: new MemoryChannelRouteStore(),
     discrepancies: new MemoryDiscrepancyStore(),
     recoveries: new MemoryRecoveryStore(),
@@ -209,7 +249,12 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     location: sqlite.location,
     busy_timeout_ms: sqlite.busy_timeout_ms,
   });
-  migrateSqlite(session);
+  migrateSqlite(
+    session,
+    config.admission === undefined
+      ? SQLITE_MIGRATIONS
+      : [...SQLITE_MIGRATIONS, SQLITE_ADMISSION_MIGRATION],
+  );
   const persistence = new SqliteExchangePersistence(session, config.tenant_id);
   const operations = createSqliteOperationsStores(
     session,
@@ -226,6 +271,8 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     endpointDirectory: createSqliteEndpointDirectoryStore(session, config.tenant_id),
     endpointInbox: createSqliteEndpointInboxStore(session, config.tenant_id),
     connectorIngress: createSqliteConnectorIngressStore(session, config.tenant_id),
+    admissionBindings: new SqliteParticipantBindingStore(session, config.tenant_id),
+    admissionDecisions: new SqliteAdmissionDecisionStore(session, config.tenant_id),
     channelRoutes: new SqliteChannelRouteStore(session),
     discrepancies: operations.discrepancies,
     recoveries: operations.recoveries,
@@ -329,8 +376,227 @@ class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
   }
 }
 
+interface AdmissionComposition {
+  readonly service: CollaborationAdmissionService;
+  readonly identity: AdmissionIdentityProvider;
+  readonly authority: AdmissionAuthorityPolicy;
+  readonly feishuTenantTokens: ReadonlyMap<string, FeishuTenantTokenProvider>;
+}
+
+function compositionError(code: string, path: string): never {
+  throw new NodeConfigurationError(code, path);
+}
+
+function exactOwnDataObject(
+  value: unknown,
+  path: string,
+  keys: readonly string[],
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return compositionError("admission_evidence_provider_invalid", path);
+  }
+  let actual: readonly PropertyKey[];
+  try { actual = Reflect.ownKeys(value); } catch {
+    return compositionError("admission_evidence_provider_invalid", path);
+  }
+  if (actual.length !== keys.length || actual.some((key) => typeof key !== "string" || !keys.includes(key))) {
+    return compositionError("admission_evidence_provider_invalid", path);
+  }
+  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const key of keys) {
+    let descriptor: PropertyDescriptor | undefined;
+    try { descriptor = Object.getOwnPropertyDescriptor(value, key); } catch {
+      return compositionError("admission_evidence_provider_invalid", `${path}.${key}`);
+    }
+    if (descriptor === undefined || !("value" in descriptor) || descriptor.value === undefined) {
+      return compositionError("admission_evidence_provider_invalid", `${path}.${key}`);
+    }
+    result[key] = descriptor.value;
+  }
+  return result;
+}
+
+function enabledFeishuAdmissionPlugins(configuration: PluginHostConfiguration): ReadonlyMap<string, FeishuPluginConfig> {
+  const result = new Map<string, FeishuPluginConfig>();
+  for (const [instanceId, instance] of Object.entries(configuration)) {
+    if (!instance.enabled || instance.type !== "collaboration-channel.feishu") continue;
+    const plugin = validateFeishuPluginConfig(instance.config);
+    if (plugin.identity_admission !== undefined) result.set(instanceId, plugin);
+  }
+  return result;
+}
+
+function composeAdmission(
+  config: NodeServiceConfig,
+  storage: NodeStorageComposition,
+  pluginConfiguration: PluginHostConfiguration,
+  section: AdmissionConfigurationSection | undefined,
+  runtimeFetch: typeof globalThis.fetch,
+): AdmissionComposition | undefined {
+  const plugins = enabledFeishuAdmissionPlugins(pluginConfiguration);
+  if (plugins.size === 0 && config.admission === undefined) return undefined;
+  if (config.admission === undefined) {
+    return compositionError("service_admission_missing", "service.admission");
+  }
+  const storagePath = config.storage_profile === "postgres"
+    ? "postgres_storage"
+    : `${config.storage_profile}_storage`;
+  if (storage.admissionBindings === undefined) {
+    return compositionError("admission_storage_missing", `${storagePath}.admissionBindings`);
+  }
+  if (storage.admissionDecisions === undefined) {
+    return compositionError("admission_storage_missing", `${storagePath}.admissionDecisions`);
+  }
+  const admissionSection = section ?? { policies: {}, evidence_providers: {} };
+  const evidenceProviders = new Map<string, ExternalSubjectEvidenceProvider>();
+  const feishuTenantTokens = new Map<string, FeishuTenantTokenProvider>();
+  const feishuPlugins = new Map<string, FeishuPluginConfig>();
+  for (const [instanceId, instance] of Object.entries(pluginConfiguration)) {
+    if (!instance.enabled || instance.type !== "collaboration-channel.feishu") continue;
+    feishuPlugins.set(instanceId, validateFeishuPluginConfig(instance.config));
+  }
+
+  for (const [providerRef, candidate] of Object.entries(admissionSection.evidence_providers)) {
+    const path = `admission.evidence_providers.${providerRef}`;
+    const descriptor = exactOwnDataObject(candidate, path, ["type", "config"]);
+    if (descriptor.type !== "feishu.directory") {
+      return compositionError("admission_evidence_provider_unsupported", `${path}.type`);
+    }
+    const providerConfig = exactOwnDataObject(descriptor.config, `${path}.config`, ["plugin_instance_id"]);
+    if (typeof providerConfig.plugin_instance_id !== "string" || providerConfig.plugin_instance_id.length === 0) {
+      return compositionError("admission_evidence_provider_invalid", `${path}.config.plugin_instance_id`);
+    }
+    const pluginInstanceId = providerConfig.plugin_instance_id;
+    const plugin = feishuPlugins.get(pluginInstanceId);
+    if (plugin === undefined) {
+      return compositionError("admission_evidence_plugin_missing", `${path}.config.plugin_instance_id`);
+    }
+    const credentialRef = `feishu:${pluginInstanceId}`;
+    let tenantTokens = feishuTenantTokens.get(pluginInstanceId);
+    if (tenantTokens === undefined) {
+      tenantTokens = new FeishuTenantAccessTokenProvider({
+        credential_provider: {
+          async loadAppCredentials(reference) {
+            if (reference !== credentialRef) throw new TypeError("credential scope mismatch");
+            return {
+              app_id: plugin.credentials.app_id,
+              app_secret: plugin.credentials.app_secret,
+            };
+          },
+        },
+        fetch: runtimeFetch,
+        base_url: "https://open.feishu.cn",
+        clock: { nowEpochSeconds: () => Math.floor(Date.parse(clock.now()) / 1_000) },
+        expiry_skew_seconds: 60,
+        request_timeout_ms: 10_000,
+        max_cache_entries: 1,
+      });
+      feishuTenantTokens.set(pluginInstanceId, tenantTokens);
+    }
+    const client = new FeishuOpenApiClient({
+      token_provider: tenantTokens,
+      fetch: runtimeFetch,
+      base_url: "https://open.feishu.cn",
+      request_timeout_ms: 10_000,
+      max_response_bytes: 64 * 1_024,
+    });
+    evidenceProviders.set(providerRef, new FeishuDirectoryEvidenceProvider({
+      provider_ref: providerRef,
+      tenant_id: config.tenant_id,
+      connector_id: plugin.connector_id,
+      source_system: "feishu",
+      external_tenant_id: plugin.external_tenant_id,
+      credential_ref: credentialRef,
+      client,
+      clock,
+    }));
+  }
+
+  const authorityRules: AdmissionAuthorityRule[] = [];
+  for (const [instanceId, plugin] of plugins) {
+    const policyId = plugin.identity_admission!.policy_id;
+    const policyPath = `admission.policies.${policyId}`;
+    const policy = Object.hasOwn(admissionSection.policies, policyId)
+      ? admissionSection.policies[policyId]
+      : undefined;
+    if (policy === undefined) return compositionError("admission_policy_missing", policyPath);
+    const checks = [
+      ["tenant_id", policy.tenant_id, config.tenant_id],
+      ["connector_id", policy.connector_id, plugin.connector_id],
+      ["source_system", policy.source_system, "feishu"],
+      ["external_tenant_id", policy.external_tenant_id, plugin.external_tenant_id],
+    ] as const;
+    const mismatch = checks.find(([, actual, expected]) => actual !== expected);
+    if (mismatch !== undefined) {
+      return compositionError("admission_policy_scope_mismatch", `${policyPath}.${mismatch[0]}`);
+    }
+    if (policy.allow.all_internal_members) {
+      const providerRef = policy.internal_membership?.evidence_provider_ref;
+      if (providerRef === undefined || !evidenceProviders.has(providerRef)) {
+        return compositionError(
+          "admission_evidence_provider_missing",
+          `admission.evidence_providers.${providerRef ?? "missing"}`,
+        );
+      }
+      const descriptor = admissionSection.evidence_providers[providerRef];
+      const descriptorData = exactOwnDataObject(descriptor, `admission.evidence_providers.${providerRef}`, ["type", "config"]);
+      const providerConfig = exactOwnDataObject(descriptorData.config, `admission.evidence_providers.${providerRef}.config`, ["plugin_instance_id"]);
+      if (providerConfig.plugin_instance_id !== instanceId) {
+        return compositionError("admission_evidence_scope_mismatch", `admission.evidence_providers.${providerRef}.config.plugin_instance_id`);
+      }
+    }
+    authorityRules.push({
+      tenant_id: config.tenant_id,
+      connector_id: plugin.connector_id,
+      principal_id: `admission:${plugin.connector_id}`,
+      action: "workfabric.handoff.offer.v1",
+    });
+  }
+
+  const grants = new HmacRepresentationGrants({
+    active_key_id: config.admission.grant_active_key_id,
+    keys: Object.fromEntries(Object.entries(config.admission.grant_keys).map(
+      ([keyId, value]) => [keyId, new TextEncoder().encode(value)],
+    )),
+    clock,
+    ids: { grantId: () => `grant_${randomUUID()}` },
+  });
+  const bindingStores = new Map<string, ParticipantBindingStore>();
+  for (const policy of Object.values(admissionSection.policies)) {
+    bindingStores.set(policy.binding.store_ref, storage.admissionBindings);
+  }
+  const trust = new AdmissionPrincipalTrust();
+  const service = new DefaultCollaborationAdmissionService({
+    policies: new ConfigurationAdmissionPolicyProvider(admissionSection),
+    evidence_providers: evidenceProviders,
+    binding_stores: bindingStores,
+    decisions: storage.admissionDecisions,
+    fingerprinter: new HmacSubjectFingerprinter(
+      new TextEncoder().encode(config.admission.subject_fingerprint_key),
+    ),
+    grants,
+    clock,
+    ids: {
+      decisionId: () => `decision_${randomUUID()}`,
+      actorId: (fingerprint) => `actor_admission_${fingerprint.slice(4)}`,
+      endpointId: (fingerprint) => `endpoint_admission_${fingerprint.slice(4)}`,
+    },
+    grant_ttl_seconds: config.admission.grant_ttl_seconds,
+    retry_after_seconds: 30,
+    max_evidence_cache_entries: config.admission.max_evidence_cache_entries,
+  });
+  return {
+    service,
+    identity: new AdmissionIdentityProvider({ grants, trust, clock }),
+    authority: new AdmissionAuthorityPolicy(authorityRules, trust),
+    feishuTenantTokens,
+  };
+}
+
 export interface ComposedNodeService {
   readonly http: HttpService;
+  /** The configured connection-boundary Admission capability, when enabled. */
+  readonly admission: CollaborationAdmissionService | null;
   runProjection(partitionId: string, limit: number): Promise<{
     readonly handoff: Awaited<ReturnType<HandoffProjector["runPartition"]>>;
     readonly collaboration: Awaited<ReturnType<CollaborationProjector["runPartition"]>>;
@@ -369,14 +635,33 @@ export async function composeNodeService(
   const channelSignalRouter = options.channel_signal_router ?? new ChannelSignalRouter();
   const webhookRegistry = new FeishuWebhookRegistry();
   const runtimeFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
+  let admissionComposition: AdmissionComposition | undefined;
+  try {
+    admissionComposition = composeAdmission(
+      config,
+      storage,
+      pluginConfiguration,
+      options.admission,
+      runtimeFetch,
+    );
+  } catch (error) {
+    storage.sqlite?.close();
+    throw error;
+  }
   const connectorCommandSink = new DeferredConnectorSdkCommandSink(config, pluginConfiguration, runtimeFetch);
   const schemas = await loadWfppSchemaValidator("protocol/schemas/v1");
   const validator = await loadWfppCommandValidator(
     schemas,
     "protocol/spec/interaction-payloads.json",
   );
-  const identity = new LocalIdentityProvider(config.identities);
-  const authority = new LocalAuthorityPolicy(config.authority_rules);
+  const localIdentity = new LocalIdentityProvider(config.identities);
+  const localAuthority = new LocalAuthorityPolicy(config.authority_rules);
+  const identity = admissionComposition === undefined
+    ? localIdentity
+    : new CompositeIdentityProvider([admissionComposition.identity, localIdentity]);
+  const authority = admissionComposition === undefined
+    ? localAuthority
+    : new CompositeAuthorityPolicy([admissionComposition.authority, localAuthority]);
   const application = new ExchangeApplication({
     persistence: storage.persistence,
     identity,
@@ -435,6 +720,12 @@ export async function composeNodeService(
     ["connector.command_sink", connectorCommandSink],
     ["channel.signal_registry", channelSignalRouter],
     ["feishu.webhook_registry", webhookRegistry],
+    ...(admissionComposition === undefined
+      ? []
+      : [["collaboration.admission", admissionComposition.service] as const]),
+    ...(admissionComposition === undefined
+      ? []
+      : [["feishu.tenant_token_providers", admissionComposition.feishuTenantTokens] as const]),
     [
       "feishu.long_connection_client_factory",
       options.feishu_long_connection_client_factory
@@ -692,6 +983,7 @@ export async function composeNodeService(
 
   return {
     http,
+    admission: admissionComposition?.service ?? null,
     async runProjection(partitionId, limit) {
       const handoff = await handoffProjector.runPartition(partitionId, limit);
       const collaborationResult = await collaborationProjector.runPartition(

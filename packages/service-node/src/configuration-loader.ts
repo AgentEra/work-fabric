@@ -26,6 +26,14 @@ function declaredSecretPaths(root: Record<string, unknown>): readonly string[] {
   const paths = ["service.cursor_secret"];
   const service = object(root.service, "service");
   if (service.postgres !== undefined) paths.push("service.postgres.connection_string");
+  if (service.admission !== undefined) {
+    const admission = object(service.admission, "service.admission");
+    paths.push("service.admission.subject_fingerprint_key");
+    const grantKeys = object(admission.grant_keys, "service.admission.grant_keys");
+    for (const keyId of Object.keys(grantKeys)) {
+      paths.push(`service.admission.grant_keys.${keyId}`);
+    }
+  }
   if (Array.isArray(service.identities)) {
     service.identities.forEach((identity, index) => {
       if (typeof identity === "object" && identity !== null && !Array.isArray(identity)) {

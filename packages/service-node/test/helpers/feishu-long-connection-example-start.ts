@@ -37,6 +37,7 @@ const loaded = await loadNodeConfiguration(process.env);
 const service = await composeNodeService(loaded.service, {
   configuration_revision: loaded.revision,
   plugins: loaded.plugins,
+  admission: loaded.admission,
   feishu_long_connection_client_factory: {
     create: () => new NeutralLongConnectionClient(),
   },

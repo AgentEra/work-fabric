@@ -52,6 +52,8 @@ describe("global node configuration", () => {
             PATH: process.env.PATH ?? "",
             WORK_FABRIC_CONFIG: configuration,
             WORK_FABRIC_CURSOR_SECRET: "x".repeat(32),
+            WORK_FABRIC_ADMISSION_FINGERPRINT_KEY: "f".repeat(32),
+            WORK_FABRIC_ADMISSION_GRANT_KEY: "g".repeat(32),
             FEISHU_APP_ID: "cli_0123456789abcdef",
             FEISHU_APP_SECRET: "synthetic-app-secret",
             FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
@@ -78,6 +80,8 @@ describe("global node configuration", () => {
     const loaded = await loadNodeConfiguration({
       WORK_FABRIC_CONFIG: path,
       WORK_FABRIC_CURSOR_SECRET: "x".repeat(32),
+      WORK_FABRIC_ADMISSION_FINGERPRINT_KEY: "f".repeat(32),
+      WORK_FABRIC_ADMISSION_GRANT_KEY: "g".repeat(32),
       FEISHU_APP_ID: "cli_0123456789abcdef",
       FEISHU_APP_SECRET: "synthetic-app-secret",
       FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
@@ -179,6 +183,42 @@ plugins:
     const loaded = await loadNodeConfiguration({ WORK_FABRIC_CONFIG: path, CURSOR_SECRET: "x".repeat(32) });
     expect(loaded.admission).toEqual({ policies: {}, evidence_providers: {} });
     expect(() => { (loaded.admission.policies as Record<string, unknown>).later = {}; }).toThrow();
+  });
+
+  it("resolves every service Admission secret through the global secret Provider", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "wf-config-admission-secrets-")), "work-fabric.yaml");
+    await writeFile(path, `api_version: workfabric.config/v1
+service:
+  storage_profile: memory-demo
+  development_mode: true
+  tenant_id: tenant-local
+  exchange_id: exchange-local
+  cursor_secret: \${CURSOR_SECRET}
+  admission:
+    subject_fingerprint_key: \${ADMISSION_FINGERPRINT_KEY}
+    grant_active_key_id: primary
+    grant_keys:
+      primary: \${ADMISSION_PRIMARY_KEY}
+      previous: \${ADMISSION_PREVIOUS_KEY}
+    grant_ttl_seconds: 120
+    max_evidence_cache_entries: 10000
+  identities: [{authentication_evidence: {bearer_token: token}, principal: {principal_id: p, tenant_id: tenant-local, actor_claims: [{actor_id: a, actor_type: human, endpoint_ids: [e]}], attributes: {}}}]
+  authority_rules: [{tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}]
+`, "utf8");
+    const loaded = await loadNodeConfiguration({
+      WORK_FABRIC_CONFIG: path,
+      CURSOR_SECRET: "x".repeat(32),
+      ADMISSION_FINGERPRINT_KEY: "f".repeat(32),
+      ADMISSION_PRIMARY_KEY: "p".repeat(32),
+      ADMISSION_PREVIOUS_KEY: "q".repeat(32),
+    });
+    expect(loaded.service.admission).toEqual({
+      subject_fingerprint_key: "f".repeat(32),
+      grant_active_key_id: "primary",
+      grant_keys: { primary: "p".repeat(32), previous: "q".repeat(32) },
+      grant_ttl_seconds: 120,
+      max_evidence_cache_entries: 10_000,
+    });
   });
 
   it("loads long-connection secrets without a Webhook verification token", async () => {

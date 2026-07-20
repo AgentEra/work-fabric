@@ -7,6 +7,13 @@ service:
   tenant_id: tenant-local
   exchange_id: exchange-local
   cursor_secret: ${WORK_FABRIC_CURSOR_SECRET}
+  admission:
+    subject_fingerprint_key: ${WORK_FABRIC_ADMISSION_FINGERPRINT_KEY}
+    grant_active_key_id: primary
+    grant_keys:
+      primary: ${WORK_FABRIC_ADMISSION_GRANT_KEY}
+    grant_ttl_seconds: 120
+    max_evidence_cache_entries: 10000
 
   listen:
     host: 127.0.0.1
@@ -17,17 +24,6 @@ service:
     busy_timeout_ms: 5000
 
   identities:
-    - authentication_evidence:
-        bearer_token: ${FEISHU_CONNECTOR_ACCESS_TOKEN}
-      principal:
-        principal_id: principal-feishu-connector
-        tenant_id: tenant-local
-        actor_claims:
-          - actor_id: actor-feishu-user
-            actor_type: human
-            endpoint_ids: [endpoint-feishu-user]
-        attributes: {}
-
     - authentication_evidence:
         bearer_token: ${INTAKE_AGENT_ACCESS_TOKEN}
       principal:
@@ -41,20 +37,40 @@ service:
 
   authority_rules:
     - tenant_id: tenant-local
-      principal_id: principal-feishu-connector
-      actor_id: actor-feishu-user
-      actor_type: human
-      endpoint_id: endpoint-feishu-user
-      action: workfabric.handoff.offer.v1
-      resource_id: null
-
-    - tenant_id: tenant-local
-      principal_id: principal-feishu-connector
-      actor_id: actor-feishu-user
-      actor_type: human
-      endpoint_id: endpoint-feishu-user
+      principal_id: principal-intake-agent
+      actor_id: actor-intake-agent
+      actor_type: agent
+      endpoint_id: endpoint-intake-agent
       action: workfabric.operations.health.read.v1
       resource_id: tenant-local
+
+admission:
+  evidence_providers:
+    feishu-directory-primary:
+      type: feishu.directory
+      config:
+        plugin_instance_id: feishu-primary
+  policies:
+    feishu-primary-participants:
+      policy_id: feishu-primary-participants
+      revision: "1"
+      tenant_id: tenant-local
+      connector_id: feishu-primary
+      source_system: feishu
+      external_tenant_id: tenant-key-example
+      default: deny
+      allow:
+        all_internal_members: true
+        external_subject_ids: []
+      deny:
+        external_subject_ids: []
+      internal_membership:
+        evidence_provider_ref: feishu-directory-primary
+        positive_ttl_seconds: 300
+        negative_ttl_seconds: 60
+      binding:
+        actor_type: human
+        store_ref: participant-bindings
 
 plugins:
   instances:
@@ -100,11 +116,8 @@ plugins:
                   - workfabric.handoff.result_returned.v1
                   - workfabric.handoff.verified.v1
 
-        identities:
-          - external_open_id: ou-user-example
-            actor_id: actor-feishu-user
-            actor_type: human
-            endpoint_id: endpoint-feishu-user
+        identity_admission:
+          policy_id: feishu-primary-participants
 
         worker:
           poll_interval_ms: 1000

@@ -10,6 +10,23 @@ import {
 export type ServiceStorageProfile = "memory-demo" | "sqlite-local" | "postgres";
 export type ServiceRole = "all" | "api" | "worker";
 
+export interface NodeAdmissionConfig {
+  readonly subject_fingerprint_key: string;
+  readonly grant_active_key_id: string;
+  readonly grant_keys: Readonly<Record<string, string>>;
+  readonly grant_ttl_seconds: number;
+  readonly max_evidence_cache_entries: number;
+}
+
+export class NodeConfigurationError extends TypeError {
+  constructor(
+    readonly code: string,
+    readonly path: string,
+  ) {
+    super(`${code} at ${path}`);
+  }
+}
+
 export interface ClusterHostConfig extends ClusterHostLimits {
   readonly worker_owner_id: string;
   readonly tenant_ids: readonly string[];
@@ -22,12 +39,126 @@ export interface NodeServiceConfig {
   readonly tenant_id: string;
   readonly exchange_id: string;
   readonly cursor_secret: string;
+  readonly admission?: NodeAdmissionConfig;
   readonly listen: { readonly host: string; readonly port: number };
   readonly identities: readonly LocalIdentityRecord[];
   readonly authority_rules: readonly LocalAuthorityAllowRule[];
   readonly sqlite?: { readonly location: string; readonly busy_timeout_ms: number };
   readonly postgres?: { readonly connection_string: string };
   readonly cluster?: ClusterHostConfig;
+}
+
+const ADMISSION_KEYS = [
+  "subject_fingerprint_key",
+  "grant_active_key_id",
+  "grant_keys",
+  "grant_ttl_seconds",
+  "max_evidence_cache_entries",
+] as const;
+const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function admissionError(path: string): never {
+  throw new NodeConfigurationError("service_admission_invalid", path);
+}
+
+function ownData(value: object, key: string, path: string): unknown {
+  let descriptor: PropertyDescriptor | undefined;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(value, key);
+  } catch {
+    return admissionError(path);
+  }
+  if (descriptor === undefined || !("value" in descriptor) || descriptor.value === undefined) {
+    return admissionError(path);
+  }
+  return descriptor.value;
+}
+
+function exactAdmissionObject(
+  value: unknown,
+  path: string,
+  keys: readonly string[],
+): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return admissionError(path);
+  }
+  let actual: readonly PropertyKey[];
+  try {
+    actual = Reflect.ownKeys(value);
+  } catch {
+    return admissionError(path);
+  }
+  if (
+    actual.length !== keys.length
+    || actual.some((key) => typeof key !== "string" || !keys.includes(key))
+  ) return admissionError(path);
+  const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const key of keys) result[key] = ownData(value, key, `${path}.${key}`);
+  return result;
+}
+
+function admissionIdentifier(value: unknown, path: string): string {
+  if (
+    typeof value !== "string"
+    || value.length === 0
+    || value.length > 128
+    || value.trim() !== value
+    || PROTOTYPE_KEYS.has(value)
+  ) return admissionError(path);
+  return value;
+}
+
+function admissionSecret(value: unknown, path: string): string {
+  if (typeof value !== "string" || new TextEncoder().encode(value).byteLength < 32) {
+    return admissionError(path);
+  }
+  return value;
+}
+
+function parseAdmissionConfig(value: unknown): NodeAdmissionConfig {
+  const path = "service.admission";
+  const raw = exactAdmissionObject(value, path, ADMISSION_KEYS);
+  const fingerprintKey = admissionSecret(raw.subject_fingerprint_key, `${path}.subject_fingerprint_key`);
+  const activeKeyId = admissionIdentifier(raw.grant_active_key_id, `${path}.grant_active_key_id`);
+  const rawKeys = raw.grant_keys;
+  if (typeof rawKeys !== "object" || rawKeys === null || Array.isArray(rawKeys)) {
+    return admissionError(`${path}.grant_keys`);
+  }
+  let keyIds: readonly PropertyKey[];
+  try {
+    keyIds = Reflect.ownKeys(rawKeys);
+  } catch {
+    return admissionError(`${path}.grant_keys`);
+  }
+  if (
+    keyIds.length === 0
+    || keyIds.length > 100
+    || keyIds.some((key) => typeof key !== "string" || PROTOTYPE_KEYS.has(key))
+  ) return admissionError(`${path}.grant_keys`);
+  const grantKeys: Record<string, string> = Object.create(null) as Record<string, string>;
+  for (const keyId of keyIds as readonly string[]) {
+    const normalizedId = admissionIdentifier(keyId, `${path}.grant_keys`);
+    grantKeys[normalizedId] = admissionSecret(
+      ownData(rawKeys, keyId, `${path}.grant_keys.${keyId}`),
+      `${path}.grant_keys.${keyId}`,
+    );
+  }
+  if (!Object.hasOwn(grantKeys, activeKeyId)) return admissionError(`${path}.grant_active_key_id`);
+  const ttl = raw.grant_ttl_seconds;
+  if (!Number.isSafeInteger(ttl) || (ttl as number) < 1 || (ttl as number) > 300) {
+    return admissionError(`${path}.grant_ttl_seconds`);
+  }
+  const cache = raw.max_evidence_cache_entries;
+  if (!Number.isSafeInteger(cache) || (cache as number) < 1 || (cache as number) > 100_000) {
+    return admissionError(`${path}.max_evidence_cache_entries`);
+  }
+  return Object.freeze({
+    subject_fingerprint_key: fingerprintKey,
+    grant_active_key_id: activeKeyId,
+    grant_keys: Object.freeze(grantKeys),
+    grant_ttl_seconds: ttl as number,
+    max_evidence_cache_entries: cache as number,
+  });
 }
 
 function identifier(value: unknown, field: string): string {
@@ -152,6 +283,25 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
   if (role === "worker" && cluster === undefined) {
     throw new TypeError("worker role requires cluster configuration");
   }
+  let admission: NodeAdmissionConfig | undefined;
+  let admissionDescriptor: PropertyDescriptor | undefined;
+  try {
+    admissionDescriptor = Object.getOwnPropertyDescriptor(raw, "admission");
+  } catch {
+    return admissionError("service.admission");
+  }
+  if (admissionDescriptor === undefined) {
+    try {
+      if (Reflect.has(raw, "admission")) return admissionError("service.admission");
+    } catch {
+      return admissionError("service.admission");
+    }
+  } else {
+    if (!("value" in admissionDescriptor) || admissionDescriptor.value === undefined) {
+      return admissionError("service.admission");
+    }
+    admission = parseAdmissionConfig(admissionDescriptor.value);
+  }
   return {
     storage_profile: storageProfile,
     role,
@@ -159,6 +309,7 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
     tenant_id: tenantId,
     exchange_id: exchangeId,
     cursor_secret: cursorSecret,
+    ...(admission === undefined ? {} : { admission }),
     listen,
     identities,
     authority_rules: authorityRules,

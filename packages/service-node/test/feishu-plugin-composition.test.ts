@@ -93,7 +93,7 @@ describe("Feishu plugin deployment role", () => {
 
   it("validates enabled Feishu plugin configurations for every role", () => {
     expect(() => assertFeishuPluginRole("api", plugins({})))
-      .toThrowError("inbound must be an object");
+      .toThrowError("exactly one of identities or identity_admission is required");
   });
 
   it("rejects a pure worker before reading storage or cluster dependencies", async () => {

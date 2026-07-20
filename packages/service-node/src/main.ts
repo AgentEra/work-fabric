@@ -25,6 +25,7 @@ export async function runNodeService(
     ...composition,
     configuration_revision: loaded.revision,
     plugins: loaded.plugins,
+    admission: loaded.admission,
   });
   if (config.role === "api" || config.role === "all") {
     const { origin } = await service.listen();

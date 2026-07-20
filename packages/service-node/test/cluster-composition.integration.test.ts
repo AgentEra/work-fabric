@@ -1,9 +1,16 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { MemoryClusterAdapter } from "@work-fabric/adapter-cluster-memory";
+import { MemoryAdmissionDecisionStore, MemoryParticipantBindingStore } from "@work-fabric/adapter-admission-memory";
+import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
+import { MemoryContextRepository } from "@work-fabric/adapter-context-memory";
+import { MemoryEndpointDirectoryStore, MemoryEndpointInboxStore } from "@work-fabric/adapter-endpoint-memory";
+import { MemoryDiscrepancyStore, MemoryOperationsFixture, MemoryRecoveryStore } from "@work-fabric/adapter-operations-memory";
+import { MemoryChannelRouteStore, MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import type { FeishuLongConnectionClientFactory } from "@work-fabric/connector-feishu";
 import type { OutboxStore, WorkerLeaseStore } from "@work-fabric/exchange-spi";
-import { composeNodeService, parseServiceConfig } from "../src/index.js";
+import { MemoryHandoffReadModelStore, MemorySubscriptionStore } from "@work-fabric/exchange-runtime";
+import { composeNodeService, parseServiceConfig, type NodeStorageComposition } from "../src/index.js";
 
 const identity = {
   authentication_evidence: { bearer_token: "configured-test-token" },
@@ -43,6 +50,88 @@ const leases: WorkerLeaseStore = {
 };
 
 describe("clustered Node composition", () => {
+  it("uses deployment-owned PostgreSQL Admission stores without creating a database client", async () => {
+    const persistence = new MemoryExchangePersistence();
+    const operations = new MemoryOperationsFixture();
+    const bindings = new MemoryParticipantBindingStore();
+    const decisions = new MemoryAdmissionDecisionStore();
+    const bindingCall = vi.spyOn(bindings, "getOrCreate");
+    const decisionCall = vi.spyOn(decisions, "record");
+    const storage: NodeStorageComposition = {
+      persistence,
+      context: new MemoryContextRepository(),
+      subscriptions: new MemorySubscriptionStore(),
+      handoffs: new MemoryHandoffReadModelStore(),
+      collaboration: operations.collaboration,
+      audit: operations.audit,
+      endpointDirectory: new MemoryEndpointDirectoryStore(),
+      endpointInbox: new MemoryEndpointInboxStore(),
+      connectorIngress: new MemoryConnectorIngressStore(),
+      channelRoutes: new MemoryChannelRouteStore(),
+      discrepancies: new MemoryDiscrepancyStore(),
+      recoveries: new MemoryRecoveryStore(),
+      admissionBindings: bindings,
+      admissionDecisions: decisions,
+      sqlite: null,
+    };
+    const config = parseServiceConfig({
+      storage_profile: "postgres",
+      role: "api",
+      tenant_id: "tenant-local",
+      exchange_id: "exchange-local",
+      cursor_secret: "x".repeat(32),
+      postgres: { connection_string: "postgres://deployment-owned-not-opened" },
+      admission: {
+        subject_fingerprint_key: "f".repeat(32),
+        grant_active_key_id: "primary",
+        grant_keys: { primary: "g".repeat(32) },
+        grant_ttl_seconds: 120,
+        max_evidence_cache_entries: 10_000,
+      },
+      identities: [identity],
+      authority_rules: [rule],
+    });
+    const service = await composeNodeService(config, {
+      postgres_storage: storage,
+      admission: {
+        evidence_providers: {},
+        policies: {
+          "synthetic-participants": {
+            policy_id: "synthetic-participants", revision: "1",
+            tenant_id: "tenant-local", connector_id: "synthetic-primary",
+            source_system: "synthetic", external_tenant_id: "external-local",
+            default: "deny",
+            allow: { all_internal_members: false, external_subject_ids: ["subject-1"] },
+            deny: { external_subject_ids: [] },
+            binding: { actor_type: "human", store_ref: "participant-bindings" },
+          },
+        },
+      },
+    });
+    const result = await service.admission!.admit("synthetic-participants", {
+      tenant_id: "tenant-local", connector_id: "synthetic-primary",
+      source_system: "synthetic", external_tenant_id: "external-local",
+      external_subject_type: "human", external_subject_id: "subject-1",
+      ingress_id: "ingress-postgres-injection",
+    });
+    expect(result.decision.kind).toBe("allow");
+    expect(bindingCall).toHaveBeenCalledTimes(1);
+    expect(decisionCall).toHaveBeenCalledTimes(1);
+    await service.close();
+
+    const incomplete = { ...storage, admissionBindings: undefined } as unknown as NodeStorageComposition;
+    await expect(composeNodeService(config, {
+      postgres_storage: incomplete,
+      admission: {
+        evidence_providers: {},
+        policies: {},
+      },
+    })).rejects.toMatchObject({
+      code: "admission_storage_missing",
+      path: "postgres_storage.admissionBindings",
+    });
+  });
+
   it("starts only the worker host, exposes aggregate state and drains it", async () => {
     const config = parseServiceConfig({
       storage_profile: "memory-demo",

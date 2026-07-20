@@ -26,6 +26,16 @@ const rule = {
 };
 
 describe("Node service configuration", () => {
+  const base = {
+    storage_profile: "memory-demo",
+    development_mode: true,
+    tenant_id: "tenant-local",
+    exchange_id: "exchange-local",
+    cursor_secret: "x".repeat(32),
+    identities: [identity],
+    authority_rules: [rule],
+  } as const;
+
   it("requires explicit development mode, identity and default-deny rules", () => {
     expect(() => parseServiceConfig({
       storage_profile: "memory-demo",
@@ -53,6 +63,62 @@ describe("Node service configuration", () => {
       listen: { host: "127.0.0.1", port: 8787 },
     });
     expect(JSON.stringify(config)).not.toContain("default-token");
+  });
+
+  it("validates bounded Admission secrets and runtime limits", () => {
+    const config = parseServiceConfig({
+      ...base,
+      admission: {
+        subject_fingerprint_key: "指".repeat(11),
+        grant_active_key_id: "primary",
+        grant_keys: { primary: "授".repeat(11), previous: "p".repeat(32) },
+        grant_ttl_seconds: 120,
+        max_evidence_cache_entries: 10_000,
+      },
+    });
+    expect(config.admission).toMatchObject({
+      grant_active_key_id: "primary",
+      grant_ttl_seconds: 120,
+      max_evidence_cache_entries: 10_000,
+    });
+    expect(new TextEncoder().encode(config.admission!.subject_fingerprint_key)).toHaveLength(33);
+
+    for (const admission of [
+      { subject_fingerprint_key: "x".repeat(31), grant_active_key_id: "primary", grant_keys: { primary: "y".repeat(32) }, grant_ttl_seconds: 120, max_evidence_cache_entries: 10_000 },
+      { subject_fingerprint_key: "x".repeat(32), grant_active_key_id: "missing", grant_keys: { primary: "y".repeat(32) }, grant_ttl_seconds: 120, max_evidence_cache_entries: 10_000 },
+      { subject_fingerprint_key: "x".repeat(32), grant_active_key_id: "primary", grant_keys: { primary: "y".repeat(31) }, grant_ttl_seconds: 120, max_evidence_cache_entries: 10_000 },
+      { subject_fingerprint_key: "x".repeat(32), grant_active_key_id: "primary", grant_keys: { primary: "y".repeat(32) }, grant_ttl_seconds: 301, max_evidence_cache_entries: 10_000 },
+      { subject_fingerprint_key: "x".repeat(32), grant_active_key_id: "primary", grant_keys: { primary: "y".repeat(32) }, grant_ttl_seconds: 120, max_evidence_cache_entries: 100_001 },
+    ]) {
+      expect(() => parseServiceConfig({ ...base, admission })).toThrow(/service\.admission/);
+    }
+  });
+
+  it("fails closed on inherited, accessor and prototype Admission key maps", () => {
+    let invoked = false;
+    const accessor = Object.defineProperty({
+      grant_active_key_id: "primary",
+      grant_keys: { primary: "y".repeat(32) },
+      grant_ttl_seconds: 120,
+      max_evidence_cache_entries: 10_000,
+    }, "subject_fingerprint_key", {
+      enumerable: true,
+      get() { invoked = true; return "x".repeat(32); },
+    });
+    expect(() => parseServiceConfig({ ...base, admission: accessor })).toThrow(/service\.admission\.subject_fingerprint_key/);
+    expect(invoked).toBe(false);
+
+    const inherited = Object.create({ primary: "y".repeat(32) }) as Record<string, unknown>;
+    expect(() => parseServiceConfig({
+      ...base,
+      admission: {
+        subject_fingerprint_key: "x".repeat(32),
+        grant_active_key_id: "primary",
+        grant_keys: inherited,
+        grant_ttl_seconds: 120,
+        max_evidence_cache_entries: 10_000,
+      },
+    })).toThrow(/service\.admission\.grant_keys/);
   });
 
   it("requires a SQLite location and refuses unsupported production defaults", () => {

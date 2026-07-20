@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { describe, expect, it } from "vitest";
+import { MemoryAdmissionDecisionStore, MemoryParticipantBindingStore } from "@work-fabric/adapter-admission-memory";
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
 import { MemoryContextRepository } from "@work-fabric/adapter-context-memory";
 import {
@@ -323,6 +324,8 @@ describe("Phase 6A clustered runtime roundtrip", () => {
       endpointDirectory: new MemoryEndpointDirectoryStore(),
       endpointInbox: new MemoryEndpointInboxStore(),
       connectorIngress: new MemoryConnectorIngressStore(),
+      admissionBindings: new MemoryParticipantBindingStore(),
+      admissionDecisions: new MemoryAdmissionDecisionStore(),
       discrepancies: new MemoryDiscrepancyStore(),
       recoveries: new MemoryRecoveryStore(),
       sqlite: null,

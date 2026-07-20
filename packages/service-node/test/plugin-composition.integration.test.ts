@@ -6,6 +6,7 @@ import type {
 import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
 import { describe, expect, it, vi } from "vitest";
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
+import type { AdmissionConfigurationSection } from "@work-fabric/adapter-admission-configuration";
 
 const identity = { authentication_evidence: { bearer_token: "token" }, principal: { principal_id: "principal", tenant_id: "tenant-local", actor_claims: [{ actor_id: "actor-human", actor_type: "human" as const, endpoint_ids: ["endpoint-human"] }], attributes: {} } };
 const rule = { tenant_id: "tenant-local", principal_id: "principal", actor_id: "actor-human", actor_type: "human" as const, endpoint_id: "endpoint-human", action: "workfabric.operations.health.read.v1", resource_id: null };
@@ -17,6 +18,39 @@ const plugin = {
   identities: [{ external_open_id: "ou-human", actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" }],
   worker: { poll_interval_ms: 1000, lease_seconds: 30, batch_limit: 100, max_attempts: 8 },
 };
+const { identities: _legacyIdentities, ...pluginWithoutIdentities } = plugin;
+const admissionPlugin = {
+  ...pluginWithoutIdentities,
+  identity_admission: { policy_id: "feishu-primary-participants" },
+};
+const admissionSection = (overrides: Partial<AdmissionConfigurationSection["policies"][string]> = {}): AdmissionConfigurationSection => ({
+  evidence_providers: {
+    "feishu-directory-primary": {
+      type: "feishu.directory",
+      config: { plugin_instance_id: "feishu-primary" },
+    },
+  },
+  policies: {
+    "feishu-primary-participants": {
+      policy_id: "feishu-primary-participants",
+      revision: "1",
+      tenant_id: "tenant-local",
+      connector_id: "feishu-primary",
+      source_system: "feishu",
+      external_tenant_id: "tenant-key",
+      default: "deny",
+      allow: { all_internal_members: true, external_subject_ids: [] },
+      deny: { external_subject_ids: [] },
+      internal_membership: {
+        evidence_provider_ref: "feishu-directory-primary",
+        positive_ttl_seconds: 300,
+        negative_ttl_seconds: 60,
+      },
+      binding: { actor_type: "human", store_ref: "participant-bindings" },
+      ...overrides,
+    },
+  },
+});
 
 const serviceConfig = (role: "all" | "api" = "all") => parseServiceConfig({
   storage_profile: "memory-demo",
@@ -29,6 +63,66 @@ const serviceConfig = (role: "all" | "api" = "all") => parseServiceConfig({
   authority_rules: [rule],
   listen: { port: 0 },
 });
+
+const admissionServiceConfig = (
+  role: "all" | "api" = "api",
+  activeKeyId: "primary" | "previous" = "primary",
+) => parseServiceConfig({
+  storage_profile: "memory-demo",
+  development_mode: true,
+  role,
+  tenant_id: "tenant-local",
+  exchange_id: "exchange-local",
+  cursor_secret: "x".repeat(32),
+  admission: {
+    subject_fingerprint_key: "f".repeat(32),
+    grant_active_key_id: activeKeyId,
+    grant_keys: { primary: "g".repeat(32), previous: "h".repeat(32) },
+    grant_ttl_seconds: 120,
+    max_evidence_cache_entries: 10_000,
+  },
+  identities: [identity],
+  authority_rules: [rule],
+  listen: { port: 0 },
+});
+
+function admissionOfferEnvelope(actorId: string, endpointId: string, suffix: string) {
+  const now = Date.now();
+  return {
+    spec_version: "1.0",
+    message_id: `message-${suffix}`,
+    message_type: "workfabric.handoff.offer.v1",
+    sent_at: new Date(now).toISOString(),
+    tenant_id: "tenant-local",
+    exchange_id: "exchange-local",
+    actor_id: actorId,
+    endpoint_id: endpointId,
+    idempotency_key: `offer-${suffix}`,
+    payload: {
+      work_reference: { uri: `urn:test:${suffix}`, extensions: {} },
+      target: { actor_id: "actor-agent" },
+      intent: [{ kind: "text", media_type: "text/plain", text: "synthetic intake" }],
+      authority_scope: {
+        delegation_id: `delegation-${suffix}`,
+        scopes: ["work:read"],
+        resource_refs: [`urn:test:${suffix}`],
+        expires_at: new Date(now + 300_000).toISOString(),
+        may_redelegate: false,
+      },
+      acceptance_criteria: [{
+        criterion_id: `criterion-${suffix}`,
+        description: "synthetic handoff accepted",
+        required: true,
+        result_schema_ref: null,
+        required_evidence_types: [],
+      }],
+      verifier: { actor_id: actorId, actor_type: "human" },
+      priority: "normal",
+      accept_by: new Date(now + 60_000).toISOString(),
+      result_due_at: new Date(now + 240_000).toISOString(),
+    },
+  };
+}
 
 class FakeLongConnectionClient implements FeishuLongConnectionClient {
   state: FeishuLongConnectionState = "connecting";
@@ -76,6 +170,135 @@ async function composeLongConnectionService(client: FeishuLongConnectionClient) 
 }
 
 describe("service plugin composition", () => {
+  it("fails before plugin prepare when an Admission-backed plugin has no policy", async () => {
+    await expect(composeNodeService(admissionServiceConfig(), {
+      plugins: {
+        "feishu-primary": { type: "collaboration-channel.feishu", enabled: true, config: admissionPlugin },
+      },
+      admission: { policies: {}, evidence_providers: {} },
+    })).rejects.toMatchObject({
+      code: "admission_policy_missing",
+      path: "admission.policies.feishu-primary-participants",
+    });
+  });
+
+  it("fails closed on Admission scope mismatch or a missing internal evidence provider", async () => {
+    const options = {
+      plugins: {
+        "feishu-primary": { type: "collaboration-channel.feishu", enabled: true, config: admissionPlugin },
+      },
+    } as const;
+    await expect(composeNodeService(admissionServiceConfig(), {
+      ...options,
+      admission: admissionSection({ connector_id: "another-connector" }),
+    })).rejects.toMatchObject({
+      code: "admission_policy_scope_mismatch",
+      path: "admission.policies.feishu-primary-participants.connector_id",
+    });
+    const section = admissionSection();
+    await expect(composeNodeService(admissionServiceConfig(), {
+      ...options,
+      admission: { ...section, evidence_providers: {} },
+    })).rejects.toMatchObject({
+      code: "admission_evidence_provider_missing",
+      path: "admission.evidence_providers.feishu-directory-primary",
+    });
+  });
+
+  it("composes an Admission-backed Feishu plugin with a directory descriptor", async () => {
+    const service = await composeNodeService(admissionServiceConfig(), {
+      plugins: {
+        "feishu-primary": { type: "collaboration-channel.feishu", enabled: true, config: admissionPlugin },
+      },
+      admission: admissionSection(),
+      fetch: async () => { throw new Error("directory lookup is not part of composition"); },
+    });
+    await expect(service.http.dispatch({ method: "GET", url: "/health/live" }))
+      .resolves.toMatchObject({ status_code: 200 });
+    await service.close();
+  });
+
+  it("lets an API composition admit and verify one scoped grant through HTTP Identity and Authority", async () => {
+    const service = await composeNodeService(admissionServiceConfig("api"), {
+      plugins: {
+        "feishu-primary": { type: "collaboration-channel.feishu", enabled: true, config: admissionPlugin },
+      },
+      admission: admissionSection({
+        allow: { all_internal_members: false, external_subject_ids: ["ou-admitted"] },
+      }),
+    });
+    const admitted = await service.admission!.admit("feishu-primary-participants", {
+      tenant_id: "tenant-local",
+      connector_id: "feishu-primary",
+      source_system: "feishu",
+      external_tenant_id: "tenant-key",
+      external_subject_type: "human",
+      external_subject_id: "ou-admitted",
+      ingress_id: "ingress-admission-http",
+    });
+    expect(admitted).toMatchObject({ decision: { kind: "allow" } });
+    const decision = admitted.decision;
+    if (decision.kind !== "allow" || admitted.representation_grant === undefined) {
+      throw new Error("expected Admission allow grant");
+    }
+    const response = await service.http.dispatch({
+      method: "POST",
+      url: "/v1/commands",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${admitted.representation_grant}`,
+      },
+      payload: admissionOfferEnvelope(decision.binding.actor_id, decision.binding.endpoint_id, "admission-http"),
+    });
+    expect(response.status_code).toBe(200);
+    expect(response.json()).toMatchObject({ operation_status: "accepted" });
+    await service.close();
+  });
+
+  it("accepts a grant across independently composed processes during key rotation", async () => {
+    const plugins = {
+      "feishu-primary": { type: "collaboration-channel.feishu", enabled: true, config: admissionPlugin },
+    } as const;
+    const admission = admissionSection({
+      allow: { all_internal_members: false, external_subject_ids: ["ou-rotation"] },
+    });
+    const issuer = await composeNodeService(admissionServiceConfig("api", "primary"), {
+      plugins,
+      admission,
+    });
+    const verifier = await composeNodeService(admissionServiceConfig("api", "previous"), {
+      plugins,
+      admission,
+    });
+    try {
+      const admitted = await issuer.admission!.admit("feishu-primary-participants", {
+        tenant_id: "tenant-local", connector_id: "feishu-primary", source_system: "feishu",
+        external_tenant_id: "tenant-key", external_subject_type: "human",
+        external_subject_id: "ou-rotation", ingress_id: "ingress-key-rotation",
+      });
+      if (admitted.decision.kind !== "allow" || admitted.representation_grant === undefined) {
+        throw new Error("expected key-rotation Admission grant");
+      }
+      const response = await verifier.http.dispatch({
+        method: "POST",
+        url: "/v1/commands",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${admitted.representation_grant}`,
+        },
+        payload: admissionOfferEnvelope(
+          admitted.decision.binding.actor_id,
+          admitted.decision.binding.endpoint_id,
+          "key-rotation",
+        ),
+      });
+      expect(response.status_code).toBe(200);
+      expect(response.json()).toMatchObject({ operation_status: "accepted" });
+    } finally {
+      await issuer.close();
+      await verifier.close();
+    }
+  });
   it("marks readiness unavailable when the SDK detects a pong blackhole and recovers after reconnect", async () => {
     let sdkStatus: {
       state: "idle" | "connecting" | "connected" | "reconnecting" | "failed";
