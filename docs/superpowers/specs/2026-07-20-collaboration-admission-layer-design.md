@@ -1,6 +1,6 @@
 # Work Fabric Collaboration Admission Layer Design
 
-**Status:** Draft for user review
+**Status:** Approved
 **Date:** 2026-07-20
 
 ## 1. Decision summary
@@ -133,6 +133,8 @@ be retried without pretending the event was processed.
   source-neutral evidence SPI.
 - `adapter-identity-admission`: validates short-lived representation grants and
   returns a `ResolvedPrincipal` containing exactly one Actor/Endpoint claim.
+- `adapter-authority-admission`: authorizes only explicitly configured Intake
+  operations for principals produced by the Admission Identity adapter.
 - `plugin-channel-feishu`: constructs an Admission request from normalized
   message facts and consumes the decision; it contains no precedence logic.
 - `service-node`: composition root only.
