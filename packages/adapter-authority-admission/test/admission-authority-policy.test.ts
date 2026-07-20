@@ -1,0 +1,357 @@
+import { describe, expect, it, vi } from "vitest";
+
+import type { RepresentationGrantVerifier } from "@work-fabric/admission-spi";
+import {
+  AdmissionIdentityProvider,
+  AdmissionPrincipalTrust,
+} from "@work-fabric/adapter-identity-admission";
+import { markAdmissionPrincipalTrusted } from "../../adapter-identity-admission/src/admission-principal-trust.js";
+import type {
+  AuthorityPolicy,
+  AuthorityRequest,
+  ResolvedPrincipal,
+} from "@work-fabric/exchange-spi";
+
+import {
+  AdmissionAuthorityPolicy,
+  CompositeAuthorityPolicy,
+  type AdmissionAuthorityRule,
+} from "../src/index.js";
+
+const NOW = "2026-07-20T00:00:00.000Z";
+const OFFER = "workfabric.handoff.offer.v1" as const;
+const verified = {
+  tenant_id: "tenant-a",
+  connector_id: "connector-a",
+  ingress_id: "ingress-a",
+  decision_id: "decision-a",
+  actor_id: "actor-a",
+  actor_type: "human" as const,
+  endpoint_id: "endpoint-a",
+  external_subject_fingerprint: "fingerprint-private",
+  expires_at: "2026-07-20T00:01:00.000Z",
+};
+
+function rule(
+  overrides: Partial<AdmissionAuthorityRule> = {},
+): AdmissionAuthorityRule {
+  return {
+    tenant_id: "tenant-a",
+    connector_id: "connector-a",
+    principal_id: "admission:connector-a",
+    action: OFFER,
+    ...overrides,
+  };
+}
+
+async function resolvePrincipal(
+  trust: AdmissionPrincipalTrust,
+  overrides: Partial<typeof verified> = {},
+): Promise<ResolvedPrincipal> {
+  const grants: RepresentationGrantVerifier = {
+    verify: async () => ({ ...verified, ...overrides }),
+  };
+  const provider = new AdmissionIdentityProvider({
+    grants,
+    trust,
+    clock: { now: () => NOW },
+  });
+  const principal = await provider.resolve({ bearer_token: "opaque-grant" });
+  if (principal === null) throw new Error("expected a trusted admission principal");
+  return principal;
+}
+
+function request(
+  principal: ResolvedPrincipal,
+  overrides: Partial<AuthorityRequest> = {},
+): AuthorityRequest {
+  return {
+    principal,
+    actor_id: "actor-a",
+    actor_type: "human",
+    endpoint_id: "endpoint-a",
+    delegation_id: null,
+    action: OFFER,
+    resource_id: null,
+    ...overrides,
+  };
+}
+
+function authority(
+  authorize: AuthorityPolicy["authorize"],
+  adapter = "test",
+): AuthorityPolicy {
+  return {
+    manifest: {
+      profile: "exchange.authority.v1",
+      adapter,
+      capabilities: {
+        explicit_decision: true,
+        default_deny: true,
+        resource_scoping: true,
+      },
+    },
+    authorize,
+  };
+}
+
+describe("AdmissionAuthorityPolicy", () => {
+  it("allows only the exact offer represented by one trusted admission principal", async () => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+
+    await expect(policy.authorize(request(principal))).resolves.toEqual({ kind: "allow" });
+  });
+
+  it.each([
+    "workfabric.handoff.accept.v1",
+    "workfabric.handoff.result.report.v1",
+    "workfabric.handoff.result.verify.v1",
+    "workfabric.admin.recovery.request.v1",
+    "workfabric.handoff.query.v1",
+  ])("denies non-offer action %s", async (action) => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+
+    await expect(policy.authorize(request(principal, { action }))).resolves.toMatchObject({
+      kind: "deny",
+    });
+  });
+
+  it.each([
+    ["another tenant", { tenant_id: "tenant-b" }],
+    ["another connector", { connector_id: "connector-b" }],
+  ] as const)("denies a trusted principal from %s", async (_label, principalOverrides) => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust, principalOverrides);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+
+    await expect(policy.authorize(request(principal))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it.each([
+    ["another actor", { actor_id: "actor-b" }],
+    ["another actor type", { actor_type: "agent" as const }],
+    ["another endpoint", { endpoint_id: "endpoint-b" }],
+    ["a delegation", { delegation_id: "delegation-a" }],
+    ["a resource", { resource_id: "handoff-a" }],
+  ] as const)("denies %s", async (_label, requestOverrides) => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+
+    await expect(
+      policy.authorize(request(principal, requestOverrides)),
+    ).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("denies forged principals that are structurally identical but not trusted", async () => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust);
+    const forged = structuredClone(principal);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+
+    expect(forged).toEqual(principal);
+    expect(trust.isTrusted(forged)).toBe(false);
+    await expect(policy.authorize(request(forged))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it.each([
+    [
+      "multiple claims",
+      [
+        { actor_id: "actor-a", actor_type: "human" as const, endpoint_ids: ["endpoint-a"] },
+        { actor_id: "actor-b", actor_type: "human" as const, endpoint_ids: ["endpoint-b"] },
+      ],
+    ],
+    [
+      "multiple endpoints",
+      [{ actor_id: "actor-a", actor_type: "human" as const, endpoint_ids: ["endpoint-a", "endpoint-b"] }],
+    ],
+  ] as const)("denies a trusted malformed principal with %s", async (_label, actorClaims) => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal: ResolvedPrincipal = {
+      principal_id: "admission:connector-a",
+      tenant_id: "tenant-a",
+      actor_claims: actorClaims,
+      attributes: {
+        "workfabric.dev/identity_kind": "admission",
+        "workfabric.dev/connector_id": "connector-a",
+      },
+    };
+    markAdmissionPrincipalTrusted(trust, principal);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+
+    await expect(policy.authorize(request(principal))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("requires exact own trusted identity attributes", async () => {
+    const trust = new AdmissionPrincipalTrust();
+    const inheritedAttributes = Object.create({
+      "workfabric.dev/identity_kind": "admission",
+      "workfabric.dev/connector_id": "connector-a",
+    }) as ResolvedPrincipal["attributes"];
+    const principal: ResolvedPrincipal = {
+      principal_id: "admission:connector-a",
+      tenant_id: "tenant-a",
+      actor_claims: [{ actor_id: "actor-a", actor_type: "human", endpoint_ids: ["endpoint-a"] }],
+      attributes: inheritedAttributes,
+    };
+    markAdmissionPrincipalTrusted(trust, principal);
+
+    await expect(
+      new AdmissionAuthorityPolicy([rule()], trust).authorize(request(principal)),
+    ).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("validates exact own bounded rule fields without invoking accessors", () => {
+    const trust = new AdmissionPrincipalTrust();
+    const invalidRules: unknown[] = [
+      rule({ tenant_id: "" }),
+      rule({ tenant_id: " tenant-a" }),
+      rule({ tenant_id: "t".repeat(256) }),
+      rule({ connector_id: "" }),
+      rule({ connector_id: "connector-a " }),
+      rule({ connector_id: "c".repeat(256) }),
+      rule({ principal_id: "admission:connector-b" }),
+      rule({ principal_id: "p".repeat(256) }),
+      { ...rule(), action: "workfabric.handoff.accept.v1" },
+      Object.assign(Object.create({ action: OFFER }), {
+        tenant_id: "tenant-a",
+        connector_id: "connector-a",
+        principal_id: "admission:connector-a",
+      }),
+    ];
+
+    for (const invalidRule of invalidRules) {
+      expect(
+        () => new AdmissionAuthorityPolicy([invalidRule as AdmissionAuthorityRule], trust),
+      ).toThrow(TypeError);
+    }
+
+    const accessor = Object.defineProperty(
+      { ...rule() },
+      "tenant_id",
+      { enumerable: true, get: () => { throw new Error("accessor executed"); } },
+    );
+    expect(
+      () => new AdmissionAuthorityPolicy([accessor as AdmissionAuthorityRule], trust),
+    ).toThrow(TypeError);
+    expect(
+      () => new AdmissionAuthorityPolicy([accessor as AdmissionAuthorityRule], trust),
+    ).not.toThrow("accessor executed");
+  });
+
+  it("rejects exact duplicate rules instead of widening their meaning", () => {
+    expect(
+      () => new AdmissionAuthorityPolicy(
+        [rule(), rule()],
+        new AdmissionPrincipalTrust(),
+      ),
+    ).toThrow(TypeError);
+  });
+
+  it("accepts the bounded Task 5 principal derived from a maximum-length connector ID", () => {
+    const connectorId = "c".repeat(255);
+    expect(
+      () => new AdmissionAuthorityPolicy([
+        rule({
+          connector_id: connectorId,
+          principal_id: `admission:${connectorId}`,
+        }),
+      ], new AdmissionPrincipalTrust()),
+    ).not.toThrow();
+  });
+
+  it("clones rules at construction and returns isolated authority manifests", async () => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust);
+    const input = rule() as { -readonly [K in keyof AdmissionAuthorityRule]: AdmissionAuthorityRule[K] };
+    const policy = new AdmissionAuthorityPolicy([input], trust);
+    input.tenant_id = "tenant-b";
+
+    const manifest = policy.manifest;
+    expect(manifest).toEqual({
+      profile: "exchange.authority.v1",
+      adapter: "admission",
+      capabilities: {
+        explicit_decision: true,
+        default_deny: true,
+        resource_scoping: true,
+      },
+    });
+    (manifest.capabilities as Record<string, boolean>).explicit_decision = false;
+    expect(policy.manifest.capabilities.explicit_decision).toBe(true);
+    await expect(policy.authorize(request(principal))).resolves.toEqual({ kind: "allow" });
+  });
+});
+
+describe("CompositeAuthorityPolicy", () => {
+  it("tries children in order and stops at the first allow", async () => {
+    const calls: string[] = [];
+    const first = authority(async () => {
+      calls.push("first");
+      return { kind: "deny", reason: "first private reason" };
+    }, "first");
+    const second = authority(async () => {
+      calls.push("second");
+      return { kind: "allow" };
+    }, "second");
+    const third = authority(async () => {
+      calls.push("third");
+      return { kind: "allow" };
+    }, "third");
+
+    const decision = await new CompositeAuthorityPolicy([first, second, third]).authorize(
+      {} as AuthorityRequest,
+    );
+
+    expect(decision).toEqual({ kind: "allow" });
+    expect(calls).toEqual(["first", "second"]);
+  });
+
+  it("returns one stable generic deny without exposing child reasons", async () => {
+    const policy = new CompositeAuthorityPolicy([
+      authority(async () => ({ kind: "deny", reason: "secret reason A" })),
+      authority(async () => ({ kind: "deny", reason: "secret reason B" })),
+    ]);
+
+    const first = await policy.authorize({} as AuthorityRequest);
+    const second = await policy.authorize({} as AuthorityRequest);
+    expect(first).toEqual(second);
+    expect(first).toEqual({ kind: "deny", reason: "No authority policy allowed the request" });
+    expect(JSON.stringify(first)).not.toContain("secret reason");
+  });
+
+  it("propagates child errors and never skips a failed authority to reach an allow", async () => {
+    const later = vi.fn(async () => ({ kind: "allow" as const }));
+    const policy = new CompositeAuthorityPolicy([
+      authority(async () => { throw new Error("authority unavailable"); }),
+      authority(later),
+    ]);
+
+    await expect(policy.authorize({} as AuthorityRequest)).rejects.toThrow(
+      "authority unavailable",
+    );
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it("returns an isolated manifest with all required authority capabilities", () => {
+    const policy = new CompositeAuthorityPolicy([]);
+    const manifest = policy.manifest;
+
+    expect(manifest).toEqual({
+      profile: "exchange.authority.v1",
+      adapter: "composite",
+      capabilities: {
+        explicit_decision: true,
+        default_deny: true,
+        resource_scoping: true,
+      },
+    });
+    (manifest.capabilities as Record<string, boolean>).default_deny = false;
+    expect(policy.manifest.capabilities.default_deny).toBe(true);
+  });
+});
