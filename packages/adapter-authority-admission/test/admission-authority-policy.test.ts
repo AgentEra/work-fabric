@@ -7,6 +7,7 @@ import {
 } from "@work-fabric/adapter-identity-admission";
 import { markAdmissionPrincipalTrusted } from "../../adapter-identity-admission/src/admission-principal-trust.js";
 import type {
+  AuthorityDecision,
   AuthorityPolicy,
   AuthorityRequest,
   ResolvedPrincipal,
@@ -106,10 +107,12 @@ describe("AdmissionAuthorityPolicy", () => {
 
   it.each([
     "workfabric.handoff.accept.v1",
-    "workfabric.handoff.result.report.v1",
-    "workfabric.handoff.result.verify.v1",
-    "workfabric.admin.recovery.request.v1",
-    "workfabric.handoff.query.v1",
+    "workfabric.handoff.report_status.v1",
+    "workfabric.handoff.return_result.v1",
+    "workfabric.handoff.verify.v1",
+    "workfabric.query.handoff.read.v1",
+    "workfabric.operations.subscription.list.v1",
+    "workfabric.operations.health.read.v1",
   ])("denies non-offer action %s", async (action) => {
     const trust = new AdmissionPrincipalTrust();
     const principal = await resolvePrincipal(trust);
@@ -289,6 +292,25 @@ describe("AdmissionAuthorityPolicy", () => {
 });
 
 describe("CompositeAuthorityPolicy", () => {
+  it("accepts ordinary own allow and deny decisions", async () => {
+    const request = {} as AuthorityRequest;
+    const childAllow = { kind: "allow" as const };
+    const allow = await new CompositeAuthorityPolicy([
+      authority(async () => childAllow),
+    ]).authorize(request);
+    expect(allow).toEqual({ kind: "allow" });
+    expect(allow).not.toBe(childAllow);
+    expect(Object.isFrozen(allow)).toBe(true);
+    await expect(
+      new CompositeAuthorityPolicy([
+        authority(async () => ({ kind: "deny", reason: "ordinary deny" })),
+      ]).authorize(request),
+    ).resolves.toEqual({
+      kind: "deny",
+      reason: "No authority policy allowed the request",
+    });
+  });
+
   it("tries children in order and stops at the first allow", async () => {
     const calls: string[] = [];
     const first = authority(async () => {
@@ -336,6 +358,46 @@ describe("CompositeAuthorityPolicy", () => {
       "authority unavailable",
     );
     expect(later).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inherited allow decision and never reaches a later allow", async () => {
+    const inherited = Object.create({ kind: "allow" }) as AuthorityDecision;
+    const later = vi.fn(async () => ({ kind: "allow" as const }));
+    const policy = new CompositeAuthorityPolicy([
+      authority(async () => inherited),
+      authority(later),
+    ]);
+
+    await expect(policy.authorize({} as AuthorityRequest)).rejects.toThrow(
+      new TypeError("Authority policy returned an invalid decision"),
+    );
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it("rejects an accessor-backed allow without invoking it or reaching a later allow", async () => {
+    const getter = vi.fn(() => "allow");
+    const accessor = Object.defineProperty({}, "kind", { get: getter }) as AuthorityDecision;
+    const later = vi.fn(async () => ({ kind: "allow" as const }));
+    const policy = new CompositeAuthorityPolicy([
+      authority(async () => accessor),
+      authority(later),
+    ]);
+
+    await expect(policy.authorize({} as AuthorityRequest)).rejects.toThrow(
+      new TypeError("Authority policy returned an invalid decision"),
+    );
+    expect(getter).not.toHaveBeenCalled();
+    expect(later).not.toHaveBeenCalled();
+  });
+
+  it("rejects a malformed own decision kind", async () => {
+    const malformed = { kind: "permit" } as unknown as AuthorityDecision;
+
+    await expect(
+      new CompositeAuthorityPolicy([
+        authority(async () => malformed),
+      ]).authorize({} as AuthorityRequest),
+    ).rejects.toThrow(new TypeError("Authority policy returned an invalid decision"));
   });
 
   it("returns an isolated manifest with all required authority capabilities", () => {

@@ -20,6 +20,29 @@ const DENY: AuthorityDecision = Object.freeze({
   reason: "No authority policy allowed the request",
 });
 
+const ALLOW: AuthorityDecision = Object.freeze({ kind: "allow" });
+const INVALID_DECISION = "Authority policy returned an invalid decision";
+
+function decisionKind(decision: unknown): "allow" | "deny" {
+  if (typeof decision !== "object" || decision === null) {
+    throw new TypeError(INVALID_DECISION);
+  }
+  let descriptor: PropertyDescriptor | undefined;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(decision, "kind");
+  } catch {
+    throw new TypeError(INVALID_DECISION);
+  }
+  if (
+    descriptor === undefined
+    || !("value" in descriptor)
+    || (descriptor.value !== "allow" && descriptor.value !== "deny")
+  ) {
+    throw new TypeError(INVALID_DECISION);
+  }
+  return descriptor.value;
+}
+
 export class CompositeAuthorityPolicy implements AuthorityPolicy {
   private readonly policies: readonly AuthorityPolicy[];
 
@@ -37,7 +60,7 @@ export class CompositeAuthorityPolicy implements AuthorityPolicy {
   async authorize(request: AuthorityRequest): Promise<AuthorityDecision> {
     for (const policy of this.policies) {
       const decision = await policy.authorize(request);
-      if (decision.kind === "allow") return decision;
+      if (decisionKind(decision) === "allow") return ALLOW;
     }
     return DENY;
   }
