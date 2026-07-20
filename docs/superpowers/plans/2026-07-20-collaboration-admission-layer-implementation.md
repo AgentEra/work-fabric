@@ -480,7 +480,7 @@ Expected: FAIL because the conformance and Memory packages do not exist.
 
 - [ ] **Step 3: Implement atomic in-process stores**
 
-Use composite keys joined with `"\0"`; clone on all boundaries. `getOrCreate` performs one synchronous `Map.get`/`Map.set` segment before resolving its Promise, so concurrent first calls converge in one Node process. `record` returns the existing record only when it is deeply equal; otherwise throw `AdmissionAdapterError("decision_store_unavailable", "admission_decision_conflict")` without including record data.
+Use collision-safe JSON-encoded tuple keys; never concatenate identifier components with a delimiter that those identifiers may contain. Clone on all boundaries. `getOrCreate` performs one synchronous `Map.get`/`Map.set` segment before resolving its Promise, so concurrent first calls converge in one Node process. `record` returns the existing record only when it is deeply equal; otherwise throw `AdmissionAdapterError("decision_store_unavailable", "admission_decision_conflict")` without including record data.
 
 - [ ] **Step 4: Run profiles and commit**
 
