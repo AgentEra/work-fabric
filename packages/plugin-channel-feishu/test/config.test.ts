@@ -40,6 +40,14 @@ const longConnection = () => ({
   worker: valid().worker,
 });
 
+const admission = () => {
+  const { identities: _identities, ...configuration } = valid();
+  return {
+    ...configuration,
+    identity_admission: { policy_id: "feishu-primary-participants" },
+  };
+};
+
 describe("Feishu plugin configuration", () => {
   it("keeps valid Webhook configuration source-compatible", () => {
     const parsed = validateFeishuPluginConfig(valid());
@@ -61,6 +69,29 @@ describe("Feishu plugin configuration", () => {
       },
       inbound: { transport: "long_connection" },
     });
+  });
+
+  it("accepts exactly one strict participant identity mode", () => {
+    expect(validateFeishuPluginConfig(admission())).toMatchObject({
+      identity_admission: { policy_id: "feishu-primary-participants" },
+    });
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      identity_admission: { policy_id: "feishu-primary-participants" },
+    })).toThrow(/exactly one|both/i);
+    const { identities: _identities, ...neither } = valid();
+    expect(() => validateFeishuPluginConfig(neither)).toThrow(/exactly one|identity/i);
+  });
+
+  it("rejects unknown or invalid identity admission configuration", () => {
+    expect(() => validateFeishuPluginConfig({
+      ...admission(),
+      identity_admission: { policy_id: "feishu-primary-participants", precedence: "allow-first" },
+    })).toThrow(/unknown key precedence/);
+    expect(() => validateFeishuPluginConfig({
+      ...admission(),
+      identity_admission: { policy_id: " spaced " },
+    })).toThrow(/policy_id/);
   });
 
   it.each([

@@ -1,12 +1,12 @@
 import { createHash } from "node:crypto";
-import type { ConnectorIdentityResolver, ConnectorIngressClaim, ConnectorMappingOutcome } from "@work-fabric/connector-spi";
-import type { FeishuMessageMappingPolicy } from "@work-fabric/connector-feishu";
+import type { ConnectorIngressClaim, ConnectorMappingOutcome } from "@work-fabric/connector-spi";
+import type { FeishuMessageMappingPolicy, FeishuParticipantResolver } from "@work-fabric/connector-feishu";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 
 export interface FeishuIntakeTarget { readonly actor_id: string; readonly endpoint_id: string; }
 export interface FeishuIntakeMessagePolicyOptions {
   readonly bot_open_id: string;
-  readonly identity_resolver: ConnectorIdentityResolver;
+  readonly participant_resolver: FeishuParticipantResolver;
   readonly target: FeishuIntakeTarget;
   readonly clock: { now(): string };
   readonly accept_within_seconds: number;
@@ -54,12 +54,23 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
     catch { return { kind: "rejected", reason_code: "invalid_message_content", retryable: false }; }
     if (text.length === 0) return { kind: "ignored", reason_code: "empty_intent" };
     const sender = bounded(payload.sender_open_id, "sender_open_id", 255);
-    const identity = await this.options.identity_resolver.resolve({
-      tenant_id: claim.envelope.tenant_id, connector_id: claim.envelope.connector_id,
-      source_system: "feishu", external_tenant_id: claim.envelope.external_tenant_id,
-      external_subject_type: "user", external_subject_id: sender,
-    });
-    if (identity === null || identity.endpoint_id === undefined) return { kind: "rejected", reason_code: "identity_unmapped", retryable: false };
+    let participant;
+    try {
+      participant = await this.options.participant_resolver.resolve({
+        claim,
+        external_subject_id: sender,
+        external_subject_type: "human",
+      });
+    } catch {
+      return { kind: "rejected", reason_code: "participant_resolution_unavailable", retryable: true };
+    }
+    if (participant.kind !== "resolved") return {
+      kind: "rejected",
+      reason_code: participant.reason_code,
+      retryable: participant.kind === "temporarily_unavailable",
+    };
+    const identity = participant.identity;
+    if (identity.endpoint_id === undefined) return { kind: "rejected", reason_code: "participant_endpoint_missing", retryable: false };
     const now = this.options.clock.now();
     const messageId = bounded(payload.message_id, "message_id", 255);
     const reference = `feishu://${encodeURIComponent(claim.envelope.external_tenant_id)}/message/${encodeURIComponent(messageId)}`;
@@ -89,6 +100,14 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
       accept_by: addSeconds(now, this.options.accept_within_seconds),
       result_due_at: addSeconds(now, this.options.result_due_within_seconds),
     };
-    return { kind: "command", command: { operation: "handoff.offer", idempotency_key: idempotency(claim), identity, input } };
+    return { kind: "command", command: {
+      operation: "handoff.offer",
+      idempotency_key: idempotency(claim),
+      identity,
+      ...(participant.representation_grant === undefined ? {} : {
+        authentication: { kind: "bearer" as const, credential: participant.representation_grant },
+      }),
+      input,
+    } };
   }
 }

@@ -4,6 +4,9 @@ export interface FeishuPluginIdentity {
   readonly actor_type: "human" | "agent" | "system";
   readonly endpoint_id: string;
 }
+export interface FeishuPluginIdentityAdmission {
+  readonly policy_id: string;
+}
 export interface FeishuStaticChannelConfig {
   readonly receive_id_type: "chat_id" | "open_id" | "user_id" | "union_id" | "email";
   readonly receive_id: string;
@@ -78,16 +81,25 @@ interface FeishuPluginConfigBase {
   readonly external_tenant_id: string;
   readonly bot_open_id: string;
   readonly outbound: FeishuPluginOutboundConfig;
-  readonly identities: readonly FeishuPluginIdentity[];
   readonly worker: FeishuPluginWorkerConfig;
 }
 
+type FeishuPluginParticipantConfig =
+  | {
+      readonly identities: readonly FeishuPluginIdentity[];
+      readonly identity_admission?: never;
+    }
+  | {
+      readonly identities?: never;
+      readonly identity_admission: FeishuPluginIdentityAdmission;
+    };
+
 export type FeishuPluginConfig =
-  | (FeishuPluginConfigBase & {
+  | (FeishuPluginConfigBase & FeishuPluginParticipantConfig & {
       readonly credentials: FeishuWebhookCredentials;
       readonly inbound: FeishuWebhookInboundConfig;
     })
-  | (FeishuPluginConfigBase & {
+  | (FeishuPluginConfigBase & FeishuPluginParticipantConfig & {
       readonly credentials: FeishuCommonCredentials;
       readonly inbound: FeishuLongConnectionInboundConfig;
     });
@@ -121,7 +133,7 @@ function stringList(value: unknown, field: string): readonly string[] {
 }
 
 export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
-  const root = object(value, "Feishu plugin config", ["connector_id", "external_tenant_id", "bot_open_id", "credentials", "inbound", "outbound", "identities", "worker"]);
+  const root = object(value, "Feishu plugin config", ["connector_id", "external_tenant_id", "bot_open_id", "credentials", "inbound", "outbound", "identities", "identity_admission", "worker"]);
   const inboundCandidate = object(root.inbound, "inbound", ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]);
   if (inboundCandidate.transport !== "webhook" && inboundCandidate.transport !== "long_connection") throw new TypeError("inbound.transport is invalid");
   const transport = inboundCandidate.transport;
@@ -156,18 +168,27 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
       },
     } satisfies FeishuStaticSubscriptionConfig];
   }));
-  if (!Array.isArray(root.identities) || root.identities.length > 500) throw new TypeError("identities is invalid");
-  const identities = root.identities.map((entry, index): FeishuPluginIdentity => {
-    const item = object(entry, `identities[${index}]`, ["external_open_id", "actor_id", "actor_type", "endpoint_id"]);
-    if (item.actor_type !== "human" && item.actor_type !== "agent" && item.actor_type !== "system") throw new TypeError(`identities[${index}].actor_type is invalid`);
-    return { external_open_id: id(item.external_open_id, `identities[${index}].external_open_id`), actor_id: id(item.actor_id, `identities[${index}].actor_id`, 128), actor_type: item.actor_type, endpoint_id: id(item.endpoint_id, `identities[${index}].endpoint_id`, 128) };
-  });
-  if (new Set(identities.map((item) => item.external_open_id)).size !== identities.length) throw new TypeError("duplicate identity mapping");
+  const hasIdentities = Object.hasOwn(root, "identities");
+  const hasIdentityAdmission = Object.hasOwn(root, "identity_admission");
+  if (hasIdentities === hasIdentityAdmission) throw new TypeError("exactly one of identities or identity_admission is required");
+  let participantConfig: FeishuPluginParticipantConfig;
+  if (hasIdentities) {
+    if (!Array.isArray(root.identities) || root.identities.length > 500) throw new TypeError("identities is invalid");
+    const identities = root.identities.map((entry, index): FeishuPluginIdentity => {
+      const item = object(entry, `identities[${index}]`, ["external_open_id", "actor_id", "actor_type", "endpoint_id"]);
+      if (item.actor_type !== "human" && item.actor_type !== "agent" && item.actor_type !== "system") throw new TypeError(`identities[${index}].actor_type is invalid`);
+      return { external_open_id: id(item.external_open_id, `identities[${index}].external_open_id`), actor_id: id(item.actor_id, `identities[${index}].actor_id`, 128), actor_type: item.actor_type, endpoint_id: id(item.endpoint_id, `identities[${index}].endpoint_id`, 128) };
+    });
+    if (new Set(identities.map((item) => item.external_open_id)).size !== identities.length) throw new TypeError("duplicate identity mapping");
+    participantConfig = { identities };
+  } else {
+    const identityAdmission = object(root.identity_admission, "identity_admission", ["policy_id"]);
+    participantConfig = { identity_admission: { policy_id: id(identityAdmission.policy_id, "identity_admission.policy_id", 128) } };
+  }
   const worker = object(root.worker, "worker", ["poll_interval_ms", "lease_seconds", "batch_limit", "max_attempts"]);
   const base: FeishuPluginConfigBase = {
     connector_id: id(root.connector_id, "connector_id", 128), external_tenant_id: id(root.external_tenant_id, "external_tenant_id"), bot_open_id: id(root.bot_open_id, "bot_open_id"),
     outbound: { enabled: bool(outbound.enabled, "outbound.enabled"), default_render_mode: outbound.default_render_mode, channels, subscriptions },
-    identities,
     worker: { poll_interval_ms: integer(worker.poll_interval_ms, "worker.poll_interval_ms", 1000, 60_000), lease_seconds: integer(worker.lease_seconds, "worker.lease_seconds", 30, 3600), batch_limit: integer(worker.batch_limit, "worker.batch_limit", 100, 1000), max_attempts: integer(worker.max_attempts, "worker.max_attempts", 8, 100) },
   };
   const commonInbound = {
@@ -185,6 +206,7 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
   if (transport === "webhook") {
     return {
       ...base,
+      ...participantConfig,
       credentials: {
         ...commonCredentials,
         verification_token: id(credentials.verification_token, "credentials.verification_token", 512),
@@ -193,7 +215,7 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
       inbound: { ...commonInbound, transport, route_id: id(inbound.route_id, "inbound.route_id", 128) },
     };
   }
-  return { ...base, credentials: commonCredentials, inbound: { ...commonInbound, transport } };
+  return { ...base, ...participantConfig, credentials: commonCredentials, inbound: { ...commonInbound, transport } };
 }
 
 export function feishuSecretPaths(

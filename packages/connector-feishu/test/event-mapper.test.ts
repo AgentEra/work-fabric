@@ -11,6 +11,7 @@ import {
   FeishuActionReferenceCodec,
   FeishuEventMapper,
   FeishuIdentityMapper,
+  type FeishuParticipantResolver,
 } from "../src/index.js";
 
 const manifest = (profile: string) => ({
@@ -18,6 +19,26 @@ const manifest = (profile: string) => ({
   adapter: "test",
   capabilities: {},
 });
+
+function asParticipantResolver(
+  resolver: ConnectorIdentityResolver,
+): FeishuParticipantResolver {
+  return {
+    async resolve(input) {
+      const identity = await resolver.resolve({
+        tenant_id: input.claim.envelope.tenant_id,
+        connector_id: input.claim.envelope.connector_id,
+        source_system: "feishu",
+        external_tenant_id: input.claim.envelope.external_tenant_id,
+        external_subject_type: "user",
+        external_subject_id: input.external_subject_id,
+      });
+      return identity === null
+        ? { kind: "denied", reason_code: "identity_unmapped" }
+        : { kind: "resolved", identity };
+    },
+  };
+}
 
 function claim(
   eventType: "card.action.trigger" | "im.message.receive_v1",
@@ -171,14 +192,17 @@ describe("Feishu identity and action mapping", () => {
       input: { handoff_id: "handoff-1" },
       expires_at: "2026-07-16T00:10:00Z",
     });
-    const resolver: ConnectorIdentityResolver = {
-      manifest: manifest("connector.identity.v1"),
-      async resolve(): Promise<ConnectorResolvedIdentity> {
-        return { actor_id: "human-1", actor_type: "human", endpoint_id: "feishu-endpoint-1" };
+    const resolver: FeishuParticipantResolver = {
+      async resolve() {
+        return {
+          kind: "resolved",
+          identity: { actor_id: "human-1", actor_type: "human", endpoint_id: "feishu-endpoint-1" },
+          representation_grant: "card-action-grant",
+        };
       },
     };
     const mapper = new FeishuEventMapper({
-      identity_resolver: resolver,
+      participant_resolver: resolver,
       action_codec: codec,
       clock: { now: () => "2026-07-16T00:05:00Z" },
     });
@@ -194,9 +218,24 @@ describe("Feishu identity and action mapping", () => {
         operation: "handoff.accept",
         expected_version: 4,
         identity: { actor_id: "human-1", actor_type: "human", endpoint_id: "feishu-endpoint-1" },
+        authentication: { kind: "bearer", credential: "card-action-grant" },
         input: { handoff_id: "handoff-1" },
       },
     });
+  });
+
+  it.each([
+    [{ kind: "denied", reason_code: "scope_mismatch" } as const, false],
+    [{ kind: "temporarily_unavailable", reason_code: "evidence_unavailable" } as const, true],
+  ])("maps card participant resolution %s without leaking detail", async (resolution, retryable) => {
+    const mapper = new FeishuEventMapper({
+      participant_resolver: { async resolve() { return resolution; } },
+      action_codec: new FeishuActionReferenceCodec({ encryption_key: new Uint8Array(32).fill(7) }),
+      clock: { now: () => "2026-07-16T00:05:00Z" },
+    });
+    await expect(mapper.map(claim("card.action.trigger", {
+      operator_open_id: "ou-human-1", action_ref: "opaque", message_id: "om-card-1", action_tag: "button",
+    }))).resolves.toEqual({ kind: "rejected", reason_code: resolution.reason_code, retryable });
   });
 
   it("rejects an action when the external identity mapping changed after issue", async () => {
@@ -216,11 +255,11 @@ describe("Feishu identity and action mapping", () => {
       expires_at: "2026-07-16T00:10:00Z",
     });
     const mapper = new FeishuEventMapper({
-      identity_resolver: new FeishuIdentityMapper(async () => ({
+      participant_resolver: asParticipantResolver(new FeishuIdentityMapper(async () => ({
         actor_id: "human-reassigned",
         actor_type: "human",
         endpoint_id: "endpoint-reassigned",
-      })),
+      }))),
       action_codec: codec,
       clock: { now: () => "2026-07-16T00:05:00Z" },
     });
@@ -254,11 +293,11 @@ describe("Feishu identity and action mapping", () => {
       expires_at: "2026-07-16T00:10:00Z",
     });
     const mapper = new FeishuEventMapper({
-      identity_resolver: new FeishuIdentityMapper(async () => ({
+      participant_resolver: asParticipantResolver(new FeishuIdentityMapper(async () => ({
         actor_id: "shared-actor",
         actor_type: "agent",
         endpoint_id: "shared-endpoint",
-      })),
+      }))),
       action_codec: codec,
       clock: { now: () => "2026-07-16T00:05:00Z" },
     });
@@ -281,7 +320,7 @@ describe("Feishu identity and action mapping", () => {
       async resolve() { return null; },
     };
     const mapper = new FeishuEventMapper({
-      identity_resolver: resolver,
+      participant_resolver: asParticipantResolver(resolver),
       action_codec: new FeishuActionReferenceCodec({
         encryption_key: new Uint8Array(32).fill(7),
       }),

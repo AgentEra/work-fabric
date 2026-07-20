@@ -446,12 +446,27 @@ describe("Feishu Connector roundtrip", () => {
         duplicate: true,
       });
 
+      const identityResolver = new FeishuIdentityMapper(async (query) =>
+        query.external_subject_id === "ou-worker"
+          ? { actor_id: "actor_worker", actor_type: "human", endpoint_id: "endpoint_feishu" }
+          : null,
+      );
       const mapper = new FeishuEventMapper({
-        identity_resolver: new FeishuIdentityMapper(async (query) =>
-          query.external_subject_id === "ou-worker"
-            ? { actor_id: "actor_worker", actor_type: "human", endpoint_id: "endpoint_feishu" }
-            : null,
-        ),
+        participant_resolver: {
+          async resolve(input) {
+            const identity = await identityResolver.resolve({
+              tenant_id: input.claim.envelope.tenant_id,
+              connector_id: input.claim.envelope.connector_id,
+              source_system: "feishu",
+              external_tenant_id: input.claim.envelope.external_tenant_id,
+              external_subject_type: "user",
+              external_subject_id: input.external_subject_id,
+            });
+            return identity === null
+              ? { kind: "denied", reason_code: "identity_unmapped" }
+              : { kind: "resolved", identity };
+          },
+        },
         action_codec: new FeishuActionReferenceCodec({ encryption_key: actionKey }),
         clock: { now: () => "2026-07-16T00:05:00Z" },
       });

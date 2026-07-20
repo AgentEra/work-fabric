@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConnectorIngressClaim } from "@work-fabric/connector-spi";
-import { FeishuIdentityMapper } from "@work-fabric/connector-feishu";
+import type { FeishuParticipantResolution, FeishuParticipantResolver } from "@work-fabric/connector-feishu";
 import { FeishuIntakeMessagePolicy } from "../src/index.js";
 
 function claim(overrides: Record<string, unknown> = {}): ConnectorIngressClaim {
@@ -26,12 +26,16 @@ function claim(overrides: Record<string, unknown> = {}): ConnectorIngressClaim {
   };
 }
 
-function policy(mapped = true) {
+function policy(resolution: FeishuParticipantResolution = {
+  kind: "resolved",
+  identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
+}) {
+  const participantResolver: FeishuParticipantResolver = {
+    async resolve() { return structuredClone(resolution); },
+  };
   return new FeishuIntakeMessagePolicy({
     bot_open_id: "ou-bot-1",
-    identity_resolver: new FeishuIdentityMapper(async () => mapped
-      ? { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" }
-      : null),
+    participant_resolver: participantResolver,
     target: { actor_id: "actor-agent", endpoint_id: "endpoint-agent" },
     clock: { now: () => "2026-07-17T00:00:05.000Z" },
     accept_within_seconds: 86_400,
@@ -59,6 +63,25 @@ describe("FeishuIntakeMessagePolicy", () => {
     expect(result.kind === "command" && result.command.idempotency_key).toMatch(/^feishu-intake:[A-Za-z0-9_-]+$/);
   });
 
+  it("places a representation grant only in command authentication", async () => {
+    const result = await policy({
+      kind: "resolved",
+      identity: { actor_id: "actor-stable", actor_type: "human", endpoint_id: "endpoint-stable" },
+      representation_grant: "secret-representation-grant",
+    }).mapMessage(claim());
+    expect(result).toMatchObject({
+      kind: "command",
+      command: {
+        identity: { actor_id: "actor-stable", actor_type: "human", endpoint_id: "endpoint-stable" },
+        authentication: { kind: "bearer", credential: "secret-representation-grant" },
+      },
+    });
+    expect(JSON.stringify(result.kind === "command" ? {
+      identity: result.command.identity,
+      input: result.command.input,
+    } : result)).not.toContain("secret-representation-grant");
+  });
+
   it.each([
     ["no mention", { mentions: [] }, "bot_not_mentioned"],
     ["different bot", { mentions: [{ key: "@_user_1", open_id: "ou-other" }] }, "bot_not_mentioned"],
@@ -67,9 +90,15 @@ describe("FeishuIntakeMessagePolicy", () => {
     await expect(policy().mapMessage(claim(overrides))).resolves.toEqual({ kind: "ignored", reason_code: reason });
   });
 
-  it("rejects an unmapped sender without creating authority", async () => {
-    await expect(policy(false).mapMessage(claim())).resolves.toEqual({
-      kind: "rejected", reason_code: "identity_unmapped", retryable: false,
+  it("maps participant denial to permanent rejection using only a stable reason", async () => {
+    await expect(policy({ kind: "denied", reason_code: "explicit_deny" }).mapMessage(claim())).resolves.toEqual({
+      kind: "rejected", reason_code: "explicit_deny", retryable: false,
+    });
+  });
+
+  it("maps evidence outage to retryable rejection using only a stable reason", async () => {
+    await expect(policy({ kind: "temporarily_unavailable", reason_code: "evidence_unavailable" }).mapMessage(claim())).resolves.toEqual({
+      kind: "rejected", reason_code: "evidence_unavailable", retryable: true,
     });
   });
 

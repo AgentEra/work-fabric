@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import type {
   ConnectorEventMapper,
-  ConnectorIdentityResolver,
   ConnectorIngressClaim,
   ConnectorMappingOutcome,
 } from "@work-fabric/connector-spi";
@@ -11,6 +10,10 @@ import {
   FeishuActionReferenceError,
   type FeishuActionReferenceCodec,
 } from "./action-token.js";
+import type {
+  FeishuParticipantResolution,
+  FeishuParticipantResolver,
+} from "./participant-resolver.js";
 
 export interface FeishuEventMapperClock {
   now(): string;
@@ -21,10 +24,20 @@ export interface FeishuMessageMappingPolicy {
 }
 
 export interface FeishuEventMapperOptions {
-  readonly identity_resolver: ConnectorIdentityResolver;
+  readonly participant_resolver: FeishuParticipantResolver;
   readonly action_codec: FeishuActionReferenceCodec;
   readonly clock: FeishuEventMapperClock;
   readonly message_policy?: FeishuMessageMappingPolicy;
+}
+
+function participantRejection(
+  resolution: Exclude<FeishuParticipantResolution, { readonly kind: "resolved" }>,
+): ConnectorMappingOutcome {
+  return {
+    kind: "rejected",
+    reason_code: resolution.reason_code,
+    retryable: resolution.kind === "temporarily_unavailable",
+  };
 }
 
 function stringField(
@@ -118,21 +131,22 @@ export class FeishuEventMapper implements ConnectorEventMapper {
         retryable: false,
       };
     }
-    const identity = await this.options.identity_resolver.resolve({
-      tenant_id: claim.envelope.tenant_id,
-      connector_id: claim.envelope.connector_id,
-      source_system: "feishu",
-      external_tenant_id: claim.envelope.external_tenant_id,
-      external_subject_type: "user",
-      external_subject_id: operator,
-    });
-    if (identity === null) {
+    let participant: FeishuParticipantResolution;
+    try {
+      participant = await this.options.participant_resolver.resolve({
+        claim,
+        external_subject_id: operator,
+        external_subject_type: "human",
+      });
+    } catch {
       return {
         kind: "rejected",
-        reason_code: "identity_unmapped",
-        retryable: false,
+        reason_code: "participant_resolution_unavailable",
+        retryable: true,
       };
     }
+    if (participant.kind !== "resolved") return participantRejection(participant);
+    const identity = participant.identity;
 
     try {
       const action = this.options.action_codec.resolve(actionReference, {
@@ -156,6 +170,12 @@ export class FeishuEventMapper implements ConnectorEventMapper {
           idempotency_key: idempotencyKey(claim),
           expected_version: action.expected_version,
           identity: action.identity,
+          ...(participant.representation_grant === undefined ? {} : {
+            authentication: {
+              kind: "bearer" as const,
+              credential: participant.representation_grant,
+            },
+          }),
           input: action.input,
         },
       };

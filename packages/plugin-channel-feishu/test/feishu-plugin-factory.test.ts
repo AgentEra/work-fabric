@@ -1,17 +1,25 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { CollaborationAdmissionService } from "@work-fabric/admission-spi";
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
 import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
 import type {
+  FeishuParticipantResolution,
   FeishuLongConnectionClient,
   FeishuLongConnectionClientFactory,
   FeishuLongConnectionHandler,
   FeishuLongConnectionState,
   FeishuLongConnectionStatus,
 } from "@work-fabric/connector-feishu";
+import type { ConnectorIngressClaim } from "@work-fabric/connector-spi";
 import { MemorySubscriptionStore } from "@work-fabric/exchange-runtime";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 import type { SignalAdapter } from "@work-fabric/exchange-spi";
-import { FeishuPluginFactory, FeishuWebhookRegistry } from "../src/index.js";
+import {
+  AdmissionFeishuParticipantResolver,
+  FeishuPluginFactory,
+  FeishuWebhookRegistry,
+  LegacyFeishuParticipantResolver,
+} from "../src/index.js";
 
 const config = () => ({
   connector_id: "feishu-primary", external_tenant_id: "tenant-key-1", bot_open_id: "ou-bot",
@@ -59,6 +67,23 @@ const longConnectionBody: JsonObject = {
     },
   },
 };
+
+function participantClaim(ingressId = "ingress-admission-1"): ConnectorIngressClaim {
+  return {
+    ingress_id: ingressId,
+    envelope: {
+      tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu",
+      external_tenant_id: "tenant-key-1", external_event_id: "event-1",
+      dedupe_key: "message:om-1", event_type: "im.message.receive_v1",
+      occurred_at: "2026-07-20T00:00:00.000Z", received_at: "2026-07-20T00:00:01.000Z",
+      payload: {},
+    },
+    state: "processing", attempt: 1, available_at: "2026-07-20T00:00:01.000Z",
+    accepted_at: "2026-07-20T00:00:01.000Z", updated_at: "2026-07-20T00:00:02.000Z",
+    claim_owner: "worker-1", claim_token: "claim-1", fencing_token: 1,
+    lease_expires_at: "2026-07-20T00:01:02.000Z",
+  };
+}
 
 function statusFor(state: FeishuLongConnectionState): FeishuLongConnectionStatus {
   return {
@@ -136,6 +161,165 @@ afterEach(() => {
 });
 
 describe("FeishuPluginFactory", () => {
+  it("keeps legacy exact mapping local and never creates a representation grant", async () => {
+    const resolver = new LegacyFeishuParticipantResolver({
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      external_tenant_id: "tenant-key-1",
+      identities: config().identities.map((identity) => ({ ...identity, actor_type: "human" as const })),
+    });
+    await expect(resolver.resolve({
+      claim: participantClaim(), external_subject_id: "ou-human", external_subject_type: "human",
+    })).resolves.toEqual({
+      kind: "resolved",
+      identity: { actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" },
+    });
+    await expect(resolver.resolve({
+      claim: participantClaim(), external_subject_id: "ou-unknown", external_subject_type: "human",
+    })).resolves.toEqual({ kind: "denied", reason_code: "identity_unmapped" });
+  });
+
+  it("forwards the complete participant tuple and preserves duplicate ingress stability for active internal allow", async () => {
+    const admit = vi.fn<CollaborationAdmissionService["admit"]>(async () => ({
+      decision: {
+        kind: "allow", reason_code: "internal_member", policy_id: "feishu-primary-participants", policy_revision: "r1",
+        decision_id: "decision-stable",
+        binding: {
+          tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu", external_tenant_id: "tenant-key-1",
+          external_subject_type: "human", external_subject_fingerprint: "fingerprint",
+          actor_id: "actor-stable", actor_type: "human", endpoint_id: "endpoint-stable", created_at: "2026-07-20T00:00:00.000Z",
+        },
+      },
+      representation_grant: "opaque-grant",
+    }));
+    const resolver = new AdmissionFeishuParticipantResolver({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      policy_id: "feishu-primary-participants", admission: { admit },
+    });
+    const input = { claim: participantClaim(), external_subject_id: "ou-internal", external_subject_type: "human" as const };
+    const first = await resolver.resolve(input);
+    const duplicate = await resolver.resolve(input);
+    expect(first).toEqual({
+      kind: "resolved",
+      identity: { actor_id: "actor-stable", actor_type: "human", endpoint_id: "endpoint-stable" },
+      representation_grant: "opaque-grant",
+    } satisfies FeishuParticipantResolution);
+    expect(duplicate).toEqual(first);
+    expect(admit).toHaveBeenCalledTimes(2);
+    expect(admit).toHaveBeenNthCalledWith(1, "feishu-primary-participants", {
+      tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu",
+      external_tenant_id: "tenant-key-1", external_subject_type: "human",
+      external_subject_id: "ou-internal", ingress_id: "ingress-admission-1",
+    });
+  });
+
+  it("maps exact Admission allow to only the stable binding and opaque grant", async () => {
+    const admission: CollaborationAdmissionService = {
+      async admit() {
+        return {
+          decision: {
+            kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r1",
+            decision_id: "decision-explicit",
+            binding: {
+              tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu", external_tenant_id: "tenant-key-1",
+              external_subject_type: "human", external_subject_fingerprint: "fingerprint-explicit",
+              actor_id: "actor-explicit", actor_type: "human", endpoint_id: "endpoint-explicit", created_at: "2026-07-20T00:00:00.000Z",
+            },
+          },
+          representation_grant: "grant-explicit",
+        };
+      },
+    };
+    const resolver = new AdmissionFeishuParticipantResolver({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      policy_id: "feishu-primary-participants", admission,
+    });
+    await expect(resolver.resolve({
+      claim: participantClaim(), external_subject_id: "ou-explicit", external_subject_type: "human",
+    })).resolves.toEqual({
+      kind: "resolved",
+      identity: { actor_id: "actor-explicit", actor_type: "human", endpoint_id: "endpoint-explicit" },
+      representation_grant: "grant-explicit",
+    });
+  });
+
+  it.each([
+    ["explicit_deny", "denied", false],
+    ["scope_mismatch", "denied", false],
+    ["not_internal_member", "denied", false],
+    ["inactive_subject", "denied", false],
+    ["default_deny", "denied", false],
+    ["evidence_unavailable", "temporarily_unavailable", true],
+  ] as const)("maps Admission %s to stable participant resolution", async (reasonCode, expectedKind, unavailable) => {
+    const admission: CollaborationAdmissionService = {
+      async admit() {
+        return unavailable
+          ? { decision: { kind: "temporarily_unavailable", reason_code: "evidence_unavailable", retry_after_seconds: 5 } }
+          : { decision: { kind: "deny", reason_code: reasonCode as "explicit_deny" | "scope_mismatch" | "not_internal_member" | "inactive_subject" | "default_deny", policy_id: "p", policy_revision: "r", decision_id: "d" } };
+      },
+    };
+    const resolver = new AdmissionFeishuParticipantResolver({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      policy_id: "feishu-primary-participants", admission,
+    });
+    await expect(resolver.resolve({
+      claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human",
+    })).resolves.toEqual({ kind: expectedKind, reason_code: reasonCode });
+  });
+
+  it("fails closed when an allow has no grant or a mismatched binding", async () => {
+    const baseDecision = {
+      kind: "allow" as const, reason_code: "explicit_allow" as const,
+      policy_id: "feishu-primary-participants", policy_revision: "r1", decision_id: "decision-1",
+      binding: {
+        tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu", external_tenant_id: "tenant-key-1",
+        external_subject_type: "human" as const, external_subject_fingerprint: "fingerprint",
+        actor_id: "actor-1", actor_type: "human" as const, endpoint_id: "endpoint-1", created_at: "2026-07-20T00:00:00.000Z",
+      },
+    };
+    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const };
+    const withoutGrant = new AdmissionFeishuParticipantResolver({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1", policy_id: "feishu-primary-participants",
+      admission: { async admit() { return { decision: baseDecision }; } },
+    });
+    await expect(withoutGrant.resolve(input)).resolves.toEqual({ kind: "temporarily_unavailable", reason_code: "grant_unavailable" });
+
+    const mismatched = new AdmissionFeishuParticipantResolver({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1", policy_id: "feishu-primary-participants",
+      admission: { async admit() { return { decision: { ...baseDecision, binding: { ...baseDecision.binding, external_tenant_id: "wrong-tenant" } }, representation_grant: "grant" }; } },
+    });
+    await expect(mismatched.resolve(input)).resolves.toEqual({ kind: "denied", reason_code: "scope_mismatch" });
+  });
+
+  it("resolves the Admission capability only for identity_admission mode", async () => {
+    const fixture = createLongConnectionFixture();
+    const factory = new FeishuPluginFactory();
+    await factory.create(fixture.context, {
+      instance_id: "feishu-primary", type: factory.type, config: factory.validate(config()),
+    });
+    expect(fixture.requested).not.toContain("collaboration.admission");
+
+    const { identities: _identities, ...configured } = config();
+    const requested: string[] = [];
+    const admission: CollaborationAdmissionService = { async admit() { throw new Error("not called during composition"); } };
+    const context = {
+      ...fixture.context,
+      service: {
+        get<T>(key: string): T {
+          requested.push(key);
+          if (key === "collaboration.admission") return admission as T;
+          return fixture.context.service.get<T>(key);
+        },
+      },
+    };
+    await factory.create(context, {
+      instance_id: "feishu-primary",
+      type: factory.type,
+      config: factory.validate({ ...configured, identity_admission: { policy_id: "feishu-primary-participants" } }),
+    });
+    expect(requested.filter((key) => key === "collaboration.admission")).toHaveLength(1);
+  });
+
   it("composes isolated inbound and outbound seams and cleans registrations", async () => {
     const webhook = new FeishuWebhookRegistry();
     const signals = new Map<string, SignalAdapter>();

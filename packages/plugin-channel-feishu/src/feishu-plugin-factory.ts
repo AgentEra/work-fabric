@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
+import type { CollaborationAdmissionService } from "@work-fabric/admission-spi";
 import type { ChannelRouteStore } from "@work-fabric/channel-spi";
 import {
   FeishuActionReferenceCodec,
   FeishuEventMapper,
   FeishuEventRenderer,
-  FeishuIdentityMapper,
   FeishuLongConnectionSource,
   FeishuOpenApiClient,
   FeishuSignalAdapter,
@@ -19,6 +19,10 @@ import type { PluginContext, PluginFactory, PluginHealth, PluginInstance, Plugin
 import { validateFeishuPluginConfig, type FeishuPluginConfig, type FeishuStaticChannelConfig, type FeishuStaticSubscriptionConfig } from "./config.js";
 import { FeishuIntakeMessagePolicy } from "./intake-message-policy.js";
 import { FeishuIntakeReceiptHandler } from "./intake-receipt-handler.js";
+import {
+  AdmissionFeishuParticipantResolver,
+  LegacyFeishuParticipantResolver,
+} from "./participant-resolver.js";
 import { FeishuRouteAwareSignalAdapter } from "./route-aware-signal-adapter.js";
 import type { FeishuWebhookRegistry } from "./webhook-registry.js";
 
@@ -190,13 +194,22 @@ export class FeishuPluginFactory implements PluginFactory {
         });
     const wakeHandoff = context.service.get<(handoffId: string) => void>("runtime.handoff_wakeup");
     const fetch = context.service.get<typeof globalThis.fetch>("runtime.fetch");
-    const identities = new Map(config.identities.map((item) => [item.external_open_id, item]));
-    const identityResolver = new FeishuIdentityMapper(async (query) => {
-      if (query.tenant_id !== tenantId || query.connector_id !== config.connector_id || query.external_tenant_id !== config.external_tenant_id) return null;
-      const value = identities.get(query.external_subject_id); return value === undefined ? null : { actor_id: value.actor_id, actor_type: value.actor_type, endpoint_id: value.endpoint_id };
-    });
+    const participantResolver = config.identity_admission === undefined
+      ? new LegacyFeishuParticipantResolver({
+          tenant_id: tenantId,
+          connector_id: config.connector_id,
+          external_tenant_id: config.external_tenant_id,
+          identities: config.identities,
+        })
+      : new AdmissionFeishuParticipantResolver({
+          tenant_id: tenantId,
+          connector_id: config.connector_id,
+          external_tenant_id: config.external_tenant_id,
+          policy_id: config.identity_admission.policy_id,
+          admission: context.service.get<CollaborationAdmissionService>("collaboration.admission"),
+        });
     const actionCodec = new FeishuActionReferenceCodec({ encryption_key: createHash("sha256").update(config.credentials.app_secret).digest() });
-    const mapper = new FeishuEventMapper({ identity_resolver: identityResolver, action_codec: actionCodec, clock, message_policy: new FeishuIntakeMessagePolicy({ bot_open_id: config.bot_open_id, identity_resolver: identityResolver, target: config.inbound.intake_target, clock, accept_within_seconds: config.inbound.accept_within_seconds, result_due_within_seconds: config.inbound.result_due_within_seconds, max_intent_length: 4_000 }) });
+    const mapper = new FeishuEventMapper({ participant_resolver: participantResolver, action_codec: actionCodec, clock, message_policy: new FeishuIntakeMessagePolicy({ bot_open_id: config.bot_open_id, participant_resolver: participantResolver, target: config.inbound.intake_target, clock, accept_within_seconds: config.inbound.accept_within_seconds, result_due_within_seconds: config.inbound.result_due_within_seconds, max_intent_length: 4_000 }) });
     const receipt = new FeishuIntakeReceiptHandler({ plugin_instance_id: instance.instance_id, routes, subscriptions, max_delivery_attempts: config.worker.max_attempts, on_handoff_ready: wakeHandoff });
     const observation: ConnectorObservationSink = { manifest: { profile: "connector.observation-sink.v1", adapter: "feishu-inert", capabilities: {} }, async record(input) { return { kind: "accepted", receipt_id: `ignored:${input.ingress_id}`, event_ids: [] }; } };
     const worker = new ConnectorWorker({ store: ingress, mapper, command_sink: commandSink, observation_sink: observation, accepted_receipt_handler: receipt, clock, retry_policy: { nextAvailableAt(attempt, _code, now) { return addSeconds(now, Math.min(300, 2 ** Math.min(attempt, 8))); } }, scope: { tenant_id: tenantId, connector_id: config.connector_id, worker_id: `plugin:${instance.instance_id}`, lease_seconds: config.worker.lease_seconds, batch_limit: config.worker.batch_limit, max_attempts: config.worker.max_attempts, max_error_detail_length: 256 } });
