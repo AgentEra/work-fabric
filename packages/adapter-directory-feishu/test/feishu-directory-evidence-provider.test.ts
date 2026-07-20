@@ -54,7 +54,7 @@ function provider(result: FeishuContactBatchResult): {
 }
 
 function success(items: readonly unknown[]): FeishuContactBatchResult {
-  return { kind: "accepted", body: { code: 0, data: { items } } };
+  return { kind: "accepted", items } as FeishuContactBatchResult;
 }
 
 function expectUnavailable(promise: Promise<unknown>): Promise<void> {
@@ -133,7 +133,7 @@ describe("FeishuDirectoryEvidenceProvider", () => {
   });
 
   it.each([
-    ["Feishu nonzero API code", { kind: "accepted", body: { code: 99999, msg: "sensitive-api-message" } }],
+    ["Feishu nonzero API code", { kind: "failure", error_code: "api_rejected" }],
     ["401/403 response", { kind: "failure", error_code: "http_rejected" }],
     ["429/5xx response", { kind: "failure", error_code: "temporarily_unavailable" }],
     ["request timeout", { kind: "failure", error_code: "request_timeout" }],
@@ -146,12 +146,12 @@ describe("FeishuDirectoryEvidenceProvider", () => {
   it("rejects malformed or ambiguous success bodies without exposing raw fields", async () => {
     const rawSecret = "raw-response-secret";
     const cases: FeishuContactBatchResult[] = [
-      { kind: "accepted", body: { code: 0, data: { items: "not-an-array", rawSecret } } },
-      success([{
+      { kind: "accepted", items: "not-an-array" } as unknown as FeishuContactBatchResult,
+      { kind: "accepted", items: [{
         open_id: request.external_subject_id,
         status: { is_activated: "yes", is_exited: false },
         rawSecret,
-      }]),
+      }] } as unknown as FeishuContactBatchResult,
       success([
         { open_id: request.external_subject_id, status: { is_activated: true, is_exited: false } },
         { open_id: request.external_subject_id, status: { is_activated: true, is_exited: false } },
@@ -169,6 +169,33 @@ describe("FeishuDirectoryEvidenceProvider", () => {
       expect(JSON.stringify(failure)).not.toContain(rawSecret);
       expect(String(failure)).not.toContain(rawSecret);
     }
+  });
+
+  it.each(["inherited", "accessor", "undefined_optional"] as const)("rejects an accepted client item with an %s field", async (kind) => {
+    const item = kind === "inherited"
+      ? Object.create({ open_id: request.external_subject_id }) as Record<string, unknown>
+      : kind === "accessor"
+        ? Object.defineProperty({}, "open_id", { get: () => request.external_subject_id }) as Record<string, unknown>
+        : { open_id: request.external_subject_id };
+    item.status = kind === "undefined_optional"
+      ? { is_activated: true, is_exited: undefined }
+      : { is_activated: true, is_exited: false };
+    await expectUnavailable(provider({
+      kind: "accepted",
+      items: [item],
+    } as unknown as FeishuContactBatchResult).provider.resolve(request));
+  });
+
+  it("treats absent is_exited as not exited", async () => {
+    const evidence = provider(success([{
+      open_id: request.external_subject_id,
+      status: { is_activated: true },
+    }])).provider;
+
+    await expect(evidence.resolve(request)).resolves.toMatchObject({
+      membership: "internal",
+      active: true,
+    });
   });
 
   it("fails closed on wrong external tenant scope before loading a token or calling Feishu", async () => {

@@ -43,8 +43,16 @@ export interface FeishuContactBatchInput {
   readonly user_ids: readonly string[];
 }
 
+export interface FeishuContactUser {
+  readonly open_id: string;
+  readonly status: {
+    readonly is_activated: boolean;
+    readonly is_exited?: boolean;
+  };
+}
+
 export type FeishuContactBatchResult =
-  | { readonly kind: "accepted"; readonly body: unknown }
+  | { readonly kind: "accepted"; readonly items: readonly FeishuContactUser[] }
   | {
       readonly kind: "failure";
       readonly error_code:
@@ -52,6 +60,7 @@ export type FeishuContactBatchResult =
         | "token_unavailable"
         | "token_rejected"
         | "http_rejected"
+        | "api_rejected"
         | "temporarily_unavailable"
         | "request_timeout"
         | "network_failure"
@@ -76,6 +85,8 @@ export interface FeishuOpenApiClientOptions {
 const TOKEN_REJECTED_CODES = new Set([99991663, 99991664, 99991668]);
 const CONTACT_TIMEOUT_MS = 10_000;
 const CONTACT_MAX_RESPONSE_BYTES = 64 * 1_024;
+const CONTACT_BATCH_URL = "https://open.feishu.cn/open-apis/contact/v3/users/batch";
+const ABSENT = Symbol("absent");
 const RECEIVE_ID_TYPES = new Set<FeishuReceiveIdType>([
   "open_id",
   "user_id",
@@ -113,6 +124,51 @@ function validateMessage(input: FeishuSendMessageInput): void {
   } catch {
     throw new TypeError("Feishu message content must be JSON");
   }
+}
+
+function ownData(value: unknown, key: string): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError("invalid Contact response");
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined || !("value" in descriptor)) {
+    throw new TypeError("invalid Contact response");
+  }
+  return descriptor.value;
+}
+
+function optionalOwnData(value: object, key: string): unknown | typeof ABSENT {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) {
+    if (Reflect.has(value, key)) throw new TypeError("invalid Contact response");
+    return ABSENT;
+  }
+  if (!("value" in descriptor)) throw new TypeError("invalid Contact response");
+  return descriptor.value;
+}
+
+function safeContactItems(body: unknown): readonly FeishuContactUser[] {
+  const data = ownData(body, "data");
+  const items = ownData(data, "items");
+  if (!Array.isArray(items)) throw new TypeError("invalid Contact response");
+  const safeItems: FeishuContactUser[] = [];
+  for (const item of items) {
+    const openId = ownData(item, "open_id");
+    if (typeof openId !== "string") throw new TypeError("invalid Contact response");
+    bounded(openId, "open_id", 255);
+    const status = ownData(item, "status");
+    const activated = ownData(status, "is_activated");
+    if (typeof activated !== "boolean") throw new TypeError("invalid Contact response");
+    const exited = optionalOwnData(status as object, "is_exited");
+    if (exited !== ABSENT && typeof exited !== "boolean") {
+      throw new TypeError("invalid Contact response");
+    }
+    const safeStatus = exited === ABSENT
+      ? Object.freeze({ is_activated: activated })
+      : Object.freeze({ is_activated: activated, is_exited: exited });
+    safeItems.push(Object.freeze({ open_id: openId, status: safeStatus }));
+  }
+  return Object.freeze(safeItems);
 }
 
 export class FeishuOpenApiClient
@@ -203,7 +259,7 @@ export class FeishuOpenApiClient
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), CONTACT_TIMEOUT_MS);
     try {
-      const url = new URL(`${this.baseUrl}/open-apis/contact/v3/users/batch`);
+      const url = new URL(CONTACT_BATCH_URL);
       for (const userId of userIds) url.searchParams.append("user_ids", userId);
       url.searchParams.set("user_id_type", "open_id");
       const response = await this.options.fetch(url, {
@@ -242,11 +298,18 @@ export class FeishuOpenApiClient
       if (body === null || typeof body !== "object" || Array.isArray(body)) {
         return { kind: "failure", error_code: "invalid_response" };
       }
-      const code = (body as Record<string, unknown>).code;
-      if (typeof code === "number" && TOKEN_REJECTED_CODES.has(code)) {
-        return { kind: "token_rejected" };
+      try {
+        const code = ownData(body, "code");
+        if (typeof code !== "number" || !Number.isSafeInteger(code)) {
+          return { kind: "failure", error_code: "invalid_response" };
+        }
+        if (TOKEN_REJECTED_CODES.has(code)) return { kind: "token_rejected" };
+        if (code !== 0) return { kind: "failure", error_code: "api_rejected" };
+        const items = safeContactItems(body);
+        return Object.freeze({ kind: "accepted", items });
+      } catch {
+        return { kind: "failure", error_code: "invalid_response" };
       }
-      return { kind: "accepted", body };
     } catch {
       return {
         kind: "failure",

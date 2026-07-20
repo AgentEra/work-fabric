@@ -24,18 +24,26 @@ const message = {
 };
 
 describe("FeishuOpenApiClient", () => {
-  it("calls only the fixed Contact v3 batch endpoint with repeated open IDs and a tenant bearer token", async () => {
+  it("pins Contact lookup to the official HTTPS endpoint even when the message base URL is hostile", async () => {
     const fetch = vi.fn(async (
       _input: string | URL | Request,
       _init?: RequestInit,
     ) => new Response(JSON.stringify({
       code: 0,
-      data: { items: [] },
+      msg: "sensitive-upstream-message",
+      data: { items: [{
+        open_id: "ou-user-1",
+        name: "sensitive-name",
+        mobile: "sensitive-mobile",
+        email: "sensitive-email",
+        avatar: { avatar_72: "sensitive-avatar" },
+        status: { is_activated: true, is_exited: false, is_frozen: false },
+      }] },
     }), { status: 200 }));
     const client = new FeishuOpenApiClient({
       token_provider: new Tokens(),
       fetch: fetch as unknown as typeof globalThis.fetch,
-      base_url: "https://open.feishu.test",
+      base_url: "http://attacker.test/redirect",
       request_timeout_ms: 1_000,
       max_response_bytes: 64_000,
     });
@@ -45,13 +53,16 @@ describe("FeishuOpenApiClient", () => {
       user_ids: ["ou-user-1", "ou user/2"],
     })).resolves.toEqual({
       kind: "accepted",
-      body: { code: 0, data: { items: [] } },
+      items: [{
+        open_id: "ou-user-1",
+        status: { is_activated: true, is_exited: false },
+      }],
     });
 
     expect(fetch).toHaveBeenCalledOnce();
     const [input, init] = fetch.mock.calls[0]!;
     const url = new URL(String(input));
-    expect(`${url.origin}${url.pathname}`).toBe("https://open.feishu.test/open-apis/contact/v3/users/batch");
+    expect(`${url.origin}${url.pathname}`).toBe("https://open.feishu.cn/open-apis/contact/v3/users/batch");
     expect(url.searchParams.getAll("user_ids")).toEqual(["ou-user-1", "ou user/2"]);
     expect(url.searchParams.get("user_id_type")).toBe("open_id");
     expect(init).toMatchObject({
@@ -62,6 +73,99 @@ describe("FeishuOpenApiClient", () => {
       },
     });
     expect(init?.body).toBeUndefined();
+  });
+
+  it("returns a sanitized failure for a nonzero Contact API code without retaining msg or body", async () => {
+    const secret = "sensitive-api-message-and-open-id-ou-secret";
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: (async () => new Response(JSON.stringify({
+        code: 12345,
+        msg: secret,
+        data: { items: [{ open_id: secret }] },
+      }), { status: 200 })) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+
+    const result = await client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] });
+    expect(result).toEqual({ kind: "failure", error_code: "api_rejected" });
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
+  it.each([
+    ["missing open_id", { status: { is_activated: true, is_exited: false } }],
+    ["blank open_id", { open_id: " ", status: { is_activated: true, is_exited: false } }],
+    ["missing status", { open_id: "ou-user-1" }],
+    ["nonboolean activation", { open_id: "ou-user-1", status: { is_activated: "yes", is_exited: false } }],
+    ["nonboolean optional exit", { open_id: "ou-user-1", status: { is_activated: true, is_exited: "no" } }],
+  ])("rejects the entire Contact response when one item has %s", async (_label, malformed) => {
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: (async () => new Response(JSON.stringify({
+        code: 0,
+        data: { items: [
+          { open_id: "ou-valid", status: { is_activated: true, is_exited: false } },
+          malformed,
+        ] },
+      }), { status: 200 })) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+
+    await expect(client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-valid"] })).resolves.toEqual({
+      kind: "failure",
+      error_code: "invalid_response",
+    });
+  });
+
+  it("rejects a malformed-only Contact item array", async () => {
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: (async () => new Response(JSON.stringify({
+        code: 0,
+        data: { items: [{ status: { is_activated: true } }] },
+      }), { status: 200 })) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+
+    await expect(client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] })).resolves.toEqual({
+      kind: "failure",
+      error_code: "invalid_response",
+    });
+  });
+
+  it("returns an immutable exact safe Contact item shape and permits absent is_exited", async () => {
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: (async () => new Response(JSON.stringify({
+        code: 0,
+        data: { items: [{
+          open_id: "ou-user-1",
+          ignored: "raw-secret",
+          status: { is_activated: true, ignored: "status-secret" },
+        }] },
+      }), { status: 200 })) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+
+    const result = await client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] });
+    expect(result).toEqual({
+      kind: "accepted",
+      items: [{ open_id: "ou-user-1", status: { is_activated: true } }],
+    });
+    expect(JSON.stringify(result)).not.toContain("secret");
+    if (result.kind !== "accepted") throw new Error("expected accepted result");
+    expect(Object.isFrozen(result)).toBe(true);
+    expect(Object.isFrozen(result.items)).toBe(true);
+    expect(Object.isFrozen(result.items[0])).toBe(true);
+    expect(Object.isFrozen(result.items[0]!.status)).toBe(true);
   });
 
   it.each([401, 403, 429, 503])("returns only a sanitized failure for Contact HTTP %s", async (status) => {

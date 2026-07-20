@@ -10,6 +10,7 @@ import type { FeishuContactApiClient } from "@work-fabric/connector-feishu";
 import { assertCapabilities, type CapabilityManifest } from "@work-fabric/exchange-spi";
 
 const PROVIDER_REVISION = "feishu-contact-v3";
+const ABSENT = Symbol("absent");
 
 const manifest: CapabilityManifest = {
   profile: "admission.evidence-provider.v1",
@@ -57,6 +58,16 @@ function ownData(value: unknown, key: string): unknown {
   }
   const descriptor = Object.getOwnPropertyDescriptor(value, key);
   if (descriptor === undefined || !("value" in descriptor)) throw unavailable();
+  return descriptor.value;
+}
+
+function optionalOwnData(value: object, key: string): unknown | typeof ABSENT {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) {
+    if (Reflect.has(value, key)) throw unavailable();
+    return ABSENT;
+  }
+  if (!("value" in descriptor)) throw unavailable();
   return descriptor.value;
 }
 
@@ -114,19 +125,25 @@ export class FeishuDirectoryEvidenceProvider
         user_ids: [request.external_subject_id],
       });
       if (ownData(result, "kind") !== "accepted") throw unavailable();
-      const body = ownData(result, "body");
-      if (ownData(body, "code") !== 0) throw unavailable();
-      const data = ownData(body, "data");
-      const items = ownData(data, "items");
+      const items = ownData(result, "items");
       if (!Array.isArray(items)) throw unavailable();
 
-      const matches = items.filter((item) => {
-        try {
-          return ownData(item, "open_id") === request.external_subject_id;
-        } catch {
-          return false;
-        }
-      });
+      const matches: Array<{ readonly activated: boolean; readonly exited: boolean | typeof ABSENT }> = [];
+      for (const item of items) {
+        const openId = ownData(item, "open_id");
+        if (
+          typeof openId !== "string" ||
+          openId.length === 0 ||
+          openId.length > 255 ||
+          openId.trim() !== openId
+        ) throw unavailable();
+        const status = ownData(item, "status");
+        const activated = ownData(status, "is_activated");
+        if (typeof activated !== "boolean") throw unavailable();
+        const exited = optionalOwnData(status as object, "is_exited");
+        if (exited !== ABSENT && typeof exited !== "boolean") throw unavailable();
+        if (openId === request.external_subject_id) matches.push({ activated, exited });
+      }
       const timestamp = observedAt(this.options.clock);
       if (matches.length === 0) {
         return Object.freeze({
@@ -137,15 +154,10 @@ export class FeishuDirectoryEvidenceProvider
         });
       }
       if (matches.length !== 1) throw unavailable();
-      const status = ownData(matches[0], "status");
-      const activated = ownData(status, "is_activated");
-      const exited = ownData(status, "is_exited");
-      if (typeof activated !== "boolean" || typeof exited !== "boolean") {
-        throw unavailable();
-      }
+      const match = matches[0]!;
       return Object.freeze({
         membership: "internal",
-        active: activated === true && exited !== true,
+        active: match.activated === true && match.exited !== true,
         observed_at: timestamp,
         provider_revision: PROVIDER_REVISION,
       });
