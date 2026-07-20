@@ -79,18 +79,24 @@ function boundedIdentifier(value: unknown): value is string {
     && value.trim() === value;
 }
 
+function protocolActorType(
+  value: unknown,
+): value is ConnectorResolvedIdentity["actor_type"] {
+  return value === "human" || value === "agent" || value === "system";
+}
+
 function participantIdentity(value: unknown): ConnectorResolvedIdentity {
   const identity = strictRecord(value, ["actor_id", "actor_type", "endpoint_id"]);
   if (
     !boundedIdentifier(identity.actor_id)
-    || identity.actor_type !== "human"
+    || !protocolActorType(identity.actor_type)
     || !boundedIdentifier(identity.endpoint_id)
   ) {
     throw new TypeError("participant resolution is invalid");
   }
   return {
     actor_id: identity.actor_id,
-    actor_type: "human",
+    actor_type: identity.actor_type,
     endpoint_id: identity.endpoint_id,
   };
 }

@@ -171,7 +171,11 @@ describe("FeishuPluginFactory", () => {
       tenant_id: "tenant-1",
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
-      identities: config().identities.map((identity) => ({ ...identity, actor_type: "human" as const })),
+      identities: [
+        ...config().identities.map((identity) => ({ ...identity, actor_type: "human" as const })),
+        { external_open_id: "ou-agent", actor_id: "actor-agent", actor_type: "agent", endpoint_id: "endpoint-agent" },
+        { external_open_id: "ou-system", actor_id: "actor-system", actor_type: "system", endpoint_id: "endpoint-system" },
+      ],
     });
     await expect(resolver.resolve({
       claim: participantClaim(), external_subject_id: "ou-human", external_subject_type: "human",
@@ -182,6 +186,16 @@ describe("FeishuPluginFactory", () => {
     await expect(resolver.resolve({
       claim: participantClaim(), external_subject_id: "ou-unknown", external_subject_type: "human",
     })).resolves.toEqual({ kind: "denied", reason_code: "identity_unmapped" });
+    await expect(resolver.resolve({
+      claim: participantClaim(), external_subject_id: "ou-agent", external_subject_type: "human",
+    })).resolves.toEqual({
+      kind: "resolved", identity: { actor_id: "actor-agent", actor_type: "agent", endpoint_id: "endpoint-agent" },
+    });
+    await expect(resolver.resolve({
+      claim: participantClaim(), external_subject_id: "ou-system", external_subject_type: "human",
+    })).resolves.toEqual({
+      kind: "resolved", identity: { actor_id: "actor-system", actor_type: "system", endpoint_id: "endpoint-system" },
+    });
   });
 
   it("forwards the complete participant tuple and preserves duplicate ingress stability for active internal allow", async () => {
@@ -248,6 +262,53 @@ describe("FeishuPluginFactory", () => {
     });
   });
 
+  it.each(["agent", "system"] as const)("preserves an Admission-bound %s Actor for a human external subject", async (actorType) => {
+    const admission: CollaborationAdmissionService = {
+      async admit() {
+        return {
+          decision: {
+            kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r1",
+            decision_id: `decision-${actorType}`,
+            binding: {
+              tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu", external_tenant_id: "tenant-key-1",
+              external_subject_type: "human", external_subject_fingerprint: `fingerprint-${actorType}`,
+              actor_id: `actor-${actorType}`, actor_type: actorType, endpoint_id: `endpoint-${actorType}`, created_at: "2026-07-20T00:00:00.000Z",
+            },
+          },
+          representation_grant: `grant-${actorType}`,
+        };
+      },
+    };
+    const resolver = new AdmissionFeishuParticipantResolver({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      policy_id: "feishu-primary-participants", admission,
+    });
+    await expect(resolver.resolve({
+      claim: participantClaim(), external_subject_id: `ou-${actorType}`, external_subject_type: "human",
+    })).resolves.toEqual({
+      kind: "resolved",
+      identity: { actor_id: `actor-${actorType}`, actor_type: actorType, endpoint_id: `endpoint-${actorType}` },
+      representation_grant: `grant-${actorType}`,
+    });
+  });
+
+  it("accepts any positive safe retry delay and rejects invalid retry delays", async () => {
+    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const };
+    const resolverFor = (retryAfterSeconds: number) => new AdmissionFeishuParticipantResolver({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      policy_id: "feishu-primary-participants",
+      admission: { async admit() { return { decision: { kind: "temporarily_unavailable", reason_code: "evidence_unavailable", retry_after_seconds: retryAfterSeconds } }; } },
+    });
+    await expect(resolverFor(86_401).resolve(input)).resolves.toEqual({
+      kind: "temporarily_unavailable", reason_code: "evidence_unavailable",
+    });
+    for (const invalid of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(resolverFor(invalid).resolve(input)).resolves.toEqual({
+        kind: "temporarily_unavailable", reason_code: "admission_unavailable",
+      });
+    }
+  });
+
   it.each([
     ["explicit_deny", "denied", false],
     ["scope_mismatch", "denied", false],
@@ -311,7 +372,7 @@ describe("FeishuPluginFactory", () => {
       Object.create({ decision: { kind: "deny", reason_code: "explicit_deny", policy_id: "p", policy_revision: "r", decision_id: "d" } }),
       { decision: { kind: "deny", reason_code: secret, policy_id: "p", policy_revision: "r", decision_id: "d" } },
       { decision: { kind: "deny", reason_code: "explicit_deny", policy_id: "p", policy_revision: "r", decision_id: "d", extra: secret } },
-      { decision: { kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r", decision_id: "d", binding: { ...validBinding, actor_type: "agent" } }, representation_grant: secret },
+      { decision: { kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r", decision_id: "d", binding: { ...validBinding, actor_type: "robot" } }, representation_grant: secret },
       { decision: { kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r", decision_id: "d", binding: validBinding }, representation_grant: undefined },
       new Proxy({ decision: { kind: "temporarily_unavailable", reason_code: "evidence_unavailable", retry_after_seconds: 5 } }, { getOwnPropertyDescriptor() { throw new Error(secret); } }),
     ];

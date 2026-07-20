@@ -73,6 +73,12 @@ function bounded(value: unknown, maximum = 255): value is string {
     && value.trim() === value;
 }
 
+function protocolActorType(
+  value: unknown,
+): value is ParticipantBinding["actor_type"] {
+  return value === "human" || value === "agent" || value === "system";
+}
+
 function kindOf(value: unknown): unknown {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError("admission result is invalid");
@@ -117,7 +123,7 @@ function parseBinding(value: unknown): ParticipantBinding {
     || binding.external_subject_type !== "human"
     || !bounded(binding.external_subject_fingerprint)
     || !bounded(binding.actor_id)
-    || binding.actor_type !== "human"
+    || !protocolActorType(binding.actor_type)
     || !bounded(binding.endpoint_id)
     || !bounded(binding.created_at)
   ) {
@@ -131,7 +137,7 @@ function parseBinding(value: unknown): ParticipantBinding {
     external_subject_type: "human",
     external_subject_fingerprint: binding.external_subject_fingerprint,
     actor_id: binding.actor_id,
-    actor_type: "human",
+    actor_type: binding.actor_type,
     endpoint_id: binding.endpoint_id,
     created_at: binding.created_at,
   };
@@ -154,7 +160,6 @@ function parseAdmissionResult(value: unknown): AdmissionResult {
       || !UNAVAILABLE_REASONS.has(decision.reason_code)
       || !Number.isSafeInteger(decision.retry_after_seconds)
       || (decision.retry_after_seconds as number) <= 0
-      || (decision.retry_after_seconds as number) > 86_400
     ) throw new TypeError("admission result is invalid");
     return {
       decision: {

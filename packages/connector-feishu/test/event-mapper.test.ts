@@ -287,7 +287,7 @@ describe("Feishu identity and action mapping", () => {
       Object.create({ kind: "denied", reason_code: grant }),
       { kind: "denied", reason_code: grant },
       { kind: "denied", reason_code: "explicit_deny", extra: grant },
-      { kind: "resolved", identity: { actor_id: "actor", actor_type: "agent", endpoint_id: "endpoint" }, representation_grant: grant },
+      { kind: "resolved", identity: { actor_id: "actor", actor_type: "robot", endpoint_id: "endpoint" }, representation_grant: grant },
       { kind: "resolved", identity: { actor_id: "actor", actor_type: "human", endpoint_id: "endpoint" }, representation_grant: undefined },
       new Proxy({ kind: "denied", reason_code: "explicit_deny" }, { getOwnPropertyDescriptor() { throw new Error(grant); } }),
     ];
@@ -352,7 +352,7 @@ describe("Feishu identity and action mapping", () => {
     });
   });
 
-  it("fails closed when a human participant resolver changes to a non-human actor type", async () => {
+  it("preserves a protocol-valid Agent Actor and detects a changed action identity", async () => {
     const codec = new FeishuActionReferenceCodec({
       encryption_key: new Uint8Array(32).fill(7),
       nonce_factory: () => new Uint8Array(12).fill(5),
@@ -385,8 +385,8 @@ describe("Feishu identity and action mapping", () => {
       action_tag: "button",
     }))).resolves.toEqual({
       kind: "rejected",
-      reason_code: "participant_resolution_unavailable",
-      retryable: true,
+      reason_code: "identity_mapping_changed",
+      retryable: false,
     });
   });
 

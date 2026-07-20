@@ -28,7 +28,7 @@ function claim(overrides: Record<string, unknown> = {}): ConnectorIngressClaim {
 
 function policy(resolution: FeishuParticipantResolution = {
   kind: "resolved",
-  identity: { actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" },
+  identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
 }) {
   const participantResolver: FeishuParticipantResolver = {
     async resolve() { return resolution; },
@@ -51,16 +51,29 @@ describe("FeishuIntakeMessagePolicy", () => {
       kind: "command",
       command: {
         operation: "handoff.offer",
-        identity: { actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" },
+        identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
         input: {
           work_reference: { uri: "feishu://tenant-key-1/message/om-1" },
           target: { actor_id: "actor-agent" },
           intent: [{ kind: "text", media_type: "text/plain", text: "create a requirement" }],
-          verifier: { actor_id: "actor-human", actor_type: "human" },
+          verifier: { actor_id: "actor-human", actor_type: "agent" },
         },
       },
     });
     expect(result.kind === "command" && result.command.idempotency_key).toMatch(/^feishu-intake:[A-Za-z0-9_-]+$/);
+  });
+
+  it("preserves a protocol-valid system Actor for a human external participant", async () => {
+    await expect(policy({
+      kind: "resolved",
+      identity: { actor_id: "system-actor", actor_type: "system", endpoint_id: "system-endpoint" },
+    }).mapMessage(claim())).resolves.toMatchObject({
+      kind: "command",
+      command: {
+        identity: { actor_id: "system-actor", actor_type: "system", endpoint_id: "system-endpoint" },
+        input: { verifier: { actor_id: "system-actor", actor_type: "system" } },
+      },
+    });
   });
 
   it("places a representation grant only in command authentication", async () => {
@@ -111,7 +124,7 @@ describe("FeishuIntakeMessagePolicy", () => {
     const extra = { kind: "denied", reason_code: "explicit_deny", grant: secret } as unknown as FeishuParticipantResolution;
     const wrongActorType = {
       kind: "resolved",
-      identity: { actor_id: "actor", actor_type: "agent", endpoint_id: "endpoint" },
+      identity: { actor_id: "actor", actor_type: "robot", endpoint_id: "endpoint" },
       representation_grant: secret,
     } as unknown as FeishuParticipantResolution;
     const undefinedGrant = {
