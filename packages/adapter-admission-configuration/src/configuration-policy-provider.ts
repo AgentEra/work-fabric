@@ -77,7 +77,7 @@ function validatePolicy(value: unknown, path: string, evidenceProviders: Readonl
       "evidence_provider_ref", "positive_ttl_seconds", "negative_ttl_seconds",
     ]);
     const evidenceProviderRef = identifier(membership.evidence_provider_ref, `${path}.internal_membership.evidence_provider_ref`, 128);
-    if (evidenceProviders[evidenceProviderRef] === undefined) throw new TypeError(`${path}.internal_membership.evidence_provider_ref is unknown`);
+    if (!Object.hasOwn(evidenceProviders, evidenceProviderRef)) throw new TypeError(`${path}.internal_membership.evidence_provider_ref is unknown`);
     internalMembership = {
       evidence_provider_ref: evidenceProviderRef,
       positive_ttl_seconds: ttl(membership.positive_ttl_seconds, `${path}.internal_membership.positive_ttl_seconds`),
@@ -138,7 +138,8 @@ export class ConfigurationAdmissionPolicyProvider implements AdmissionPolicyProv
   constructor(private readonly section: AdmissionConfigurationSection) {}
 
   async load(policyId: string): Promise<AdmissionPolicy | null> {
+    if (!Object.hasOwn(this.section.policies, policyId)) return null;
     const policy = this.section.policies[policyId];
-    return policy === undefined ? null : structuredClone(policy);
+    return structuredClone(policy!);
   }
 }

@@ -59,4 +59,24 @@ describe("Admission configuration policy provider", () => {
   ])("rejects %s", (_label, value) => {
     expect(() => validateAdmissionConfiguration(value, "admission")).toThrow();
   });
+
+  it.each(["toString", "constructor"])("rejects a prototype-named missing evidence provider reference: %s", (providerRef) => {
+    expect(() => validateAdmissionConfiguration(configuration({
+      policies: {
+        "policy-primary": policy({
+          allow: { all_internal_members: true, external_subject_ids: [] },
+          internal_membership: {
+            evidence_provider_ref: providerRef,
+            positive_ttl_seconds: 60,
+            negative_ttl_seconds: 60,
+          },
+        }),
+      },
+    }), "admission")).toThrow();
+  });
+
+  it.each(["toString", "constructor"])("returns null for a prototype-named missing policy ID: %s", async (policyId) => {
+    const provider = new ConfigurationAdmissionPolicyProvider(validateAdmissionConfiguration(configuration(), "admission"));
+    await expect(provider.load(policyId)).resolves.toBeNull();
+  });
 });
