@@ -32,6 +32,36 @@ export interface ChannelSignalRegistration {
 }
 interface RuntimeClock { now(): string; nowEpochSeconds(): number; }
 
+function validatedAdmissionCapability(value: unknown): CollaborationAdmissionService {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
+    throw new TypeError("collaboration.admission capability is invalid");
+  }
+  const visited = new Set<object>();
+  let current: object | null = value as object;
+  try {
+    while (current !== null && visited.size < 32) {
+      if (visited.has(current)) throw new TypeError("collaboration.admission capability is invalid");
+      visited.add(current);
+      const descriptor = Object.getOwnPropertyDescriptor(current, "admit");
+      if (descriptor !== undefined) {
+        if (!("value" in descriptor) || typeof descriptor.value !== "function") {
+          throw new TypeError("collaboration.admission capability is invalid");
+        }
+        const method = descriptor.value as CollaborationAdmissionService["admit"];
+        return {
+          admit(policyId, request) {
+            return Reflect.apply(method, value, [policyId, request]) as ReturnType<CollaborationAdmissionService["admit"]>;
+          },
+        };
+      }
+      current = Object.getPrototypeOf(current) as object | null;
+    }
+  } catch {
+    throw new TypeError("collaboration.admission capability is invalid");
+  }
+  throw new TypeError("collaboration.admission capability is invalid");
+}
+
 type FeishuWebhookPluginConfig = Extract<
   FeishuPluginConfig,
   { readonly inbound: { readonly transport: "webhook" } }
@@ -206,7 +236,9 @@ export class FeishuPluginFactory implements PluginFactory {
           connector_id: config.connector_id,
           external_tenant_id: config.external_tenant_id,
           policy_id: config.identity_admission.policy_id,
-          admission: context.service.get<CollaborationAdmissionService>("collaboration.admission"),
+          admission: validatedAdmissionCapability(
+            context.service.get<unknown>("collaboration.admission"),
+          ),
         });
     const actionCodec = new FeishuActionReferenceCodec({ encryption_key: createHash("sha256").update(config.credentials.app_secret).digest() });
     const mapper = new FeishuEventMapper({ participant_resolver: participantResolver, action_codec: actionCodec, clock, message_policy: new FeishuIntakeMessagePolicy({ bot_open_id: config.bot_open_id, participant_resolver: participantResolver, target: config.inbound.intake_target, clock, accept_within_seconds: config.inbound.accept_within_seconds, result_due_within_seconds: config.inbound.result_due_within_seconds, max_intent_length: 4_000 }) });

@@ -107,9 +107,44 @@ export type FeishuPluginConfig =
 function object(value: unknown, field: string, keys: readonly string[]): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${field} must be an object`);
   const result = value as Record<string, unknown>;
-  const unknown = Object.keys(result).find((key) => !keys.includes(key));
+  let actualKeys: readonly string[];
+  try {
+    actualKeys = Object.keys(result);
+  } catch {
+    throw new TypeError(`${field} is invalid`);
+  }
+  const unknown = actualKeys.find((key) => !keys.includes(key));
   if (unknown !== undefined) throw new TypeError(`${field} contains unknown key ${unknown}`);
   return result;
+}
+function ownDataDescriptor(value: object, key: string, field: string): PropertyDescriptor | undefined {
+  let descriptor: PropertyDescriptor | undefined;
+  try {
+    descriptor = Object.getOwnPropertyDescriptor(value, key);
+  } catch {
+    throw new TypeError(`${field} is invalid`);
+  }
+  if (descriptor !== undefined && !("value" in descriptor)) throw new TypeError(`${field} must be an own data property`);
+  return descriptor;
+}
+function strictOwnDataObject(value: unknown, field: string, keys: readonly string[]): Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${field} must be an object`);
+  let actual: readonly PropertyKey[];
+  try {
+    actual = Reflect.ownKeys(value);
+  } catch {
+    throw new TypeError(`${field} is invalid`);
+  }
+  if (actual.length !== keys.length || actual.some((key) => typeof key !== "string" || !keys.includes(key))) {
+    throw new TypeError(`${field} has invalid keys`);
+  }
+  const parsed: Record<string, unknown> = {};
+  for (const key of keys) {
+    const descriptor = ownDataDescriptor(value, key, `${field}.${key}`);
+    if (descriptor === undefined) throw new TypeError(`${field}.${key} is required`);
+    parsed[key] = descriptor.value;
+  }
+  return parsed;
 }
 function id(value: unknown, field: string, maximum = 255): string {
   if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim() !== value) throw new TypeError(`${field} is invalid`);
@@ -134,6 +169,9 @@ function stringList(value: unknown, field: string): readonly string[] {
 
 export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
   const root = object(value, "Feishu plugin config", ["connector_id", "external_tenant_id", "bot_open_id", "credentials", "inbound", "outbound", "identities", "identity_admission", "worker"]);
+  const identitiesDescriptor = ownDataDescriptor(root, "identities", "identities");
+  const admissionDescriptor = ownDataDescriptor(root, "identity_admission", "identity_admission");
+  if ((identitiesDescriptor === undefined) === (admissionDescriptor === undefined)) throw new TypeError("exactly one of identities or identity_admission is required");
   const inboundCandidate = object(root.inbound, "inbound", ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]);
   if (inboundCandidate.transport !== "webhook" && inboundCandidate.transport !== "long_connection") throw new TypeError("inbound.transport is invalid");
   const transport = inboundCandidate.transport;
@@ -168,13 +206,11 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
       },
     } satisfies FeishuStaticSubscriptionConfig];
   }));
-  const hasIdentities = Object.hasOwn(root, "identities");
-  const hasIdentityAdmission = Object.hasOwn(root, "identity_admission");
-  if (hasIdentities === hasIdentityAdmission) throw new TypeError("exactly one of identities or identity_admission is required");
   let participantConfig: FeishuPluginParticipantConfig;
-  if (hasIdentities) {
-    if (!Array.isArray(root.identities) || root.identities.length > 500) throw new TypeError("identities is invalid");
-    const identities = root.identities.map((entry, index): FeishuPluginIdentity => {
+  if (identitiesDescriptor !== undefined) {
+    const rawIdentities = identitiesDescriptor.value;
+    if (!Array.isArray(rawIdentities) || rawIdentities.length > 500) throw new TypeError("identities is invalid");
+    const identities = rawIdentities.map((entry, index): FeishuPluginIdentity => {
       const item = object(entry, `identities[${index}]`, ["external_open_id", "actor_id", "actor_type", "endpoint_id"]);
       if (item.actor_type !== "human" && item.actor_type !== "agent" && item.actor_type !== "system") throw new TypeError(`identities[${index}].actor_type is invalid`);
       return { external_open_id: id(item.external_open_id, `identities[${index}].external_open_id`), actor_id: id(item.actor_id, `identities[${index}].actor_id`, 128), actor_type: item.actor_type, endpoint_id: id(item.endpoint_id, `identities[${index}].endpoint_id`, 128) };
@@ -182,7 +218,7 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
     if (new Set(identities.map((item) => item.external_open_id)).size !== identities.length) throw new TypeError("duplicate identity mapping");
     participantConfig = { identities };
   } else {
-    const identityAdmission = object(root.identity_admission, "identity_admission", ["policy_id"]);
+    const identityAdmission = strictOwnDataObject(admissionDescriptor!.value, "identity_admission", ["policy_id"]);
     participantConfig = { identity_admission: { policy_id: id(identityAdmission.policy_id, "identity_admission.policy_id", 128) } };
   }
   const worker = object(root.worker, "worker", ["poll_interval_ms", "lease_seconds", "batch_limit", "max_attempts"]);

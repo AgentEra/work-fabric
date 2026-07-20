@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConnectorIngressClaim, ConnectorMappingOutcome } from "@work-fabric/connector-spi";
-import type { FeishuMessageMappingPolicy, FeishuParticipantResolver } from "@work-fabric/connector-feishu";
+import { parseFeishuParticipantResolution, type FeishuMessageMappingPolicy, type FeishuParticipantResolver } from "@work-fabric/connector-feishu";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 
 export interface FeishuIntakeTarget { readonly actor_id: string; readonly endpoint_id: string; }
@@ -56,11 +56,13 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
     const sender = bounded(payload.sender_open_id, "sender_open_id", 255);
     let participant;
     try {
-      participant = await this.options.participant_resolver.resolve({
-        claim,
-        external_subject_id: sender,
-        external_subject_type: "human",
-      });
+      participant = parseFeishuParticipantResolution(
+        await this.options.participant_resolver.resolve({
+          claim,
+          external_subject_id: sender,
+          external_subject_type: "human",
+        }),
+      );
     } catch {
       return { kind: "rejected", reason_code: "participant_resolution_unavailable", retryable: true };
     }

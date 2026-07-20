@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   ConnectorIdentityQuery,
@@ -12,6 +12,7 @@ import {
   FeishuEventMapper,
   FeishuIdentityMapper,
   type FeishuParticipantResolver,
+  type FeishuParticipantResolution,
 } from "../src/index.js";
 
 const manifest = (profile: string) => ({
@@ -228,14 +229,89 @@ describe("Feishu identity and action mapping", () => {
     [{ kind: "denied", reason_code: "scope_mismatch" } as const, false],
     [{ kind: "temporarily_unavailable", reason_code: "evidence_unavailable" } as const, true],
   ])("maps card participant resolution %s without leaking detail", async (resolution, retryable) => {
+    const codec = new FeishuActionReferenceCodec({ encryption_key: new Uint8Array(32).fill(7) });
+    const actionRef = codec.issue({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      external_subject_id: "ou-human-1",
+      identity: { actor_id: "human-1", actor_type: "human", endpoint_id: "endpoint-1" },
+      operation: "handoff.accept", expected_version: 1, input: { handoff_id: "handoff-1" },
+      expires_at: "2026-07-16T00:10:00Z",
+    });
     const mapper = new FeishuEventMapper({
       participant_resolver: { async resolve() { return resolution; } },
-      action_codec: new FeishuActionReferenceCodec({ encryption_key: new Uint8Array(32).fill(7) }),
+      action_codec: codec,
       clock: { now: () => "2026-07-16T00:05:00Z" },
     });
     await expect(mapper.map(claim("card.action.trigger", {
-      operator_open_id: "ou-human-1", action_ref: "opaque", message_id: "om-card-1", action_tag: "button",
+      operator_open_id: "ou-human-1", action_ref: actionRef, message_id: "om-card-1", action_tag: "button",
     }))).resolves.toEqual({ kind: "rejected", reason_code: resolution.reason_code, retryable });
+  });
+
+  it("validates action authenticity and expiry before participant resolution", async () => {
+    const resolveParticipant = vi.fn(async () => ({
+      kind: "denied" as const,
+      reason_code: "explicit_deny",
+    }));
+    const codec = new FeishuActionReferenceCodec({
+      encryption_key: new Uint8Array(32).fill(9),
+      nonce_factory: () => new Uint8Array(12).fill(8),
+    });
+    const expired = codec.issue({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      external_subject_id: "ou-human-1",
+      identity: { actor_id: "human-1", actor_type: "human", endpoint_id: "endpoint-1" },
+      operation: "handoff.accept", expected_version: 1, input: { handoff_id: "handoff-1" },
+      expires_at: "2026-07-16T00:04:00Z",
+    });
+    const mapper = new FeishuEventMapper({
+      participant_resolver: { resolve: resolveParticipant },
+      action_codec: codec,
+      clock: { now: () => "2026-07-16T00:05:00Z" },
+    });
+    await expect(mapper.map(claim("card.action.trigger", {
+      operator_open_id: "ou-human-1", action_ref: "not-a-token", message_id: "om-1", action_tag: "button",
+    }))).resolves.toEqual({ kind: "rejected", reason_code: "invalid_action_reference", retryable: false });
+    await expect(mapper.map(claim("card.action.trigger", {
+      operator_open_id: "ou-human-1", action_ref: expired, message_id: "om-1", action_tag: "button",
+    }))).resolves.toEqual({ kind: "rejected", reason_code: "action_expired", retryable: false });
+    expect(resolveParticipant).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on hostile participant results without invoking accessors or reflecting grants", async () => {
+    const grant = "grant-must-not-become-an-error";
+    const kindGetter = vi.fn(() => "denied");
+    const accessor: Record<string, unknown> = { reason_code: grant };
+    Object.defineProperty(accessor, "kind", { enumerable: true, get: kindGetter });
+    const hostile = [
+      accessor,
+      Object.create({ kind: "denied", reason_code: grant }),
+      { kind: "denied", reason_code: grant },
+      { kind: "denied", reason_code: "explicit_deny", extra: grant },
+      { kind: "resolved", identity: { actor_id: "actor", actor_type: "agent", endpoint_id: "endpoint" }, representation_grant: grant },
+      { kind: "resolved", identity: { actor_id: "actor", actor_type: "human", endpoint_id: "endpoint" }, representation_grant: undefined },
+      new Proxy({ kind: "denied", reason_code: "explicit_deny" }, { getOwnPropertyDescriptor() { throw new Error(grant); } }),
+    ];
+    const codec = new FeishuActionReferenceCodec({ encryption_key: new Uint8Array(32).fill(7) });
+    const actionRef = codec.issue({
+      tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+      external_subject_id: "ou-human-1",
+      identity: { actor_id: "actor", actor_type: "human", endpoint_id: "endpoint" },
+      operation: "handoff.accept", expected_version: 1, input: { handoff_id: "handoff-1" },
+      expires_at: "2026-07-16T00:10:00Z",
+    });
+    for (const result of hostile) {
+      const mapper = new FeishuEventMapper({
+        participant_resolver: { async resolve() { return result as FeishuParticipantResolution; } },
+        action_codec: codec,
+        clock: { now: () => "2026-07-16T00:05:00Z" },
+      });
+      const mapped = await mapper.map(claim("card.action.trigger", {
+        operator_open_id: "ou-human-1", action_ref: actionRef, message_id: "om-1", action_tag: "button",
+      }));
+      expect(mapped).toEqual({ kind: "rejected", reason_code: "participant_resolution_unavailable", retryable: true });
+      expect(JSON.stringify(mapped)).not.toContain(grant);
+    }
+    expect(kindGetter).not.toHaveBeenCalled();
   });
 
   it("rejects an action when the external identity mapping changed after issue", async () => {
@@ -276,7 +352,7 @@ describe("Feishu identity and action mapping", () => {
     });
   });
 
-  it("rejects an action when only the resolved actor type changed", async () => {
+  it("fails closed when a human participant resolver changes to a non-human actor type", async () => {
     const codec = new FeishuActionReferenceCodec({
       encryption_key: new Uint8Array(32).fill(7),
       nonce_factory: () => new Uint8Array(12).fill(5),
@@ -309,12 +385,12 @@ describe("Feishu identity and action mapping", () => {
       action_tag: "button",
     }))).resolves.toEqual({
       kind: "rejected",
-      reason_code: "identity_mapping_changed",
-      retryable: false,
+      reason_code: "participant_resolution_unavailable",
+      retryable: true,
     });
   });
 
-  it("rejects an unmapped card user and ignores arbitrary chat by default", async () => {
+  it("rejects an invalid card token before identity lookup and ignores arbitrary chat by default", async () => {
     const resolver: ConnectorIdentityResolver = {
       manifest: manifest("connector.identity.v1"),
       async resolve() { return null; },
@@ -333,7 +409,7 @@ describe("Feishu identity and action mapping", () => {
       action_tag: "button",
     }))).resolves.toEqual({
       kind: "rejected",
-      reason_code: "identity_unmapped",
+      reason_code: "invalid_action_reference",
       retryable: false,
     });
     await expect(mapper.map(claim("im.message.receive_v1", {

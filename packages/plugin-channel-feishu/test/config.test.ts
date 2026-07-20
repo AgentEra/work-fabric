@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { feishuSecretPaths, validateFeishuPluginConfig } from "../src/index.js";
 
 const valid = () => ({
@@ -87,11 +87,43 @@ describe("Feishu plugin configuration", () => {
     expect(() => validateFeishuPluginConfig({
       ...admission(),
       identity_admission: { policy_id: "feishu-primary-participants", precedence: "allow-first" },
-    })).toThrow(/unknown key precedence/);
+    })).toThrow(/identity_admission/);
     expect(() => validateFeishuPluginConfig({
       ...admission(),
       identity_admission: { policy_id: " spaced " },
     })).toThrow(/policy_id/);
+  });
+
+  it("reads identity mode and policy only from exact own data descriptors", () => {
+    const identityModeGetter = vi.fn(() => ({ policy_id: "should-not-run" }));
+    const topLevelAccessor = admission();
+    Object.defineProperty(topLevelAccessor, "identity_admission", {
+      enumerable: true,
+      get: identityModeGetter,
+    });
+    expect(() => validateFeishuPluginConfig(topLevelAccessor)).toThrow(/identity/i);
+    expect(identityModeGetter).not.toHaveBeenCalled();
+
+    const inherited = Object.create({ policy_id: "inherited-policy" }) as Record<string, unknown>;
+    expect(() => validateFeishuPluginConfig({ ...admission(), identity_admission: inherited })).toThrow(/identity_admission/);
+
+    const policyGetter = vi.fn(() => "should-not-run");
+    const nestedAccessor: Record<string, unknown> = {};
+    Object.defineProperty(nestedAccessor, "policy_id", { enumerable: true, get: policyGetter });
+    expect(() => validateFeishuPluginConfig({ ...admission(), identity_admission: nestedAccessor })).toThrow(/policy_id/);
+    expect(policyGetter).not.toHaveBeenCalled();
+
+    expect(() => validateFeishuPluginConfig({ ...admission(), identity_admission: { policy_id: undefined } })).toThrow(/policy_id/);
+  });
+
+  it("fails closed on identity-mode descriptor proxy errors", () => {
+    const proxy = new Proxy(admission(), {
+      getOwnPropertyDescriptor(target, property) {
+        if (property === "identity_admission") throw new Error("private descriptor detail");
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+    });
+    expect(() => validateFeishuPluginConfig(proxy)).toThrow(/config|identity/i);
   });
 
   it.each([

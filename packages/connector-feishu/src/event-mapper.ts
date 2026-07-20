@@ -14,6 +14,7 @@ import type {
   FeishuParticipantResolution,
   FeishuParticipantResolver,
 } from "./participant-resolver.js";
+import { parseFeishuParticipantResolution } from "./participant-resolver.js";
 
 export interface FeishuEventMapperClock {
   now(): string;
@@ -131,54 +132,15 @@ export class FeishuEventMapper implements ConnectorEventMapper {
         retryable: false,
       };
     }
-    let participant: FeishuParticipantResolution;
+    let action: ReturnType<FeishuActionReferenceCodec["resolve"]>;
     try {
-      participant = await this.options.participant_resolver.resolve({
-        claim,
-        external_subject_id: operator,
-        external_subject_type: "human",
-      });
-    } catch {
-      return {
-        kind: "rejected",
-        reason_code: "participant_resolution_unavailable",
-        retryable: true,
-      };
-    }
-    if (participant.kind !== "resolved") return participantRejection(participant);
-    const identity = participant.identity;
-
-    try {
-      const action = this.options.action_codec.resolve(actionReference, {
+      action = this.options.action_codec.resolve(actionReference, {
         tenant_id: claim.envelope.tenant_id,
         connector_id: claim.envelope.connector_id,
         external_tenant_id: claim.envelope.external_tenant_id,
         external_subject_id: operator,
         now: this.options.clock.now(),
       });
-      if (!sameIdentity(identity, action.identity)) {
-        return {
-          kind: "rejected",
-          reason_code: "identity_mapping_changed",
-          retryable: false,
-        };
-      }
-      return {
-        kind: "command",
-        command: {
-          operation: action.operation,
-          idempotency_key: idempotencyKey(claim),
-          expected_version: action.expected_version,
-          identity: action.identity,
-          ...(participant.representation_grant === undefined ? {} : {
-            authentication: {
-              kind: "bearer" as const,
-              credential: participant.representation_grant,
-            },
-          }),
-          input: action.input,
-        },
-      };
     } catch (error) {
       return {
         kind: "rejected",
@@ -189,5 +151,47 @@ export class FeishuEventMapper implements ConnectorEventMapper {
         retryable: false,
       };
     }
+    let participant: FeishuParticipantResolution;
+    try {
+      participant = parseFeishuParticipantResolution(
+        await this.options.participant_resolver.resolve({
+          claim,
+          external_subject_id: operator,
+          external_subject_type: "human",
+        }),
+      );
+    } catch {
+      return {
+        kind: "rejected",
+        reason_code: "participant_resolution_unavailable",
+        retryable: true,
+      };
+    }
+    if (participant.kind !== "resolved") return participantRejection(participant);
+    const identity = participant.identity;
+
+    if (!sameIdentity(identity, action.identity)) {
+      return {
+        kind: "rejected",
+        reason_code: "identity_mapping_changed",
+        retryable: false,
+      };
+    }
+    return {
+      kind: "command",
+      command: {
+        operation: action.operation,
+        idempotency_key: idempotencyKey(claim),
+        expected_version: action.expected_version,
+        identity: action.identity,
+        ...(participant.representation_grant === undefined ? {} : {
+          authentication: {
+            kind: "bearer" as const,
+            credential: participant.representation_grant,
+          },
+        }),
+        input: action.input,
+      },
+    };
   }
 }

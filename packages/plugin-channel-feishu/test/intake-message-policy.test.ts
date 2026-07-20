@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ConnectorIngressClaim } from "@work-fabric/connector-spi";
 import type { FeishuParticipantResolution, FeishuParticipantResolver } from "@work-fabric/connector-feishu";
 import { FeishuIntakeMessagePolicy } from "../src/index.js";
@@ -28,10 +28,10 @@ function claim(overrides: Record<string, unknown> = {}): ConnectorIngressClaim {
 
 function policy(resolution: FeishuParticipantResolution = {
   kind: "resolved",
-  identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
+  identity: { actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" },
 }) {
   const participantResolver: FeishuParticipantResolver = {
-    async resolve() { return structuredClone(resolution); },
+    async resolve() { return resolution; },
   };
   return new FeishuIntakeMessagePolicy({
     bot_open_id: "ou-bot-1",
@@ -51,12 +51,12 @@ describe("FeishuIntakeMessagePolicy", () => {
       kind: "command",
       command: {
         operation: "handoff.offer",
-        identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
+        identity: { actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" },
         input: {
           work_reference: { uri: "feishu://tenant-key-1/message/om-1" },
           target: { actor_id: "actor-agent" },
           intent: [{ kind: "text", media_type: "text/plain", text: "create a requirement" }],
-          verifier: { actor_id: "actor-human", actor_type: "agent" },
+          verifier: { actor_id: "actor-human", actor_type: "human" },
         },
       },
     });
@@ -100,6 +100,35 @@ describe("FeishuIntakeMessagePolicy", () => {
     await expect(policy({ kind: "temporarily_unavailable", reason_code: "evidence_unavailable" }).mapMessage(claim())).resolves.toEqual({
       kind: "rejected", reason_code: "evidence_unavailable", retryable: true,
     });
+  });
+
+  it("rejects hostile participant results without invoking accessors or reflecting secrets", async () => {
+    const secret = "grant-must-not-become-a-reason";
+    const kindGetter = vi.fn(() => "denied");
+    const accessor: Record<string, unknown> = { reason_code: secret };
+    Object.defineProperty(accessor, "kind", { enumerable: true, get: kindGetter });
+    const inherited = Object.create({ kind: "denied", reason_code: secret }) as FeishuParticipantResolution;
+    const extra = { kind: "denied", reason_code: "explicit_deny", grant: secret } as unknown as FeishuParticipantResolution;
+    const wrongActorType = {
+      kind: "resolved",
+      identity: { actor_id: "actor", actor_type: "agent", endpoint_id: "endpoint" },
+      representation_grant: secret,
+    } as unknown as FeishuParticipantResolution;
+    const undefinedGrant = {
+      kind: "resolved",
+      identity: { actor_id: "actor", actor_type: "human", endpoint_id: "endpoint" },
+      representation_grant: undefined,
+    } as unknown as FeishuParticipantResolution;
+    const descriptorFailure = new Proxy({ kind: "denied", reason_code: "explicit_deny" }, {
+      getOwnPropertyDescriptor() { throw new Error(secret); },
+    }) as FeishuParticipantResolution;
+
+    for (const result of [accessor as FeishuParticipantResolution, inherited, extra, wrongActorType, undefinedGrant, descriptorFailure]) {
+      const mapped = await policy(result).mapMessage(claim());
+      expect(mapped).toEqual({ kind: "rejected", reason_code: "participant_resolution_unavailable", retryable: true });
+      expect(JSON.stringify(mapped)).not.toContain(secret);
+    }
+    expect(kindGetter).not.toHaveBeenCalled();
   });
 
   it("rejects malformed text content and an empty mention-only intent", async () => {

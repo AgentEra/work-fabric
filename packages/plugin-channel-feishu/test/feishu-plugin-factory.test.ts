@@ -30,6 +30,11 @@ const config = () => ({
   worker: { poll_interval_ms: 1000, lease_seconds: 30, batch_limit: 100, max_attempts: 8 },
 });
 
+const admissionConfig = () => {
+  const { identities: _identities, ...configured } = config();
+  return { ...configured, identity_admission: { policy_id: "feishu-primary-participants" } };
+};
+
 const longConnectionConfig = (enabled = true) => ({
   ...config(),
   credentials: {
@@ -282,13 +287,46 @@ describe("FeishuPluginFactory", () => {
       tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1", policy_id: "feishu-primary-participants",
       admission: { async admit() { return { decision: baseDecision }; } },
     });
-    await expect(withoutGrant.resolve(input)).resolves.toEqual({ kind: "temporarily_unavailable", reason_code: "grant_unavailable" });
+    await expect(withoutGrant.resolve(input)).resolves.toEqual({ kind: "temporarily_unavailable", reason_code: "admission_unavailable" });
 
     const mismatched = new AdmissionFeishuParticipantResolver({
       tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1", policy_id: "feishu-primary-participants",
       admission: { async admit() { return { decision: { ...baseDecision, binding: { ...baseDecision.binding, external_tenant_id: "wrong-tenant" } }, representation_grant: "grant" }; } },
     });
     await expect(mismatched.resolve(input)).resolves.toEqual({ kind: "denied", reason_code: "scope_mismatch" });
+  });
+
+  it("strictly parses Admission results without invoking accessors or reflecting upstream values", async () => {
+    const secret = "grant-or-provider-detail-must-not-reflect";
+    const decisionGetter = vi.fn(() => ({ kind: "deny", reason_code: secret }));
+    const accessor: Record<string, unknown> = {};
+    Object.defineProperty(accessor, "decision", { enumerable: true, get: decisionGetter });
+    const validBinding = {
+      tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu", external_tenant_id: "tenant-key-1",
+      external_subject_type: "human", external_subject_fingerprint: "fingerprint",
+      actor_id: "actor", actor_type: "human", endpoint_id: "endpoint", created_at: "2026-07-20T00:00:00.000Z",
+    };
+    const malformed = [
+      accessor,
+      Object.create({ decision: { kind: "deny", reason_code: "explicit_deny", policy_id: "p", policy_revision: "r", decision_id: "d" } }),
+      { decision: { kind: "deny", reason_code: secret, policy_id: "p", policy_revision: "r", decision_id: "d" } },
+      { decision: { kind: "deny", reason_code: "explicit_deny", policy_id: "p", policy_revision: "r", decision_id: "d", extra: secret } },
+      { decision: { kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r", decision_id: "d", binding: { ...validBinding, actor_type: "agent" } }, representation_grant: secret },
+      { decision: { kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r", decision_id: "d", binding: validBinding }, representation_grant: undefined },
+      new Proxy({ decision: { kind: "temporarily_unavailable", reason_code: "evidence_unavailable", retry_after_seconds: 5 } }, { getOwnPropertyDescriptor() { throw new Error(secret); } }),
+    ];
+    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const };
+    for (const result of malformed) {
+      const resolver = new AdmissionFeishuParticipantResolver({
+        tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
+        policy_id: "feishu-primary-participants",
+        admission: { async admit() { return result as never; } },
+      });
+      const resolved = await resolver.resolve(input);
+      expect(resolved).toEqual({ kind: "temporarily_unavailable", reason_code: "admission_unavailable" });
+      expect(JSON.stringify(resolved)).not.toContain(secret);
+    }
+    expect(decisionGetter).not.toHaveBeenCalled();
   });
 
   it("resolves the Admission capability only for identity_admission mode", async () => {
@@ -318,6 +356,56 @@ describe("FeishuPluginFactory", () => {
       config: factory.validate({ ...configured, identity_admission: { policy_id: "feishu-primary-participants" } }),
     });
     expect(requested.filter((key) => key === "collaboration.admission")).toHaveLength(1);
+  });
+
+  it("accepts a class Admission method but rejects unsafe capabilities before registration", async () => {
+    class ClassAdmission implements CollaborationAdmissionService {
+      async admit(): ReturnType<CollaborationAdmissionService["admit"]> {
+        throw new Error("not called during composition");
+      }
+    }
+    const factory = new FeishuPluginFactory();
+    const validFixture = createLongConnectionFixture();
+    const validContext = {
+      ...validFixture.context,
+      service: {
+        get<T>(key: string): T {
+          if (key === "collaboration.admission") return new ClassAdmission() as T;
+          return validFixture.context.service.get<T>(key);
+        },
+      },
+    };
+    await expect(factory.create(validContext, {
+      instance_id: "feishu-primary", type: factory.type, config: factory.validate(admissionConfig()),
+    })).resolves.toBeDefined();
+
+    const admitGetter = vi.fn(() => async () => ({ decision: { kind: "temporarily_unavailable", reason_code: "policy_unavailable", retry_after_seconds: 5 } }));
+    const accessorCapability: Record<string, unknown> = {};
+    Object.defineProperty(accessorCapability, "admit", { get: admitGetter });
+    const unsafeCapabilities = [
+      {},
+      { admit: "not-a-function" },
+      accessorCapability,
+      new Proxy({ admit: async () => ({}) }, { getOwnPropertyDescriptor() { throw new Error("private capability detail"); } }),
+    ];
+    for (const capability of unsafeCapabilities) {
+      const fixture = createLongConnectionFixture();
+      const context = {
+        ...fixture.context,
+        service: {
+          get<T>(key: string): T {
+            if (key === "collaboration.admission") return capability as T;
+            return fixture.context.service.get<T>(key);
+          },
+        },
+      };
+      await expect(factory.create(context, {
+        instance_id: "feishu-primary", type: factory.type, config: factory.validate(admissionConfig()),
+      })).rejects.toThrow(/admission/i);
+      expect(await fixture.webhook.resolve("feishu-primary")).toBeNull();
+      expect(fixture.signalEvents).not.toContain("signal_register");
+    }
+    expect(admitGetter).not.toHaveBeenCalled();
   });
 
   it("composes isolated inbound and outbound seams and cleans registrations", async () => {
