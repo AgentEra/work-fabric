@@ -101,6 +101,14 @@ describe("admission contracts", () => {
     expect(() => validateAdmissionRequest(request({ external_subject_id: "*" }))).toThrow();
   });
 
+  it.each([
+    ["a number", 1],
+    ["null", null],
+    ["a string-like object", { length: 1, trim() { return this; } }],
+  ])("rejects %s identifier values", (_name, value) => {
+    expect(() => validateAdmissionRequest(request({ tenant_id: value as string }))).toThrow();
+  });
+
   it("exposes only stable adapter error codes", () => {
     const errors = [
       new AdmissionAdapterError("policy_unavailable", "policy fetch failed"),

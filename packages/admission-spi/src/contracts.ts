@@ -125,7 +125,7 @@ export interface CollaborationAdmissionService {
 }
 
 function assertBoundedIdentifier(value: string, field: string, maximum: number): void {
-  if (value.length === 0 || value.length > maximum || value.trim() !== value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > maximum || value.trim() !== value) {
     throw new TypeError(`${field} must be a trimmed string of 1-${maximum} UTF-16 code units`);
   }
 }
