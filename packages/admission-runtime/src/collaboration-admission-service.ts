@@ -100,14 +100,16 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
     } catch {
       return this.unavailable("store_unavailable");
     }
-    if (existing !== null) return this.resultForRecord(existing, request);
+    if (existing !== null) {
+      return this.resultForReusableRecord(existing, compiled.policy, request, fingerprint, scopeMatches);
+    }
 
     if (!scopeMatches) {
-      return this.recordTerminal(request, fingerprint, this.deny(compiled.policy, "scope_mismatch"));
+      return this.recordTerminal(compiled.policy, request, fingerprint, this.deny(compiled.policy, "scope_mismatch"));
     }
 
     if (compiled.exact_deny.has(request.external_subject_id)) {
-      return this.recordTerminal(request, fingerprint, this.deny(compiled.policy, "explicit_deny"));
+      return this.recordTerminal(compiled.policy, request, fingerprint, this.deny(compiled.policy, "explicit_deny"));
     }
 
     if (compiled.exact_allow.has(request.external_subject_id)) {
@@ -123,10 +125,10 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
         return this.allow(compiled.policy, request, fingerprint, "internal_member", evidence);
       }
       const reason = evidence.membership === "internal" ? "inactive_subject" : "not_internal_member";
-      return this.recordTerminal(request, fingerprint, this.deny(compiled.policy, reason), evidence);
+      return this.recordTerminal(compiled.policy, request, fingerprint, this.deny(compiled.policy, reason), evidence);
     }
 
-    return this.recordTerminal(request, fingerprint, this.deny(compiled.policy, "default_deny"));
+    return this.recordTerminal(compiled.policy, request, fingerprint, this.deny(compiled.policy, "default_deny"));
   }
 
   private async loadPolicy(policyId: string): Promise<CompiledAdmissionPolicy | null> {
@@ -218,7 +220,7 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
       binding,
       decision_id: this.options.ids.decisionId(),
     };
-    return this.recordTerminal(request, fingerprint, decision, evidence);
+    return this.recordTerminal(policy, request, fingerprint, decision, evidence);
   }
 
   private deny(policy: AdmissionPolicy, reasonCode: Extract<AdmissionDecision, { kind: "deny" }>["reason_code"]): TerminalDecision {
@@ -232,6 +234,7 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
   }
 
   private async recordTerminal(
+    policy: AdmissionPolicy,
     request: AdmissionRequest,
     fingerprint: string,
     decision: TerminalDecision,
@@ -258,7 +261,29 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
     } catch {
       return this.unavailable("store_unavailable");
     }
-    return this.resultForRecord(canonical, request);
+    return this.resultForReusableRecord(canonical, policy, request, fingerprint, sameScope(policy, request));
+  }
+
+  private resultForReusableRecord(
+    record: AdmissionDecisionRecord,
+    policy: AdmissionPolicy,
+    request: AdmissionRequest,
+    fingerprint: string,
+    policyScopeMatches: boolean,
+  ): Promise<AdmissionResult> | AdmissionResult {
+    const recordMatches = record.scope.tenant_id === request.tenant_id
+      && record.scope.connector_id === request.connector_id
+      && record.scope.source_system === request.source_system
+      && record.scope.external_tenant_id === request.external_tenant_id
+      && record.external_subject_fingerprint === fingerprint
+      && record.decision.policy_id === policy.policy_id
+      && record.decision.policy_revision === policy.revision;
+    if (!recordMatches) return this.unavailable("store_unavailable");
+    if (!policyScopeMatches
+      && !(record.decision.kind === "deny" && record.decision.reason_code === "scope_mismatch")) {
+      return this.unavailable("store_unavailable");
+    }
+    return this.resultForRecord(record, request);
   }
 
   private async resultForRecord(record: AdmissionDecisionRecord, request: AdmissionRequest): Promise<AdmissionResult> {

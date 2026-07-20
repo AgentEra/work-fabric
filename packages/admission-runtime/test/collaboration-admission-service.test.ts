@@ -525,6 +525,81 @@ describe("DefaultCollaborationAdmissionService orchestration", () => {
     expect(env.grants.calls).toHaveLength(2);
   });
 
+  it("rejects unsafe ingress reuse when a prior allow is evaluated under a different scope-mismatched policy", async () => {
+    const matching = policy({
+      allow: { all_internal_members: false, external_subject_ids: ["subject-1"] },
+    });
+    const mismatched = policy({
+      policy_id: "policy-2",
+      revision: "revision-2",
+      tenant_id: "tenant-other",
+      allow: { all_internal_members: false, external_subject_ids: ["subject-1"] },
+    });
+    const policies = new TestPolicyProvider(new Map([
+      [matching.policy_id, matching],
+      [mismatched.policy_id, mismatched],
+    ]));
+    const env = fixture({ policies });
+    const first = await env.service.admit(matching.policy_id, request());
+
+    const replay = await env.service.admit(mismatched.policy_id, request());
+
+    expect(first.decision.kind).toBe("allow");
+    expect(replay).toEqual({
+      decision: { kind: "temporarily_unavailable", reason_code: "store_unavailable", retry_after_seconds: 17 },
+    });
+    expect(env.decisions.recordCalls).toHaveLength(1);
+    expect(env.grants.calls).toHaveLength(1);
+  });
+
+  it("rejects unsafe ingress reuse when the external subject fingerprint changes", async () => {
+    const policies = new TestPolicyProvider(new Map([[
+      "policy-1",
+      policy({ allow: { all_internal_members: false, external_subject_ids: ["subject-1"] } }),
+    ]]));
+    const env = fixture({ policies });
+    const first = await env.service.admit("policy-1", request());
+
+    const replay = await env.service.admit("policy-1", request({ external_subject_id: "subject-2" }));
+
+    expect(first.decision.kind).toBe("allow");
+    expect(replay).toEqual({
+      decision: { kind: "temporarily_unavailable", reason_code: "store_unavailable", retry_after_seconds: 17 },
+    });
+    expect(env.decisions.recordCalls).toHaveLength(1);
+    expect(env.grants.calls).toHaveLength(1);
+  });
+
+  it.each([
+    ["stored scope", (record: AdmissionDecisionRecord): AdmissionDecisionRecord => ({
+      ...record,
+      scope: { ...record.scope, tenant_id: "tenant-other" },
+    })],
+    ["stored policy revision", (record: AdmissionDecisionRecord): AdmissionDecisionRecord => ({
+      ...record,
+      decision: { ...record.decision, policy_revision: "revision-other" },
+    })],
+  ] as const)("rejects unsafe ingress reuse with a different %s", async (_label, change) => {
+    const policies = new TestPolicyProvider(new Map([[
+      "policy-1",
+      policy({ allow: { all_internal_members: false, external_subject_ids: ["subject-1"] } }),
+    ]]));
+    const env = fixture({ policies });
+    await env.service.admit("policy-1", request());
+    const storedEntry = [...env.decisions.records.entries()][0];
+    if (storedEntry === undefined) throw new Error("expected stored decision");
+    env.decisions.records.set(storedEntry[0], change(storedEntry[1]));
+    const grantCount = env.grants.calls.length;
+
+    const replay = await env.service.admit("policy-1", request());
+
+    expect(replay).toEqual({
+      decision: { kind: "temporarily_unavailable", reason_code: "store_unavailable", retry_after_seconds: 17 },
+    });
+    expect(env.decisions.recordCalls).toHaveLength(1);
+    expect(env.grants.calls).toHaveLength(grantCount);
+  });
+
   it("uses the store-returned allow record as canonical and grants only after recording", async () => {
     const events: string[] = [];
     const decisions = new TestDecisionStore(events);
