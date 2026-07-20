@@ -67,14 +67,27 @@ export async function runParticipantBindingStoreProfile(
     ["external_subject_type", request({ external_subject_type: "agent" }), "fingerprint-profile"],
     ["external_subject_fingerprint", request(), "fingerprint-other"],
   ] as const) {
-    const isolated = await store.getOrCreate(input({
+    const isolatedInput = input({
       request: changedRequest,
       external_subject_fingerprint: fingerprint,
       actor_id: `actor-isolated-${label}`,
       endpoint_id: `endpoint-isolated-${label}`,
+    });
+    const isolated = await store.getOrCreate(isolatedInput);
+    assert.equal(isolated.tenant_id, isolatedInput.request.tenant_id, `${label} must retain its tenant`);
+    assert.equal(isolated.connector_id, isolatedInput.request.connector_id, `${label} must retain its connector`);
+    assert.equal(isolated.source_system, isolatedInput.request.source_system, `${label} must retain its source system`);
+    assert.equal(isolated.external_tenant_id, isolatedInput.request.external_tenant_id, `${label} must retain its external tenant`);
+    assert.equal(isolated.external_subject_type, isolatedInput.request.external_subject_type, `${label} must retain its subject type`);
+    assert.equal(isolated.external_subject_fingerprint, isolatedInput.external_subject_fingerprint, `${label} must retain its fingerprint`);
+    assert.equal(isolated.actor_id, isolatedInput.actor_id, `${label} must retain its Actor`);
+    assert.equal(isolated.endpoint_id, isolatedInput.endpoint_id, `${label} must retain its Endpoint`);
+    const original = await store.getOrCreate(input({
+      actor_id: `actor-original-replacement-${label}`,
+      endpoint_id: `endpoint-original-replacement-${label}`,
+      created_at: "2026-07-21T00:00:00.000Z",
     }));
-    assert.notEqual(isolated.actor_id, first.actor_id, `${label} must isolate Actor bindings`);
-    assert.notEqual(isolated.endpoint_id, first.endpoint_id, `${label} must isolate Endpoint bindings`);
+    assert.deepEqual(original, first, `${label} must not replace the original binding`);
   }
 
   const mutable = input({
