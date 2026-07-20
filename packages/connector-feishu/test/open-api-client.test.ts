@@ -24,6 +24,138 @@ const message = {
 };
 
 describe("FeishuOpenApiClient", () => {
+  it("calls only the fixed Contact v3 batch endpoint with repeated open IDs and a tenant bearer token", async () => {
+    const fetch = vi.fn(async (
+      _input: string | URL | Request,
+      _init?: RequestInit,
+    ) => new Response(JSON.stringify({
+      code: 0,
+      data: { items: [] },
+    }), { status: 200 }));
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+
+    await expect(client.batchUsers({
+      credential_ref: "credential-ref-1",
+      user_ids: ["ou-user-1", "ou user/2"],
+    })).resolves.toEqual({
+      kind: "accepted",
+      body: { code: 0, data: { items: [] } },
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    const [input, init] = fetch.mock.calls[0]!;
+    const url = new URL(String(input));
+    expect(`${url.origin}${url.pathname}`).toBe("https://open.feishu.test/open-apis/contact/v3/users/batch");
+    expect(url.searchParams.getAll("user_ids")).toEqual(["ou-user-1", "ou user/2"]);
+    expect(url.searchParams.get("user_id_type")).toBe("open_id");
+    expect(init).toMatchObject({
+      method: "GET",
+      headers: {
+        authorization: "Bearer token-1",
+        "content-type": "application/json; charset=utf-8",
+      },
+    });
+    expect(init?.body).toBeUndefined();
+  });
+
+  it.each([401, 403, 429, 503])("returns only a sanitized failure for Contact HTTP %s", async (status) => {
+    const secret = "tenant-token-secret";
+    const client = new FeishuOpenApiClient({
+      token_provider: { async getToken() { return secret; } },
+      fetch: (async () => new Response(`upstream echoed ${secret}`, { status })) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+
+    const result = await client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] });
+    expect(result.kind).toBe("failure");
+    expect(JSON.stringify(result)).not.toContain(secret);
+  });
+
+  it("enforces a fixed 10-second Contact timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn((_input: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+        })) as unknown as typeof globalThis.fetch;
+      const client = new FeishuOpenApiClient({
+        token_provider: new Tokens(),
+        fetch,
+        base_url: "https://open.feishu.test",
+        request_timeout_ms: 1,
+        max_response_bytes: 1,
+      });
+
+      const pending = client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] });
+      await vi.advanceTimersByTimeAsync(9_999);
+      expect(await Promise.race([pending.then(() => "settled"), Promise.resolve("pending")])).toBe("pending");
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(pending).resolves.toEqual({ kind: "failure", error_code: "request_timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("classifies a Contact response-body stall as the same fixed request timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            init?.signal?.addEventListener("abort", () => controller.error(new Error("aborted")), { once: true });
+          },
+        });
+        return new Response(stream, { status: 200 });
+      }) as unknown as typeof globalThis.fetch;
+      const client = new FeishuOpenApiClient({
+        token_provider: new Tokens(),
+        fetch,
+        base_url: "https://open.feishu.test",
+        request_timeout_ms: 1,
+        max_response_bytes: 1,
+      });
+
+      const pending = client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] });
+      await vi.advanceTimersByTimeAsync(10_000);
+      await expect(pending).resolves.toEqual({ kind: "failure", error_code: "request_timeout" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("enforces a fixed 64 KiB Contact response limit and rejects malformed JSON", async () => {
+    let call = 0;
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: (async () => {
+        call += 1;
+        return call === 1
+          ? new Response("x".repeat(65_537), { status: 200 })
+          : new Response("not-json", { status: 200 });
+      }) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 1_000_000,
+    });
+
+    await expect(client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] })).resolves.toEqual({
+      kind: "failure",
+      error_code: "response_too_large",
+    });
+    await expect(client.batchUsers({ credential_ref: "credential-ref-1", user_ids: ["ou-user-1"] })).resolves.toEqual({
+      kind: "failure",
+      error_code: "invalid_response",
+    });
+  });
+
   it("refreshes once after token rejection and preserves UUID", async () => {
     const bodies: unknown[] = [];
     let call = 0;

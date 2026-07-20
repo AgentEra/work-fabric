@@ -38,6 +38,33 @@ export interface FeishuMessageClient {
   sendMessage(input: FeishuSendMessageInput): Promise<FeishuSendMessageResult>;
 }
 
+export interface FeishuContactBatchInput {
+  readonly credential_ref: string;
+  readonly user_ids: readonly string[];
+}
+
+export type FeishuContactBatchResult =
+  | { readonly kind: "accepted"; readonly body: unknown }
+  | {
+      readonly kind: "failure";
+      readonly error_code:
+        | "invalid_request"
+        | "token_unavailable"
+        | "token_rejected"
+        | "http_rejected"
+        | "temporarily_unavailable"
+        | "request_timeout"
+        | "network_failure"
+        | "response_too_large"
+        | "response_read_failed"
+        | "invalid_response";
+    };
+
+/** A deliberately narrow transport boundary for Feishu Contact v3 user lookup. */
+export interface FeishuContactApiClient {
+  batchUsers(input: FeishuContactBatchInput): Promise<FeishuContactBatchResult>;
+}
+
 export interface FeishuOpenApiClientOptions {
   readonly token_provider: FeishuTenantTokenProvider;
   readonly fetch: typeof globalThis.fetch;
@@ -47,6 +74,8 @@ export interface FeishuOpenApiClientOptions {
 }
 
 const TOKEN_REJECTED_CODES = new Set([99991663, 99991664, 99991668]);
+const CONTACT_TIMEOUT_MS = 10_000;
+const CONTACT_MAX_RESPONSE_BYTES = 64 * 1_024;
 const RECEIVE_ID_TYPES = new Set<FeishuReceiveIdType>([
   "open_id",
   "user_id",
@@ -86,7 +115,8 @@ function validateMessage(input: FeishuSendMessageInput): void {
   }
 }
 
-export class FeishuOpenApiClient implements FeishuMessageClient {
+export class FeishuOpenApiClient
+  implements FeishuMessageClient, FeishuContactApiClient {
   private readonly baseUrl: string;
 
   constructor(private readonly options: FeishuOpenApiClientOptions) {
@@ -136,6 +166,95 @@ export class FeishuOpenApiClient implements FeishuMessageClient {
       forceRefresh = true;
     }
     return { kind: "retryable_failure", error_code: "token_rejected" };
+  }
+
+  async batchUsers(
+    input: FeishuContactBatchInput,
+  ): Promise<FeishuContactBatchResult> {
+    try {
+      bounded(input.credential_ref, "credential_ref", 255);
+      if (!Array.isArray(input.user_ids) || input.user_ids.length === 0 || input.user_ids.length > 50) {
+        throw new TypeError("user_ids is invalid");
+      }
+      for (const userId of input.user_ids) bounded(userId, "user_id", 255);
+    } catch {
+      return { kind: "failure", error_code: "invalid_request" };
+    }
+
+    let forceRefresh = false;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let token: string;
+      try {
+        token = await this.options.token_provider.getToken(input.credential_ref, forceRefresh);
+      } catch {
+        return { kind: "failure", error_code: "token_unavailable" };
+      }
+      const result = await this.requestContactBatch(input.user_ids, token);
+      if (result.kind !== "token_rejected") return result;
+      forceRefresh = true;
+    }
+    return { kind: "failure", error_code: "token_rejected" };
+  }
+
+  private async requestContactBatch(
+    userIds: readonly string[],
+    token: string,
+  ): Promise<FeishuContactBatchResult | { readonly kind: "token_rejected" }> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), CONTACT_TIMEOUT_MS);
+    try {
+      const url = new URL(`${this.baseUrl}/open-apis/contact/v3/users/batch`);
+      for (const userId of userIds) url.searchParams.append("user_ids", userId);
+      url.searchParams.set("user_id_type", "open_id");
+      const response = await this.options.fetch(url, {
+        method: "GET",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json; charset=utf-8",
+        },
+        signal: controller.signal,
+      });
+      if (response.status === 401) return { kind: "token_rejected" };
+      if (response.status === 429 || response.status >= 500) {
+        return { kind: "failure", error_code: "temporarily_unavailable" };
+      }
+      if (!response.ok) return { kind: "failure", error_code: "http_rejected" };
+
+      let text: string;
+      try {
+        text = await readBoundedResponseText(response, CONTACT_MAX_RESPONSE_BYTES);
+      } catch (error) {
+        return {
+          kind: "failure",
+          error_code: controller.signal.aborted
+            ? "request_timeout"
+            : error instanceof FeishuBoundedResponseError
+              ? "response_too_large"
+              : "response_read_failed",
+        };
+      }
+      let body: unknown;
+      try {
+        body = JSON.parse(text);
+      } catch {
+        return { kind: "failure", error_code: "invalid_response" };
+      }
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        return { kind: "failure", error_code: "invalid_response" };
+      }
+      const code = (body as Record<string, unknown>).code;
+      if (typeof code === "number" && TOKEN_REJECTED_CODES.has(code)) {
+        return { kind: "token_rejected" };
+      }
+      return { kind: "accepted", body };
+    } catch {
+      return {
+        kind: "failure",
+        error_code: controller.signal.aborted ? "request_timeout" : "network_failure",
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   private async request(
