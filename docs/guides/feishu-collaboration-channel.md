@@ -12,7 +12,7 @@
 
 1. 在飞书开放平台创建企业自建应用并启用机器人。
 2. 在事件订阅中选择 `使用长连接接收事件`，订阅 `im.message.receive_v1`，并配置读取群消息事件与机器人发送消息所需的最小权限。
-3. 打开 [service-feishu-long-connection.yaml](../../examples/config/service-feishu-long-connection.yaml)，替换 `external_tenant_id`、`bot_open_id`、`identities[].external_open_id` 和 `outbound.channels.project-notifications.receive_id` 的 `*-example` 值（包括 `oc-project-example`）。`external_open_id` 必须是允许进入 Work Fabric 的映射用户 open_id；固定项目通知不是必需功能，不需要时应同时删除 `outbound.channels.project-notifications` 和引用它的 `outbound.subscriptions.project-results`。
+3. 打开 [service-feishu-long-connection.yaml](../../examples/config/service-feishu-long-connection.yaml)，替换插件与 Admission policy 中的 `external_tenant_id`、`bot_open_id` 以及可选固定通知 `receive_id`。把明确允许的用户 open_id 写入 `admission.policies.feishu-primary-participants.allow.external_subject_ids`，把明确禁止的用户写入同一策略的 `deny.external_subject_ids`；固定项目通知不是必需功能，不需要时应同时删除 `outbound.channels.project-notifications` 和引用它的 `outbound.subscriptions.project-results`。
 4. 明确进入仓库根目录，创建 SQLite 父目录，再设置环境变量并启动：
 
 ```bash
@@ -21,6 +21,8 @@ cd "$REPOSITORY_ROOT"
 mkdir -p "$PWD/var"
 export WORK_FABRIC_CONFIG="$PWD/examples/config/service-feishu-long-connection.yaml"
 export WORK_FABRIC_CURSOR_SECRET="$(openssl rand -hex 32)"
+export WORK_FABRIC_ADMISSION_FINGERPRINT_KEY="$(openssl rand -hex 32)"
+export WORK_FABRIC_ADMISSION_GRANT_KEY="$(openssl rand -hex 32)"
 export FEISHU_APP_ID="cli_..."
 export FEISHU_APP_SECRET="..."
 export FEISHU_CONNECTOR_ACCESS_TOKEN="use-a-long-random-token"
@@ -64,17 +66,42 @@ export INTAKE_AGENT_ACCESS_TOKEN="use-another-long-random-token"
 npm run service:start
 ```
 
-若启用飞书 Encrypt Key，把 `credentials.encrypt_key` 加入 Webhook YAML 并使用环境变量引用。`verification_token`、`encrypt_key` 和 `route_id` 都是 Webhook-only 字段，不得放入长连接配置。
+当前 Webhook 示例保留兼容性的静态 `identities`，因此不读取 Admission key；按第 7 节迁移为 `identity_admission` 后，还需要像长连接示例一样导出 `WORK_FABRIC_ADMISSION_FINGERPRINT_KEY` 和 `WORK_FABRIC_ADMISSION_GRANT_KEY`。若启用飞书 Encrypt Key，把 `credentials.encrypt_key` 加入 Webhook YAML 并使用环境变量引用。`verification_token`、`encrypt_key` 和 `route_id` 都是 Webhook-only 字段，不得放入长连接配置。
 
-## 4. 共同的身份、权限与职责边界
+## 4. Admission 策略与飞书目录权限
 
-`FEISHU_CONNECTOR_ACCESS_TOKEN` 是插件调用 Work Fabric 公共 HTTP/TypeScript SDK 的凭证，不是飞书 App Secret。它必须映射到收到消息的 Work Fabric Actor/Endpoint 表示，并由 Authority Policy 明确允许 `workfabric.handoff.offer.v1`。
+推荐的新部署使用 `identity_admission.policy_id`，不再用插件内的 `identities` 同时承担 allowlist 和身份绑定。策略的范围必须与插件实例的 Work Fabric tenant、connector、`source_system: feishu` 和飞书 `external_tenant_id` 完全一致，否则服务在插件启动前失败。
+
+策略优先级固定为：
+
+1. `deny.external_subject_ids` exact match：拒绝；
+2. `allow.external_subject_ids` exact match：允许；
+3. `allow.all_internal_members: true` 且目录证据为 active internal human：允许；
+4. external、inactive、unknown 或无规则：拒绝；
+5. 目录、存储或 grant 暂不可用：进入 Connector 有界重试，不降级为允许。
+
+`deny` 可以与 exact allow 和 `all_internal_members` 同时存在，并始终优先。`all_internal_members` 不是裸 `"*"`，也不代表“群里所有人”；它只代表配置 external tenant 中被飞书 Contact API 确认的 active internal human。Agent 和 system 主体必须 exact allow。
+
+启用 `all_internal_members` 时，企业自建应用必须拥有 Contact v3 批量获取用户信息接口所需的应用身份通讯录权限，并把应用可见范围覆盖预期员工。飞书接口只返回应用有权看到的目录记录；查询不到某个 open_id 时，Work Fabric 只能记录 `unknown`，不能可靠断言其是 external 或 guest，因此一律 fail closed。群成员身份、跨租户共享群关系和“能否 @ 机器人”都不能替代目录证据。
+
+以下值只通过环境变量或其他 Secret Provider 注入，不写入 YAML 明文、Handoff、Decision、Console 或日志：
+
+- `FEISHU_APP_SECRET`、Webhook 的 `FEISHU_VERIFICATION_TOKEN` 和可选 Encrypt Key；
+- `WORK_FABRIC_ADMISSION_FINGERPRINT_KEY`，用于 tenant-scoped subject fingerprint；
+- `WORK_FABRIC_ADMISSION_GRANT_KEY`，用于短时 representation grant 的签发/验证；
+- `FEISHU_CONNECTOR_ACCESS_TOKEN` 与外部 Agent/运维身份 token。
+
+`service.admission.grant_active_key_id` 和 `grant_keys` 支持验证密钥轮换。策略 deny 或目录状态变化立即影响新的 Admission；已经签发的无状态 grant 最晚在 `grant_ttl_seconds` 后失效，所以该 TTL 也是正常撤销的上界（配置范围 1–300 秒）。紧急撤销应同时轮换/移除验证密钥或停止 Connector。
+
+## 5. 共同的身份、权限与职责边界
+
+`FEISHU_CONNECTOR_ACCESS_TOKEN` 是公共 TypeScript SDK 的部署 bootstrap 凭证，不是飞书 App Secret。Admission-backed 消息在单次 command 上使用短时 representation grant 覆盖 bootstrap 身份；HTTP Identity 将它解析为恰好一个 Actor/Endpoint claim，独立 Admission Authority 仅允许该 Connector 的 `workfabric.handoff.offer.v1`。grant 证明“代表谁”，不证明“可以做什么”，也不会绕过 HTTP、Identity、Authority 或 Exchange Core。
 
 `outbound.channels` 声明固定通知目的地，`outbound.subscriptions` 把它们配置成 canonical Subscription。配置属于可信部署启动面；来自飞书的参与方命令仍必须经过 Identity、Representation 和 Authority。每个 Intake Handoff 的回聊 Subscription 是已授权 Offer 的机械后果，归属发起 Actor/Endpoint，并继续受事件 audience policy 约束。任何参与方经公共 API 修改 Subscription 时，仍必须拥有 `workfabric.subscription.manage.v1` 权限。
 
 Console 只是可选呈现面，不参与入站、Handoff、Agent 或通知链路。外部 Intake Agent 才负责理解消息、接受并执行工作、调用需求系统，以及通过公共 API 回报状态和结果；Work Fabric 与飞书插件不解释或执行“创建需求”。
 
-## 5. Intake Handoff 链路
+## 6. Intake Handoff 链路
 
 已映射用户在群聊中发送：
 
@@ -85,32 +112,49 @@ Console 只是可选呈现面，不参与入站、Handoff、Agent 或通知链�
 链路为：
 
 ```text
-Feishu Webhook / long connection
-  -> durable Connector ingress
-  -> explicit mention/identity mapping
-  -> public TypeScript SDK handoff.offer
-  -> durable conversation route
-  -> canonical Handoff Subscription
-  -> original Feishu chat notification
+Feishu transport trust -> durable ingress -> Admission -> representation grant
+-> public TypeScript SDK -> HTTP Identity -> Authority -> Exchange Core -> Handoff
+-> durable conversation route -> canonical Subscription -> original Feishu chat notification
 ```
 
-普通聊天、未提及该机器人、非文本消息和未映射用户都不会创建 Handoff。同一飞书事件重复投递只返回 duplicate，不会创建第二个 Handoff。
+普通聊天、未提及该机器人、非文本消息和 Admission 拒绝的用户都不会创建 Handoff。同一飞书事件重复投递只返回 duplicate，不会创建第二个 Decision、Binding 或 Handoff。目录暂不可用时 ingress 保持 durable 并进入有界重试，恢复后仍只产生一个逻辑结果。
 
 外部 Intake Agent 使用正常 Work Fabric SDK/Agent Gateway 接受 Handoff，理解文本，向需求系统写入需求，并通过 `reportStatus`、`returnResult` 等公共操作回报状态。需求系统调用和 Agent 推理始终在 Work Fabric 外部。
 
-## 6. 多实例与后续通道
+## 7. 从 `identities` 迁移
+
+现有 `identities` 仍是兼容 Adapter，适合小型、固定映射部署，但它把 allowlist 和 Actor/Endpoint 分配耦合在插件配置中。迁移步骤：
+
+1. 配置 `service.admission` 的 fingerprint key、active grant key、1–300 秒 TTL 和 evidence cache 上限；
+2. 在根级 `admission.policies` 创建与插件 scope 完全一致的策略，先把每个 `identities[].external_open_id` 原样放入 exact allowlist；
+3. 如需内部员工通配，再配置 `all_internal_members`、`internal_membership` 和对应 `feishu.directory` evidence provider，并确认 Contact 权限与应用可见范围；
+4. 保留独立 denylist，将插件的 `identities` 整体替换为 `identity_admission.policy_id`，两者不能同时存在；
+5. 重启并验证 exact allow/deny、unknown、重复事件和目录故障恢复。Admission-backed Connector 不再需要静态飞书 Connector Actor 的 Offer authority rule；外部 Intake Agent 等正常身份配置仍保留。
+
+Admission binding 中不会保存 raw open_id；它以部署密钥生成 fingerprint。若迁移前必须保持已有 Actor ID，请先制定显式的数据迁移/映射方案，不要假定由 fingerprint 生成的新 Actor ID 与旧静态 ID 相同。
+
+## 8. 持久化与部署形态
+
+- `memory-demo` 只用于测试和演示，进程退出后绑定与 Decision 丢失；
+- `sqlite-local` 保存 Admission binding/decision，适合长期本地开发和单进程服务，不能作为多实例共享权威；
+- `postgres` 通过部署注入的 Admission stores、事务唯一约束和 tenant RLS 支持多进程/集群并发；`service-node` 不读取或创建 PostgreSQL 凭据；
+- 三种实现共享同一 SPI 和 conformance profile。YAML 只是首个 immutable Configuration Provider，后续数据库/远程 Provider 不改变 Admission runtime 或插件接口。
+
+## 9. 多实例与后续通道
 
 `plugins.instances` 可配置多个飞书实例。每个实例拥有独立 connector scope、凭据、token cache、身份映射、worker、健康状态和会话路由。未来企业微信或其他通道实现新的可信 `PluginFactory` 和 channel adapter，复用相同 Connector、Handoff、Subscription 与 Signal 合约，不修改 WFPP 或 Exchange Core。
 
 本地 `memory-demo` 与 `sqlite-local` 由 `service-node` 自动组合 Channel Route 和有界机械推进器；SQLite 重启会恢复 ingress、route、Subscription、projection 与 delivery position。PostgreSQL/集群部署必须注入部署自有的 `ChannelRouteStore`，并让集群 `SignalDispatcher` 与插件使用同一个 `ChannelSignalRouter`。数据库仍是权威状态，Broker 只可用作 wakeup 加速。
 
-## 7. 故障语义
+## 10. 故障语义
 
 - Webhook 和长连接 handler 都只等待 durable accept；映射和 Offer 异步进行；
 - Feishu 429、5xx、网络失败和路由暂不可用进入有界重试；
-- Authority 拒绝、未映射身份和非法消息进入明确忽略或死信状态；
+- Admission/Authority 拒绝和非法消息进入明确忽略或死信状态；目录、grant 或存储暂不可用进入有界重试；
 - SQLite 保存 ingress、route、Subscription 和 delivery position；
 - Feishu 不可用不会撤销已提交的 Work Fabric 事实；
 - 密钥不会进入 Handoff、route、Protocol Event、Console、健康信息或指标标签。
+
+Admission 只判断可信外部主体是否能进入协作网络。群组成员策略、消息内容分类、敏感词/Prompt 防护、Agent 推理、目标选择、业务审批、需求创建和专业工作执行都在它的职责之外。Work Fabric 是协作连接和责任交接 fabric，不是 automation brain，也不是企业通用防火墙。
 
 删除或停用一个已经运行过的插件实例前，应先通过运维流程关闭它创建的固定 Subscription；仅把实例设为 `enabled: false` 不会删除历史 canonical 状态。运行时配置采用启动时不可变快照，变更 YAML 后需要重启服务；未来数据库或远程 Provider 可以替换 YAML，而插件消费者不需要改动。

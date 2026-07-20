@@ -155,7 +155,7 @@ import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, t
 import { NodeConfigurationError, type NodeServiceConfig } from "./config.js";
 import { assertFeishuPluginRole } from "./feishu-plugin-composition.js";
 
-const clock: Clock = { now: () => new Date().toISOString() };
+const defaultClock: Clock = { now: () => new Date().toISOString() };
 const defaultIds: IdGenerator = {
   nextId(kind) { return `${kind}_${randomUUID()}`; },
 };
@@ -199,6 +199,8 @@ export interface NodeServiceCompositionOptions {
   readonly postgres_storage?: NodeStorageComposition;
   /** Deployment-owned generator; useful for deterministic integration profiles. */
   readonly ids?: IdGenerator;
+  /** Deployment-owned clock; useful for deterministic integration profiles. */
+  readonly clock?: Clock;
   readonly cluster_worker?: NodeClusterWorkerDependencies;
   readonly cluster_snapshot?: ClusterOperationalSnapshotSource;
   readonly configuration_revision?: string;
@@ -299,6 +301,7 @@ class StoreFreshness implements ProjectionFreshnessSource {
     private readonly persistence: ExchangePersistence & ProjectionCheckpointStore,
     private readonly projectorId: string,
     private readonly journalPositions: PartitionJournalPositionSource,
+    private readonly clock: Clock,
   ) {}
 
   async load(tenantId: string, partitionId: string) {
@@ -312,7 +315,7 @@ class StoreFreshness implements ProjectionFreshnessSource {
       partition_id: partitionId,
       projected_position: projected,
       journal_position: journal,
-      observed_at: clock.now(),
+      observed_at: this.clock.now(),
     };
   }
 }
@@ -360,6 +363,7 @@ class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
     private readonly config: NodeServiceConfig,
     private readonly plugins: PluginHostConfiguration,
     private readonly fetch: typeof globalThis.fetch,
+    private readonly clock: Clock,
   ) {}
   activate(origin: string): void {
     for (const [instanceId, instance] of Object.entries(this.plugins)) {
@@ -372,7 +376,7 @@ class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
         tenantId: this.config.tenant_id,
         exchangeId: this.config.exchange_id,
         fetch: this.fetch,
-        clock,
+        clock: this.clock,
       });
       this.sinks.set(instanceId, new ConnectorSdkCommandSink(client));
     }
@@ -441,6 +445,7 @@ function composeAdmission(
   pluginConfiguration: PluginHostConfiguration,
   section: AdmissionConfigurationSection | undefined,
   runtimeFetch: typeof globalThis.fetch,
+  clock: Clock,
 ): AdmissionComposition | undefined {
   const plugins = enabledFeishuAdmissionPlugins(pluginConfiguration);
   if (plugins.size === 0 && config.admission === undefined) return undefined;
@@ -634,6 +639,7 @@ export async function composeNodeService(
   config: NodeServiceConfig,
   options: NodeServiceCompositionOptions = {},
 ): Promise<ComposedNodeService> {
+  const clock = options.clock ?? defaultClock;
   const pluginConfiguration = options.plugins ?? {};
   assertFeishuPluginRole(config.role, pluginConfiguration);
   const selectedStorage = config.storage_profile === "memory-demo"
@@ -663,8 +669,14 @@ export async function composeNodeService(
     pluginConfiguration,
     options.admission,
     runtimeFetch,
+    clock,
   );
-  const connectorCommandSink = new DeferredConnectorSdkCommandSink(config, pluginConfiguration, runtimeFetch);
+  const connectorCommandSink = new DeferredConnectorSdkCommandSink(
+    config,
+    pluginConfiguration,
+    runtimeFetch,
+    clock,
+  );
   const schemas = await (options.protocol_schema_loader ?? loadWfppSchemaValidator)("protocol/schemas/v1");
   const validator = await loadWfppCommandValidator(
     schemas,
@@ -836,6 +848,7 @@ export async function composeNodeService(
       storage.persistence,
       "workfabric.collaboration.visibility.v1",
       storage.journalPositions ?? new StoreJournalPositions(storage.persistence),
+      clock,
     ),
   );
   const audit = new OperationAuditRecorder(storage.audit, clock);

@@ -116,6 +116,8 @@ Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具�
 
 阶段 8 在 Core 外增加 Provider-backed 全局配置、可信多实例插件生命周期和持久化 Channel Route。内置飞书协作通道仅把明确 `@机器人` 的消息映射成面向已配置外部 Agent 的 Intake Handoff，并通过 canonical Subscription 把协议事件送回原会话或显式固定频道。YAML 只是首个 Configuration Provider；插件与消费方不依赖文件实现。该层不解释意图、不选择目标、不调用模型/工具，也不创建外部需求或执行工作。
 
+阶段 9 在可信传输和协议 Authority 之间增加技术中立的 Collaboration Admission。它判断一个已经由 Connector 认证的外部参与方是否可进入协作网络，为允许的单一外部主体建立稳定 Actor/Endpoint 绑定，并签发短时、单主体、与 ingress 绑定的 representation grant。Admission 不属于飞书插件，不依赖 YAML、SQLite、PostgreSQL、WFPP 或 Exchange Core；具体配置、目录和持久化均由 Adapter 在 `service-node` 组合根注入。
+
 ## 4. Unified Participation Protocol
 
 统一参与协议是 Work Fabric 的核心产品。它统一协作语义，而不是强制统一传输方式。
@@ -655,7 +657,7 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - Connector Worker 将受限 mapping outcome 交给 SDK command sink；Webhook 与可选长连接不在线执行协议命令。
 - Node Feishu Long-Connection Adapter 只在 `service-node` 组合根下接入官方 SDK，并把 `im.message.receive_v1` 送入同一个 durable ingress；它不进入 Core。
 - 飞书 callback 支持 raw-body 验签、时间窗口、加密体、verification、challenge、消息/卡片归一化和稳定幂等。
-- 飞书用户必须显式映射到已有 Work Fabric 身份；Connector 签发的 action reference 经过认证、范围绑定、过期和 expected-version 约束。
+- 飞书用户可以通过兼容性的静态 `identities` 显式映射，或由 Collaboration Admission 策略建立独立、稳定的 Actor/Endpoint 绑定；Connector 签发的 action reference 经过认证、范围绑定、过期和 expected-version 约束。
 - 飞书文档使用 revision-aware canonical reference，内容只按需、有界获取；outbound 通知复用既有 SignalDispatcher。
 - Reconciliation 只保存 discrepancy；不静默修改任一侧。
 - Worker 在公共 side effect 前续租并校验 fencing；PostgreSQL 使用可索引时间列、生命周期 retention deadline 和有界租户清理。
@@ -663,6 +665,22 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - 真实 HTTP + SDK + Exchange + Subscription integration test 证明了卡片 Offer/Accept/状态回传闭环，且权威事件不含凭据。
 
 详细 Endpoint 边界见 [Endpoint 与外部 Agent Runtime 接入](endpoint-agent-boundary.md)，飞书部署组合见 [Feishu Connector 示例](../examples/feishu-connector/README.md)，完整业务连接场景见 [飞书客户项目生命周期示例](feishu-customer-lifecycle-example.md)。生产身份 Adapter 和真正的本地 Agent Runtime 仍是部署或外部模块；所有连接模块都不改变 Core 的职责边界。
+
+阶段 9 完成 Collaboration Admission 连接边界：
+
+```text
+Feishu transport trust -> durable ingress -> Admission -> representation grant
+-> public TypeScript SDK -> HTTP Identity -> Authority -> Exchange Core -> Handoff
+```
+
+- transport trust 先验证来源、应用/租户绑定和有界事件；Admission 只消费可信主体事实，不替代 Webhook 验签、飞书 IAM、WAF 或 DDoS 防护。
+- 策略按 tenant、connector、source system 和 external tenant 精确选取。固定优先级为 exact deny、exact allow、已验证的 active internal member、default deny，通道插件不得复制或调整该优先级。
+- `all_internal_members` 是明确的布尔规则，只适用于经目录证据确认的 active human；群成员关系、群聊可加入性、消息文本和 Agent 推理都不是 Admission 证据。
+- 允许的外部主体获得独立且稳定的 Actor/Endpoint。审计只保存 tenant-scoped fingerprint、稳定 reason code、policy revision 和 ingress correlation，不保存 raw subject、消息、目录原始响应、grant 或密钥。
+- representation grant 只证明一次受界限的 Actor 表示，不授权操作。公共 SDK 仍进入 HTTP Identity，Admission Authority 仅允许配置的 Intake `workfabric.handoff.offer.v1`，Exchange Core 才记录 Handoff。
+- Memory Adapter 只用于 demo/test；SQLite 是单进程、本地、重启可恢复的绑定和决策权威；PostgreSQL 通过事务、唯一约束、RLS 和部署注入的连接提供多进程/集群权威。Admission SPI/runtime 不知道具体数据库。
+- 策略 deny 或目录状态变更会阻止新 Admission；已经签发的 representation grant 不维护集中会话，最坏撤销延迟由 `service.admission.grant_ttl_seconds` 限定。高风险撤销应同时轮换/移除验证密钥或停止 Connector。
+- Admission 是协作连接和交接 Fabric 的入口策略，不是通用防火墙、内容审核、业务审批、目标调度、automation brain 或 Agent 执行器。
 
 阶段 5 完成可操作性与可替换呈现层：
 
@@ -758,5 +776,7 @@ flowchart LR
 | 6A | 集群分区所有权与数据库恢复 | 已完成 |
 | 6B | Broker-backed Signal/Wakeup 加速 | 已完成 |
 | 7 | 跨 Exchange Federation Profile | 已完成 |
+| 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
+| 9 | Collaboration Admission、稳定参与方绑定与短时表示 | 已完成 |
 
-阶段 1–7 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–9 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。

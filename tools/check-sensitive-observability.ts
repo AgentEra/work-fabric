@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { checkAdmissionBoundaries } from "./check-admission-boundaries.js";
 const allowedOtelAttributes = new Set([
   "workfabric.operation", "workfabric.outcome", "workfabric.category", "workfabric.correlation_id",
 ]);
@@ -8,6 +9,7 @@ const allowedOtelAttributes = new Set([
 export interface ObservabilitySafetyReport {
   readonly observation_calls: number;
   readonly otel_attributes: number;
+  readonly admission_sensitive_sinks: number;
 }
 
 export async function checkSensitiveObservability(root = resolve(".")): Promise<ObservabilitySafetyReport> {
@@ -43,8 +45,13 @@ export async function checkSensitiveObservability(root = resolve(".")): Promise<
   for (const attribute of attributeKeys) {
     if (!allowedOtelAttributes.has(attribute)) violations.push(`unsafe OpenTelemetry attribute ${attribute}`);
   }
+  const admission = await checkAdmissionBoundaries(root);
   if (violations.length > 0) throw new Error(`Observability safety violations:\n${violations.join("\n")}`);
-  return { observation_calls: calls, otel_attributes: attributes };
+  return {
+    observation_calls: calls,
+    otel_attributes: attributes,
+    admission_sensitive_sinks: admission.sensitive_sink_violations,
+  };
 }
 
 const invoked = process.argv[1] === undefined ? null : pathToFileURL(resolve(process.argv[1])).href;

@@ -1,4 +1,12 @@
-import type { ExchangeAdapter } from "@work-fabric/exchange-spi";
+export interface AdmissionCapabilityManifest {
+  readonly profile: string;
+  readonly adapter: string;
+  readonly capabilities: Readonly<Record<string, boolean>>;
+}
+
+export interface AdmissionAdapter {
+  readonly manifest: AdmissionCapabilityManifest;
+}
 
 export const ADMISSION_POLICY_PROVIDER_REQUIRED_CAPABILITIES = [
   "immutable_revision",
@@ -81,11 +89,11 @@ export interface AdmissionResult {
   readonly representation_grant?: string;
 }
 
-export interface AdmissionPolicyProvider extends ExchangeAdapter {
+export interface AdmissionPolicyProvider extends AdmissionAdapter {
   load(policyId: string): Promise<AdmissionPolicy | null>;
 }
 
-export interface ExternalSubjectEvidenceProvider extends ExchangeAdapter {
+export interface ExternalSubjectEvidenceProvider extends AdmissionAdapter {
   readonly provider_ref: string;
   resolve(request: AdmissionRequest): Promise<ExternalSubjectEvidence>;
 }
@@ -94,7 +102,7 @@ export interface ExternalSubjectFingerprinter {
   fingerprint(request: AdmissionRequest): string;
 }
 
-export interface ParticipantBindingStore extends ExchangeAdapter {
+export interface ParticipantBindingStore extends AdmissionAdapter {
   getOrCreate(input: { readonly request: AdmissionRequest; readonly external_subject_fingerprint: string; readonly actor_id: string; readonly endpoint_id: string; readonly created_at: string }): Promise<ParticipantBinding>;
 }
 
@@ -107,7 +115,7 @@ export interface AdmissionDecisionRecord {
   readonly recorded_at: string;
 }
 
-export interface AdmissionDecisionStore extends ExchangeAdapter {
+export interface AdmissionDecisionStore extends AdmissionAdapter {
   findByIngress(input: AdmissionScope & { readonly ingress_id: string }): Promise<AdmissionDecisionRecord | null>;
   record(input: AdmissionDecisionRecord): Promise<AdmissionDecisionRecord>;
 }

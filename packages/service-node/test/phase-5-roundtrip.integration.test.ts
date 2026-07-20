@@ -8,6 +8,7 @@ import {
   WorkFabricClient,
   type HandoffOfferPayload,
 } from "@work-fabric/sdk-typescript";
+import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
 
@@ -46,28 +47,33 @@ function client(origin: string, token: string, actorId: string, endpointId: stri
   });
 }
 
-const offer: HandoffOfferPayload = {
-  thread_id: "thread-customer-project-1",
-  work_reference: { uri: "feishu://document/customer-project-1", extensions: {} },
-  target: { actor_id: "actor-agent" },
-  intent: [{ kind: "text", media_type: "text/plain", text: "Implement in the external runtime" }],
-  authority_scope: {
-    delegation_id: "delegation-phase5", scopes: ["work:read", "result:write"],
-    resource_refs: ["feishu://document/customer-project-1"],
-    expires_at: "2026-07-20T00:00:00.000Z", may_redelegate: false,
-  },
-  acceptance_criteria: [{
-    criterion_id: "tests-pass", description: "Tests pass", required: true,
-    result_schema_ref: null, required_evidence_types: ["test_report"],
-  }],
-  verifier: { actor_id: "actor-human", actor_type: "human" },
-  priority: "normal",
-  accept_by: "2026-07-17T00:00:00.000Z",
-  result_due_at: "2026-07-19T00:00:00.000Z",
-};
+function offer(clock: { now(): string }): HandoffOfferPayload {
+  const acceptBy = addUtcTimestampSeconds(clock.now(), 300);
+  const resultDueAt = addUtcTimestampSeconds(clock.now(), 3_600);
+  return {
+    thread_id: "thread-customer-project-1",
+    work_reference: { uri: "feishu://document/customer-project-1", extensions: {} },
+    target: { actor_id: "actor-agent" },
+    intent: [{ kind: "text", media_type: "text/plain", text: "Implement in the external runtime" }],
+    authority_scope: {
+      delegation_id: "delegation-phase5", scopes: ["work:read", "result:write"],
+      resource_refs: ["feishu://document/customer-project-1"],
+      expires_at: resultDueAt, may_redelegate: false,
+    },
+    acceptance_criteria: [{
+      criterion_id: "tests-pass", description: "Tests pass", required: true,
+      result_schema_ref: null, required_evidence_types: ["test_report"],
+    }],
+    verifier: { actor_id: "actor-human", actor_type: "human" },
+    priority: "normal",
+    accept_by: acceptBy,
+    result_due_at: resultDueAt,
+  };
+}
 
 describe("Phase 5 public HTTP/SDK roundtrip", () => {
   it("projects, rebuilds, audits and fences recovery without executing participant work", async () => {
+    const clock = { now: () => "2026-07-20T00:00:00.000Z" };
     const partition = partitionId();
     const acceptedRecovery = recoveryId("projection-rebuild-1");
     const deniedRecovery = recoveryId("projection-rebuild-denied");
@@ -108,12 +114,12 @@ describe("Phase 5 public HTTP/SDK roundtrip", () => {
       ],
       authority_rules: authorityRules,
       listen: { host: "127.0.0.1", port: 0 },
-    }), { ids });
+    }), { ids, clock });
     const { origin } = await service.listen();
     const human = client(origin, "human-token", "actor-human", "endpoint-human");
     const agent = client(origin, "agent-token", "actor-agent", "endpoint-agent");
     try {
-      await expect(human.handoffs.offer(offer, { idempotencyKey: "offer-1" }))
+      await expect(human.handoffs.offer(offer(clock), { idempotencyKey: "offer-1" }))
         .resolves.toMatchObject({ operation_status: "accepted", resource: { resource_id: handoffId, resource_version: 1 } });
       await expect(agent.handoffs.accept({ handoff_id: handoffId }, { expectedVersion: 1, idempotencyKey: "accept-1" }))
         .resolves.toMatchObject({ operation_status: "accepted", resource: { resource_version: 2 } });

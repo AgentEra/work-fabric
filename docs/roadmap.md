@@ -18,6 +18,29 @@ and repository verification are implemented.
 | 6B | Broker-backed Signal/wakeup acceleration | Complete |
 | 7 | Cross-Exchange federation profile | Complete |
 | 8 | Provider-backed configuration and collaboration-channel plugin runtime | Complete |
+| 9 | Source-neutral Collaboration Admission and participant representation | Complete |
+
+## Phase 9 completion boundary
+
+Phase 9 adds a source-neutral Collaboration Admission SPI/runtime between
+trusted Connector ingress and protocol Identity/Authority. Tenant-scoped
+policies use fixed deny-before-allow precedence, optional verified internal
+membership, stable per-subject Actor/Endpoint bindings, bounded decision
+receipts and short-lived single-subject representation grants. Memory, SQLite
+and PostgreSQL adapters share the same conformance profiles; the Feishu Contact
+adapter supplies evidence without owning policy.
+
+The verified path is `transport trust -> durable ingress -> Admission ->
+representation grant -> public TypeScript SDK -> HTTP Identity -> Authority ->
+Exchange Core -> Handoff`. Exact deny, unknown/guest evidence and directory
+outage create no Handoff; retryable outage recovery, duplicate ingress and both
+Feishu transports preserve the same authoritative semantics. A synthetic
+non-Feishu system participant reuses the same Admission runtime.
+
+Phase 9 does not classify group membership, message text or prompts, reason for
+Agents, select targets, approve business work, execute automation, or become a
+general firewall. Those remain external IAM, channel, Agent and connected-work
+system responsibilities.
 
 ## Phase 8 completion boundary
 
