@@ -529,10 +529,20 @@ Expected: FAIL because the package does not exist.
 
 - [ ] **Step 3: Implement tenant-scoped fingerprints**
 
-Use HMAC-SHA-256 with a deployment secret of at least 32 UTF-8 bytes:
+Use HMAC-SHA-256 with a deployment secret of at least 32 UTF-8 bytes. Encode the
+input as one deterministic JSON string tuple so identifier components cannot
+collide even when they contain delimiter characters:
 
 ```ts
-HMAC(key, "workfabric-admission-subject-v1\0" + tenant_id + "\0" + connector_id + "\0" + source_system + "\0" + external_tenant_id + "\0" + external_subject_type + "\0" + external_subject_id)
+HMAC(key, JSON.stringify([
+  "workfabric-admission-subject-v1",
+  tenant_id,
+  connector_id,
+  source_system,
+  external_tenant_id,
+  external_subject_type,
+  external_subject_id,
+]))
 ```
 
 Return `afp_` plus base64url digest. Never log the input or key.
