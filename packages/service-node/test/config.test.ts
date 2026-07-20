@@ -119,6 +119,25 @@ describe("Node service configuration", () => {
         max_evidence_cache_entries: 10_000,
       },
     })).toThrow(/service\.admission\.grant_keys/);
+
+    for (const keyId of ["bad.key", ".", "__proto__", "prototype", "constructor"]) {
+      const grantKeys = Object.create(null) as Record<string, string>;
+      Object.defineProperty(grantKeys, keyId, {
+        enumerable: true,
+        configurable: true,
+        value: "y".repeat(32),
+      });
+      expect(() => parseServiceConfig({
+        ...base,
+        admission: {
+          subject_fingerprint_key: "x".repeat(32),
+          grant_active_key_id: keyId,
+          grant_keys: grantKeys,
+          grant_ttl_seconds: 120,
+          max_evidence_cache_entries: 10_000,
+        },
+      })).toThrow(/service\.admission\.(grant_keys|grant_active_key_id)/);
+    }
   });
 
   it("requires a SQLite location and refuses unsupported production defaults", () => {

@@ -97,12 +97,11 @@ function exactAdmissionObject(
   return result;
 }
 
-function admissionIdentifier(value: unknown, path: string): string {
+function admissionGrantKeyId(value: unknown, path: string): string {
   if (
     typeof value !== "string"
-    || value.length === 0
-    || value.length > 128
-    || value.trim() !== value
+    || value.length > 64
+    || !/^[A-Za-z0-9_-]+$/.test(value)
     || PROTOTYPE_KEYS.has(value)
   ) return admissionError(path);
   return value;
@@ -119,7 +118,7 @@ function parseAdmissionConfig(value: unknown): NodeAdmissionConfig {
   const path = "service.admission";
   const raw = exactAdmissionObject(value, path, ADMISSION_KEYS);
   const fingerprintKey = admissionSecret(raw.subject_fingerprint_key, `${path}.subject_fingerprint_key`);
-  const activeKeyId = admissionIdentifier(raw.grant_active_key_id, `${path}.grant_active_key_id`);
+  const activeKeyId = admissionGrantKeyId(raw.grant_active_key_id, `${path}.grant_active_key_id`);
   const rawKeys = raw.grant_keys;
   if (typeof rawKeys !== "object" || rawKeys === null || Array.isArray(rawKeys)) {
     return admissionError(`${path}.grant_keys`);
@@ -137,7 +136,7 @@ function parseAdmissionConfig(value: unknown): NodeAdmissionConfig {
   ) return admissionError(`${path}.grant_keys`);
   const grantKeys: Record<string, string> = Object.create(null) as Record<string, string>;
   for (const keyId of keyIds as readonly string[]) {
-    const normalizedId = admissionIdentifier(keyId, `${path}.grant_keys`);
+    const normalizedId = admissionGrantKeyId(keyId, `${path}.grant_keys`);
     grantKeys[normalizedId] = admissionSecret(
       ownData(rawKeys, keyId, `${path}.grant_keys.${keyId}`),
       `${path}.grant_keys.${keyId}`,
@@ -159,6 +158,49 @@ function parseAdmissionConfig(value: unknown): NodeAdmissionConfig {
     grant_ttl_seconds: ttl as number,
     max_evidence_cache_entries: cache as number,
   });
+}
+
+export function serviceAdmissionSecretPaths(service: unknown): readonly string[] {
+  if (typeof service !== "object" || service === null || Array.isArray(service)) {
+    return admissionError("service");
+  }
+  let descriptor: PropertyDescriptor | undefined;
+  try { descriptor = Object.getOwnPropertyDescriptor(service, "admission"); } catch {
+    return admissionError("service.admission");
+  }
+  if (descriptor === undefined) {
+    try {
+      if (Reflect.has(service, "admission")) return admissionError("service.admission");
+    } catch {
+      return admissionError("service.admission");
+    }
+    return [];
+  }
+  if (!("value" in descriptor) || descriptor.value === undefined) {
+    return admissionError("service.admission");
+  }
+  const raw = exactAdmissionObject(descriptor.value, "service.admission", ADMISSION_KEYS);
+  admissionGrantKeyId(raw.grant_active_key_id, "service.admission.grant_active_key_id");
+  const keys = raw.grant_keys;
+  if (typeof keys !== "object" || keys === null || Array.isArray(keys)) {
+    return admissionError("service.admission.grant_keys");
+  }
+  let keyIds: readonly PropertyKey[];
+  try { keyIds = Reflect.ownKeys(keys); } catch {
+    return admissionError("service.admission.grant_keys");
+  }
+  if (keyIds.length === 0 || keyIds.length > 100 || keyIds.some((key) => typeof key !== "string")) {
+    return admissionError("service.admission.grant_keys");
+  }
+  const safeKeyIds = (keyIds as readonly string[]).map((keyId) => {
+    admissionGrantKeyId(keyId, "service.admission.grant_keys");
+    ownData(keys, keyId, `service.admission.grant_keys.${keyId}`);
+    return keyId;
+  });
+  return [
+    "service.admission.subject_fingerprint_key",
+    ...safeKeyIds.map((keyId) => `service.admission.grant_keys.${keyId}`),
+  ];
 }
 
 function identifier(value: unknown, field: string): string {

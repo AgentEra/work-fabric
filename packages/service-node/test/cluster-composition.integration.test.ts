@@ -130,6 +130,19 @@ describe("clustered Node composition", () => {
       code: "admission_storage_missing",
       path: "postgres_storage.admissionBindings",
     });
+
+    const injectedClose = vi.fn();
+    const postgresWithForeignCloser = {
+      ...storage,
+      sqlite: { close: injectedClose },
+    } as unknown as NodeStorageComposition;
+    const compositionFailure = new Error("injected protocol schema failure");
+    await expect(composeNodeService(config, {
+      postgres_storage: postgresWithForeignCloser,
+      admission: { policies: {}, evidence_providers: {} },
+      protocol_schema_loader: async () => { throw compositionFailure; },
+    })).rejects.toBe(compositionFailure);
+    expect(injectedClose).not.toHaveBeenCalled();
   });
 
   it("starts only the worker host, exposes aggregate state and drains it", async () => {

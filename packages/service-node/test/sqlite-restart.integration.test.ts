@@ -1,10 +1,51 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { SqliteSession } from "@work-fabric/adapter-storage-sqlite";
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
 
 describe("SQLite Node service composition", () => {
+  it("closes an owned SQLite session exactly once when composition fails after Admission", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "work-fabric-admission-cleanup-"));
+    const close = vi.spyOn(SqliteSession.prototype, "close");
+    const failure = new Error("injected protocol schema failure");
+    const config = parseServiceConfig({
+      storage_profile: "sqlite-local",
+      role: "api",
+      tenant_id: "tenant-local",
+      exchange_id: "exchange-local",
+      cursor_secret: "x".repeat(32),
+      sqlite: { location: join(directory, "work-fabric.db") },
+      admission: {
+        subject_fingerprint_key: "f".repeat(32),
+        grant_active_key_id: "primary",
+        grant_keys: { primary: "g".repeat(32) },
+        grant_ttl_seconds: 120,
+        max_evidence_cache_entries: 100,
+      },
+      identities: [{ authentication_evidence: { bearer_token: "token" }, principal: {
+        principal_id: "principal", tenant_id: "tenant-local",
+        actor_claims: [{ actor_id: "actor", actor_type: "human", endpoint_ids: ["endpoint"] }], attributes: {},
+      } }],
+      authority_rules: [{
+        tenant_id: "tenant-local", principal_id: "principal", actor_id: "actor",
+        actor_type: "human", endpoint_id: "endpoint",
+        action: "workfabric.operations.health.read.v1", resource_id: null,
+      }],
+    });
+    try {
+      await expect(composeNodeService(config, {
+        admission: { policies: {}, evidence_providers: {} },
+        protocol_schema_loader: async () => { throw failure; },
+      })).rejects.toBe(failure);
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      close.mockRestore();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps Admission decisions and participant bindings stable across restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "work-fabric-admission-service-"));
     const config = parseServiceConfig({

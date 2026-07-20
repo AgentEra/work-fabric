@@ -3,7 +3,7 @@ import { admissionConfigurationValidator, type AdmissionConfigurationSection } f
 import { ConfigurationService, EnvironmentSecretResolver, resolveDeclaredSecrets } from "@work-fabric/configuration-runtime";
 import { FeishuPluginFactory, feishuSecretPaths, validateFeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
 import type { PluginHostConfiguration } from "@work-fabric/plugin-runtime";
-import { parseServiceConfig, type NodeServiceConfig } from "./config.js";
+import { parseServiceConfig, serviceAdmissionSecretPaths, type NodeServiceConfig } from "./config.js";
 
 export interface LoadedNodeConfiguration {
   readonly revision: string;
@@ -22,18 +22,11 @@ function object(value: unknown, field: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function declaredSecretPaths(root: Record<string, unknown>): readonly string[] {
+export function collectDeclaredSecretPaths(root: Record<string, unknown>): readonly string[] {
   const paths = ["service.cursor_secret"];
   const service = object(root.service, "service");
   if (service.postgres !== undefined) paths.push("service.postgres.connection_string");
-  if (service.admission !== undefined) {
-    const admission = object(service.admission, "service.admission");
-    paths.push("service.admission.subject_fingerprint_key");
-    const grantKeys = object(admission.grant_keys, "service.admission.grant_keys");
-    for (const keyId of Object.keys(grantKeys)) {
-      paths.push(`service.admission.grant_keys.${keyId}`);
-    }
-  }
+  paths.push(...serviceAdmissionSecretPaths(service));
   if (Array.isArray(service.identities)) {
     service.identities.forEach((identity, index) => {
       if (typeof identity === "object" && identity !== null && !Array.isArray(identity)) {
@@ -61,7 +54,7 @@ export async function loadNodeConfiguration(environment: Readonly<Record<string,
   const document = await yaml.load();
   const root = object(document.value, "configuration");
   const serviceRaw = object(root.service, "service");
-  const resolved = await resolveDeclaredSecrets(document.value, declaredSecretPaths(root), {
+  const resolved = await resolveDeclaredSecrets(document.value, collectDeclaredSecretPaths(root), {
     resolver: new EnvironmentSecretResolver(environment),
     allow_literals: serviceRaw.development_mode === true,
   });

@@ -4,6 +4,8 @@ import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memo
 import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
 import {
   ConfigurationAdmissionPolicyProvider,
+  AdmissionConfigurationValidationError,
+  validateAdmissionConfiguration,
   type AdmissionConfigurationSection,
 } from "@work-fabric/adapter-admission-configuration";
 import {
@@ -205,6 +207,8 @@ export interface NodeServiceCompositionOptions {
   readonly fetch?: typeof globalThis.fetch;
   readonly channel_signal_router?: ChannelSignalRouter;
   readonly feishu_long_connection_client_factory?: FeishuLongConnectionClientFactory;
+  /** @internal Optional stable seam for composition-failure verification. */
+  readonly protocol_schema_loader?: typeof loadWfppSchemaValidator;
 }
 
 export interface NodeClusterWorkerDependencies {
@@ -249,6 +253,7 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     location: sqlite.location,
     busy_timeout_ms: sqlite.busy_timeout_ms,
   });
+  try {
   migrateSqlite(
     session,
     config.admission === undefined
@@ -283,6 +288,10 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     ),
     sqlite: session,
   };
+  } catch (error) {
+    try { session.close(); } catch { /* preserve the composition failure */ }
+    throw error;
+  }
 }
 
 class StoreFreshness implements ProjectionFreshnessSource {
@@ -447,7 +456,18 @@ function composeAdmission(
   if (storage.admissionDecisions === undefined) {
     return compositionError("admission_storage_missing", `${storagePath}.admissionDecisions`);
   }
-  const admissionSection = section ?? { policies: {}, evidence_providers: {} };
+  let admissionSection: AdmissionConfigurationSection;
+  try {
+    admissionSection = validateAdmissionConfiguration(
+      section ?? { policies: {}, evidence_providers: {} },
+      "admission",
+    );
+  } catch (error) {
+    return compositionError(
+      "admission_configuration_invalid",
+      error instanceof AdmissionConfigurationValidationError ? error.path : "admission",
+    );
+  }
   const evidenceProviders = new Map<string, ExternalSubjectEvidenceProvider>();
   const feishuTenantTokens = new Map<string, FeishuTenantTokenProvider>();
   const feishuPlugins = new Map<string, FeishuPluginConfig>();
@@ -627,6 +647,8 @@ export async function composeNodeService(
     );
   }
   const storage = selectedStorage;
+  const ownedSqlite = config.storage_profile === "sqlite-local" ? storage.sqlite : null;
+  try {
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
   if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
     throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
@@ -635,21 +657,15 @@ export async function composeNodeService(
   const channelSignalRouter = options.channel_signal_router ?? new ChannelSignalRouter();
   const webhookRegistry = new FeishuWebhookRegistry();
   const runtimeFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
-  let admissionComposition: AdmissionComposition | undefined;
-  try {
-    admissionComposition = composeAdmission(
-      config,
-      storage,
-      pluginConfiguration,
-      options.admission,
-      runtimeFetch,
-    );
-  } catch (error) {
-    storage.sqlite?.close();
-    throw error;
-  }
+  const admissionComposition = composeAdmission(
+    config,
+    storage,
+    pluginConfiguration,
+    options.admission,
+    runtimeFetch,
+  );
   const connectorCommandSink = new DeferredConnectorSdkCommandSink(config, pluginConfiguration, runtimeFetch);
-  const schemas = await loadWfppSchemaValidator("protocol/schemas/v1");
+  const schemas = await (options.protocol_schema_loader ?? loadWfppSchemaValidator)("protocol/schemas/v1");
   const validator = await loadWfppCommandValidator(
     schemas,
     "protocol/spec/interaction-payloads.json",
@@ -904,12 +920,7 @@ export async function composeNodeService(
       },
     }],
   }, normalizeHttpServiceConfig({}));
-  try {
-    await pluginHost.prepare();
-  } catch (error) {
-    storage.sqlite?.close();
-    throw error;
-  }
+  await pluginHost.prepare();
   type ServiceLifecycleState =
     | "new"
     | "starting"
@@ -974,7 +985,7 @@ export async function composeNodeService(
       let failure: unknown;
       try { await stopExecutionResources(); } catch (error) { failure = error; }
       try { await http.close(); } catch (error) { failure ??= error; }
-      try { storage.sqlite?.close(); } catch (error) { failure ??= error; }
+      try { ownedSqlite?.close(); } catch (error) { failure ??= error; }
       lifecycleState = "closed";
       if (failure !== undefined) throw failure;
     })();
@@ -1010,4 +1021,8 @@ export async function composeNodeService(
     },
     close: closeService,
   };
+  } catch (error) {
+    try { ownedSqlite?.close(); } catch { /* preserve the composition failure */ }
+    throw error;
+  }
 }

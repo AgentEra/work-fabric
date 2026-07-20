@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { loadNodeConfiguration } from "../src/index.js";
+import { collectDeclaredSecretPaths, loadNodeConfiguration } from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -219,6 +219,63 @@ service:
       grant_ttl_seconds: 120,
       max_evidence_cache_entries: 10_000,
     });
+  });
+
+  it("rejects unsafe Admission key path segments before secret resolution", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "wf-config-admission-path-")), "work-fabric.yaml");
+    await writeFile(path, `api_version: workfabric.config/v1
+service:
+  storage_profile: memory-demo
+  development_mode: true
+  tenant_id: tenant-local
+  exchange_id: exchange-local
+  cursor_secret: \${CURSOR_SECRET}
+  admission:
+    subject_fingerprint_key: \${FINGERPRINT_KEY}
+    grant_active_key_id: bad.key
+    grant_keys: { "bad.key": "\${GRANT_KEY}" }
+    grant_ttl_seconds: 120
+    max_evidence_cache_entries: 100
+  identities: [{authentication_evidence: {bearer_token: token}, principal: {principal_id: p, tenant_id: tenant-local, actor_claims: [{actor_id: a, actor_type: human, endpoint_ids: [e]}], attributes: {}}}]
+  authority_rules: [{tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}]
+`, "utf8");
+    await expect(loadNodeConfiguration({
+      WORK_FABRIC_CONFIG: path,
+      CURSOR_SECRET: "x".repeat(32),
+      FINGERPRINT_KEY: "f".repeat(32),
+      GRANT_KEY: "g".repeat(32),
+    })).rejects.toMatchObject({
+      code: "service_admission_invalid",
+      path: "service.admission.grant_active_key_id",
+    });
+  });
+
+  it("discovers Admission secret paths without invoking accessors or proxy traps", () => {
+    let getterCalls = 0;
+    const admission = Object.defineProperty({
+      subject_fingerprint_key: "placeholder",
+      grant_active_key_id: "primary",
+      grant_ttl_seconds: 120,
+      max_evidence_cache_entries: 100,
+    }, "grant_keys", {
+      enumerable: true,
+      get() { getterCalls += 1; return { primary: "placeholder" }; },
+    });
+    expect(() => collectDeclaredSecretPaths({ service: { admission } }))
+      .toThrowError(expect.objectContaining({
+        code: "service_admission_invalid",
+        path: "service.admission.grant_keys",
+      }));
+    expect(getterCalls).toBe(0);
+
+    const trapped = new Proxy({}, {
+      ownKeys() { throw new Error("sensitive proxy detail"); },
+    });
+    expect(() => collectDeclaredSecretPaths({ service: { admission: trapped } }))
+      .toThrowError(expect.objectContaining({
+        code: "service_admission_invalid",
+        path: "service.admission",
+      }));
   });
 
   it("loads long-connection secrets without a Webhook verification token", async () => {

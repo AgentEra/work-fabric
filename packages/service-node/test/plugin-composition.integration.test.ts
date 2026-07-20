@@ -200,8 +200,58 @@ describe("service plugin composition", () => {
       ...options,
       admission: { ...section, evidence_providers: {} },
     })).rejects.toMatchObject({
-      code: "admission_evidence_provider_missing",
+      code: "admission_configuration_invalid",
+      path: "admission.policies.feishu-primary-participants.internal_membership.evidence_provider_ref",
+    });
+  });
+
+  it("normalizes direct Admission options without invoking nested accessors or proxy traps", async () => {
+    let getterCalls = 0;
+    const evidenceProviders = Object.defineProperty({}, "feishu-directory-primary", {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return { type: "feishu.directory", config: { plugin_instance_id: "feishu-primary" } };
+      },
+    });
+    await expect(composeNodeService(admissionServiceConfig(), {
+      admission: {
+        policies: admissionSection().policies,
+        evidence_providers: evidenceProviders,
+      } as AdmissionConfigurationSection,
+    })).rejects.toMatchObject({
+      code: "admission_configuration_invalid",
       path: "admission.evidence_providers.feishu-directory-primary",
+    });
+    expect(getterCalls).toBe(0);
+
+    const policy = admissionSection().policies["feishu-primary-participants"]!;
+    const nestedAccessor = Object.defineProperty({ ...policy }, "allow", {
+      enumerable: true,
+      get() { getterCalls += 1; return policy.allow; },
+    });
+    await expect(composeNodeService(admissionServiceConfig(), {
+      admission: {
+        evidence_providers: admissionSection().evidence_providers,
+        policies: { "feishu-primary-participants": nestedAccessor },
+      } as unknown as AdmissionConfigurationSection,
+    })).rejects.toMatchObject({
+      code: "admission_configuration_invalid",
+      path: "admission.policies.feishu-primary-participants.allow",
+    });
+    expect(getterCalls).toBe(0);
+
+    const trapped = new Proxy({ ...policy }, {
+      getOwnPropertyDescriptor() { throw new Error("sensitive proxy detail"); },
+    });
+    await expect(composeNodeService(admissionServiceConfig(), {
+      admission: {
+        evidence_providers: {},
+        policies: { "feishu-primary-participants": trapped },
+      } as unknown as AdmissionConfigurationSection,
+    })).rejects.toMatchObject({
+      code: "admission_configuration_invalid",
+      path: "admission.policies.feishu-primary-participants.policy_id",
     });
   });
 
