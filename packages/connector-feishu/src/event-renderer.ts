@@ -9,6 +9,7 @@ const ALLOWED_DESTINATION_KEYS = new Set([
   "connector_id",
   "external_tenant_id",
   "actor_id",
+  "actor_type",
   "endpoint_id",
   "delegation_id",
   "receive_id_type",
@@ -23,6 +24,7 @@ export interface FeishuDestinationConfiguration {
   readonly connector_id: string;
   readonly external_tenant_id: string;
   readonly actor_id: string;
+  readonly actor_type: "human" | "agent" | "system";
   readonly endpoint_id?: string;
   readonly delegation_id?: string;
   readonly receive_id_type: FeishuReceiveIdType;
@@ -74,6 +76,11 @@ export function parseFeishuDestination(
     throw new TypeError("render_mode is invalid");
   }
   if (
+    value.actor_type !== "human" &&
+    value.actor_type !== "agent" &&
+    value.actor_type !== "system"
+  ) throw new TypeError("actor_type is invalid");
+  if (
     !Number.isSafeInteger(value.action_ttl_seconds) ||
     (value.action_ttl_seconds as number) <= 0 ||
     (value.action_ttl_seconds as number) > 86_400
@@ -83,6 +90,7 @@ export function parseFeishuDestination(
     connector_id: bounded(value.connector_id, "connector_id"),
     external_tenant_id: bounded(value.external_tenant_id, "external_tenant_id"),
     actor_id: bounded(value.actor_id, "actor_id"),
+    actor_type: value.actor_type,
     ...(value.endpoint_id === undefined
       ? {} : { endpoint_id: bounded(value.endpoint_id, "endpoint_id") }),
     ...(value.delegation_id === undefined
@@ -163,6 +171,7 @@ export class FeishuEventRenderer {
           external_subject_id: destination.receive_id,
           identity: {
             actor_id: destination.actor_id,
+            actor_type: destination.actor_type,
             ...(destination.endpoint_id === undefined
               ? {} : { endpoint_id: destination.endpoint_id }),
             ...(destination.delegation_id === undefined

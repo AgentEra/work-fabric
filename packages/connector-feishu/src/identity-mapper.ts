@@ -49,6 +49,13 @@ export class FeishuIdentityMapper implements ConnectorIdentityResolver {
     const resolved = await this.lookup(structuredClone(query));
     if (resolved === null) return null;
     bounded(resolved.actor_id, "actor_id");
+    if (
+      resolved.actor_type !== "human" &&
+      resolved.actor_type !== "agent" &&
+      resolved.actor_type !== "system"
+    ) {
+      throw new TypeError("actor_type is invalid");
+    }
     if (resolved.endpoint_id !== undefined) {
       bounded(resolved.endpoint_id, "endpoint_id");
     }

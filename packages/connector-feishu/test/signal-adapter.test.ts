@@ -48,6 +48,7 @@ function destination(
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       actor_id: "actor-feishu-recipient",
+      actor_type: "human",
       endpoint_id: "endpoint-feishu-recipient",
       receive_id_type: "open_id",
       receive_id: receiveId,

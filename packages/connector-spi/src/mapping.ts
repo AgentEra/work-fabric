@@ -9,8 +9,14 @@ import type { ConnectorExternalReference } from "./resource.js";
 
 export interface ConnectorResolvedIdentity {
   readonly actor_id: string;
+  readonly actor_type: "human" | "agent" | "system";
   readonly endpoint_id?: string;
   readonly delegation_id?: string;
+}
+
+export interface ConnectorCommandAuthentication {
+  readonly kind: "bearer";
+  readonly credential: string;
 }
 
 export interface ConnectorIdentityQuery {
@@ -34,8 +40,14 @@ export interface ConnectorCommandDescriptor {
   readonly idempotency_key: string;
   readonly expected_version?: number;
   readonly identity: ConnectorResolvedIdentity;
+  readonly authentication?: ConnectorCommandAuthentication;
   readonly input: JsonObject;
 }
+
+export type AuditableConnectorCommandDescriptor = Omit<
+  ConnectorCommandDescriptor,
+  "authentication"
+>;
 
 export interface ConnectorReconciliationObservation {
   readonly external_object_id: string;
@@ -111,7 +123,7 @@ export interface ConnectorAcceptedReceipt {
   readonly connector_id: string;
   readonly ingress_id: string;
   readonly claim: ConnectorIngressClaim;
-  readonly command: ConnectorCommandDescriptor;
+  readonly command: AuditableConnectorCommandDescriptor;
   readonly accepted: ConnectorAcceptedCommandResult;
 }
 

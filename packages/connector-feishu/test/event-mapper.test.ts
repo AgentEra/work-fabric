@@ -51,7 +51,7 @@ function claim(
 
 describe("Feishu identity and action mapping", () => {
   it("resolves only configured identities and defensively clones them", async () => {
-    const identity = { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" };
+    const identity = { actor_id: "human-1", actor_type: "agent" as const, endpoint_id: "feishu-endpoint-1" };
     const mapper = new FeishuIdentityMapper(async (query) =>
       query.external_subject_id === "ou-known" ? identity : null,
     );
@@ -84,7 +84,7 @@ describe("Feishu identity and action mapping", () => {
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
-      identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
+      identity: { actor_id: "human-1", actor_type: "human" as const, endpoint_id: "feishu-endpoint-1" },
       operation: "handoff.accept",
       expected_version: 4,
       input: { handoff_id: "handoff-1" },
@@ -98,7 +98,11 @@ describe("Feishu identity and action mapping", () => {
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
       now: "2026-07-16T00:05:00Z",
-    })).toMatchObject({ operation: "handoff.accept", expected_version: 4 });
+    })).toMatchObject({
+      operation: "handoff.accept",
+      expected_version: 4,
+      identity: { actor_type: "human" },
+    });
     expect(() => codec.resolve(`${reference.slice(0, -1)}x`, {
       tenant_id: "tenant-1",
       connector_id: "feishu-primary",
@@ -132,7 +136,7 @@ describe("Feishu identity and action mapping", () => {
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
-      identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
+      identity: { actor_id: "human-1", actor_type: "human" as const, endpoint_id: "feishu-endpoint-1" },
       operation: "handoff.accept",
       expected_version: 4,
       input: { handoff_id: "handoff-1" },
@@ -153,7 +157,7 @@ describe("Feishu identity and action mapping", () => {
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
-      identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
+      identity: { actor_id: "human-1", actor_type: "human", endpoint_id: "feishu-endpoint-1" },
       operation: "handoff.accept",
       expected_version: 4,
       input: { handoff_id: "handoff-1" },
@@ -162,7 +166,7 @@ describe("Feishu identity and action mapping", () => {
     const resolver: ConnectorIdentityResolver = {
       manifest: manifest("connector.identity.v1"),
       async resolve(): Promise<ConnectorResolvedIdentity> {
-        return { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" };
+        return { actor_id: "human-1", actor_type: "human", endpoint_id: "feishu-endpoint-1" };
       },
     };
     const mapper = new FeishuEventMapper({
@@ -181,7 +185,7 @@ describe("Feishu identity and action mapping", () => {
       command: {
         operation: "handoff.accept",
         expected_version: 4,
-        identity: { actor_id: "human-1", endpoint_id: "feishu-endpoint-1" },
+        identity: { actor_id: "human-1", actor_type: "human", endpoint_id: "feishu-endpoint-1" },
         input: { handoff_id: "handoff-1" },
       },
     });
@@ -197,7 +201,7 @@ describe("Feishu identity and action mapping", () => {
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",
       external_subject_id: "ou-human-1",
-      identity: { actor_id: "human-original", endpoint_id: "endpoint-original" },
+      identity: { actor_id: "human-original", actor_type: "human", endpoint_id: "endpoint-original" },
       operation: "handoff.accept",
       expected_version: 4,
       input: { handoff_id: "handoff-1" },
@@ -206,7 +210,46 @@ describe("Feishu identity and action mapping", () => {
     const mapper = new FeishuEventMapper({
       identity_resolver: new FeishuIdentityMapper(async () => ({
         actor_id: "human-reassigned",
+        actor_type: "human",
         endpoint_id: "endpoint-reassigned",
+      })),
+      action_codec: codec,
+      clock: { now: () => "2026-07-16T00:05:00Z" },
+    });
+
+    await expect(mapper.map(claim("card.action.trigger", {
+      operator_open_id: "ou-human-1",
+      action_ref: actionRef,
+      message_id: "om-card-1",
+      action_tag: "button",
+    }))).resolves.toEqual({
+      kind: "rejected",
+      reason_code: "identity_mapping_changed",
+      retryable: false,
+    });
+  });
+
+  it("rejects an action when only the resolved actor type changed", async () => {
+    const codec = new FeishuActionReferenceCodec({
+      encryption_key: new Uint8Array(32).fill(7),
+      nonce_factory: () => new Uint8Array(12).fill(5),
+    });
+    const actionRef = codec.issue({
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      external_tenant_id: "tenant-key-1",
+      external_subject_id: "ou-human-1",
+      identity: { actor_id: "shared-actor", actor_type: "human", endpoint_id: "shared-endpoint" },
+      operation: "handoff.accept",
+      expected_version: 4,
+      input: { handoff_id: "handoff-1" },
+      expires_at: "2026-07-16T00:10:00Z",
+    });
+    const mapper = new FeishuEventMapper({
+      identity_resolver: new FeishuIdentityMapper(async () => ({
+        actor_id: "shared-actor",
+        actor_type: "agent",
+        endpoint_id: "shared-endpoint",
       })),
       action_codec: codec,
       clock: { now: () => "2026-07-16T00:05:00Z" },

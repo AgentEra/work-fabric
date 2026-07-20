@@ -230,12 +230,21 @@ export class ConnectorWorker {
           const renewedForReceipt = await this.renewBeforeSideEffect(claim);
           if (renewedForReceipt === null) return "fenced";
           claim = renewedForReceipt;
+          const auditableCommand = {
+            operation: mapping.command.operation,
+            idempotency_key: mapping.command.idempotency_key,
+            ...(mapping.command.expected_version === undefined
+              ? {}
+              : { expected_version: mapping.command.expected_version }),
+            identity: structuredClone(mapping.command.identity),
+            input: structuredClone(mapping.command.input),
+          };
           const receipt = await this.options.accepted_receipt_handler.record({
             tenant_id: claim.envelope.tenant_id,
             connector_id: claim.envelope.connector_id,
             ingress_id: claim.ingress_id,
             claim: structuredClone(claim),
-            command: structuredClone(mapping.command),
+            command: auditableCommand,
             accepted: structuredClone(result),
           });
           if (receipt.kind !== "accepted") {

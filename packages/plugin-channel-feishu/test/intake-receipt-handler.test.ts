@@ -13,7 +13,7 @@ function receipt(): ConnectorAcceptedReceipt {
       envelope: { tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu", external_tenant_id: "tenant-key-1", external_event_id: "event-1", dedupe_key: "message:om-1", event_type: "im.message.receive_v1", occurred_at: "2026-07-17T00:00:00.000Z", received_at: "2026-07-17T00:00:01.000Z", payload: { chat_id: "oc-1", message_id: "om-1" } },
       state: "processing", attempt: 1, available_at: "2026-07-17T00:00:01.000Z", accepted_at: "2026-07-17T00:00:01.000Z", updated_at: "2026-07-17T00:00:02.000Z", claim_owner: "worker", claim_token: "claim", fencing_token: 1, lease_expires_at: "2026-07-17T00:01:02.000Z",
     },
-    command: { operation: "handoff.offer", idempotency_key: "key", identity: { actor_id: "actor-human", endpoint_id: "endpoint-human" }, input: {} },
+    command: { operation: "handoff.offer", idempotency_key: "key", identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" }, input: {} },
     accepted: { kind: "accepted", receipt_id: "receipt-1", event_ids: [], resource: { resource_type: "handoff", resource_id: "handoff-1", resource_version: 1 } },
   };
 }
@@ -25,7 +25,7 @@ describe("FeishuIntakeReceiptHandler", () => {
     const ready: string[] = [];
     const handler = new FeishuIntakeReceiptHandler({
       plugin_instance_id: "feishu-primary", routes, subscriptions,
-      actor_type_for: () => "human", max_delivery_attempts: 8,
+      max_delivery_attempts: 8,
       on_handoff_ready: (handoffId) => { ready.push(handoffId); },
     });
     await expect(handler.record(receipt())).resolves.toMatchObject({ kind: "accepted" });
@@ -33,7 +33,7 @@ describe("FeishuIntakeReceiptHandler", () => {
     const active = await subscriptions.listActiveSubscriptions("tenant-1");
     expect(active).toHaveLength(1);
     expect(active[0]).toMatchObject({
-      owner: { actor_id: "actor-human", actor_type: "human" }, endpoint_id: "endpoint-human",
+      owner: { actor_id: "actor-human", actor_type: "agent" }, endpoint_id: "endpoint-human",
       filter: { handoff_ids: ["handoff-1"] },
       destination: { binding: "collaboration-channel", configuration: { plugin_instance_id: "feishu-primary", route_mode: "handoff" } },
     });
@@ -44,7 +44,7 @@ describe("FeishuIntakeReceiptHandler", () => {
 
   it("rejects accepted results without a Handoff resource", async () => {
     const value = receipt();
-    const handler = new FeishuIntakeReceiptHandler({ plugin_instance_id: "feishu-primary", routes: new MemoryChannelRouteStore(), subscriptions: new MemorySubscriptionStore(), actor_type_for: () => "human", max_delivery_attempts: 8 });
+    const handler = new FeishuIntakeReceiptHandler({ plugin_instance_id: "feishu-primary", routes: new MemoryChannelRouteStore(), subscriptions: new MemorySubscriptionStore(), max_delivery_attempts: 8 });
     await expect(handler.record({ ...value, accepted: { kind: "accepted", receipt_id: "r", event_ids: [] } })).resolves.toMatchObject({ kind: "permanent_failure", error_code: "handoff_resource_missing" });
   });
 
@@ -61,7 +61,7 @@ describe("FeishuIntakeReceiptHandler", () => {
         if (failAfterWrite) { failAfterWrite = false; throw new Error("simulated crash after commit"); }
       },
     };
-    const handler = new FeishuIntakeReceiptHandler({ plugin_instance_id: "feishu-primary", routes, subscriptions, actor_type_for: () => "human", max_delivery_attempts: 8 });
+    const handler = new FeishuIntakeReceiptHandler({ plugin_instance_id: "feishu-primary", routes, subscriptions, max_delivery_attempts: 8 });
     await expect(handler.record(receipt())).resolves.toMatchObject({ kind: "retryable_failure" });
     await expect(handler.record(receipt())).resolves.toMatchObject({ kind: "accepted" });
     expect(await delegate.listActiveSubscriptions("tenant-1")).toHaveLength(1);

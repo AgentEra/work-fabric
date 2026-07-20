@@ -7,7 +7,6 @@ export interface FeishuIntakeReceiptHandlerOptions {
   readonly plugin_instance_id: string;
   readonly routes: ChannelRouteStore;
   readonly subscriptions: SubscriptionStore;
-  readonly actor_type_for: (actorId: string) => "human" | "agent" | "system";
   readonly max_delivery_attempts: number;
   readonly on_handoff_ready?: (handoffId: string) => void;
 }
@@ -34,7 +33,7 @@ export class FeishuIntakeReceiptHandler implements ConnectorAcceptedReceiptHandl
       const subscription: RuntimeSubscription = {
         subscription_id: subscriptionId(input.tenant_id, this.options.plugin_instance_id, resource.resource_id),
         tenant_id: input.tenant_id,
-        owner: { actor_id: input.command.identity.actor_id, actor_type: this.options.actor_type_for(input.command.identity.actor_id) },
+        owner: { actor_id: input.command.identity.actor_id, actor_type: input.command.identity.actor_type },
         endpoint_id: input.command.identity.endpoint_id,
         filter: { event_types: [], actor_ids: [], endpoint_ids: [], thread_ids: [], handoff_ids: [resource.resource_id], work_reference_uris: [], capability_ids: [], lifecycle_states: [] },
         destination: { destination_id: `handoff:${resource.resource_id}`, binding: "collaboration-channel", configuration: { plugin_instance_id: this.options.plugin_instance_id, route_mode: "handoff" } },

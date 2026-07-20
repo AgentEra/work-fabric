@@ -93,7 +93,7 @@ const acceptedCommand: ConnectorMappingOutcome = {
     operation: "handoff.accept",
     idempotency_key: "connector:message-1",
     expected_version: 2,
-    identity: { actor_id: "actor-1" },
+    identity: { actor_id: "actor-1", actor_type: "human" },
     input: { handoff_id: "handoff-1" },
   },
 };
@@ -135,9 +135,11 @@ function worker(
 class ReceiptHandler implements ConnectorAcceptedReceiptHandler {
   readonly manifest = manifest("connector.accepted-receipt.v1");
   readonly calls: string[] = [];
+  readonly receipts: unknown[] = [];
   constructor(private readonly result: ConnectorCommandResult) {}
   async record(input: { readonly ingress_id: string }): Promise<ConnectorCommandResult> {
     this.calls.push(input.ingress_id);
+    this.receipts.push(structuredClone(input));
     return this.result;
   }
 }
@@ -241,7 +243,7 @@ describe("ConnectorWorker", () => {
       store,
       new QueueMapper([{ kind: "command", command: {
         operation: "handoff.offer", idempotency_key: "connector:message-1",
-        identity: { actor_id: "actor-1" }, input: { work_reference: {} },
+        identity: { actor_id: "actor-1", actor_type: "human" }, input: { work_reference: {} },
       } }]),
       new QueueSink([{
         kind: "accepted", receipt_id: "receipt-1", event_ids: [],
@@ -254,6 +256,45 @@ describe("ConnectorWorker", () => {
 
     await expect(runtime.runBatch()).resolves.toMatchObject({ completed: 1 });
     expect(receipt.calls).toEqual([accepted.record.ingress_id]);
+  });
+
+  it("whitelists the auditable receipt command and strips command authentication", async () => {
+    const store = new MemoryConnectorIngressStore();
+    await store.accept(envelope("authenticated-receipt"));
+    const receipt = new ReceiptHandler({
+      kind: "accepted", receipt_id: "route-ready", event_ids: [],
+    });
+    const grant = "representation-grant-must-not-persist";
+    const command = {
+      operation: "handoff.accept",
+      idempotency_key: "connector:message-1",
+      expected_version: 2,
+      identity: { actor_id: "actor-1", actor_type: "human" as const, endpoint_id: "endpoint-1" },
+      authentication: { kind: "bearer" as const, credential: grant },
+      input: { handoff_id: "handoff-1", nested: { value: true } },
+    };
+    await worker(
+      store,
+      new QueueMapper([{ kind: "command", command }]),
+      new QueueSink([{ kind: "accepted", receipt_id: "receipt-1", event_ids: [] }]),
+      new MutableClock("2026-07-15T00:00:00Z"),
+      undefined,
+      receipt,
+    ).runBatch();
+
+    expect(receipt.receipts).toHaveLength(1);
+    expect(receipt.receipts[0]).toMatchObject({
+      command: {
+        operation: command.operation,
+        idempotency_key: command.idempotency_key,
+        expected_version: command.expected_version,
+        identity: command.identity,
+        input: command.input,
+      },
+    });
+    const serialized = JSON.stringify(receipt.receipts[0]);
+    expect(serialized).not.toContain("authentication");
+    expect(serialized).not.toContain(grant);
   });
 
   it("retries ingress when accepted receipt provisioning is temporarily unavailable", async () => {

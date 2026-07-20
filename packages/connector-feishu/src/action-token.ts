@@ -78,11 +78,14 @@ function validIdentity(value: unknown): value is ConnectorResolvedIdentity {
   const identity = value as Record<string, unknown>;
   const keys = Object.keys(identity);
   return (
-    keys.length >= 1 &&
-    keys.length <= 3 &&
+    keys.length >= 2 &&
+    keys.length <= 4 &&
     keys.every((key) =>
-      key === "actor_id" || key === "endpoint_id" || key === "delegation_id") &&
+      key === "actor_id" || key === "actor_type" || key === "endpoint_id" || key === "delegation_id") &&
     bounded(identity.actor_id) &&
+    (identity.actor_type === "human" ||
+      identity.actor_type === "agent" ||
+      identity.actor_type === "system") &&
     (identity.endpoint_id === undefined || bounded(identity.endpoint_id)) &&
     (identity.delegation_id === undefined || bounded(identity.delegation_id))
   );

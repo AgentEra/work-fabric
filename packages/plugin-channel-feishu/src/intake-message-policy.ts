@@ -84,7 +84,7 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
         result_schema_ref: null,
         required_evidence_types: [],
       }],
-      verifier: { actor_id: identity.actor_id, actor_type: "human" },
+      verifier: { actor_id: identity.actor_id, actor_type: identity.actor_type },
       priority: "normal",
       accept_by: addSeconds(now, this.options.accept_within_seconds),
       result_due_at: addSeconds(now, this.options.result_due_within_seconds),

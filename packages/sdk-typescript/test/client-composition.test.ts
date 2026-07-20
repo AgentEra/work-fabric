@@ -58,4 +58,43 @@ describe("WorkFabricClient composition", () => {
       ["system_01", "service_01", null],
     ]);
   });
+
+  it("derives isolated authentication transports for sequential and concurrent calls", async () => {
+    const headers: Headers[] = [];
+    const fetch = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      headers.push(new Headers(init?.headers));
+      return json({ handoff_id: "handoff_01" });
+    }) as unknown as typeof globalThis.fetch;
+    const base = new WorkFabricClient({
+      baseUrl: "https://fabric.example.test",
+      tenantId: "tenant_01",
+      exchangeId: "exchange_01",
+      representation: { actorId: "human_01", endpointId: "web_01" },
+      authentication: new BearerTokenProvider("base-token"),
+      fetch,
+      queryRetry: { maxRetries: 0 },
+    });
+    const first = base.withAuthentication(new BearerTokenProvider("scoped-one"));
+    const second = base.withAuthentication(new BearerTokenProvider("scoped-two"));
+
+    expect(first).not.toBe(base);
+    expect(second).not.toBe(base);
+    expect(first).not.toBe(second);
+
+    await base.queries.getHandoff("base-before");
+    await first.queries.getHandoff("scoped-one");
+    await base.queries.getHandoff("base-after");
+    await Promise.all([
+      first.queries.getHandoff("concurrent-one"),
+      second.queries.getHandoff("concurrent-two"),
+    ]);
+
+    expect(headers.map((value) => value.get("authorization"))).toEqual([
+      "Bearer base-token",
+      "Bearer scoped-one",
+      "Bearer base-token",
+      "Bearer scoped-one",
+      "Bearer scoped-two",
+    ]);
+  });
 });

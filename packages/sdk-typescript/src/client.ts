@@ -13,6 +13,7 @@ import { QueryClient } from "./query-client.js";
 import { SubscriptionClient } from "./subscription-client.js";
 import { SdkTransport } from "./transport.js";
 import { CollaborationClient } from "./collaboration-client.js";
+import type { AuthenticationProvider } from "./authentication.js";
 
 export class WorkFabricClient {
   readonly commands!: CommandClient;
@@ -40,6 +41,15 @@ export class WorkFabricClient {
       this.config,
       this.transport,
       normalizeRepresentationContext(representation),
+    );
+  }
+
+  withAuthentication(authentication: AuthenticationProvider): WorkFabricClient {
+    const config = { ...this.config, authentication };
+    return WorkFabricClient.compose(
+      config,
+      new SdkTransport(config),
+      this.representation,
     );
   }
 

@@ -37,6 +37,7 @@ export class FeishuRouteAwareSignalAdapter implements SignalAdapter {
         connector_id: this.options.connector_id,
         external_tenant_id: this.options.external_tenant_id,
         actor_id: this.options.actor_id,
+        actor_type: "agent",
         ...(this.options.endpoint_id === undefined ? {} : { endpoint_id: this.options.endpoint_id }),
         receive_id_type: receive.receive_id_type,
         receive_id: receive.receive_id,

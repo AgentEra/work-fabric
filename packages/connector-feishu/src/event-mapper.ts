@@ -52,16 +52,19 @@ function idempotencyKey(claim: ConnectorIngressClaim): string {
 function sameIdentity(
   left: {
     readonly actor_id: string;
+    readonly actor_type: "human" | "agent" | "system";
     readonly endpoint_id?: string;
     readonly delegation_id?: string;
   },
   right: {
     readonly actor_id: string;
+    readonly actor_type: "human" | "agent" | "system";
     readonly endpoint_id?: string;
     readonly delegation_id?: string;
   },
 ): boolean {
   return left.actor_id === right.actor_id &&
+    left.actor_type === right.actor_type &&
     left.endpoint_id === right.endpoint_id &&
     left.delegation_id === right.delegation_id;
 }

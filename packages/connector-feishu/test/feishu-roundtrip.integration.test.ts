@@ -379,6 +379,7 @@ describe("Feishu Connector roundtrip", () => {
             connector_id: "feishu-primary",
             external_tenant_id: "tenant-key-1",
             actor_id: "actor_worker",
+            actor_type: "human",
             endpoint_id: "endpoint_feishu",
             receive_id_type: "open_id",
             receive_id: "ou-worker",
@@ -448,7 +449,7 @@ describe("Feishu Connector roundtrip", () => {
       const mapper = new FeishuEventMapper({
         identity_resolver: new FeishuIdentityMapper(async (query) =>
           query.external_subject_id === "ou-worker"
-            ? { actor_id: "actor_worker", endpoint_id: "endpoint_feishu" }
+            ? { actor_id: "actor_worker", actor_type: "human", endpoint_id: "endpoint_feishu" }
             : null,
         ),
         action_codec: new FeishuActionReferenceCodec({ encryption_key: actionKey }),

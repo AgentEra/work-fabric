@@ -30,7 +30,7 @@ function policy(mapped = true) {
   return new FeishuIntakeMessagePolicy({
     bot_open_id: "ou-bot-1",
     identity_resolver: new FeishuIdentityMapper(async () => mapped
-      ? { actor_id: "actor-human", endpoint_id: "endpoint-human" }
+      ? { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" }
       : null),
     target: { actor_id: "actor-agent", endpoint_id: "endpoint-agent" },
     clock: { now: () => "2026-07-17T00:00:05.000Z" },
@@ -47,12 +47,12 @@ describe("FeishuIntakeMessagePolicy", () => {
       kind: "command",
       command: {
         operation: "handoff.offer",
-        identity: { actor_id: "actor-human", endpoint_id: "endpoint-human" },
+        identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
         input: {
           work_reference: { uri: "feishu://tenant-key-1/message/om-1" },
           target: { actor_id: "actor-agent" },
           intent: [{ kind: "text", media_type: "text/plain", text: "create a requirement" }],
-          verifier: { actor_id: "actor-human", actor_type: "human" },
+          verifier: { actor_id: "actor-human", actor_type: "agent" },
         },
       },
     });

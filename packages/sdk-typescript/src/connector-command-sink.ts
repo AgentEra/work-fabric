@@ -7,6 +7,7 @@ import type { JsonObject } from "@work-fabric/exchange-spi";
 
 import type { WorkFabricClient } from "./client.js";
 import type { OperationResult } from "./protocol-types.js";
+import { BearerTokenProvider } from "./authentication.js";
 
 const SUPPORTED = new Set([
   "handoff.offer",
@@ -21,12 +22,21 @@ const SUPPORTED = new Set([
   "handoff.request_rework",
 ]);
 
-function detail(result: OperationResult): string | undefined {
+function detail(
+  result: OperationResult,
+  protectedValue: string | undefined,
+): string | undefined {
   const code = result.error?.code;
-  return typeof code === "string" ? code.slice(0, 256) : undefined;
+  return typeof code === "string" &&
+    (protectedValue === undefined || !code.includes(protectedValue))
+    ? code.slice(0, 256)
+    : undefined;
 }
 
-function classify(result: OperationResult): ConnectorCommandResult {
+function classify(
+  result: OperationResult,
+  protectedValue?: string,
+): ConnectorCommandResult {
   if (result.operation_status === "accepted") {
     const value = result.receipt?.receipt_id;
     const resource = result.resource;
@@ -54,7 +64,7 @@ function classify(result: OperationResult): ConnectorCommandResult {
       ...(acceptedResource === undefined ? {} : { resource: acceptedResource }),
     };
   }
-  const errorDetail = detail(result);
+  const errorDetail = detail(result, protectedValue);
   return {
     kind:
       result.operation_status === "temporarily_unavailable"
@@ -71,6 +81,38 @@ function handoffId(input: JsonObject): string {
     throw new TypeError("handoff_id is invalid");
   }
   return value;
+}
+
+function commandBearerCredential(authentication: unknown): string | undefined {
+  if (authentication === undefined) return undefined;
+  if (
+    authentication === null ||
+    typeof authentication !== "object" ||
+    Array.isArray(authentication)
+  ) {
+    throw new TypeError("Command authentication is invalid");
+  }
+  const keys = Reflect.ownKeys(authentication);
+  if (
+    keys.length !== 2 ||
+    !keys.includes("kind") ||
+    !keys.includes("credential")
+  ) {
+    throw new TypeError("Command authentication is invalid");
+  }
+  const kind = Object.getOwnPropertyDescriptor(authentication, "kind");
+  const credential = Object.getOwnPropertyDescriptor(authentication, "credential");
+  if (
+    kind === undefined ||
+    credential === undefined ||
+    !("value" in kind) ||
+    !("value" in credential) ||
+    kind.value !== "bearer" ||
+    typeof credential.value !== "string"
+  ) {
+    throw new TypeError("Command authentication is invalid");
+  }
+  return credential.value;
 }
 
 export class ConnectorSdkCommandSink implements ConnectorCommandSink {
@@ -102,7 +144,18 @@ export class ConnectorSdkCommandSink implements ConnectorCommandSink {
       };
     }
     try {
-      const handoffs = this.client.withRepresentation({
+      const credential = commandBearerCredential(command.authentication);
+      let client = this.client;
+      if (credential !== undefined) {
+        const authentication = new BearerTokenProvider(credential);
+        await authentication.getAuthorization({
+          method: "POST",
+          url: "https://command-authentication.invalid",
+          signal: new AbortController().signal,
+        });
+        client = this.client.withAuthentication(authentication);
+      }
+      const handoffs = client.withRepresentation({
         actorId: command.identity.actor_id,
         endpointId: command.identity.endpoint_id,
         ...(command.identity.delegation_id === undefined
@@ -155,7 +208,7 @@ export class ConnectorSdkCommandSink implements ConnectorCommandSink {
             error_code: "unsupported_operation",
           };
       }
-      return classify(result);
+      return classify(result, credential);
     } catch (error) {
       return error instanceof TypeError
         ? {
