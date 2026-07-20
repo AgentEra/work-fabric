@@ -7,6 +7,10 @@ export interface ConfigurationSectionValidator<T = unknown> {
   validate(value: unknown, path: string): T;
 }
 
+export interface NamedConfigurationSectionValidator<T = unknown> extends ConfigurationSectionValidator<T> {
+  readonly section: string;
+}
+
 export interface ConfigurationClock {
   now(): string;
 }
@@ -23,6 +27,7 @@ export interface ConfigurationValue<Service = unknown> {
   readonly plugins: {
     readonly instances: Readonly<Record<string, PluginInstanceSnapshot>>;
   };
+  readonly sections: Readonly<Record<string, unknown>>;
 }
 
 export interface ConfigurationSnapshot<Service = unknown> {
@@ -36,6 +41,7 @@ export interface ConfigurationServiceOptions<Service> {
   readonly clock: ConfigurationClock;
   readonly validate_service: (value: unknown, path: string) => Service;
   readonly plugin_validators: readonly ConfigurationSectionValidator[];
+  readonly section_validators?: readonly NamedConfigurationSectionValidator[];
 }
 
 function record(value: unknown, path: string): Record<string, unknown> {
@@ -87,7 +93,12 @@ export class ConfigurationService<Service = unknown> {
         throw new ConfigurationError("invalid_source_revision", "revision");
       }
       const root = record(document.value, "$" );
-      exactKeys(root, ["api_version", "service", "plugins"], "$");
+      const sectionValidators = this.options.section_validators ?? [];
+      const sectionsByName = new Map(sectionValidators.map((item) => [item.section, item]));
+      if (sectionsByName.size !== sectionValidators.length) {
+        throw new ConfigurationError("duplicate_section_validator", "sections");
+      }
+      exactKeys(root, ["api_version", "service", "plugins", ...sectionsByName.keys()], "$");
       if (root.api_version !== "workfabric.config/v1") {
         throw new ConfigurationError("unsupported_api_version", "api_version");
       }
@@ -127,6 +138,12 @@ export class ConfigurationService<Service = unknown> {
           config: validator.validate(instance.config, `${path}.config`),
         });
       }
+      const sections: Record<string, unknown> = {};
+      for (const [section, validator] of sectionsByName) {
+        if (root[section] !== undefined) {
+          sections[section] = deepFreeze(validator.validate(root[section], section));
+        }
+      }
       const snapshot = deepFreeze({
         revision: document.revision,
         loaded_at: this.options.clock.now(),
@@ -134,6 +151,7 @@ export class ConfigurationService<Service = unknown> {
           api_version: "workfabric.config/v1" as const,
           service: structuredClone(service),
           plugins: { instances: normalized },
+          sections,
         },
       });
       this.snapshot = snapshot;

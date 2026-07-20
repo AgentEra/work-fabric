@@ -1,4 +1,5 @@
 import { YamlConfigurationProvider } from "@work-fabric/adapter-configuration-yaml";
+import { admissionConfigurationValidator, type AdmissionConfigurationSection } from "@work-fabric/adapter-admission-configuration";
 import { ConfigurationService, EnvironmentSecretResolver, resolveDeclaredSecrets } from "@work-fabric/configuration-runtime";
 import { FeishuPluginFactory, feishuSecretPaths, validateFeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
 import type { PluginHostConfiguration } from "@work-fabric/plugin-runtime";
@@ -8,7 +9,13 @@ export interface LoadedNodeConfiguration {
   readonly revision: string;
   readonly service: NodeServiceConfig;
   readonly plugins: PluginHostConfiguration;
+  readonly admission: AdmissionConfigurationSection;
 }
+
+const emptyAdmissionConfiguration: AdmissionConfigurationSection = Object.freeze({
+  policies: Object.freeze({}),
+  evidence_providers: Object.freeze({}),
+});
 
 function object(value: unknown, field: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${field} must be an object`);
@@ -56,7 +63,14 @@ export async function loadNodeConfiguration(environment: Readonly<Record<string,
     clock: { now: () => new Date().toISOString() },
     validate_service: (value) => parseServiceConfig(value),
     plugin_validators: [{ type: feishu.type, validate: (value) => feishu.validate(value) }],
+    section_validators: [admissionConfigurationValidator],
   });
   const snapshot = await configuration.load();
-  return { revision: snapshot.revision, service: snapshot.value.service, plugins: snapshot.value.plugins.instances };
+  const admission = snapshot.value.sections.admission ?? emptyAdmissionConfiguration;
+  return {
+    revision: snapshot.revision,
+    service: snapshot.value.service,
+    plugins: snapshot.value.plugins.instances,
+    admission: admission as AdmissionConfigurationSection,
+  };
 }

@@ -1,0 +1,12 @@
+{
+  "name": "@work-fabric/adapter-admission-configuration",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/admission-spi": "0.1.0",
+    "@work-fabric/configuration-runtime": "0.1.0"
+  }
+}

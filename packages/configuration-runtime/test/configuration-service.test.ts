@@ -4,6 +4,7 @@ import {
   ConfigurationError,
   ConfigurationService,
   type ConfigurationSectionValidator,
+  type NamedConfigurationSectionValidator,
 } from "../src/index.js";
 
 function validator(type: string): ConfigurationSectionValidator {
@@ -118,5 +119,35 @@ describe("ConfigurationService", () => {
     });
     await expect(create({ api_version: "workfabric.config/v1", service: {}, plugins: { instances: {} }, typo: true }).load()).rejects.toMatchObject({ code: "unknown_key", path: "$.typo" });
     await expect(create({ api_version: "workfabric.config/v1", service: {}, plugins: { instances: { one: { type: "known", enabled: true, config: {}, typo: true } } } }).load()).rejects.toMatchObject({ code: "unknown_key", path: "plugins.instances.one.typo" });
+  });
+
+  it("validates registered named root sections and publishes them deeply frozen", async () => {
+    const admission: NamedConfigurationSectionValidator<{ readonly policies: { readonly policy: { readonly nested: string } } }> = {
+      section: "admission",
+      type: "test.admission.v1",
+      validate(value, path) {
+        if (typeof value !== "object" || value === null) throw new ConfigurationError("invalid_admission", path);
+        return structuredClone(value) as { readonly policies: { readonly policy: { readonly nested: string } } };
+      },
+    };
+    const create = (value: unknown) => new ConfigurationService({
+      provider: { async load() { return { revision: "sections:1", value }; } },
+      clock: { now: () => "2026-07-20T01:02:03.000Z" },
+      validate_service: (candidate) => candidate,
+      plugin_validators: [],
+      section_validators: [admission],
+    });
+
+    const snapshot = await create({
+      api_version: "workfabric.config/v1", service: {}, plugins: { instances: {} },
+      admission: { policies: { policy: { nested: "value" } } },
+    }).load();
+    expect(snapshot.value.sections.admission).toEqual({ policies: { policy: { nested: "value" } } });
+    expect(() => {
+      (snapshot.value.sections.admission as { policies: { policy: { nested: string } } }).policies.policy.nested = "changed";
+    }).toThrow();
+    await expect(create({ api_version: "workfabric.config/v1", service: {}, plugins: { instances: {} }, unexpected: true }).load()).rejects.toMatchObject({
+      code: "unknown_key", path: "$.unexpected",
+    });
   });
 });

@@ -173,6 +173,14 @@ plugins:
     await expect(loadNodeConfiguration({ WORK_FABRIC_CONFIG: path, CURSOR_SECRET: "x".repeat(32) })).resolves.toMatchObject({ plugins: { future: { enabled: false } } });
   });
 
+  it("normalizes an omitted admission section to immutable empty policy metadata", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "wf-config-admission-")), "work-fabric.yaml");
+    await writeFile(path, `api_version: workfabric.config/v1\nservice:\n  storage_profile: memory-demo\n  development_mode: true\n  tenant_id: tenant-local\n  exchange_id: exchange-local\n  cursor_secret: \${CURSOR_SECRET}\n  identities: [{authentication_evidence: {bearer_token: token}, principal: {principal_id: p, tenant_id: tenant-local, actor_claims: [{actor_id: a, actor_type: human, endpoint_ids: [e]}], attributes: {}}}]\n  authority_rules: [{tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}]\n`, "utf8");
+    const loaded = await loadNodeConfiguration({ WORK_FABRIC_CONFIG: path, CURSOR_SECRET: "x".repeat(32) });
+    expect(loaded.admission).toEqual({ policies: {}, evidence_providers: {} });
+    expect(() => { (loaded.admission.policies as Record<string, unknown>).later = {}; }).toThrow();
+  });
+
   it("loads long-connection secrets without a Webhook verification token", async () => {
     const path = join(await mkdtemp(join(tmpdir(), "wf-config-long-connection-")), "work-fabric.yaml");
     await writeFile(path, `
