@@ -294,6 +294,68 @@ describe("PostgreSQL Admission stores", () => {
     }
     expect(transactions).toBe(0);
   });
+
+  it("rejects sub-millisecond timestamps before they can collapse to one decision", async () => {
+    const state = new MemoryPostgresState();
+    let transactions = 0;
+    const session: TenantSession = {
+      tenant_id: "tenant-postgres",
+      withTransaction(operation) {
+        transactions += 1;
+        return operation(new MemoryPostgresClient(state));
+      },
+    };
+    const bindings = new PostgresParticipantBindingStore(() => session, "tenant-postgres");
+    await expect(bindings.getOrCreate({
+      request: {
+        tenant_id: "tenant-postgres",
+        connector_id: "connector-postgres",
+        source_system: "source-postgres",
+        external_tenant_id: "external-postgres",
+        external_subject_type: "human",
+        external_subject_id: "not-persisted",
+        ingress_id: "ingress-postgres",
+      },
+      external_subject_fingerprint: "submillisecond-binding",
+      actor_id: "submillisecond-actor",
+      endpoint_id: "submillisecond-endpoint",
+      created_at: "2026-07-20T00:00:00.123456Z",
+    })).rejects.toMatchObject({ message: "admission_binding_store_unavailable" });
+
+    const store = new PostgresAdmissionDecisionStore(() => session, "tenant-postgres");
+    const canonical = decisionRecord();
+    const allow = canonical.decision as Extract<AdmissionDecisionRecord["decision"], { kind: "allow" }>;
+    for (const invalid of [
+      { ...canonical, recorded_at: "2026-07-20T00:00:01.123456Z" },
+      { ...canonical, recorded_at: "2026-07-20T00:00:01.123999Z" },
+      { ...canonical, decision: { ...allow, binding: { ...allow.binding, created_at: "2026-07-20T00:00:00.123456Z" } } },
+      { ...canonical, evidence: { ...canonical.evidence!, observed_at: "2026-07-20T00:00:00.123456Z" } },
+    ] satisfies AdmissionDecisionRecord[]) {
+      await expect(store.record(invalid)).rejects.toMatchObject({
+        code: "decision_store_unavailable",
+        message: "admission_decision_store_unavailable",
+      });
+    }
+    expect(transactions).toBe(0);
+    expect(state.decisions.size).toBe(0);
+  });
+
+  it("keeps legal one-to-three digit fractions canonical", async () => {
+    const state = new MemoryPostgresState();
+    const store = new PostgresAdmissionDecisionStore(
+      () => memorySession(state, "tenant-postgres"),
+      "tenant-postgres",
+    );
+    const input = decisionRecord();
+    await expect(store.record({
+      ...input,
+      recorded_at: "2026-07-20T00:00:01.1Z",
+      evidence: { ...input.evidence!, observed_at: "2026-07-20T00:00:00.12Z" },
+    })).resolves.toMatchObject({
+      recorded_at: "2026-07-20T00:00:01.100Z",
+      evidence: { observed_at: "2026-07-20T00:00:00.120Z" },
+    });
+  });
 });
 
 const liveConnection = process.env.WORK_FABRIC_TEST_POSTGRES_URL;
@@ -349,6 +411,20 @@ describe.skipIf(!live)("PostgreSQL Admission live integration", () => {
         external_tenant_id: tenantARecord.scope.external_tenant_id,
         ingress_id: tenantARecord.ingress_id,
       })).resolves.toBeNull();
+
+      const tenantBRawRead = await createTenantSession(pool, tenantB).withTransaction((client) => client.query<{ decision_id: string }>(`
+        SELECT decision_id
+        FROM work_fabric_admission_decisions
+        WHERE tenant_id = $1 AND connector_id = $2 AND source_system = $3
+          AND external_tenant_id = $4 AND ingress_id = $5
+      `, [
+        tenantA,
+        tenantARecord.scope.connector_id,
+        tenantARecord.scope.source_system,
+        tenantARecord.scope.external_tenant_id,
+        tenantARecord.ingress_id,
+      ]));
+      expect(tenantBRawRead.rows).toEqual([]);
 
       await expect(createTenantSession(pool, tenantB).withTransaction((client) => client.query(`
         INSERT INTO work_fabric_admission_decisions

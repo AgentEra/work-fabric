@@ -310,6 +310,60 @@ describe("SQLite Admission stores", () => {
     session.close();
   });
 
+  it("rejects sub-millisecond timestamps instead of folding distinct inputs", async () => {
+    const session = migratedMemorySession();
+    const bindings = new SqliteParticipantBindingStore(session, "tenant-sqlite");
+    await expect(bindings.getOrCreate({
+      request: request(),
+      external_subject_fingerprint: "submillisecond-binding",
+      actor_id: "submillisecond-actor",
+      endpoint_id: "submillisecond-endpoint",
+      created_at: "2026-07-20T00:00:00.123456Z",
+    })).rejects.toMatchObject({ message: "admission_binding_store_unavailable" });
+
+    const store = new SqliteAdmissionDecisionStore(session, "tenant-sqlite");
+    const allow = decision().decision as Extract<AdmissionDecisionRecord["decision"], { kind: "allow" }>;
+    for (const invalid of [
+      decision({ recorded_at: "2026-07-20T00:00:01.123456Z" }),
+      decision({ recorded_at: "2026-07-20T00:00:01.123999Z" }),
+      decision({ decision: { ...allow, binding: { ...allow.binding, created_at: "2026-07-20T00:00:00.123456Z" } } }),
+      decision({ evidence: { ...decision().evidence!, observed_at: "2026-07-20T00:00:00.123456Z" } }),
+    ]) {
+      await expect(store.record(invalid)).rejects.toMatchObject({
+        code: "decision_store_unavailable",
+        message: "admission_decision_store_unavailable",
+      });
+    }
+
+    const count = session.prepare("SELECT count(*) AS count FROM work_fabric_admission_decisions WHERE tenant_id = ?")
+      .get("tenant-sqlite") as { count: number };
+    expect(count.count).toBe(0);
+    session.close();
+  });
+
+  it("keeps legal one-to-three digit fractions and offsets canonical", async () => {
+    const session = migratedMemorySession();
+    const bindings = new SqliteParticipantBindingStore(session, "tenant-sqlite");
+    await expect(bindings.getOrCreate({
+      request: request(),
+      external_subject_fingerprint: "fraction-binding",
+      actor_id: "fraction-actor",
+      endpoint_id: "fraction-endpoint",
+      created_at: "2026-07-20T08:00:00.1+08:00",
+    })).resolves.toMatchObject({ created_at: "2026-07-20T00:00:00.100Z" });
+
+    const record = decision({
+      recorded_at: "2026-07-20T00:00:01.12Z",
+      evidence: { ...decision().evidence!, observed_at: "2026-07-20T00:00:00.123Z" },
+    });
+    await expect(new SqliteAdmissionDecisionStore(session, "tenant-sqlite").record(record))
+      .resolves.toMatchObject({
+        recorded_at: "2026-07-20T00:00:01.120Z",
+        evidence: { observed_at: "2026-07-20T00:00:00.123Z" },
+      });
+    session.close();
+  });
+
   it("compares every persisted decision field before accepting an ingress replay", async () => {
     const session = migratedMemorySession();
     const store = new SqliteAdmissionDecisionStore(session, "tenant-sqlite");
