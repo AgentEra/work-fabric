@@ -84,6 +84,24 @@ function isPayload(value: unknown): value is AdmissionGrantPayload {
     && typeof payload.expires_at === "string";
 }
 
+function serializePayload(payload: AdmissionGrantPayload): string {
+  return JSON.stringify({
+    v: payload.v,
+    kid: payload.kid,
+    grant_id: payload.grant_id,
+    tenant_id: payload.tenant_id,
+    connector_id: payload.connector_id,
+    ingress_id: payload.ingress_id,
+    decision_id: payload.decision_id,
+    actor_id: payload.actor_id,
+    actor_type: payload.actor_type,
+    endpoint_id: payload.endpoint_id,
+    external_subject_fingerprint: payload.external_subject_fingerprint,
+    issued_at: payload.issued_at,
+    expires_at: payload.expires_at,
+  });
+}
+
 function validTimes(payload: AdmissionGrantPayload, now: string): boolean {
   try {
     parseUtcTimestamp(now, "grant verification time");
@@ -183,7 +201,7 @@ export class HmacRepresentationGrants implements RepresentationGrantIssuer, Repr
     if (!isPayload(payload) || !validTimes(payload, issuedAt)) {
       throw new TypeError("Representation grant input is invalid");
     }
-    const payloadBytes = Buffer.from(JSON.stringify(payload), "utf8");
+    const payloadBytes = Buffer.from(serializePayload(payload), "utf8");
     const key = this.keys.get(this.activeKeyId);
     if (key === undefined) throw new TypeError("Active grant key is unavailable");
     const signature = createHmac("sha256", key).update(payloadBytes).digest("base64url");
@@ -212,7 +230,9 @@ export class HmacRepresentationGrants implements RepresentationGrantIssuer, Repr
       if (key === undefined) return null;
       const expected = createHmac("sha256", key).update(payloadBytes).digest();
       if (!timingSafeEqual(signature, expected)) return null;
-      if (!isPayload(untrusted) || !validTimes(untrusted, now)) return null;
+      if (!isPayload(untrusted)) return null;
+      const canonicalBytes = Buffer.from(serializePayload(untrusted), "utf8");
+      if (!canonicalBytes.equals(payloadBytes) || !validTimes(untrusted, now)) return null;
 
       return {
         tenant_id: untrusted.tenant_id,

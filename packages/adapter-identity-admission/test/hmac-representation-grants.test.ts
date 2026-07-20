@@ -263,11 +263,33 @@ describe("HmacRepresentationGrants verification", () => {
     }
   });
 
-  it("authenticates the original payload bytes instead of reserializing parsed JSON", async () => {
+  it.each([
+    ["pretty whitespace", (payload: AdmissionGrantPayload) => JSON.stringify(payload, null, 1)],
+    ["reordered fields", (payload: AdmissionGrantPayload) => JSON.stringify({
+      kid: payload.kid,
+      v: payload.v,
+      grant_id: payload.grant_id,
+      tenant_id: payload.tenant_id,
+      connector_id: payload.connector_id,
+      ingress_id: payload.ingress_id,
+      decision_id: payload.decision_id,
+      actor_id: payload.actor_id,
+      actor_type: payload.actor_type,
+      endpoint_id: payload.endpoint_id,
+      external_subject_fingerprint: payload.external_subject_fingerprint,
+      issued_at: payload.issued_at,
+      expires_at: payload.expires_at,
+    })],
+    ["a duplicate kid", (payload: AdmissionGrantPayload) => JSON.stringify(payload).replace(
+      '"kid":"new"',
+      '"kid":"old","kid":"new"',
+    )],
+    ["alternate numeric v spelling", (payload: AdmissionGrantPayload) => JSON.stringify(payload).replace(
+      '"v":1',
+      '"v":1e0',
+    )],
+  ])("rejects an authenticated payload encoded with %s", async (_scenario, encode) => {
     const payload = validPayload({ expires_at: "2026-07-20T00:01:00Z" });
-    const spacedJson = JSON.stringify(payload, null, 1);
-    await expect(grants().verify(signedToken(payload, NEW_KEY, spacedJson), NOW)).resolves.toEqual(
-      expect.objectContaining({ ingress_id: "ingress-a" }),
-    );
+    await expect(grants().verify(signedToken(payload, NEW_KEY, encode(payload)), NOW)).resolves.toBeNull();
   });
 });
