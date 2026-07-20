@@ -17,6 +17,13 @@ describe("PostgreSQL tooling", () => {
       .resolves.toMatchObject({ ordered_ids: expect.arrayContaining(["009_channel_routes"]) });
   });
 
+  it("includes Admission authority tables after the base storage migrations", async () => {
+    const result = await migratePostgres({ connection_string: "postgres://unused", dry_run: true });
+    expect(result.ordered_ids).toContain("010_admission");
+    expect(result.ordered_ids.indexOf("010_admission"))
+      .toBeGreaterThan(result.ordered_ids.indexOf("009_channel_routes"));
+  });
+
   it("rejects missing connection strings before any external call", async () => {
     await expect(migratePostgres({ connection_string: "" })).rejects.toThrow("connection_string");
     await expect(runPostgresSmoke({ connection_string: "", tenant_id: "tenant", verify_rls: false })).rejects.toThrow("connection_string");

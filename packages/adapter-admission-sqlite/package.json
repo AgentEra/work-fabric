@@ -1,0 +1,16 @@
+{
+  "name": "@work-fabric/adapter-admission-sqlite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/admission-spi": "0.1.0",
+    "@work-fabric/adapter-storage-sqlite": "0.1.0",
+    "@work-fabric/exchange-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/admission-conformance": "0.1.0"
+  }
+}
