@@ -227,6 +227,89 @@ describe("SQLite Admission stores", () => {
     expect(String((failure as Error).message)).not.toContain("secret-value");
   });
 
+  it("does not trust an AdmissionAdapterError thrown by the SQLite driver", async () => {
+    const failedSession = {
+      transaction(): never {
+        throw new AdmissionAdapterError(
+          "decision_store_unavailable",
+          "SELECT * FROM private_table WHERE secret = raw-private-value",
+        );
+      },
+    } as unknown as SqliteSession;
+    const failure = await new SqliteAdmissionDecisionStore(
+      failedSession,
+      "tenant-sqlite",
+    ).record(decision()).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AdmissionAdapterError);
+    expect(failure).toMatchObject({
+      code: "decision_store_unavailable",
+      message: "admission_decision_store_unavailable",
+    });
+    expect(String((failure as Error).message)).not.toContain("private");
+  });
+
+  it("normalizes every persisted timestamp before first write and replay comparison", async () => {
+    const session = migratedMemorySession();
+    const bindings = new SqliteParticipantBindingStore(session, "tenant-sqlite");
+    await expect(bindings.getOrCreate({
+      request: request(),
+      external_subject_fingerprint: "time-fingerprint",
+      actor_id: "time-actor",
+      endpoint_id: "time-endpoint",
+      created_at: "2026-07-20T08:00:00+08:00",
+    })).resolves.toMatchObject({ created_at: "2026-07-20T00:00:00.000Z" });
+
+    const store = new SqliteAdmissionDecisionStore(session, "tenant-sqlite");
+    const offsetRecord = decision({
+      recorded_at: "2026-07-20T08:00:01+08:00",
+      evidence: {
+        ...decision().evidence!,
+        observed_at: "2026-07-20T08:00:00+08:00",
+      },
+      decision: {
+        ...(decision().decision as Extract<AdmissionDecisionRecord["decision"], { kind: "allow" }>),
+        binding: {
+          ...(decision().decision as Extract<AdmissionDecisionRecord["decision"], { kind: "allow" }>).binding,
+          created_at: "2026-07-20T08:00:00+08:00",
+        },
+      },
+    });
+    const normalized = decision();
+    await expect(store.record(offsetRecord)).resolves.toEqual(normalized);
+    await expect(store.record(normalized)).resolves.toEqual(normalized);
+    session.close();
+  });
+
+  it("rejects invalid RFC3339 timestamps before persistence", async () => {
+    const session = migratedMemorySession();
+    const bindings = new SqliteParticipantBindingStore(session, "tenant-sqlite");
+    await expect(bindings.getOrCreate({
+      request: request(),
+      external_subject_fingerprint: "invalid-time-fingerprint",
+      actor_id: "invalid-time-actor",
+      endpoint_id: "invalid-time-endpoint",
+      created_at: "2026-02-30T00:00:00Z",
+    })).rejects.toMatchObject({
+      code: "binding_store_unavailable",
+      message: "admission_binding_store_unavailable",
+    });
+
+    const store = new SqliteAdmissionDecisionStore(session, "tenant-sqlite");
+    const allow = decision().decision as Extract<AdmissionDecisionRecord["decision"], { kind: "allow" }>;
+    for (const invalid of [
+      decision({ recorded_at: "not-a-time" }),
+      decision({ decision: { ...allow, binding: { ...allow.binding, created_at: "2026-02-30T00:00:00Z" } } }),
+      decision({ evidence: { ...decision().evidence!, observed_at: "2026-07-20 00:00:00" } }),
+    ]) {
+      await expect(store.record(invalid)).rejects.toMatchObject({
+        code: "decision_store_unavailable",
+        message: "admission_decision_store_unavailable",
+      });
+    }
+    session.close();
+  });
+
   it("compares every persisted decision field before accepting an ingress replay", async () => {
     const session = migratedMemorySession();
     const store = new SqliteAdmissionDecisionStore(session, "tenant-sqlite");

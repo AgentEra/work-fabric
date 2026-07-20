@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   AdmissionAdapterError,
+  type AdmissionDecisionRecord,
   type AdmissionDecisionStore,
   type ParticipantBindingStore,
 } from "@work-fabric/admission-spi";
@@ -104,6 +105,43 @@ function tenantRoutedDecisionStore(state: MemoryPostgresState): AdmissionDecisio
   };
 }
 
+function decisionRecord(tenantId = "tenant-postgres"): AdmissionDecisionRecord {
+  const scope = {
+    tenant_id: tenantId,
+    connector_id: "connector-postgres",
+    source_system: "source-postgres",
+    external_tenant_id: "external-postgres",
+  };
+  return {
+    decision: {
+      kind: "allow",
+      reason_code: "internal_member",
+      policy_id: "policy-postgres",
+      policy_revision: "revision-postgres",
+      decision_id: "decision-postgres",
+      binding: {
+        ...scope,
+        external_subject_type: "human",
+        external_subject_fingerprint: "fingerprint-postgres",
+        actor_id: "actor-postgres",
+        actor_type: "human",
+        endpoint_id: "endpoint-postgres",
+        created_at: "2026-07-20T00:00:00.000Z",
+      },
+    },
+    scope,
+    ingress_id: "ingress-postgres",
+    external_subject_fingerprint: "fingerprint-postgres",
+    evidence: {
+      membership: "internal",
+      active: true,
+      observed_at: "2026-07-20T00:00:00.000Z",
+      provider_revision: "provider-postgres",
+    },
+    recorded_at: "2026-07-20T00:00:01.000Z",
+  };
+}
+
 describe("PostgreSQL Admission stores", () => {
   it("ships composite authority keys and fail-closed tenant RLS", () => {
     expect(POSTGRES_ADMISSION_MIGRATION.id).toBe("010_admission");
@@ -185,6 +223,77 @@ describe("PostgreSQL Admission stores", () => {
     });
     expect(String((driverFailure as Error).message)).not.toContain("secret-driver-value");
   });
+
+  it("does not trust an AdmissionAdapterError thrown by the PostgreSQL driver", async () => {
+    const failedSession: TenantSession = {
+      tenant_id: "tenant-postgres",
+      withTransaction: async () => {
+        throw new AdmissionAdapterError(
+          "decision_store_unavailable",
+          "SELECT private_value FROM admission_secret",
+        );
+      },
+    };
+    const failure = await new PostgresAdmissionDecisionStore(
+      () => failedSession,
+      "tenant-postgres",
+    ).record(decisionRecord()).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(AdmissionAdapterError);
+    expect(failure).toMatchObject({
+      code: "decision_store_unavailable",
+      message: "admission_decision_store_unavailable",
+    });
+    expect(String((failure as Error).message)).not.toContain("private_value");
+  });
+
+  it("normalizes equivalent RFC3339 timestamps before write and replay comparison", async () => {
+    const state = new MemoryPostgresState();
+    const store = new PostgresAdmissionDecisionStore(
+      () => memorySession(state, "tenant-postgres"),
+      "tenant-postgres",
+    );
+    const canonical = decisionRecord();
+    const allow = canonical.decision as Extract<AdmissionDecisionRecord["decision"], { kind: "allow" }>;
+    const offset: AdmissionDecisionRecord = {
+      ...canonical,
+      recorded_at: "2026-07-20T08:00:01+08:00",
+      decision: {
+        ...allow,
+        binding: { ...allow.binding, created_at: "2026-07-20T08:00:00+08:00" },
+      },
+      evidence: { ...canonical.evidence!, observed_at: "2026-07-20T08:00:00+08:00" },
+    };
+    await expect(store.record(offset)).resolves.toEqual(canonical);
+    await expect(store.record(canonical)).resolves.toEqual(canonical);
+  });
+
+  it("rejects invalid RFC3339 decision timestamps before opening a transaction", async () => {
+    let transactions = 0;
+    const session: TenantSession = {
+      tenant_id: "tenant-postgres",
+      withTransaction: async () => {
+        transactions += 1;
+        throw new Error("must not run");
+      },
+    };
+    const canonical = decisionRecord();
+    const allow = canonical.decision as Extract<AdmissionDecisionRecord["decision"], { kind: "allow" }>;
+    for (const invalid of [
+      { ...canonical, recorded_at: "not-a-time" },
+      { ...canonical, decision: { ...allow, binding: { ...allow.binding, created_at: "2026-02-30T00:00:00Z" } } },
+      { ...canonical, evidence: { ...canonical.evidence!, observed_at: "2026-07-20 00:00:00" } },
+    ] satisfies AdmissionDecisionRecord[]) {
+      await expect(new PostgresAdmissionDecisionStore(
+        () => session,
+        "tenant-postgres",
+      ).record(invalid)).rejects.toMatchObject({
+        code: "decision_store_unavailable",
+        message: "admission_decision_store_unavailable",
+      });
+    }
+    expect(transactions).toBe(0);
+  });
 });
 
 const liveConnection = process.env.WORK_FABRIC_TEST_POSTGRES_URL;
@@ -225,14 +334,40 @@ describe.skipIf(!live)("PostgreSQL Admission live integration", () => {
       ]);
       expect(bindings[1]).toEqual(bindings[0]);
 
-      const isolated = new PostgresAdmissionDecisionStore(() => createTenantSession(pool, tenantB), tenantB);
-      await expect(isolated.findByIngress({
+      const tenantADecisions = new PostgresAdmissionDecisionStore(() => createTenantSession(pool, tenantA), tenantA);
+      const tenantBDecisions = new PostgresAdmissionDecisionStore(() => createTenantSession(pool, tenantB), tenantB);
+      const tenantARecord = decisionRecord(tenantA);
+      await expect(tenantADecisions.record(tenantARecord)).resolves.toEqual(tenantARecord);
+      await expect(tenantADecisions.findByIngress({
+        ...tenantARecord.scope,
+        ingress_id: tenantARecord.ingress_id,
+      })).resolves.toEqual(tenantARecord);
+      await expect(tenantBDecisions.findByIngress({
         tenant_id: tenantB,
-        connector_id: "connector-live",
-        source_system: "source-live",
-        external_tenant_id: "external-live",
-        ingress_id: "ingress-live",
+        connector_id: tenantARecord.scope.connector_id,
+        source_system: tenantARecord.scope.source_system,
+        external_tenant_id: tenantARecord.scope.external_tenant_id,
+        ingress_id: tenantARecord.ingress_id,
       })).resolves.toBeNull();
+
+      await expect(createTenantSession(pool, tenantB).withTransaction((client) => client.query(`
+        INSERT INTO work_fabric_admission_decisions
+          (tenant_id, connector_id, source_system, external_tenant_id, ingress_id,
+           decision_kind, reason_code, policy_id, policy_revision, decision_id,
+           external_subject_fingerprint, evidence_present, recorded_at)
+        VALUES ($1, $2, $3, $4, $5, 'deny', 'default_deny', $6, $7, $8, $9, false, $10::timestamptz)
+      `, [
+        tenantA,
+        "connector-cross-tenant",
+        "source-cross-tenant",
+        "external-cross-tenant",
+        "ingress-cross-tenant",
+        "policy-cross-tenant",
+        "revision-cross-tenant",
+        "decision-cross-tenant",
+        "fingerprint-cross-tenant",
+        "2026-07-20T00:00:00.000Z",
+      ]))).rejects.toBeDefined();
     } finally {
       await pool.end();
     }

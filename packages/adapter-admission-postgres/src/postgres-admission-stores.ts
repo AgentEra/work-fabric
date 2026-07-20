@@ -79,12 +79,45 @@ const forbiddenKeys = new Set([
   "content",
 ]);
 
+class DecisionConflictError extends Error {}
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-function timestamp(value: string | Date): string {
-  return value instanceof Date ? value.toISOString() : value;
+const RFC3339 = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+function leapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function normalizeTimestamp(value: string): string {
+  const match = RFC3339.exec(value);
+  if (match === null) throw new TypeError("timestamp must be RFC3339");
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = Number(match[7] ?? 0);
+  const offsetMinute = Number(match[8] ?? 0);
+  const days = [31, leapYear(year) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (month < 1 || month > 12 || day < 1 || day > days[month - 1]!
+    || hour > 23 || minute > 59 || second > 59 || offsetHour > 23 || offsetMinute > 59) {
+    throw new TypeError("timestamp must be RFC3339");
+  }
+  const epoch = Date.parse(value);
+  if (!Number.isFinite(epoch)) throw new TypeError("timestamp must be RFC3339");
+  return new Date(epoch).toISOString();
+}
+
+function databaseTimestamp(value: string | Date): string {
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime())) throw new TypeError("timestamp must be valid");
+    return value.toISOString();
+  }
+  return normalizeTimestamp(value);
 }
 
 function bindingError(): AdmissionAdapterError {
@@ -147,7 +180,29 @@ function bindingFromRow(row: BindingRow): ParticipantBinding {
     actor_id: row.actor_id,
     actor_type: row.actor_type,
     endpoint_id: row.endpoint_id,
-    created_at: timestamp(row.created_at),
+    created_at: databaseTimestamp(row.created_at),
+  };
+}
+
+function normalizeDecisionRecord(record: AdmissionDecisionRecord): AdmissionDecisionRecord {
+  return {
+    ...clone(record),
+    decision: record.decision.kind === "allow"
+      ? {
+          ...clone(record.decision),
+          binding: {
+            ...clone(record.decision.binding),
+            created_at: normalizeTimestamp(record.decision.binding.created_at),
+          },
+        }
+      : clone(record.decision),
+    ...(record.evidence === undefined ? {} : {
+      evidence: {
+        ...clone(record.evidence),
+        observed_at: normalizeTimestamp(record.evidence.observed_at),
+      },
+    }),
+    recorded_at: normalizeTimestamp(record.recorded_at),
   };
 }
 
@@ -172,7 +227,7 @@ function decisionFromRow(row: DecisionRow): AdmissionDecisionRecord {
           actor_id: row.binding_actor_id!,
           actor_type: row.binding_actor_type!,
           endpoint_id: row.binding_endpoint_id!,
-          created_at: timestamp(row.binding_created_at!),
+          created_at: databaseTimestamp(row.binding_created_at!),
         },
       }
     : {
@@ -191,11 +246,11 @@ function decisionFromRow(row: DecisionRow): AdmissionDecisionRecord {
       evidence: {
         membership: row.evidence_membership!,
         active: row.evidence_active,
-        observed_at: timestamp(row.evidence_observed_at!),
+        observed_at: databaseTimestamp(row.evidence_observed_at!),
         provider_revision: row.evidence_provider_revision!,
       },
     } : {}),
-    recorded_at: timestamp(row.recorded_at),
+    recorded_at: databaseTimestamp(row.recorded_at),
   };
 }
 
@@ -249,6 +304,7 @@ export class PostgresParticipantBindingStore implements ParticipantBindingStore 
   async getOrCreate(input: Parameters<ParticipantBindingStore["getOrCreate"]>[0]): Promise<ParticipantBinding> {
     try {
       if (input.request.tenant_id !== this.tenantId) throw new Error("tenant context mismatch");
+      const createdAt = normalizeTimestamp(input.created_at);
       return await run(this.sessions, this.tenantId, async (client) => {
         const result = await client.query<BindingRow>(`
           INSERT INTO work_fabric_admission_bindings
@@ -269,7 +325,7 @@ export class PostgresParticipantBindingStore implements ParticipantBindingStore 
           input.actor_id,
           input.request.external_subject_type,
           input.endpoint_id,
-          input.created_at,
+          createdAt,
         ]);
         const row = result.rows[0];
         if (row === undefined) throw new Error("binding unavailable");
@@ -312,7 +368,7 @@ export class PostgresAdmissionDecisionStore implements AdmissionDecisionStore {
     try {
       assertDecisionRecordSafe(input);
       if (input.scope.tenant_id !== this.tenantId) throw new Error("tenant context mismatch");
-      const candidate = clone(input);
+      const candidate = normalizeDecisionRecord(input);
       return await run(this.sessions, this.tenantId, async (client) => {
         const inserted = await client.query<DecisionRow>(`
           INSERT INTO work_fabric_admission_decisions
@@ -344,11 +400,11 @@ export class PostgresAdmissionDecisionStore implements AdmissionDecisionStore {
         }
         if (row === undefined) throw new Error("decision unavailable");
         const persisted = decisionFromRow(row);
-        if (!isDeepStrictEqual(persisted, candidate)) throw decisionError("admission_decision_conflict");
+        if (!isDeepStrictEqual(persisted, candidate)) throw new DecisionConflictError();
         return clone(persisted);
       });
     } catch (error: unknown) {
-      if (error instanceof AdmissionAdapterError) throw error;
+      if (error instanceof DecisionConflictError) throw decisionError("admission_decision_conflict");
       throw decisionError();
     }
   }
