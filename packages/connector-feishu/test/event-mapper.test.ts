@@ -91,6 +91,7 @@ describe("Feishu identity and action mapping", () => {
       expires_at: "2026-07-16T00:10:00Z",
     });
 
+    expect(reference).toMatch(/^wfaf2\./);
     expect(reference).not.toContain("handoff-1");
     expect(codec.resolve(reference, {
       tenant_id: "tenant-1",
@@ -104,6 +105,13 @@ describe("Feishu identity and action mapping", () => {
       identity: { actor_type: "human" },
     });
     expect(() => codec.resolve(`${reference.slice(0, -1)}x`, {
+      tenant_id: "tenant-1",
+      connector_id: "feishu-primary",
+      external_tenant_id: "tenant-key-1",
+      external_subject_id: "ou-human-1",
+      now: "2026-07-16T00:05:00Z",
+    })).toThrow(/invalid/i);
+    expect(() => codec.resolve(`wfaf1.${reference.slice("wfaf2.".length)}`, {
       tenant_id: "tenant-1",
       connector_id: "feishu-primary",
       external_tenant_id: "tenant-key-1",

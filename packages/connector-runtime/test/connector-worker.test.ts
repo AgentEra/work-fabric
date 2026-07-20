@@ -276,7 +276,16 @@ describe("ConnectorWorker", () => {
     await worker(
       store,
       new QueueMapper([{ kind: "command", command }]),
-      new QueueSink([{ kind: "accepted", receipt_id: "receipt-1", event_ids: [] }]),
+      new QueueSink([{
+        kind: "accepted",
+        receipt_id: `receipt:${grant}`,
+        event_ids: [`event:${grant}`],
+        resource: {
+          resource_type: "handoff",
+          resource_id: `resource:${grant}`,
+          resource_version: 1,
+        },
+      }]),
       new MutableClock("2026-07-15T00:00:00Z"),
       undefined,
       receipt,

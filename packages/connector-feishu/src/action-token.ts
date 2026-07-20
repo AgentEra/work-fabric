@@ -8,8 +8,8 @@ import type { ConnectorResolvedIdentity } from "@work-fabric/connector-spi";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 import { compareUtcTimestamps, parseUtcTimestamp } from "@work-fabric/exchange-spi";
 
-const PREFIX = "wfaf1.";
-const AAD = Buffer.from("work-fabric.feishu.action.v1", "utf8");
+const PREFIX = "wfaf2.";
+const AAD = Buffer.from("work-fabric.feishu.action.v2", "utf8");
 const ACTIONS = new Set([
   "handoff.accept",
   "handoff.decline",

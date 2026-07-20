@@ -35,6 +35,7 @@ function detail(
 
 function classify(
   result: OperationResult,
+  localReceiptId: string,
   protectedValue?: string,
 ): ConnectorCommandResult {
   if (result.operation_status === "accepted") {
@@ -46,6 +47,8 @@ function classify(
       typeof resource.resource_id === "string" &&
       resource.resource_id.length > 0 &&
       resource.resource_id.length <= 128 &&
+      (protectedValue === undefined ||
+        !resource.resource_id.includes(protectedValue)) &&
       Number.isSafeInteger(resource.resource_version) &&
       (resource.resource_version as number) > 0
         ? {
@@ -57,9 +60,15 @@ function classify(
     return {
       kind: "accepted",
       receipt_id:
-        typeof value === "string"
+        typeof value === "string" &&
+        (protectedValue === undefined || !value.includes(protectedValue))
           ? value
-          : `operation:${result.request_message_id}`,
+          : value === undefined &&
+              typeof result.request_message_id === "string" &&
+              (protectedValue === undefined ||
+                !result.request_message_id.includes(protectedValue))
+            ? `operation:${result.request_message_id}`
+            : localReceiptId,
       event_ids: [],
       ...(acceptedResource === undefined ? {} : { resource: acceptedResource }),
     };
@@ -83,36 +92,46 @@ function handoffId(input: JsonObject): string {
   return value;
 }
 
-function commandBearerCredential(authentication: unknown): string | undefined {
-  if (authentication === undefined) return undefined;
-  if (
-    authentication === null ||
-    typeof authentication !== "object" ||
-    Array.isArray(authentication)
-  ) {
+function commandBearerCredential(command: object): string | undefined {
+  try {
+    if (!Reflect.has(command, "authentication")) return undefined;
+    const outer = Object.getOwnPropertyDescriptor(command, "authentication");
+    if (outer === undefined || !("value" in outer)) {
+      throw new TypeError("Command authentication is invalid");
+    }
+    const authentication = outer.value;
+    if (
+      authentication === undefined ||
+      authentication === null ||
+      typeof authentication !== "object" ||
+      Array.isArray(authentication)
+    ) {
+      throw new TypeError("Command authentication is invalid");
+    }
+    const keys = Reflect.ownKeys(authentication);
+    if (
+      keys.length !== 2 ||
+      !keys.includes("kind") ||
+      !keys.includes("credential")
+    ) {
+      throw new TypeError("Command authentication is invalid");
+    }
+    const kind = Object.getOwnPropertyDescriptor(authentication, "kind");
+    const credential = Object.getOwnPropertyDescriptor(authentication, "credential");
+    if (
+      kind === undefined ||
+      credential === undefined ||
+      !("value" in kind) ||
+      !("value" in credential) ||
+      kind.value !== "bearer" ||
+      typeof credential.value !== "string"
+    ) {
+      throw new TypeError("Command authentication is invalid");
+    }
+    return credential.value;
+  } catch {
     throw new TypeError("Command authentication is invalid");
   }
-  const keys = Reflect.ownKeys(authentication);
-  if (
-    keys.length !== 2 ||
-    !keys.includes("kind") ||
-    !keys.includes("credential")
-  ) {
-    throw new TypeError("Command authentication is invalid");
-  }
-  const kind = Object.getOwnPropertyDescriptor(authentication, "kind");
-  const credential = Object.getOwnPropertyDescriptor(authentication, "credential");
-  if (
-    kind === undefined ||
-    credential === undefined ||
-    !("value" in kind) ||
-    !("value" in credential) ||
-    kind.value !== "bearer" ||
-    typeof credential.value !== "string"
-  ) {
-    throw new TypeError("Command authentication is invalid");
-  }
-  return credential.value;
 }
 
 export class ConnectorSdkCommandSink implements ConnectorCommandSink {
@@ -132,19 +151,19 @@ export class ConnectorSdkCommandSink implements ConnectorCommandSink {
     execution: ConnectorCommandExecution,
   ): Promise<ConnectorCommandResult> {
     const { command } = execution;
-    if (
-      !SUPPORTED.has(command.operation) ||
-      command.identity.endpoint_id === undefined ||
-      (command.operation !== "handoff.offer" && command.expected_version === undefined) ||
-      (command.operation === "handoff.offer" && command.expected_version !== undefined)
-    ) {
-      return {
-        kind: "permanent_failure",
-        error_code: "unsupported_or_incomplete_command",
-      };
-    }
     try {
-      const credential = commandBearerCredential(command.authentication);
+      const credential = commandBearerCredential(command);
+      if (
+        !SUPPORTED.has(command.operation) ||
+        command.identity.endpoint_id === undefined ||
+        (command.operation !== "handoff.offer" && command.expected_version === undefined) ||
+        (command.operation === "handoff.offer" && command.expected_version !== undefined)
+      ) {
+        return {
+          kind: "permanent_failure",
+          error_code: "unsupported_or_incomplete_command",
+        };
+      }
       let client = this.client;
       if (credential !== undefined) {
         const authentication = new BearerTokenProvider(credential);
@@ -208,7 +227,7 @@ export class ConnectorSdkCommandSink implements ConnectorCommandSink {
             error_code: "unsupported_operation",
           };
       }
-      return classify(result, credential);
+      return classify(result, `connector:${execution.ingress_id}`, credential);
     } catch (error) {
       return error instanceof TypeError
         ? {

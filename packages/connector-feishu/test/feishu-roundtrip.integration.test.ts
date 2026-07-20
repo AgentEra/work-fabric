@@ -399,7 +399,7 @@ describe("Feishu Connector roundtrip", () => {
         body: { elements: Array<{ actions?: Array<{ value: { action_ref: string } }> }> };
       };
       const actionRef = card.body.elements[1]?.actions?.[0]?.value.action_ref;
-      expect(actionRef).toMatch(/^wfaf1\./);
+      expect(actionRef).toMatch(/^wfaf2\./);
 
       const callback = {
         schema: "2.0",

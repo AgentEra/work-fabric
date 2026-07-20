@@ -44,11 +44,12 @@ function execution(): ConnectorCommandExecution {
 function sink(
   status: "accepted" | "conflict" | "temporarily_unavailable",
   errorCode: string = status,
+  response?: Record<string, unknown>,
 ) {
   const fetchMock = vi.fn(async (
     _input: string | URL | Request,
     _init?: RequestInit,
-  ) => new Response(JSON.stringify(operation(status, errorCode)), {
+  ) => new Response(JSON.stringify(response ?? operation(status, errorCode)), {
     status: status === "accepted" ? 202 : status === "conflict" ? 409 : 503,
     headers: { "content-type": "application/json" },
   }));
@@ -152,6 +153,44 @@ describe("ConnectorSdkCommandSink", () => {
     expect(JSON.stringify(result)).not.toContain(grant);
   });
 
+  it.each([
+    ["receipt id", {
+      ...operation("accepted"),
+      receipt: { receipt_id: "receipt:representation-grant-reflected" },
+    }],
+    ["request message id fallback", {
+      ...operation("accepted"),
+      request_message_id: "request:representation-grant-reflected",
+      receipt: null,
+    }],
+    ["resource id", {
+      ...operation("accepted"),
+      resource: {
+        resource_type: "handoff",
+        resource_id: "resource:representation-grant-reflected",
+        resource_version: 1,
+      },
+    }],
+  ])("never copies a reflected credential from accepted %s", async (_name, response) => {
+    const grant = "representation-grant-reflected";
+    const { adapter } = sink("accepted", "accepted", response);
+    const result = await adapter.execute({
+      ...execution(),
+      command: {
+        ...execution().command,
+        authentication: { kind: "bearer", credential: grant },
+      },
+    });
+
+    expect(result.kind).toBe("accepted");
+    expect(JSON.stringify(result)).not.toContain(grant);
+    if (_name !== "resource id") {
+      expect(result).toMatchObject({ receipt_id: "connector:ingress-1" });
+    } else {
+      expect(result).not.toHaveProperty("resource");
+    }
+  });
+
   it("rejects inherited, accessor, extra, and invalid bearer authentication without reading getters", async () => {
     const { adapter, fetch } = sink("accepted");
     let getterCalls = 0;
@@ -181,6 +220,84 @@ describe("ConnectorSdkCommandSink", () => {
       expect(JSON.stringify(result)).not.toContain("invalid grant");
     }
     expect(getterCalls).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an inherited outer authentication property without base or scoped I/O", async () => {
+    const { adapter, fetch } = sink("accepted");
+    const command = Object.assign(Object.create({
+      authentication: { kind: "bearer", credential: "inherited-outer-grant" },
+    }), execution().command);
+
+    await expect(adapter.execute({
+      ...execution(),
+      command: command as never,
+    })).resolves.toEqual({
+      kind: "permanent_failure",
+      error_code: "invalid_command",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects an outer authentication getter without invoking it or performing I/O", async () => {
+    const { adapter, fetch } = sink("accepted");
+    let getterCalls = 0;
+    const command = { ...execution().command } as Record<string, unknown>;
+    Object.defineProperty(command, "authentication", {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return { kind: "bearer", credential: "outer-getter-grant" };
+      },
+    });
+
+    await expect(adapter.execute({
+      ...execution(),
+      command: command as never,
+    })).resolves.toEqual({
+      kind: "permanent_failure",
+      error_code: "invalid_command",
+    });
+    expect(getterCalls).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects a present own undefined authentication property without I/O", async () => {
+    const { adapter, fetch } = sink("accepted");
+    await expect(adapter.execute({
+      ...execution(),
+      command: {
+        ...execution().command,
+        authentication: undefined,
+      } as never,
+    })).resolves.toEqual({
+      kind: "permanent_failure",
+      error_code: "invalid_command",
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["presence", { has() { throw new Error("presence trap"); } }],
+    ["descriptor", {
+      has(_target: object, property: PropertyKey) {
+        return property === "authentication";
+      },
+      getOwnPropertyDescriptor() {
+        throw new Error("descriptor trap");
+      },
+    }],
+  ])("rejects an outer authentication %s proxy error without I/O", async (_name, handler) => {
+    const { adapter, fetch } = sink("accepted");
+    const command = new Proxy({ ...execution().command }, handler);
+
+    await expect(adapter.execute({
+      ...execution(),
+      command: command as never,
+    })).resolves.toEqual({
+      kind: "permanent_failure",
+      error_code: "invalid_command",
+    });
     expect(fetch).not.toHaveBeenCalled();
   });
 

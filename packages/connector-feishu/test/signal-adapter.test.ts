@@ -110,7 +110,7 @@ describe("FeishuSignalAdapter", () => {
     expect(messages.inputs).toHaveLength(3);
     expect(messages.inputs.every((input) => input.uuid.length <= 50)).toBe(true);
     expect(new Set(messages.inputs.map((input) => input.uuid)).size).toBe(3);
-    expect(messages.inputs[0]?.content).toContain("wfaf1.");
+    expect(messages.inputs[0]?.content).toContain("wfaf2.");
   });
 
   it("reuses the same UUID for a replay and rejects secret-shaped destinations", async () => {

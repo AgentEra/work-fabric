@@ -117,6 +117,56 @@ function classifyResult(
   };
 }
 
+function commandCredential(command: object): string | undefined {
+  try {
+    const authentication = Object.getOwnPropertyDescriptor(
+      command,
+      "authentication",
+    );
+    if (authentication === undefined || !("value" in authentication)) {
+      return undefined;
+    }
+    const value = authentication.value;
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const credential = Object.getOwnPropertyDescriptor(value, "credential");
+    return credential !== undefined &&
+      "value" in credential &&
+      typeof credential.value === "string"
+      ? credential.value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function auditableAcceptedResult(
+  result: Extract<ConnectorCommandResult, { readonly kind: "accepted" }>,
+  ingressId: string,
+  protectedValue: string | undefined,
+): Extract<ConnectorCommandResult, { readonly kind: "accepted" }> {
+  const safe = (value: unknown): value is string =>
+    typeof value === "string" &&
+    (protectedValue === undefined || !value.includes(protectedValue));
+  const resource = result.resource;
+  const safeResource = resource !== undefined && safe(resource.resource_id)
+    ? {
+        resource_type: "handoff" as const,
+        resource_id: resource.resource_id,
+        resource_version: resource.resource_version,
+      }
+    : undefined;
+  return {
+    kind: "accepted",
+    receipt_id: safe(result.receipt_id)
+      ? result.receipt_id
+      : `connector:${ingressId}`,
+    event_ids: result.event_ids.filter(safe),
+    ...(safeResource === undefined ? {} : { resource: safeResource }),
+  };
+}
+
 export class ConnectorWorker {
   constructor(private readonly options: ConnectorWorkerOptions) {
     validatePositiveInteger(options.scope.lease_seconds, "lease_seconds");
@@ -239,13 +289,18 @@ export class ConnectorWorker {
             identity: structuredClone(mapping.command.identity),
             input: structuredClone(mapping.command.input),
           };
+          const auditableAccepted = auditableAcceptedResult(
+            result,
+            claim.ingress_id,
+            commandCredential(mapping.command),
+          );
           const receipt = await this.options.accepted_receipt_handler.record({
             tenant_id: claim.envelope.tenant_id,
             connector_id: claim.envelope.connector_id,
             ingress_id: claim.ingress_id,
             claim: structuredClone(claim),
             command: auditableCommand,
-            accepted: structuredClone(result),
+            accepted: auditableAccepted,
           });
           if (receipt.kind !== "accepted") {
             return this.settleFailure(
