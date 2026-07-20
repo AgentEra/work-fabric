@@ -1,0 +1,9 @@
+{
+  "name": "@work-fabric/admission-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": { "@work-fabric/admission-spi": "0.1.0" }
+}
