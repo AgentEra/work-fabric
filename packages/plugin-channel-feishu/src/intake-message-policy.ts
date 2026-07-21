@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { ConnectorIngressClaim, ConnectorMappingOutcome } from "@work-fabric/connector-spi";
-import { parseFeishuParticipantResolution, type FeishuMessageMappingPolicy, type FeishuParticipantResolver } from "@work-fabric/connector-feishu";
+import { feishuCommandIdempotencyKey, parseFeishuParticipantResolution, type FeishuMessageMappingPolicy, type FeishuParticipantResolver } from "@work-fabric/connector-feishu";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 
 export interface FeishuIntakeTarget { readonly actor_id: string; readonly endpoint_id: string; }
@@ -35,11 +35,6 @@ function mentionList(value: unknown): readonly { readonly key: string; readonly 
     ? [{ key: (item as { key: string }).key, open_id: (item as { open_id: string }).open_id }]
     : []);
 }
-function idempotency(claim: ConnectorIngressClaim): string {
-  const digest = createHash("sha256").update(claim.envelope.tenant_id).update("\0").update(claim.envelope.connector_id).update("\0").update(bounded(claim.envelope.payload.message_id, "message_id")).digest("base64url");
-  return `feishu-intake:${digest}`;
-}
-
 export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
   constructor(private readonly options: FeishuIntakeMessagePolicyOptions) {
     bounded(options.bot_open_id, "bot_open_id", 255); bounded(options.target.actor_id, "target.actor_id", 128); bounded(options.target.endpoint_id, "target.endpoint_id", 128);
@@ -54,6 +49,7 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
     catch { return { kind: "rejected", reason_code: "invalid_message_content", retryable: false }; }
     if (text.length === 0) return { kind: "ignored", reason_code: "empty_intent" };
     const sender = bounded(payload.sender_open_id, "sender_open_id", 255);
+    const commandIdempotencyKey = feishuCommandIdempotencyKey(claim);
     let participant;
     try {
       participant = parseFeishuParticipantResolution(
@@ -61,6 +57,7 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
           claim,
           external_subject_id: sender,
           external_subject_type: "human",
+          idempotency_key: commandIdempotencyKey,
         }),
       );
     } catch {
@@ -104,7 +101,7 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
     };
     return { kind: "command", command: {
       operation: "handoff.offer",
-      idempotency_key: idempotency(claim),
+      idempotency_key: commandIdempotencyKey,
       identity,
       ...(participant.representation_grant === undefined ? {} : {
         authentication: { kind: "bearer" as const, credential: participant.representation_grant },

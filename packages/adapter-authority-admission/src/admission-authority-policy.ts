@@ -11,6 +11,8 @@ const MAXIMUM_ID_LENGTH = 255;
 const MAXIMUM_PRINCIPAL_ID_LENGTH = "admission:".length + MAXIMUM_ID_LENGTH;
 const IDENTITY_KIND_ATTRIBUTE = "workfabric.dev/identity_kind";
 const CONNECTOR_ID_ATTRIBUTE = "workfabric.dev/connector_id";
+const INGRESS_ID_ATTRIBUTE = "workfabric.dev/ingress_id";
+const IDEMPOTENCY_KEY_ATTRIBUTE = "workfabric.dev/idempotency_key";
 
 export interface AdmissionAuthorityRule {
   readonly tenant_id: string;
@@ -121,6 +123,8 @@ interface ExactRequest {
   readonly delegation_id: unknown;
   readonly action: unknown;
   readonly resource_id: unknown;
+  readonly correlation_id: unknown;
+  readonly idempotency_key: unknown;
 }
 
 function exactRequest(request: AuthorityRequest): ExactRequest | null {
@@ -135,6 +139,8 @@ function exactRequest(request: AuthorityRequest): ExactRequest | null {
       delegation_id: ownDataValue(request, "delegation_id"),
       action: ownDataValue(request, "action"),
       resource_id: ownDataValue(request, "resource_id"),
+      correlation_id: ownDataValue(request, "correlation_id"),
+      idempotency_key: ownDataValue(request, "idempotency_key"),
     };
   } catch {
     return null;
@@ -168,6 +174,10 @@ function matchesRule(request: ExactRequest, rule: Readonly<AdmissionAuthorityRul
       && !Array.isArray(attributes)
       && ownDataValue(attributes, IDENTITY_KIND_ATTRIBUTE) === "admission"
       && ownDataValue(attributes, CONNECTOR_ID_ATTRIBUTE) === rule.connector_id
+      && boundedIdentifier(request.correlation_id, 128)
+      && ownDataValue(attributes, INGRESS_ID_ATTRIBUTE) === request.correlation_id
+      && boundedIdentifier(request.idempotency_key, 256)
+      && ownDataValue(attributes, IDEMPOTENCY_KEY_ATTRIBUTE) === request.idempotency_key
       && request.action === rule.action;
   } catch {
     return false;

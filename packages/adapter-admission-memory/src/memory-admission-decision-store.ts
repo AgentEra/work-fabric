@@ -60,8 +60,11 @@ function scanSerialized(value: unknown): void {
 
 function assertDecisionRecordIsPrivateAndBounded(value: unknown): asserts value is AdmissionDecisionRecord {
   scanSerialized(value);
-  const record = object(value, ["decision", "scope", "ingress_id", "external_subject_fingerprint", "evidence", "recorded_at"], "decision record");
-  requireFields(record, ["decision", "scope", "ingress_id", "external_subject_fingerprint", "recorded_at"], "decision record");
+  const record = object(value, ["decision", "scope", "ingress_id", "idempotency_key", "external_subject_fingerprint", "evidence", "recorded_at"], "decision record");
+  requireFields(record, ["decision", "scope", "ingress_id", "idempotency_key", "external_subject_fingerprint", "recorded_at"], "decision record");
+  if (typeof record.idempotency_key !== "string" || record.idempotency_key.length === 0 || record.idempotency_key.length > 256 || record.idempotency_key.trim() !== record.idempotency_key) {
+    throw new TypeError("decision record idempotency_key is invalid");
+  }
   const scope = object(record.scope, ["tenant_id", "connector_id", "source_system", "external_tenant_id"], "scope");
   requireFields(scope, ["tenant_id", "connector_id", "source_system", "external_tenant_id"], "scope");
   const decision = object(record.decision, ["kind", "reason_code", "policy_id", "policy_revision", "binding", "decision_id"], "decision");

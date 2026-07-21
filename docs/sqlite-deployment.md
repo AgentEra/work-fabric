@@ -29,6 +29,17 @@ The adapter enables foreign keys, a bounded busy timeout and WAL for file-backed
 databases. A changed migration checksum fails startup; add a forward migration
 instead of rewriting applied history.
 
+When `service-node` enables Collaboration Admission, its composition root
+automatically applies the base migrations together with adapter migration
+`005_admission`. The generic `npm run sqlite:migrate` command currently applies
+only base `SQLITE_MIGRATIONS`; it is not an Admission-aware deployment planner.
+Back up the stopped database file and WAL before enabling or upgrading
+Admission. During the current unreleased feature branch, `005_admission` was
+amended to persist the bounded command idempotency key. A development database
+that already recorded the older checksum must be backed up and recreated; do
+not edit migration history. Once released, schema evolution must use a new
+forward migration.
+
 Operational histories use indexed keyset pagination and journal high-water
 uses `MAX(partition_position)` on the tenant/partition index. These choices
 keep Console and SDK visibility reads bounded as the local journal grows; they

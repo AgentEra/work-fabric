@@ -22,6 +22,7 @@ function request(overrides: Partial<AdmissionRequest> = {}): AdmissionRequest {
     external_subject_type: "human",
     external_subject_id: "subject-1",
     ingress_id: "ingress-1",
+    idempotency_key: "command-1",
     ...overrides,
   };
 }
@@ -42,6 +43,7 @@ function record(overrides: Partial<AdmissionDecisionRecord> = {}): AdmissionDeci
       external_tenant_id: "external-tenant-1",
     },
     ingress_id: "ingress-1",
+    idempotency_key: "command-1",
     external_subject_fingerprint: "fingerprint-1",
     recorded_at: "2026-07-20T00:00:00.000Z",
     ...overrides,
@@ -60,6 +62,15 @@ describe("Memory admission stores", () => {
 
   it("conforms to the admission decision store profile", async () => {
     await runAdmissionDecisionStoreProfile(() => new MemoryAdmissionDecisionStore());
+  });
+
+  it("fails closed when one ingress is replayed with another command idempotency key", async () => {
+    const store = new MemoryAdmissionDecisionStore();
+    await expect(store.record(record())).resolves.toEqual(record());
+    await expect(store.record(record({ idempotency_key: "command-2" }))).rejects.toMatchObject({
+      code: "decision_store_unavailable",
+      message: "admission_decision_conflict",
+    });
   });
 
   it("keeps NUL-shifted binding tuple components distinct", async () => {

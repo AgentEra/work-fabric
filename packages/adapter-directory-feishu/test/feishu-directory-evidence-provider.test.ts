@@ -20,6 +20,7 @@ const request: AdmissionRequest = {
   external_subject_type: "human",
   external_subject_id: "ou-user-a",
   ingress_id: "ingress-a",
+  idempotency_key: "command-a",
 };
 
 class ContactClient implements FeishuContactApiClient {

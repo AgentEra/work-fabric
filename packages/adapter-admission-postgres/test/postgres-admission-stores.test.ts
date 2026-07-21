@@ -51,6 +51,7 @@ class MemoryPostgresClient implements PostgresClient {
     if (normalized.startsWith("INSERT INTO work_fabric_admission_decisions")) {
       const columns = [
         "tenant_id", "connector_id", "source_system", "external_tenant_id", "ingress_id",
+        "idempotency_key",
         "decision_kind", "reason_code", "policy_id", "policy_revision", "decision_id",
         "external_subject_fingerprint", "binding_external_subject_type", "binding_external_subject_fingerprint",
         "binding_actor_id", "binding_actor_type", "binding_endpoint_id", "binding_created_at",
@@ -131,6 +132,7 @@ function decisionRecord(tenantId = "tenant-postgres"): AdmissionDecisionRecord {
     },
     scope,
     ingress_id: "ingress-postgres",
+    idempotency_key: "command-postgres",
     external_subject_fingerprint: "fingerprint-postgres",
     evidence: {
       membership: "internal",
@@ -180,6 +182,7 @@ describe("PostgreSQL Admission stores", () => {
         external_subject_type: "human",
         external_subject_id: "raw-secret",
         ingress_id: "ingress-secret",
+        idempotency_key: "command-secret",
       },
       external_subject_fingerprint: "fingerprint-secret",
       actor_id: "actor-secret",
@@ -211,6 +214,7 @@ describe("PostgreSQL Admission stores", () => {
         external_subject_type: "human",
         external_subject_id: "raw-private",
         ingress_id: "ingress",
+        idempotency_key: "command",
       },
       external_subject_fingerprint: "fingerprint",
       actor_id: "actor",
@@ -315,6 +319,7 @@ describe("PostgreSQL Admission stores", () => {
         external_subject_type: "human",
         external_subject_id: "not-persisted",
         ingress_id: "ingress-postgres",
+        idempotency_key: "command-postgres",
       },
       external_subject_fingerprint: "submillisecond-binding",
       actor_id: "submillisecond-actor",
@@ -386,6 +391,7 @@ describe.skipIf(!live)("PostgreSQL Admission live integration", () => {
           external_subject_type: "human" as const,
           external_subject_id: "not-persisted",
           ingress_id: "ingress-live",
+          idempotency_key: "command-live",
         },
         external_subject_fingerprint: "fingerprint-live",
         created_at: "2026-07-20T00:00:00.000Z",

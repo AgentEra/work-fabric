@@ -18,8 +18,9 @@ const request = (overrides: Partial<AdmissionRequest> = {}): AdmissionRequest =>
   external_subject_type: "human",
   external_subject_id: "subject-1",
   ingress_id: "ingress-1",
+  idempotency_key: "command-1",
   ...overrides,
-});
+} as AdmissionRequest);
 
 describe("admission contracts", () => {
   it("constructs every admission decision member", () => {
@@ -93,6 +94,7 @@ describe("admission contracts", () => {
     ["external_tenant_id", "x".repeat(256)],
     ["external_subject_id", "x".repeat(256)],
     ["ingress_id", "x".repeat(129)],
+    ["idempotency_key", "x".repeat(257)],
   ] as const)("rejects an invalid %s", (field, value) => {
     expect(() => validateAdmissionRequest(request({ [field]: value }))).toThrow();
   });

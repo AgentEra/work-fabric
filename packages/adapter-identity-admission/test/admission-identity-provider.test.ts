@@ -18,6 +18,7 @@ const verified = {
   tenant_id: "tenant-a",
   connector_id: "connector-a",
   ingress_id: "ingress-a",
+  idempotency_key: "command-a",
   decision_id: "decision-a",
   actor_id: "actor-a",
   actor_type: "human" as const,
@@ -64,6 +65,7 @@ describe("AdmissionIdentityProvider", () => {
         "workfabric.dev/identity_kind": "admission",
         "workfabric.dev/connector_id": "connector-a",
         "workfabric.dev/ingress_id": "ingress-a",
+        "workfabric.dev/idempotency_key": "command-a",
         "workfabric.dev/decision_id": "decision-a",
       },
     });

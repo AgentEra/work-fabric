@@ -282,6 +282,7 @@ export class AdmissionFeishuParticipantResolver implements FeishuParticipantReso
           external_subject_type: "human",
           external_subject_id: input.external_subject_id,
           ingress_id: input.claim.ingress_id,
+          idempotency_key: input.idempotency_key,
         }),
       );
     } catch {

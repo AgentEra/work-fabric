@@ -280,6 +280,8 @@ export class ExchangeApplication {
         delegation_id: envelope.delegation_id ?? null,
         action: envelope.message_type,
         resource_id: authorizedResourceId,
+        correlation_id: envelope.correlation_id ?? null,
+        idempotency_key: envelope.idempotency_key,
       });
       if (authority.kind === "deny") {
         return toOperationResult(

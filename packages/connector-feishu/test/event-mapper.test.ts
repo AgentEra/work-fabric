@@ -193,14 +193,15 @@ describe("Feishu identity and action mapping", () => {
       input: { handoff_id: "handoff-1" },
       expires_at: "2026-07-16T00:10:00Z",
     });
-    const resolver: FeishuParticipantResolver = {
-      async resolve() {
+    const resolveParticipant = vi.fn(async () => {
         return {
           kind: "resolved",
           identity: { actor_id: "human-1", actor_type: "human", endpoint_id: "feishu-endpoint-1" },
           representation_grant: "card-action-grant",
-        };
-      },
+        } as const;
+      });
+    const resolver: FeishuParticipantResolver = {
+      resolve: resolveParticipant,
     };
     const mapper = new FeishuEventMapper({
       participant_resolver: resolver,
@@ -208,12 +209,14 @@ describe("Feishu identity and action mapping", () => {
       clock: { now: () => "2026-07-16T00:05:00Z" },
     });
 
-    await expect(mapper.map(claim("card.action.trigger", {
+    const inputClaim = claim("card.action.trigger", {
       operator_open_id: "ou-human-1",
       action_ref: actionRef,
       message_id: "om-card-1",
       action_tag: "button",
-    }))).resolves.toMatchObject({
+    });
+    const mapped = await mapper.map(inputClaim);
+    expect(mapped).toMatchObject({
       kind: "command",
       command: {
         operation: "handoff.accept",
@@ -223,6 +226,10 @@ describe("Feishu identity and action mapping", () => {
         input: { handoff_id: "handoff-1" },
       },
     });
+    if (mapped.kind !== "command") throw new Error("expected command");
+    expect(resolveParticipant).toHaveBeenCalledWith(expect.objectContaining({
+      idempotency_key: mapped.command.idempotency_key,
+    }));
   });
 
   it.each([

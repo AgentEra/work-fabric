@@ -15,6 +15,8 @@ export interface AuthorityRequest {
   readonly delegation_id: string | null;
   readonly action: string;
   readonly resource_id: string | null;
+  readonly correlation_id: string | null;
+  readonly idempotency_key: string;
 }
 
 export type AuthorityDecision =

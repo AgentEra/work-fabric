@@ -25,6 +25,7 @@ function request(overrides: Partial<AdmissionRequest> = {}): AdmissionRequest {
     external_subject_type: "human",
     external_subject_id: "subject-1",
     ingress_id: "ingress-1",
+    idempotency_key: "command-1",
     ...overrides,
   };
 }
@@ -570,6 +571,19 @@ describe("DefaultCollaborationAdmissionService orchestration", () => {
     expect(env.grants.calls).toHaveLength(1);
   });
 
+  it("rejects unsafe ingress reuse when the command idempotency key changes", async () => {
+    const env = fixture();
+    const first = await env.service.admit("policy-1", request());
+    const replay = await env.service.admit("policy-1", request({ idempotency_key: "command-2" }));
+
+    expect(first.decision.kind).toBe("allow");
+    expect(replay).toEqual({
+      decision: { kind: "temporarily_unavailable", reason_code: "store_unavailable", retry_after_seconds: 17 },
+    });
+    expect(env.decisions.recordCalls).toHaveLength(1);
+    expect(env.grants.calls).toHaveLength(1);
+  });
+
   it.each([
     ["stored scope", (record: AdmissionDecisionRecord): AdmissionDecisionRecord => ({
       ...record,
@@ -612,7 +626,7 @@ describe("DefaultCollaborationAdmissionService orchestration", () => {
     decisions.canonical = {
       decision: { kind: "allow", reason_code: "internal_member", policy_id: "policy-1", policy_revision: "revision-1", binding: canonicalBinding, decision_id: "decision-canonical" },
       scope: { tenant_id: "tenant-1", connector_id: "connector-1", source_system: "source-1", external_tenant_id: "external-tenant-1" },
-      ingress_id: "ingress-1", external_subject_fingerprint: "fingerprint:subject-1", evidence: internalEvidence,
+      ingress_id: "ingress-1", idempotency_key: "command-1", external_subject_fingerprint: "fingerprint:subject-1", evidence: internalEvidence,
       recorded_at: "2026-07-20T00:00:00.000Z",
     };
     const env = fixture({ decisions, grants });

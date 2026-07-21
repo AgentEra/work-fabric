@@ -45,6 +45,26 @@ function policy(resolution: FeishuParticipantResolution = {
 }
 
 describe("FeishuIntakeMessagePolicy", () => {
+  it("binds participant admission to the exact command idempotency key", async () => {
+    const resolve = vi.fn(async () => ({
+      kind: "resolved" as const,
+      identity: { actor_id: "actor-human", actor_type: "human" as const, endpoint_id: "endpoint-human" },
+    }));
+    const mapped = await new FeishuIntakeMessagePolicy({
+      bot_open_id: "ou-bot-1",
+      participant_resolver: { resolve },
+      target: { actor_id: "actor-agent", endpoint_id: "endpoint-agent" },
+      clock: { now: () => "2026-07-17T00:00:05.000Z" },
+      accept_within_seconds: 86_400,
+      result_due_within_seconds: 604_800,
+      max_intent_length: 4_000,
+    }).mapMessage(claim());
+    if (mapped.kind !== "command") throw new Error("expected command");
+    expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
+      idempotency_key: mapped.command.idempotency_key,
+    }));
+  });
+
   it("maps one explicit bot mention to one deterministic public Handoff Offer", async () => {
     const result = await policy().mapMessage(claim());
     expect(result).toMatchObject({
@@ -60,7 +80,7 @@ describe("FeishuIntakeMessagePolicy", () => {
         },
       },
     });
-    expect(result.kind === "command" && result.command.idempotency_key).toMatch(/^feishu-intake:[A-Za-z0-9_-]+$/);
+    expect(result.kind === "command" && result.command.idempotency_key).toMatch(/^feishu:[A-Za-z0-9_-]+$/);
   });
 
   it("preserves a protocol-valid system Actor for a human external participant", async () => {

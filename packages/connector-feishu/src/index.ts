@@ -1,5 +1,6 @@
 export * from "./action-token.js";
 export * from "./config.js";
+export * from "./command-idempotency.js";
 export * from "./credentials.js";
 export * from "./document-reference.js";
 export * from "./event-mapper.js";

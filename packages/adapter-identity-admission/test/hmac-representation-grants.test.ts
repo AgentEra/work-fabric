@@ -25,8 +25,9 @@ function request(overrides: Partial<AdmissionRequest> = {}): AdmissionRequest {
     external_subject_type: "human",
     external_subject_id: "raw-external-subject-AppSecret-42",
     ingress_id: "ingress-a",
+    idempotency_key: "command-a",
     ...overrides,
-  };
+  } as AdmissionRequest;
 }
 
 type AllowDecision = Extract<AdmissionDecision, { readonly kind: "allow" }>;
@@ -81,12 +82,13 @@ function signedToken(payload: unknown, key: Uint8Array = NEW_KEY, json = JSON.st
 
 function validPayload(overrides: Partial<AdmissionGrantPayload> = {}): AdmissionGrantPayload {
   return {
-    v: 1,
+    v: 2,
     kid: "new",
     grant_id: "grant-a",
     tenant_id: "tenant-a",
     connector_id: "connector-a",
     ingress_id: "ingress-a",
+    idempotency_key: "command-a",
     decision_id: "decision-a",
     actor_id: "actor-a",
     actor_type: "human",
@@ -112,6 +114,7 @@ describe("HmacRepresentationGrants issuance", () => {
     expect(decoded.json).toBe(JSON.stringify(validPayload()));
     expect(Object.keys(decoded.payload)).toEqual([
       "v", "kid", "grant_id", "tenant_id", "connector_id", "ingress_id",
+      "idempotency_key",
       "decision_id", "actor_id", "actor_type", "endpoint_id",
       "external_subject_fingerprint", "issued_at", "expires_at",
     ]);
@@ -178,6 +181,22 @@ describe("HmacRepresentationGrants issuance", () => {
 });
 
 describe("HmacRepresentationGrants verification", () => {
+  it("rejects legacy v1 grants and returns the bound command idempotency key for v2", async () => {
+    const codec = grants();
+    const token = await codec.issue({
+      request: request(),
+      decision: decision(),
+      expires_at: "2026-07-20T00:01:00.000Z",
+    });
+    await expect(codec.verify(token, NOW)).resolves.toEqual(expect.objectContaining({
+      ingress_id: "ingress-a",
+      idempotency_key: "command-a",
+    }));
+
+    const { idempotency_key: _removed, ...legacyPayload } = validPayload() as AdmissionGrantPayload & { readonly idempotency_key: string };
+    const legacy = signedToken({ ...legacyPayload, v: 1 });
+    await expect(codec.verify(legacy, NOW)).resolves.toBeNull();
+  });
   it("verifies connector and ingress-bound grants across an overlapping rotation window", async () => {
     const oldIssuer = grants({ active_key_id: "old" });
     const oldToken = await oldIssuer.issue({ request: request(), decision: decision(), expires_at: "2026-07-20T00:01:00Z" });
@@ -187,6 +206,7 @@ describe("HmacRepresentationGrants verification", () => {
       tenant_id: "tenant-a",
       connector_id: "connector-a",
       ingress_id: "ingress-a",
+      idempotency_key: "command-a",
       decision_id: "decision-a",
       actor_id: "actor-a",
       actor_type: "human",
@@ -225,7 +245,9 @@ describe("HmacRepresentationGrants verification", () => {
     const invalidPayloads: unknown[] = [
       { ...validPayload(), extra: true },
       Object.fromEntries(Object.entries(validPayload()).filter(([key]) => key !== "grant_id")),
-      { ...validPayload(), v: 2 },
+      { ...validPayload(), v: 1 },
+      Object.fromEntries(Object.entries(validPayload()).filter(([key]) => key !== "idempotency_key")),
+      { ...validPayload(), idempotency_key: "x".repeat(257) },
       { ...validPayload(), actor_type: "robot" },
       { ...validPayload(), connector_id: "" },
       { ...validPayload(), actor_id: "a".repeat(129) },
@@ -272,6 +294,7 @@ describe("HmacRepresentationGrants verification", () => {
       tenant_id: payload.tenant_id,
       connector_id: payload.connector_id,
       ingress_id: payload.ingress_id,
+      idempotency_key: payload.idempotency_key,
       decision_id: payload.decision_id,
       actor_id: payload.actor_id,
       actor_type: payload.actor_type,
@@ -285,8 +308,8 @@ describe("HmacRepresentationGrants verification", () => {
       '"kid":"old","kid":"new"',
     )],
     ["alternate numeric v spelling", (payload: AdmissionGrantPayload) => JSON.stringify(payload).replace(
-      '"v":1',
-      '"v":1e0',
+      '"v":2',
+      '"v":2e0',
     )],
   ])("rejects an authenticated payload encoded with %s", async (_scenario, encode) => {
     const payload = validPayload({ expires_at: "2026-07-20T00:01:00Z" });

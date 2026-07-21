@@ -19,6 +19,7 @@ const PAYLOAD_KEYS = [
   "tenant_id",
   "connector_id",
   "ingress_id",
+  "idempotency_key",
   "decision_id",
   "actor_id",
   "actor_type",
@@ -32,12 +33,13 @@ const ACTOR_TYPES = new Set<AdmissionSubjectType>(["human", "agent", "system"]);
 const MAX_GRANT_LENGTH = 16_384;
 
 export interface AdmissionGrantPayload {
-  readonly v: 1;
+  readonly v: 2;
   readonly kid: string;
   readonly grant_id: string;
   readonly tenant_id: string;
   readonly connector_id: string;
   readonly ingress_id: string;
+  readonly idempotency_key: string;
   readonly decision_id: string;
   readonly actor_id: string;
   readonly actor_type: AdmissionSubjectType;
@@ -68,12 +70,13 @@ function isPayload(value: unknown): value is AdmissionGrantPayload {
     Object.keys(payload).length !== PAYLOAD_KEYS.length
     || PAYLOAD_KEYS.some((key) => !Object.hasOwn(payload, key))
   ) return false;
-  return payload.v === 1
+  return payload.v === 2
     && boundedIdentifier(payload.kid, 128)
     && boundedIdentifier(payload.grant_id, 128)
     && boundedIdentifier(payload.tenant_id, 255)
     && boundedIdentifier(payload.connector_id, 255)
     && boundedIdentifier(payload.ingress_id, 128)
+    && boundedIdentifier(payload.idempotency_key, 256)
     && boundedIdentifier(payload.decision_id, 128)
     && boundedIdentifier(payload.actor_id, 128)
     && typeof payload.actor_type === "string"
@@ -92,6 +95,7 @@ function serializePayload(payload: AdmissionGrantPayload): string {
     tenant_id: payload.tenant_id,
     connector_id: payload.connector_id,
     ingress_id: payload.ingress_id,
+    idempotency_key: payload.idempotency_key,
     decision_id: payload.decision_id,
     actor_id: payload.actor_id,
     actor_type: payload.actor_type,
@@ -184,12 +188,13 @@ export class HmacRepresentationGrants implements RepresentationGrantIssuer, Repr
     }
     const issuedAt = this.clock.now();
     const payload: AdmissionGrantPayload = {
-      v: 1,
+      v: 2,
       kid: this.activeKeyId,
       grant_id: this.ids.grantId(),
       tenant_id: input.request.tenant_id,
       connector_id: input.request.connector_id,
       ingress_id: input.request.ingress_id,
+      idempotency_key: input.request.idempotency_key,
       decision_id: input.decision.decision_id,
       actor_id: binding.actor_id,
       actor_type: binding.actor_type,
@@ -238,6 +243,7 @@ export class HmacRepresentationGrants implements RepresentationGrantIssuer, Repr
         tenant_id: untrusted.tenant_id,
         connector_id: untrusted.connector_id,
         ingress_id: untrusted.ingress_id,
+        idempotency_key: untrusted.idempotency_key,
         decision_id: untrusted.decision_id,
         actor_id: untrusted.actor_id,
         actor_type: untrusted.actor_type,

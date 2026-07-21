@@ -44,6 +44,7 @@ export interface AdmissionRequest extends AdmissionScope {
   readonly external_subject_type: AdmissionSubjectType;
   readonly external_subject_id: string;
   readonly ingress_id: string;
+  readonly idempotency_key: string;
 }
 
 export interface ExternalSubjectEvidence {
@@ -110,6 +111,7 @@ export interface AdmissionDecisionRecord {
   readonly decision: Exclude<AdmissionDecision, { readonly kind: "temporarily_unavailable" }>;
   readonly scope: AdmissionScope;
   readonly ingress_id: string;
+  readonly idempotency_key: string;
   readonly external_subject_fingerprint: string;
   readonly evidence?: Pick<ExternalSubjectEvidence, "membership" | "active" | "observed_at" | "provider_revision">;
   readonly recorded_at: string;
@@ -125,7 +127,7 @@ export interface RepresentationGrantIssuer {
 }
 
 export interface RepresentationGrantVerifier {
-  verify(grant: string, now: string): Promise<{ readonly tenant_id: string; readonly connector_id: string; readonly ingress_id: string; readonly decision_id: string; readonly actor_id: string; readonly actor_type: AdmissionSubjectType; readonly endpoint_id: string; readonly external_subject_fingerprint: string; readonly expires_at: string } | null>;
+  verify(grant: string, now: string): Promise<{ readonly tenant_id: string; readonly connector_id: string; readonly ingress_id: string; readonly idempotency_key: string; readonly decision_id: string; readonly actor_id: string; readonly actor_type: AdmissionSubjectType; readonly endpoint_id: string; readonly external_subject_fingerprint: string; readonly expires_at: string } | null>;
 }
 
 export interface CollaborationAdmissionService {
@@ -145,6 +147,7 @@ export function validateAdmissionRequest(request: AdmissionRequest): void {
   assertBoundedIdentifier(request.external_tenant_id, "external_tenant_id", 255);
   assertBoundedIdentifier(request.external_subject_id, "external_subject_id", 255);
   assertBoundedIdentifier(request.ingress_id, "ingress_id", 128);
+  assertBoundedIdentifier(request.idempotency_key, "idempotency_key", 256);
   if (request.external_subject_id === "*") {
     throw new TypeError("external_subject_id must not be a wildcard");
   }

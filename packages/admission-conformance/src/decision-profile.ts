@@ -50,6 +50,7 @@ function record(overrides: Partial<AdmissionDecisionRecord> = {}): AdmissionDeci
     },
     scope: scope(),
     ingress_id: "ingress-profile",
+    idempotency_key: "command-profile",
     external_subject_fingerprint: "fingerprint-profile",
     evidence: {
       membership: "internal",
@@ -107,6 +108,19 @@ export async function runAdmissionDecisionStoreProfile(
       && error.message === "admission_decision_conflict",
     "conflicting ingress records must fail without exposing record data",
   );
+  await assert.rejects(
+    () => store.record(record({ idempotency_key: "command-other" })),
+    (error: unknown) => error instanceof AdmissionAdapterError
+      && error.code === "decision_store_unavailable"
+      && error.message === "admission_decision_conflict",
+    "one ingress must not be rebound to another command idempotency key",
+  );
+  for (const invalid of ["", "x".repeat(257)]) {
+    await rejects(
+      () => store.record(record({ scope: scope({ tenant_id: `tenant-invalid-key-${invalid.length}` }), idempotency_key: invalid })),
+      "command idempotency keys must remain bounded",
+    );
+  }
 
   for (const [label, changedScope, ingressId] of [
     ["tenant_id", scope({ tenant_id: "tenant-other" }), "ingress-profile"],

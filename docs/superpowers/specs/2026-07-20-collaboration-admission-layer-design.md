@@ -156,6 +156,7 @@ export interface AdmissionRequest {
   readonly external_subject_type: "human" | "agent" | "system";
   readonly external_subject_id: string;
   readonly ingress_id: string;
+  readonly idempotency_key: string;
 }
 
 export interface ExternalSubjectEvidence {
@@ -315,7 +316,8 @@ opaque, short-lived, single-subject grant bound to:
 - external source/tenant subject fingerprint;
 - Actor, Actor type and Endpoint;
 - Admission decision and policy revision;
-- ingress correlation identity, expiry and unique grant ID.
+- ingress correlation identity, the exact final command idempotency key,
+  expiry and unique grant ID.
 
 The grant proves trusted representation only. It does not authorize a protocol
 operation. `adapter-identity-admission` resolves it to a Principal containing
@@ -325,8 +327,14 @@ allows the admission-backed connector Principal only the explicit Intake
 operation `workfabric.handoff.offer.v1`; it does not grant Accept, result
 reporting, verification, administration or arbitrary resource access.
 
-A grant may be retried only for its bound ingress/idempotency identity until
-expiry. Reuse for another ingress, connector, Actor or Endpoint is rejected.
+A version 2 grant may be retried only for its bound
+`ingress_id + idempotency_key` tuple until expiry. HTTP Identity exposes both
+verified values only as frozen trusted-principal attributes, and Authority
+requires the command envelope's `correlation_id` and `idempotency_key` to match
+them exactly before Exchange idempotency is consulted. Reuse for another
+ingress, command key, connector, Actor or Endpoint is rejected. Version 1
+grants do not carry the complete tuple and therefore fail closed after this
+upgrade.
 Signing/verification keys are deployment credentials with explicit rotation;
 neither the grant nor its key is persisted in Admission audit output.
 
@@ -344,10 +352,12 @@ Each terminal allow/deny records:
 - a keyed fingerprint of the external subject;
 - resulting Actor/Endpoint for allowed decisions;
 - evidence provider revision and bounded freshness metadata;
-- ingress correlation ID.
+- ingress correlation ID and the bounded final command idempotency key.
 
-It does not record message content, App Secret, access token, raw grant or raw
-directory response. Operational views may show a masked external identifier
+The idempotency key is retained only as necessary security/audit semantics in
+the Admission decision store; it is not added to the public Decision result or
+Console output. Admission does not record message content, App Secret, access
+token, raw grant or raw directory response. Operational views may show a masked external identifier
 only to authorized operators. Admission decisions are operational security
 facts, not WFPP domain events, and do not become Handoff timeline content.
 

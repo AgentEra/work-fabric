@@ -72,6 +72,7 @@ flowchart TB
             NodeFeishuAdapter["Node Feishu Long-Connection Adapter"]
             HumanAdapter["Human Channel Adapter"]
             Connector["System Connector Adapter"]
+            Admission["Collaboration Admission<br/>Policy / Binding / tuple-bound Grant"]
         end
         AgentGateway["Agent Gateway<br/>Session / Inbox / SSE"]
         Directory["Endpoint Directory<br/>Facts / Lease / Discovery"]
@@ -86,11 +87,14 @@ flowchart TB
     Agent <--> AgentGateway
     System <--> Connector
     Resolver <--> Protocol
-    HumanAdapter <--> Protocol
+    HumanAdapter --> Admission
+    Connector --> Admission
+    Admission --> Protocol
+    Protocol --> HumanAdapter
     AgentGateway <--> Protocol
     AgentGateway <--> Directory
     Directory <--> Protocol
-    Connector <--> Protocol
+    Protocol --> Connector
     Protocol <--> Exchange
     Exchange <--> Signal
     Exchange <--> Support
@@ -116,7 +120,7 @@ Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具�
 
 阶段 8 在 Core 外增加 Provider-backed 全局配置、可信多实例插件生命周期和持久化 Channel Route。内置飞书协作通道仅把明确 `@机器人` 的消息映射成面向已配置外部 Agent 的 Intake Handoff，并通过 canonical Subscription 把协议事件送回原会话或显式固定频道。YAML 只是首个 Configuration Provider；插件与消费方不依赖文件实现。该层不解释意图、不选择目标、不调用模型/工具，也不创建外部需求或执行工作。
 
-阶段 9 在可信传输和协议 Authority 之间增加技术中立的 Collaboration Admission。它判断一个已经由 Connector 认证的外部参与方是否可进入协作网络，为允许的单一外部主体建立稳定 Actor/Endpoint 绑定，并签发短时、单主体、与 ingress 绑定的 representation grant。Admission 不属于飞书插件，不依赖 YAML、SQLite、PostgreSQL、WFPP 或 Exchange Core；具体配置、目录和持久化均由 Adapter 在 `service-node` 组合根注入。
+阶段 9 在可信传输和协议 Authority 之间增加技术中立的 Collaboration Admission。它判断一个已经由 Connector 认证的外部参与方是否可进入协作网络，为允许的单一外部主体建立稳定 Actor/Endpoint 绑定，并签发短时、单主体、与 `ingress_id + command idempotency_key` 强绑定的 v2 representation grant。Feishu Adapter 在 Admission 前只用一个纯函数生成最终命令键；HTTP Identity 把已验证 tuple 放入冻结的可信 Principal 属性，Admission Authority 再与命令 envelope 的 `correlation_id + idempotency_key` 精确比对。相同 tuple 可以幂等重试，任一分量变化都不能创建 Handoff。Admission 不属于飞书插件，不依赖 YAML、SQLite、PostgreSQL、WFPP 或 Exchange Core；具体配置、目录和持久化均由 Adapter 在 `service-node` 组合根注入。
 
 ## 4. Unified Participation Protocol
 

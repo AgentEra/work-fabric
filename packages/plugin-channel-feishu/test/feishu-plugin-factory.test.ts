@@ -178,21 +178,21 @@ describe("FeishuPluginFactory", () => {
       ],
     });
     await expect(resolver.resolve({
-      claim: participantClaim(), external_subject_id: "ou-human", external_subject_type: "human",
+      claim: participantClaim(), external_subject_id: "ou-human", external_subject_type: "human", idempotency_key: "command-admission",
     })).resolves.toEqual({
       kind: "resolved",
       identity: { actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" },
     });
     await expect(resolver.resolve({
-      claim: participantClaim(), external_subject_id: "ou-unknown", external_subject_type: "human",
+      claim: participantClaim(), external_subject_id: "ou-unknown", external_subject_type: "human", idempotency_key: "command-admission",
     })).resolves.toEqual({ kind: "denied", reason_code: "identity_unmapped" });
     await expect(resolver.resolve({
-      claim: participantClaim(), external_subject_id: "ou-agent", external_subject_type: "human",
+      claim: participantClaim(), external_subject_id: "ou-agent", external_subject_type: "human", idempotency_key: "command-admission",
     })).resolves.toEqual({
       kind: "resolved", identity: { actor_id: "actor-agent", actor_type: "agent", endpoint_id: "endpoint-agent" },
     });
     await expect(resolver.resolve({
-      claim: participantClaim(), external_subject_id: "ou-system", external_subject_type: "human",
+      claim: participantClaim(), external_subject_id: "ou-system", external_subject_type: "human", idempotency_key: "command-admission",
     })).resolves.toEqual({
       kind: "resolved", identity: { actor_id: "actor-system", actor_type: "system", endpoint_id: "endpoint-system" },
     });
@@ -215,7 +215,7 @@ describe("FeishuPluginFactory", () => {
       tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
       policy_id: "feishu-primary-participants", admission: { admit },
     });
-    const input = { claim: participantClaim(), external_subject_id: "ou-internal", external_subject_type: "human" as const };
+    const input = { claim: participantClaim(), external_subject_id: "ou-internal", external_subject_type: "human" as const, idempotency_key: "command-admission" };
     const first = await resolver.resolve(input);
     const duplicate = await resolver.resolve(input);
     expect(first).toEqual({
@@ -228,7 +228,7 @@ describe("FeishuPluginFactory", () => {
     expect(admit).toHaveBeenNthCalledWith(1, "feishu-primary-participants", {
       tenant_id: "tenant-1", connector_id: "feishu-primary", source_system: "feishu",
       external_tenant_id: "tenant-key-1", external_subject_type: "human",
-      external_subject_id: "ou-internal", ingress_id: "ingress-admission-1",
+      external_subject_id: "ou-internal", ingress_id: "ingress-admission-1", idempotency_key: "command-admission",
     });
   });
 
@@ -254,7 +254,7 @@ describe("FeishuPluginFactory", () => {
       policy_id: "feishu-primary-participants", admission,
     });
     await expect(resolver.resolve({
-      claim: participantClaim(), external_subject_id: "ou-explicit", external_subject_type: "human",
+      claim: participantClaim(), external_subject_id: "ou-explicit", external_subject_type: "human", idempotency_key: "command-admission",
     })).resolves.toEqual({
       kind: "resolved",
       identity: { actor_id: "actor-explicit", actor_type: "human", endpoint_id: "endpoint-explicit" },
@@ -284,7 +284,7 @@ describe("FeishuPluginFactory", () => {
       policy_id: "feishu-primary-participants", admission,
     });
     await expect(resolver.resolve({
-      claim: participantClaim(), external_subject_id: `ou-${actorType}`, external_subject_type: "human",
+      claim: participantClaim(), external_subject_id: `ou-${actorType}`, external_subject_type: "human", idempotency_key: "command-admission",
     })).resolves.toEqual({
       kind: "resolved",
       identity: { actor_id: `actor-${actorType}`, actor_type: actorType, endpoint_id: `endpoint-${actorType}` },
@@ -293,7 +293,7 @@ describe("FeishuPluginFactory", () => {
   });
 
   it("accepts any positive safe retry delay and rejects invalid retry delays", async () => {
-    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const };
+    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const, idempotency_key: "command-admission" };
     const resolverFor = (retryAfterSeconds: number) => new AdmissionFeishuParticipantResolver({
       tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",
       policy_id: "feishu-primary-participants",
@@ -329,7 +329,7 @@ describe("FeishuPluginFactory", () => {
       policy_id: "feishu-primary-participants", admission,
     });
     await expect(resolver.resolve({
-      claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human",
+      claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human", idempotency_key: "command-admission",
     })).resolves.toEqual({ kind: expectedKind, reason_code: reasonCode });
   });
 
@@ -343,7 +343,7 @@ describe("FeishuPluginFactory", () => {
         actor_id: "actor-1", actor_type: "human" as const, endpoint_id: "endpoint-1", created_at: "2026-07-20T00:00:00.000Z",
       },
     };
-    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const };
+    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const, idempotency_key: "command-admission" };
     const withoutGrant = new AdmissionFeishuParticipantResolver({
       tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1", policy_id: "feishu-primary-participants",
       admission: { async admit() { return { decision: baseDecision }; } },
@@ -376,7 +376,7 @@ describe("FeishuPluginFactory", () => {
       { decision: { kind: "allow", reason_code: "explicit_allow", policy_id: "feishu-primary-participants", policy_revision: "r", decision_id: "d", binding: validBinding }, representation_grant: undefined },
       new Proxy({ decision: { kind: "temporarily_unavailable", reason_code: "evidence_unavailable", retry_after_seconds: 5 } }, { getOwnPropertyDescriptor() { throw new Error(secret); } }),
     ];
-    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const };
+    const input = { claim: participantClaim(), external_subject_id: "ou-subject", external_subject_type: "human" as const, idempotency_key: "command-admission" };
     for (const result of malformed) {
       const resolver = new AdmissionFeishuParticipantResolver({
         tenant_id: "tenant-1", connector_id: "feishu-primary", external_tenant_id: "tenant-key-1",

@@ -17,6 +17,7 @@ export interface FeishuParticipantResolver {
     readonly claim: ConnectorIngressClaim;
     readonly external_subject_id: string;
     readonly external_subject_type: "human";
+    readonly idempotency_key: string;
   }): Promise<FeishuParticipantResolution>;
 }
 

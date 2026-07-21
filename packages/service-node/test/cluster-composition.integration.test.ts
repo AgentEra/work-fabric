@@ -113,6 +113,7 @@ describe("clustered Node composition", () => {
       source_system: "synthetic", external_tenant_id: "external-local",
       external_subject_type: "human", external_subject_id: "subject-1",
       ingress_id: "ingress-postgres-injection",
+      idempotency_key: "command-postgres-injection",
     });
     expect(result.decision.kind).toBe("allow");
     expect(bindingCall).toHaveBeenCalledTimes(1);

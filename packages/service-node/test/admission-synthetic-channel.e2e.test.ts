@@ -71,6 +71,7 @@ describe("source-neutral Collaboration Admission E2E", () => {
       external_subject_type: "system" as const,
       external_subject_id: "system-one",
       ingress_id: "synthetic-ingress-one",
+      idempotency_key: "synthetic-command-one",
     };
     try {
       const first = await service.admission!.admit("synthetic-systems", request);

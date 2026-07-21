@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import type {
   ConnectorEventMapper,
   ConnectorIngressClaim,
@@ -15,6 +13,7 @@ import type {
   FeishuParticipantResolver,
 } from "./participant-resolver.js";
 import { parseFeishuParticipantResolution } from "./participant-resolver.js";
+import { feishuCommandIdempotencyKey } from "./command-idempotency.js";
 
 export interface FeishuEventMapperClock {
   now(): string;
@@ -50,17 +49,6 @@ function stringField(
     throw new TypeError(`Feishu event ${field} is invalid`);
   }
   return value;
-}
-
-function idempotencyKey(claim: ConnectorIngressClaim): string {
-  const digest = createHash("sha256")
-    .update(claim.envelope.tenant_id)
-    .update("\0")
-    .update(claim.envelope.connector_id)
-    .update("\0")
-    .update(claim.envelope.dedupe_key)
-    .digest("base64url");
-  return `feishu:${digest}`;
 }
 
 function sameIdentity(
@@ -152,12 +140,14 @@ export class FeishuEventMapper implements ConnectorEventMapper {
       };
     }
     let participant: FeishuParticipantResolution;
+    const commandIdempotencyKey = feishuCommandIdempotencyKey(claim);
     try {
       participant = parseFeishuParticipantResolution(
         await this.options.participant_resolver.resolve({
           claim,
           external_subject_id: operator,
           external_subject_type: "human",
+          idempotency_key: commandIdempotencyKey,
         }),
       );
     } catch {
@@ -181,7 +171,7 @@ export class FeishuEventMapper implements ConnectorEventMapper {
       kind: "command",
       command: {
         operation: action.operation,
-        idempotency_key: idempotencyKey(claim),
+        idempotency_key: commandIdempotencyKey,
         expected_version: action.expected_version,
         identity: action.identity,
         ...(participant.representation_grant === undefined ? {} : {

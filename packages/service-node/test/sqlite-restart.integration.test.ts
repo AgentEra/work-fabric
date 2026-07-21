@@ -101,6 +101,7 @@ describe("SQLite Node service composition", () => {
       external_subject_type: "human" as const,
       external_subject_id: "subject-1",
       ingress_id: "ingress-sqlite-restart",
+      idempotency_key: "command-sqlite-restart",
     };
     try {
       const first = await composeNodeService(config, { admission });

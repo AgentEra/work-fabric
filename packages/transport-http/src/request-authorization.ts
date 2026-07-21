@@ -90,6 +90,8 @@ export async function authorizeHttpRequest(
       typeof request.resource_id === "function"
         ? request.resource_id(principal)
         : request.resource_id,
+    correlation_id: null,
+    idempotency_key: "http:non-command",
   });
   if (decision.kind === "deny") {
     return {

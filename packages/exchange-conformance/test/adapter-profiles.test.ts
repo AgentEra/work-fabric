@@ -313,6 +313,8 @@ const authorityBase: AuthorityRequest = {
   delegation_id: null,
   action: "allowed",
   resource_id: null,
+  correlation_id: null,
+  idempotency_key: "command-01",
 };
 
 const bundle: JsonObject = {

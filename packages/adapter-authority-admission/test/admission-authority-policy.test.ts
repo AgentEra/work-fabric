@@ -25,6 +25,7 @@ const verified = {
   tenant_id: "tenant-a",
   connector_id: "connector-a",
   ingress_id: "ingress-a",
+  idempotency_key: "command-a",
   decision_id: "decision-a",
   actor_id: "actor-a",
   actor_type: "human" as const,
@@ -74,8 +75,10 @@ function request(
     delegation_id: null,
     action: OFFER,
     resource_id: null,
+    correlation_id: "ingress-a",
+    idempotency_key: "command-a",
     ...overrides,
-  };
+  } as AuthorityRequest;
 }
 
 function authority(
@@ -103,6 +106,20 @@ describe("AdmissionAuthorityPolicy", () => {
     const policy = new AdmissionAuthorityPolicy([rule()], trust);
 
     await expect(policy.authorize(request(principal))).resolves.toEqual({ kind: "allow" });
+  });
+
+  it.each([
+    ["another ingress", { correlation_id: "ingress-b" }],
+    ["another command key", { idempotency_key: "command-b" }],
+    ["both changed", { correlation_id: "ingress-b", idempotency_key: "command-b" }],
+  ] as const)("denies a grant replayed for %s", async (_label, overrides) => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+
+    await expect(policy.authorize(request(principal, overrides))).resolves.toMatchObject({
+      kind: "deny",
+    });
   });
 
   it.each([
@@ -195,6 +212,8 @@ describe("AdmissionAuthorityPolicy", () => {
     const inheritedAttributes = Object.create({
       "workfabric.dev/identity_kind": "admission",
       "workfabric.dev/connector_id": "connector-a",
+      "workfabric.dev/ingress_id": "ingress-a",
+      "workfabric.dev/idempotency_key": "command-a",
     }) as ResolvedPrincipal["attributes"];
     const principal: ResolvedPrincipal = {
       principal_id: "admission:connector-a",
@@ -207,6 +226,25 @@ describe("AdmissionAuthorityPolicy", () => {
     await expect(
       new AdmissionAuthorityPolicy([rule()], trust).authorize(request(principal)),
     ).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("denies inherited or accessor-backed command tuple fields without invoking getters", async () => {
+    const trust = new AdmissionPrincipalTrust();
+    const principal = await resolvePrincipal(trust);
+    const policy = new AdmissionAuthorityPolicy([rule()], trust);
+    const inherited = Object.create(request(principal)) as AuthorityRequest;
+    await expect(policy.authorize(inherited)).resolves.toMatchObject({ kind: "deny" });
+
+    for (const field of ["correlation_id", "idempotency_key"] as const) {
+      const getter = vi.fn(() => { throw new Error("tuple getter executed"); });
+      const accessor = Object.defineProperty(
+        { ...request(principal) },
+        field,
+        { enumerable: true, get: getter },
+      ) as AuthorityRequest;
+      await expect(policy.authorize(accessor)).resolves.toMatchObject({ kind: "deny" });
+      expect(getter).not.toHaveBeenCalled();
+    }
   });
 
   it("validates exact own bounded rule fields without invoking accessors", () => {

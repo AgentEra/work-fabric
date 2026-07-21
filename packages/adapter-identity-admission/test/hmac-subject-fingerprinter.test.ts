@@ -17,6 +17,7 @@ function request(overrides: Partial<AdmissionRequest> = {}): AdmissionRequest {
     external_subject_type: "human",
     external_subject_id: "raw-external-subject-42",
     ingress_id: "ingress-a",
+    idempotency_key: "command-a",
     ...overrides,
   };
 }

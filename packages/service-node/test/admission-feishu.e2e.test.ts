@@ -15,6 +15,11 @@ import type {
   ParticipantBindingStore,
 } from "@work-fabric/admission-spi";
 import type { JsonObject } from "@work-fabric/exchange-spi";
+import {
+  BearerTokenProvider,
+  WorkFabricClient,
+  type HandoffOfferPayload,
+} from "@work-fabric/sdk-typescript";
 import { describe, expect, it } from "vitest";
 
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
@@ -314,7 +319,7 @@ describe("Feishu Collaboration Admission E2E", () => {
       admission_stores: { bindings, decisions },
       fetch,
     });
-    await service.listen();
+    const { origin } = await service.listen();
     await service.start();
     const dispatch = (body: JsonObject) => service.http.dispatch({
       method: "POST",
@@ -419,6 +424,66 @@ describe("Feishu Collaboration Admission E2E", () => {
       expect(decisions.recordCalls).toBe(8);
       expect(bindings.getOrCreateCalls).toBe(5);
       expect(bindings.createdBindings).toBe(4);
+
+      const exactCommand = commands.find((item) => commandIntent(item) === "exact allow")!;
+      const originalGrant = exactCommand.authorization!.replace(/^Bearer /, "");
+      const admitted = new WorkFabricClient({
+        baseUrl: origin,
+        tenantId: "tenant-local",
+        exchangeId: "exchange-local",
+        representation: {
+          actorId: exactCommand.body.actor_id as string,
+          endpointId: exactCommand.body.endpoint_id as string,
+        },
+        authentication: new BearerTokenProvider(originalGrant),
+      });
+      const originalCorrelation = exactCommand.body.correlation_id as string;
+      const originalIdempotency = exactCommand.body.idempotency_key as string;
+      const originalPayload = exactCommand.body.payload as HandoffOfferPayload;
+      const originalResourceId = (exactCommand.response.resource as { resource_id: string }).resource_id;
+
+      await expect(admitted.handoffs.offer(originalPayload, {
+        messageId: "admission-same-tuple-retry",
+        correlationId: originalCorrelation,
+        idempotencyKey: originalIdempotency,
+      })).resolves.toMatchObject({
+        operation_status: "accepted",
+        resource: { resource_id: originalResourceId },
+      });
+      await expect(admitted.handoffs.offer(originalPayload, {
+        messageId: "admission-other-correlation",
+        correlationId: "ingress-other",
+        idempotencyKey: originalIdempotency,
+      })).resolves.toMatchObject({
+        operation_status: "rejected",
+        resource: null,
+        error: { code: "permission_denied" },
+      });
+      await expect(admitted.handoffs.offer(originalPayload, {
+        messageId: "admission-other-idempotency",
+        correlationId: originalCorrelation,
+        idempotencyKey: "command-other",
+      })).resolves.toMatchObject({
+        operation_status: "rejected",
+        resource: null,
+        error: { code: "permission_denied" },
+      });
+      await expect(admitted.handoffs.offer(originalPayload, {
+        messageId: "admission-other-tuple",
+        correlationId: "ingress-other",
+        idempotencyKey: "command-other",
+      })).resolves.toMatchObject({
+        operation_status: "rejected",
+        resource: null,
+        error: { code: "permission_denied" },
+      });
+      const acceptedHandoffIds = commands.flatMap((item) => {
+        const resource = item.response.resource as { resource_type?: unknown; resource_id?: unknown } | null;
+        return resource?.resource_type === "handoff" && typeof resource.resource_id === "string"
+          ? [resource.resource_id]
+          : [];
+      });
+      expect(new Set(acceptedHandoffIds).size).toBe(5);
     } finally {
       await service.close();
     }

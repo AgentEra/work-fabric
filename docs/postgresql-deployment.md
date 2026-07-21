@@ -8,7 +8,7 @@ Run `npm run postgres:migrate -- --connection-string "$DATABASE_URL"`. For a pla
 
 For a smoke check, set `PG_TEST_URL` and run `npm run postgres:smoke`. It verifies migrations and, when enabled, that tenant RLS prevents a second tenant from reading the probe row.
 
-Migrations are additive and recorded in `work_fabric_schema_migrations`. Back up before applying them; rollback is a forward migration, not a destructive down script. The runtime hardening migration removes duplicate legacy delivery-attempt rows deterministically before installing the stricter key.
+Migrations are additive and recorded in `work_fabric_schema_migrations`. Back up before applying them; rollback is a forward migration, not a destructive down script. Admission migration `010_admission` includes the bounded command idempotency key needed to bind decisions and representation grants to one ingress command. Because this Admission feature is still unreleased, a pre-release database that already recorded the older `010_admission` checksum must be backed up and recreated; never rewrite a production migration record. The runtime hardening migration removes duplicate legacy delivery-attempt rows deterministically before installing the stricter key.
 
 Operational history and journal high-water visibility should be composed with
 `PostgresRuntimeState`'s bounded keyset port and

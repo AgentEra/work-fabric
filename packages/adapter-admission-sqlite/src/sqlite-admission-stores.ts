@@ -48,6 +48,7 @@ type DecisionRow = {
   source_system: string;
   external_tenant_id: string;
   ingress_id: string;
+  idempotency_key: string;
   decision_kind: "allow" | "deny";
   reason_code: string;
   policy_id: string;
@@ -144,8 +145,11 @@ function assertDecisionRecordSafe(value: unknown): asserts value is AdmissionDec
     }
   };
   visit(JSON.parse(JSON.stringify(value)) as unknown);
-  const record = object(value, ["decision", "scope", "ingress_id", "external_subject_fingerprint", "evidence", "recorded_at"], "decision record");
-  requireFields(record, ["decision", "scope", "ingress_id", "external_subject_fingerprint", "recorded_at"], "decision record");
+  const record = object(value, ["decision", "scope", "ingress_id", "idempotency_key", "external_subject_fingerprint", "evidence", "recorded_at"], "decision record");
+  requireFields(record, ["decision", "scope", "ingress_id", "idempotency_key", "external_subject_fingerprint", "recorded_at"], "decision record");
+  if (typeof record.idempotency_key !== "string" || record.idempotency_key.length === 0 || record.idempotency_key.length > 256 || record.idempotency_key.trim() !== record.idempotency_key) {
+    throw new TypeError("decision record idempotency_key is invalid");
+  }
   const scope = object(record.scope, ["tenant_id", "connector_id", "source_system", "external_tenant_id"], "scope");
   requireFields(scope, ["tenant_id", "connector_id", "source_system", "external_tenant_id"], "scope");
   const decision = object(record.decision, ["kind", "reason_code", "policy_id", "policy_revision", "binding", "decision_id"], "decision");
@@ -224,6 +228,7 @@ function decisionFromRow(row: DecisionRow): AdmissionDecisionRecord {
     decision,
     scope,
     ingress_id: row.ingress_id,
+    idempotency_key: row.idempotency_key,
     external_subject_fingerprint: row.external_subject_fingerprint,
     ...(row.evidence_present === 1 ? {
       evidence: {
@@ -246,6 +251,7 @@ function decisionValues(record: AdmissionDecisionRecord): readonly (string | num
     record.scope.source_system,
     record.scope.external_tenant_id,
     record.ingress_id,
+    record.idempotency_key,
     record.decision.kind,
     record.decision.reason_code,
     record.decision.policy_id,
@@ -357,13 +363,13 @@ export class SqliteAdmissionDecisionStore implements AdmissionDecisionStore {
       return this.session.transaction(() => {
         this.session.prepare(`
           INSERT INTO work_fabric_admission_decisions
-            (tenant_id, connector_id, source_system, external_tenant_id, ingress_id,
+            (tenant_id, connector_id, source_system, external_tenant_id, ingress_id, idempotency_key,
              decision_kind, reason_code, policy_id, policy_revision, decision_id,
              external_subject_fingerprint, binding_external_subject_type, binding_external_subject_fingerprint,
              binding_actor_id, binding_actor_type, binding_endpoint_id, binding_created_at,
              evidence_present, evidence_membership, evidence_active, evidence_observed_at,
              evidence_provider_revision, recorded_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT (tenant_id, connector_id, source_system, external_tenant_id, ingress_id) DO NOTHING
         `).run(...decisionValues(candidate));
         const row = this.session.prepare(`

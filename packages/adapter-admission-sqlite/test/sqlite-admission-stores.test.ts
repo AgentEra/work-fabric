@@ -41,6 +41,7 @@ function request(overrides: Partial<AdmissionRequest> = {}): AdmissionRequest {
     external_subject_type: "human",
     external_subject_id: "must-never-be-persisted",
     ingress_id: "ingress-sqlite",
+    idempotency_key: "command-sqlite",
     ...overrides,
   };
 }
@@ -73,6 +74,7 @@ function decision(overrides: Partial<AdmissionDecisionRecord> = {}): AdmissionDe
       external_tenant_id: "external-tenant-sqlite",
     },
     ingress_id: "ingress-sqlite",
+    idempotency_key: "command-sqlite",
     external_subject_fingerprint: "fingerprint-sqlite",
     evidence: {
       membership: "internal",

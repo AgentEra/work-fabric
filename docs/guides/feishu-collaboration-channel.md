@@ -91,7 +91,11 @@ npm run service:start
 - `WORK_FABRIC_ADMISSION_GRANT_KEY`，用于短时 representation grant 的签发/验证；
 - `FEISHU_CONNECTOR_ACCESS_TOKEN` 与外部 Agent/运维身份 token。
 
-`service.admission.grant_active_key_id` 和 `grant_keys` 支持验证密钥轮换。策略 deny 或目录状态变化立即影响新的 Admission；已经签发的无状态 grant 最晚在 `grant_ttl_seconds` 后失效，所以该 TTL 也是正常撤销的上界（配置范围 1–300 秒）。紧急撤销应同时轮换/移除验证密钥或停止 Connector。
+`service.admission.grant_active_key_id` 和 `grant_keys` 支持验证密钥轮换。v2 grant 同时绑定 `ingress_id` 和最终 command `idempotency_key`；HTTP Authority 要求 envelope 的 `correlation_id + idempotency_key` 与可信 grant tuple 完全一致。相同 tuple 可重试，任一分量变化都 fail closed。grant v1 缺少该完整 tuple，本版本不再接受。
+
+v2 密钥的安全轮换顺序是：先把新 key 加入所有验证节点，确认所有节点均可验证后切换 `grant_active_key_id`，至少等待一个 `grant_ttl_seconds`，最后才移除旧 key。不要先删除旧 key，也不要在集群节点尚未同步验证 key 集时切换签发 key。策略 deny 或目录状态变化立即影响新的 Admission；已经签发的无状态 grant 最晚在 TTL 后失效，所以该 TTL 也是正常撤销的上界（配置范围 1–300 秒）。紧急撤销应同时移除相关验证 key 或停止 Connector。
+
+飞书交互卡片 action reference 已从 `wfaf1` 升级为 `wfaf2`；旧 `wfaf1` 卡片按钮和旧 grant v1 都会失效。升级时应先暂停/排空 Admission-backed Connector，等待最长 grant TTL，部署所有 v2 issuer/verifier 与 `wfaf2` renderer，再恢复 ingress；用户需从新渲染的卡片继续操作。不要为了滚动兼容而重新放行缺少 tuple 的 grant v1。
 
 ## 5. 共同的身份、权限与职责边界
 
@@ -139,6 +143,8 @@ Admission binding 中不会保存 raw open_id；它以部署密钥生成 fingerp
 - `sqlite-local` 保存 Admission binding/decision，适合长期本地开发和单进程服务，不能作为多实例共享权威；
 - `postgres` 通过部署注入的 Admission stores、事务唯一约束和 tenant RLS 支持多进程/集群并发；`service-node` 不读取或创建 PostgreSQL 凭据；
 - 三种实现共享同一 SPI 和 conformance profile。YAML 只是首个 immutable Configuration Provider，后续数据库/远程 Provider 不改变 Admission runtime 或插件接口。
+
+启用 Admission 的 `service-node` 会把基础 SQLite migrations 与 `005_admission` 一起自动应用；通用 `npm run sqlite:migrate` 当前只规划和应用基础 `SQLITE_MIGRATIONS`，不会单独加入 Admission adapter migration。首次升级前先停止单进程并备份数据库文件和 WAL。由于本功能仍在未发布分支中，`005_admission` 已直接加入 command idempotency 列；若本地预发布数据库已经执行过旧 checksum 的 `005_admission`，迁移器会按设计拒绝启动，请保留备份后重建该开发数据库，不要手工篡改 migration history。正式发布后只允许新增 forward migration。
 
 ## 9. 多实例与后续通道
 

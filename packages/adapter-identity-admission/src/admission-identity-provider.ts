@@ -52,6 +52,7 @@ function admissionPrincipal(input: NonNullable<Awaited<ReturnType<Representation
     "workfabric.dev/identity_kind": "admission",
     "workfabric.dev/connector_id": input.connector_id,
     "workfabric.dev/ingress_id": input.ingress_id,
+    "workfabric.dev/idempotency_key": input.idempotency_key,
     "workfabric.dev/decision_id": input.decision_id,
   });
   return Object.freeze({

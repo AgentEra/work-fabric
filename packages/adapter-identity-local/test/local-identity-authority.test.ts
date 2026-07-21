@@ -68,6 +68,8 @@ function authorityRequest(
     delegation_id: null,
     action: "handoff.offer",
     resource_id: "handoff_01",
+    correlation_id: null,
+    idempotency_key: "command-01",
     ...overrides,
   };
 }
@@ -343,6 +345,8 @@ describe("LocalAuthorityPolicy", () => {
           delegation_id: null,
           action: rule.action,
           resource_id: rule.resource_id,
+          correlation_id: null,
+          idempotency_key: `command-${rule.actor_id}`,
         }),
       ).resolves.toEqual({ kind: "allow" });
     }
@@ -355,6 +359,8 @@ describe("LocalAuthorityPolicy", () => {
         delegation_id: null,
         action: "act",
         resource_id: null,
+        correlation_id: null,
+        idempotency_key: "command-mismatch",
       }),
     ).resolves.toMatchObject({ kind: "deny" });
   });

@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS work_fabric_admission_decisions (
   source_system text NOT NULL,
   external_tenant_id text NOT NULL,
   ingress_id text NOT NULL,
+  idempotency_key text NOT NULL CHECK (length(idempotency_key) BETWEEN 1 AND 256),
   decision_kind text NOT NULL CHECK (decision_kind IN ('allow', 'deny')),
   reason_code text NOT NULL,
   policy_id text NOT NULL,

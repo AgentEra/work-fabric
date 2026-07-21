@@ -285,6 +285,7 @@ describe("service plugin composition", () => {
       external_subject_type: "human",
       external_subject_id: "ou-admitted",
       ingress_id: "ingress-admission-http",
+      idempotency_key: "command-admission-http",
     });
     expect(admitted).toMatchObject({ decision: { kind: "allow" } });
     const decision = admitted.decision;
@@ -298,7 +299,11 @@ describe("service plugin composition", () => {
         "content-type": "application/json",
         authorization: `Bearer ${admitted.representation_grant}`,
       },
-      payload: admissionOfferEnvelope(decision.binding.actor_id, decision.binding.endpoint_id, "admission-http"),
+      payload: {
+        ...admissionOfferEnvelope(decision.binding.actor_id, decision.binding.endpoint_id, "admission-http"),
+        correlation_id: "ingress-admission-http",
+        idempotency_key: "command-admission-http",
+      },
     });
     expect(response.status_code).toBe(200);
     expect(response.json()).toMatchObject({ operation_status: "accepted" });
@@ -324,7 +329,7 @@ describe("service plugin composition", () => {
       const admitted = await issuer.admission!.admit("feishu-primary-participants", {
         tenant_id: "tenant-local", connector_id: "feishu-primary", source_system: "feishu",
         external_tenant_id: "tenant-key", external_subject_type: "human",
-        external_subject_id: "ou-rotation", ingress_id: "ingress-key-rotation",
+        external_subject_id: "ou-rotation", ingress_id: "ingress-key-rotation", idempotency_key: "command-key-rotation",
       });
       if (admitted.decision.kind !== "allow" || admitted.representation_grant === undefined) {
         throw new Error("expected key-rotation Admission grant");
@@ -336,11 +341,15 @@ describe("service plugin composition", () => {
           "content-type": "application/json",
           authorization: `Bearer ${admitted.representation_grant}`,
         },
-        payload: admissionOfferEnvelope(
-          admitted.decision.binding.actor_id,
-          admitted.decision.binding.endpoint_id,
-          "key-rotation",
-        ),
+        payload: {
+          ...admissionOfferEnvelope(
+            admitted.decision.binding.actor_id,
+            admitted.decision.binding.endpoint_id,
+            "key-rotation",
+          ),
+          correlation_id: "ingress-key-rotation",
+          idempotency_key: "command-key-rotation",
+        },
       });
       expect(response.status_code).toBe(200);
       expect(response.json()).toMatchObject({ operation_status: "accepted" });

@@ -244,6 +244,7 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
       decision,
       scope: scope(request),
       ingress_id: request.ingress_id,
+      idempotency_key: request.idempotency_key,
       external_subject_fingerprint: fingerprint,
       ...(evidence === undefined ? {} : {
         evidence: {
@@ -276,6 +277,7 @@ export class DefaultCollaborationAdmissionService implements CollaborationAdmiss
       && record.scope.source_system === request.source_system
       && record.scope.external_tenant_id === request.external_tenant_id
       && record.external_subject_fingerprint === fingerprint
+      && record.idempotency_key === request.idempotency_key
       && record.decision.policy_id === policy.policy_id
       && record.decision.policy_revision === policy.revision;
     if (!recordMatches) return this.unavailable("store_unavailable");
