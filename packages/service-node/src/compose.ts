@@ -206,6 +206,11 @@ export interface NodeServiceCompositionOptions {
   readonly configuration_revision?: string;
   readonly plugins?: PluginHostConfiguration;
   readonly admission?: AdmissionConfigurationSection;
+  /** Deployment-owned Admission persistence ports; defaults to the selected storage profile. */
+  readonly admission_stores?: {
+    readonly bindings: ParticipantBindingStore;
+    readonly decisions: AdmissionDecisionStore;
+  };
   readonly fetch?: typeof globalThis.fetch;
   readonly channel_signal_router?: ChannelSignalRouter;
   readonly feishu_long_connection_client_factory?: FeishuLongConnectionClientFactory;
@@ -652,7 +657,13 @@ export async function composeNodeService(
       "PostgreSQL composition requires injected deployment-owned adapters; no implicit credentials are loaded",
     );
   }
-  const storage = selectedStorage;
+  const storage = options.admission_stores === undefined
+    ? selectedStorage
+    : {
+        ...selectedStorage,
+        admissionBindings: options.admission_stores.bindings,
+        admissionDecisions: options.admission_stores.decisions,
+      };
   const ownedSqlite = config.storage_profile === "sqlite-local" ? storage.sqlite : null;
   try {
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);

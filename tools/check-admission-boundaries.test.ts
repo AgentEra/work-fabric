@@ -4,7 +4,10 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { checkAdmissionBoundaries } from "./check-admission-boundaries.js";
+import {
+  checkAdmissionBoundaries,
+  checkAdmissionSensitiveSinks,
+} from "./check-admission-boundaries.js";
 
 const temporary: string[] = [];
 
@@ -54,6 +57,40 @@ describe("Collaboration Admission architecture boundaries", () => {
   });
 
   it.each([
+    ["relative Exchange import", 'import { ExchangeApplication } from "../../exchange-core/src/index.js";'],
+    ["relative SQLite require", 'const sqlite = require("../../adapter-admission-sqlite/src/index.js");'],
+  ])("resolves and rejects %s", async (_name, source) => {
+    await expect(checkAdmissionBoundaries(await fixture({
+      "packages/admission-runtime/src/leak.ts": `${source}\n`,
+    }))).rejects.toThrow(/admission-runtime\/src\/leak\.ts/);
+  });
+
+  it.each([
+    ["dynamic import", "declare const moduleName: string; void import(moduleName);"],
+    ["dynamic require", "declare const moduleName: string; require(moduleName);"],
+    ["dynamic module.require", "declare const moduleName: string; module.require(moduleName);"],
+    [
+      "createRequire",
+      'import { createRequire } from "node:module"; const load = createRequire(import.meta.url); load("pg");',
+    ],
+    [
+      "ambient createRequire use",
+      'declare function createRequire(url: string): (name: string) => unknown; const load = createRequire(import.meta.url); load("pg");',
+    ],
+  ])("fails closed on Admission-core %s", async (_name, source) => {
+    await expect(checkAdmissionBoundaries(await fixture({
+      "packages/admission-runtime/src/dynamic-loader.ts": `${source}\n`,
+    }))).rejects.toThrow(/dynamic-loader\.ts/);
+  });
+
+  it("allows literal relative imports that remain inside Admission", async () => {
+    await expect(checkAdmissionBoundaries(await fixture({
+      "packages/admission-runtime/src/index.ts": 'export { evaluate } from "./evaluate.js";',
+      "packages/admission-runtime/src/evaluate.ts": "export const evaluate = (): boolean => true;",
+    }))).resolves.toMatchObject({ responsibility_violations: 0 });
+  });
+
+  it.each([
     ['import { ExchangeApplication } from "@work-fabric/exchange-core";\nvoid ExchangeApplication;'],
     ['const core = require("@work-fabric/exchange-core");\nvoid core.ExchangeApplication;'],
   ])("rejects direct ExchangeApplication use from a channel plugin", async (source) => {
@@ -75,8 +112,8 @@ describe("Collaboration Admission architecture boundaries", () => {
   it.each([
     ["logger raw subject", "packages/admission-runtime/src/log.ts", "logger.info({ external_subject_id: request.external_subject_id });"],
     ["metric raw subject", "packages/admission-runtime/src/metric.ts", "metrics.observe({ subject_id: request.external_subject_id });"],
-    ["decision raw subject", "packages/admission-runtime/src/decision.ts", "const decision = { raw_subject: request.external_subject_id }; export { decision };"],
-    ["nested decision raw subject", "packages/admission-runtime/src/result.ts", "export const result = { decision: { sender_open_id: request.external_subject_id } };"],
+    ["decision raw subject", "packages/admission-runtime/src/decision.ts", "const decision = { raw_subject: request.external_subject_id }; decisionStore.record(decision);"],
+    ["nested decision raw subject", "packages/admission-runtime/src/result.ts", "const result = { decision: { sender_open_id: request.external_subject_id } }; decisions.persist(result);"],
     ["Console raw subject", "packages/console-web/src/admission.ts", "export const external_subject_id = value;"],
     ["logger grant", "packages/plugin-channel-feishu/src/log.ts", "logger.info({ representation_grant: grant });"],
     ["logger opaque credential", "packages/plugin-channel-feishu/src/credential-log.ts", "logger.info({ credential: grant });"],
@@ -107,6 +144,63 @@ describe("Collaboration Admission architecture boundaries", () => {
       ].join("\n"),
     }))).resolves.toMatchObject({
       responsibility_violations: 0,
+      sensitive_sink_violations: 0,
+    });
+  });
+
+  it.each([
+    [
+      "renamed and second-order grant aliases",
+      "packages/admission-runtime/src/log-alias.ts",
+      [
+        "const first = result.representation_grant;",
+        "const second = first;",
+        "logger.info({ value: second });",
+      ].join("\n"),
+    ],
+    [
+      "destructured grant alias",
+      "packages/admission-runtime/src/log-destructure.ts",
+      [
+        "const { representation_grant: opaque } = result;",
+        "metrics.observe({ value: opaque });",
+      ].join("\n"),
+    ],
+    [
+      "raw subject through an object alias",
+      "packages/admission-runtime/src/decision-alias.ts",
+      [
+        "const { external_subject_id: raw } = request;",
+        "const renamed = raw;",
+        "const stored = { value: renamed };",
+        "decisionStore.record(stored);",
+      ].join("\n"),
+    ],
+    [
+      "grant keys assigned after declaration",
+      "packages/admission-runtime/src/key-alias.ts",
+      [
+        "let renamed;",
+        "renamed = config.grant_keys;",
+        "const wrapped = { value: renamed };",
+        "logger.warn(wrapped);",
+      ].join("\n"),
+    ],
+  ])("rejects sensitive taint through %s", async (_name, repositoryPath, source) => {
+    const root = await fixture({ [repositoryPath]: `${source}\n` });
+    await expect(checkAdmissionBoundaries(root)).rejects.toThrow(repositoryPath);
+    await expect(checkAdmissionSensitiveSinks(root)).rejects.toThrow(repositoryPath);
+  });
+
+  it("does not taint fingerprints, reason codes or bounded decision metadata", async () => {
+    const root = await fixture({
+      "packages/admission-runtime/src/safe-observation.ts": [
+        "const first = record.external_subject_fingerprint;",
+        "const second = first;",
+        "logger.info({ reason_code: decision.reason_code, fingerprint: second });",
+      ].join("\n"),
+    });
+    await expect(checkAdmissionSensitiveSinks(root)).resolves.toMatchObject({
       sensitive_sink_violations: 0,
     });
   });

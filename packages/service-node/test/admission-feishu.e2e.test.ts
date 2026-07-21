@@ -4,6 +4,16 @@ import type {
   FeishuLongConnectionHandler,
   FeishuLongConnectionStatus,
 } from "@work-fabric/connector-feishu";
+import {
+  MemoryAdmissionDecisionStore,
+  MemoryParticipantBindingStore,
+} from "@work-fabric/adapter-admission-memory";
+import type {
+  AdmissionDecisionRecord,
+  AdmissionDecisionStore,
+  ParticipantBinding,
+  ParticipantBindingStore,
+} from "@work-fabric/admission-spi";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 import { describe, expect, it } from "vitest";
 
@@ -14,6 +24,43 @@ interface LocalCommand {
   readonly authorization: string | null;
   readonly status: number;
   readonly response: Record<string, unknown>;
+}
+
+class CountingBindingStore implements ParticipantBindingStore {
+  private readonly delegate = new MemoryParticipantBindingStore();
+  readonly manifest = this.delegate.manifest;
+  getOrCreateCalls = 0;
+  createdBindings = 0;
+  private readonly actorIds = new Set<string>();
+
+  async getOrCreate(
+    input: Parameters<ParticipantBindingStore["getOrCreate"]>[0],
+  ): Promise<ParticipantBinding> {
+    this.getOrCreateCalls += 1;
+    const result = await this.delegate.getOrCreate(input);
+    if (!this.actorIds.has(result.actor_id)) {
+      this.actorIds.add(result.actor_id);
+      this.createdBindings += 1;
+    }
+    return result;
+  }
+}
+
+class CountingDecisionStore implements AdmissionDecisionStore {
+  private readonly delegate = new MemoryAdmissionDecisionStore();
+  readonly manifest = this.delegate.manifest;
+  recordCalls = 0;
+
+  findByIngress(
+    input: Parameters<AdmissionDecisionStore["findByIngress"]>[0],
+  ): Promise<AdmissionDecisionRecord | null> {
+    return this.delegate.findByIngress(input);
+  }
+
+  record(input: AdmissionDecisionRecord): Promise<AdmissionDecisionRecord> {
+    this.recordCalls += 1;
+    return this.delegate.record(input);
+  }
 }
 
 class CapturingLongConnection implements FeishuLongConnectionClient {
@@ -89,7 +136,7 @@ function policy() {
           all_internal_members: true,
           external_subject_ids: ["subject-exact", "subject-duplicate"],
         },
-        deny: { external_subject_ids: ["subject-denied"] },
+        deny: { external_subject_ids: ["subject-denied", "subject-guest"] },
         internal_membership: {
           evidence_provider_ref: "feishu-directory",
           positive_ttl_seconds: 300,
@@ -214,6 +261,8 @@ function commandIntent(command: LocalCommand): string {
 describe("Feishu Collaboration Admission E2E", () => {
   it("enforces precedence, stable bindings, fail-closed evidence and duplicate-safe recovery through the public SDK", async () => {
     const commands: LocalCommand[] = [];
+    const bindings = new CountingBindingStore();
+    const decisions = new CountingDecisionStore();
     const contactCalls = new Map<string, number>();
     const systemFetch = globalThis.fetch.bind(globalThis);
     const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -262,6 +311,7 @@ describe("Feishu Collaboration Admission E2E", () => {
         },
       },
       admission: policy(),
+      admission_stores: { bindings, decisions },
       fetch,
     });
     await service.listen();
@@ -325,7 +375,12 @@ describe("Feishu Collaboration Admission E2E", () => {
         waitForIngressState("guest", "dead_letter"),
       ]);
       expect(commands.some((item) => ["unknown", "guest"].includes(commandIntent(item)))).toBe(false);
+      expect(contactCalls.get("subject-unknown")).toBe(1);
+      expect(contactCalls.get("subject-guest")).toBeUndefined();
 
+      const decisionsBeforeDuplicate = decisions.recordCalls;
+      const bindingCallsBeforeDuplicate = bindings.getOrCreateCalls;
+      const bindingCreatesBeforeDuplicate = bindings.createdBindings;
       const duplicateEvent = event("duplicate", "subject-duplicate", "duplicate");
       const accepted = await dispatch(duplicateEvent);
       const duplicate = await dispatch(duplicateEvent);
@@ -333,23 +388,13 @@ describe("Feishu Collaboration Admission E2E", () => {
       expect(duplicate.json()).toMatchObject({ accepted: true, duplicate: true });
       const duplicateCommand = await waitFor(() => commands.find((item) => commandIntent(item) === "duplicate"));
       expect(commands.filter((item) => commandIntent(item) === "duplicate")).toHaveLength(1);
-      const ingressId = (accepted.json() as { ingress_id: string }).ingress_id;
-      const admissionRequest = {
-        tenant_id: "tenant-local",
-        connector_id: "feishu-primary",
-        source_system: "feishu",
-        external_tenant_id: "tenant-key",
-        external_subject_type: "human" as const,
-        external_subject_id: "subject-duplicate",
-        ingress_id: ingressId,
-      };
-      const firstDecision = await service.admission!.admit("feishu-participants", admissionRequest);
-      const reusedDecision = await service.admission!.admit("feishu-participants", admissionRequest);
-      expect(reusedDecision.decision).toEqual(firstDecision.decision);
       expect(duplicateCommand.response).toMatchObject({
         operation_status: "accepted",
         resource: { resource_type: "handoff", resource_version: 1 },
       });
+      expect(decisions.recordCalls - decisionsBeforeDuplicate).toBe(1);
+      expect(bindings.getOrCreateCalls - bindingCallsBeforeDuplicate).toBe(1);
+      expect(bindings.createdBindings - bindingCreatesBeforeDuplicate).toBe(1);
 
       await dispatch(event("outage", "subject-outage", "outage recovered"));
       const recovered = await waitFor(
@@ -371,6 +416,9 @@ describe("Feishu Collaboration Admission E2E", () => {
           && credential.split(".").length === 2;
       })).toBe(true);
       expect(commands.every((item) => item.status === 200)).toBe(true);
+      expect(decisions.recordCalls).toBe(8);
+      expect(bindings.getOrCreateCalls).toBe(5);
+      expect(bindings.createdBindings).toBe(4);
     } finally {
       await service.close();
     }
