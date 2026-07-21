@@ -110,10 +110,13 @@ import {
   type HttpService,
 } from "@work-fabric/transport-http";
 import { BearerTokenProvider, ConnectorSdkCommandSink, WorkFabricClient } from "@work-fabric/sdk-typescript";
+import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
+import type { FeishuLongConnectionClientFactory } from "@work-fabric/connector-feishu";
 import { FeishuPluginFactory, FeishuWebhookRegistry, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
 import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 
 import type { NodeServiceConfig } from "./config.js";
+import { assertFeishuPluginRole } from "./feishu-plugin-composition.js";
 
 const clock: Clock = { now: () => new Date().toISOString() };
 const defaultIds: IdGenerator = {
@@ -163,6 +166,7 @@ export interface NodeServiceCompositionOptions {
   readonly plugins?: PluginHostConfiguration;
   readonly fetch?: typeof globalThis.fetch;
   readonly channel_signal_router?: ChannelSignalRouter;
+  readonly feishu_long_connection_client_factory?: FeishuLongConnectionClientFactory;
 }
 
 export interface NodeClusterWorkerDependencies {
@@ -332,9 +336,11 @@ export interface ComposedNodeService {
     readonly collaboration: Awaited<ReturnType<CollaborationProjector["runPartition"]>>;
   }>;
   rebuildProjection(partitionId: string, limit: number): Promise<void>;
+  /** Idempotent: concurrent calls share the first result; closing/closed services never restart. */
   start(): Promise<void>;
   clusterSnapshot(): Promise<ClusterOperationalSnapshot | null>;
   listen(): Promise<{ readonly origin: string }>;
+  /** Idempotent: waits for any in-flight start, then shares one complete cleanup attempt. */
   close(): Promise<void>;
 }
 
@@ -342,17 +348,19 @@ export async function composeNodeService(
   config: NodeServiceConfig,
   options: NodeServiceCompositionOptions = {},
 ): Promise<ComposedNodeService> {
-  const storage = config.storage_profile === "memory-demo"
+  const pluginConfiguration = options.plugins ?? {};
+  assertFeishuPluginRole(config.role, pluginConfiguration);
+  const selectedStorage = config.storage_profile === "memory-demo"
     ? memoryStorage()
     : config.storage_profile === "sqlite-local"
       ? sqliteStorage(config)
       : options.postgres_storage;
-  if (storage === undefined) {
+  if (selectedStorage === undefined) {
     throw new Error(
       "PostgreSQL composition requires injected deployment-owned adapters; no implicit credentials are loaded",
     );
   }
-  const pluginConfiguration = options.plugins ?? {};
+  const storage = selectedStorage;
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
   if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
     throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
@@ -427,6 +435,11 @@ export async function composeNodeService(
     ["connector.command_sink", connectorCommandSink],
     ["channel.signal_registry", channelSignalRouter],
     ["feishu.webhook_registry", webhookRegistry],
+    [
+      "feishu.long_connection_client_factory",
+      options.feishu_long_connection_client_factory
+        ?? new NodeFeishuLongConnectionClientFactory(),
+    ],
     ["runtime.clock", { now: clock.now, nowEpochSeconds: () => Math.floor(Date.parse(clock.now()) / 1000) }],
     ["runtime.fetch", runtimeFetch],
     ["runtime.handoff_wakeup", (handoffId: string) => localPump?.wake(handoffPartitionId(config.tenant_id, handoffId))],
@@ -606,6 +619,77 @@ export async function composeNodeService(
     storage.sqlite?.close();
     throw error;
   }
+  type ServiceLifecycleState =
+    | "new"
+    | "starting"
+    | "started"
+    | "failed"
+    | "closing"
+    | "closed";
+  let lifecycleState: ServiceLifecycleState = "new";
+  let startAttempt: Promise<void> | undefined;
+  let closeAttempt: Promise<void> | undefined;
+
+  async function stopExecutionResources(): Promise<void> {
+    let failure: unknown;
+    try { await pluginHost.stop(); } catch (error) { failure = error; }
+    try { await localPump?.stop(); } catch (error) { failure ??= error; }
+    try { await clusterHost?.drain(); } catch (error) { failure ??= error; }
+    if (failure !== undefined) throw failure;
+  }
+
+  function startService(): Promise<void> {
+    if (
+      lifecycleState === "starting"
+      || lifecycleState === "started"
+      || lifecycleState === "failed"
+    ) {
+      return startAttempt!;
+    }
+    if (lifecycleState === "closing" || lifecycleState === "closed") {
+      return closeAttempt ?? Promise.resolve();
+    }
+
+    lifecycleState = "starting";
+    startAttempt = (async () => {
+      try {
+        if (config.role === "worker" || config.role === "all") {
+          clusterHost?.start();
+        }
+        localPump?.start();
+        await pluginHost.start();
+        if ((lifecycleState as ServiceLifecycleState) === "starting") {
+          lifecycleState = "started";
+        }
+      } catch (error) {
+        await stopExecutionResources().catch(() => undefined);
+        if ((lifecycleState as ServiceLifecycleState) === "starting") {
+          lifecycleState = "failed";
+        }
+        throw error;
+      }
+    })();
+    return startAttempt;
+  }
+
+  function closeService(): Promise<void> {
+    if (lifecycleState === "closing" || lifecycleState === "closed") {
+      return closeAttempt ?? Promise.resolve();
+    }
+
+    lifecycleState = "closing";
+    closeAttempt = (async () => {
+      await startAttempt?.catch(() => undefined);
+      let failure: unknown;
+      try { await stopExecutionResources(); } catch (error) { failure = error; }
+      try { await http.close(); } catch (error) { failure ??= error; }
+      try { storage.sqlite?.close(); } catch (error) { failure ??= error; }
+      lifecycleState = "closed";
+      if (failure !== undefined) throw failure;
+    })();
+    return closeAttempt;
+  }
+
   return {
     http,
     async runProjection(partitionId, limit) {
@@ -620,13 +704,7 @@ export async function composeNodeService(
       await handoffProjector.rebuildPartition(partitionId, limit);
       await collaborationProjector.rebuildPartition(config.tenant_id, partitionId, limit);
     },
-    async start() {
-      if (config.role === "worker" || config.role === "all") {
-        clusterHost?.start();
-      }
-      localPump?.start();
-      await pluginHost.start();
-    },
+    start: startService,
     async clusterSnapshot() {
       return operationalClusterSnapshot?.load(config.tenant_id) ?? null;
     },
@@ -638,12 +716,6 @@ export async function composeNodeService(
       connectorCommandSink.activate(result.origin);
       return result;
     },
-    async close() {
-      await pluginHost.stop();
-      await localPump?.stop();
-      await clusterHost?.drain();
-      await http.close();
-      storage.sqlite?.close();
-    },
+    close: closeService,
   };
 }

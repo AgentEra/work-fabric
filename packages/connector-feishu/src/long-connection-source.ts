@@ -13,9 +13,41 @@ export type FeishuLongConnectionHandler = (
   verifiedBody: JsonObject,
 ) => Promise<FeishuLongConnectionAcceptance>;
 
+export type FeishuLongConnectionState =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "failed"
+  | "stopped";
+
+export type FeishuLongConnectionStatusCode =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting"
+  | "connection_failed"
+  | "stopped";
+
+export interface FeishuLongConnectionStatus {
+  readonly state: FeishuLongConnectionState;
+  readonly code: FeishuLongConnectionStatusCode;
+  readonly reconnect_attempts: number;
+  readonly changed_at: string;
+}
+
 export interface FeishuLongConnectionClient {
   start(handler: FeishuLongConnectionHandler): Promise<void>;
+  status(): FeishuLongConnectionStatus;
   stop(): Promise<void>;
+}
+
+export interface FeishuLongConnectionClientFactory {
+  create(input: {
+    readonly app_id: string;
+    readonly app_secret: string;
+    readonly instance_id: string;
+  }): FeishuLongConnectionClient;
 }
 
 export interface FeishuLongConnectionSourceOptions {
@@ -30,12 +62,14 @@ export interface FeishuLongConnectionSourceOptions {
 }
 
 export class FeishuLongConnectionSource {
-  private started = false;
+  private startAttempted = false;
+  private released = false;
 
   constructor(private readonly options: FeishuLongConnectionSourceOptions) {}
 
   async start(): Promise<void> {
-    if (this.started) return;
+    if (this.released || this.startAttempted) return;
+    this.startAttempted = true;
     await this.options.client.start(async (verifiedBody) => {
       const envelope = normalizeFeishuEvent(verifiedBody, {
         ...this.options.scope,
@@ -48,12 +82,11 @@ export class FeishuLongConnectionSource {
         ingress_id: result.record.ingress_id,
       };
     });
-    this.started = true;
   }
 
   async stop(): Promise<void> {
-    if (!this.started) return;
+    if (this.released) return;
     await this.options.client.stop();
-    this.started = false;
+    this.released = true;
   }
 }

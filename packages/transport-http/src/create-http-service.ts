@@ -60,7 +60,7 @@ class FastifyHttpService implements HttpService {
   }
 
   async listen(options: { readonly host: string; readonly port: number }) {
-    const origin = await this.server.listen(options);
+    const origin = await this.server.listen({ ...options });
     return { origin };
   }
 

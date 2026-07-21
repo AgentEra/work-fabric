@@ -68,16 +68,20 @@ flowchart TB
     end
 
     subgraph Fabric["Work Fabric：协作对接与交接边界"]
-        HumanAdapter["Human Channel Adapter"]
+        subgraph ServiceEdge["Service edge（Core 外）"]
+            NodeFeishuAdapter["Node Feishu Long-Connection Adapter"]
+            HumanAdapter["Human Channel Adapter"]
+            Connector["System Connector Adapter"]
+        end
         AgentGateway["Agent Gateway<br/>Session / Inbox / SSE"]
         Directory["Endpoint Directory<br/>Facts / Lease / Discovery"]
-        Connector["System Connector Adapter"]
         Protocol["Unified Participation Protocol"]
         Exchange["Collaboration & Handoff Exchange"]
         Signal["Signal / Subscription / Notification"]
         Support["Context / Trust / Trace / Projections"]
     end
 
+    Human --> NodeFeishuAdapter --> HumanAdapter
     Human <--> HumanAdapter
     Agent <--> AgentGateway
     System <--> Connector
@@ -95,6 +99,8 @@ flowchart TB
 ### Human Workplaces
 
 人继续通过飞书、Web Console 或开放 API 工作。Human Channel Adapter 将消息、交互卡片、审批、问题回复和人工接管映射到统一参与协议。
+
+`service-node` 在 Service edge 显式组合 `@work-fabric/adapter-feishu-long-connection-node`。该 Node Adapter 是官方飞书 SDK 的唯一生产依赖边，只负责出站建连、事件重建、稳定健康状态和有界关停；事件随后进入既有 Human Channel/Connector durable ingress。它不在 Exchange Core、WFPP、Connector SPI/runtime 或插件包中，也不解释消息、选择目标或执行工作。Webhook 仍是独立可选入站 binding，卡片动作仍由 Webhook 接收。
 
 ### Agent Brains & Runtimes
 
@@ -647,6 +653,7 @@ Phase 1 已建立统一参与和交接的 transport-free 最小闭环：
 - `connector-spi` 定义技术中立 ingress/mapping/identity/resource/reconciliation ports，Core/SPI 不依赖飞书、HTTP 或 PostgreSQL。
 - Memory 与 PostgreSQL ingress store 共享 durable accept、去重、claim、lease/fencing、retry、dead-letter、requeue 和租户隔离行为。
 - Connector Worker 将受限 mapping outcome 交给 SDK command sink；Webhook 与可选长连接不在线执行协议命令。
+- Node Feishu Long-Connection Adapter 只在 `service-node` 组合根下接入官方 SDK，并把 `im.message.receive_v1` 送入同一个 durable ingress；它不进入 Core。
 - 飞书 callback 支持 raw-body 验签、时间窗口、加密体、verification、challenge、消息/卡片归一化和稳定幂等。
 - 飞书用户必须显式映射到已有 Work Fabric 身份；Connector 签发的 action reference 经过认证、范围绑定、过期和 expected-version 约束。
 - 飞书文档使用 revision-aware canonical reference，内容只按需、有界获取；outbound 通知复用既有 SignalDispatcher。

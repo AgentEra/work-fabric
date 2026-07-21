@@ -1,0 +1,13 @@
+{
+  "name": "@work-fabric/adapter-feishu-long-connection-node",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "1.71.1",
+    "@work-fabric/connector-feishu": "0.1.0",
+    "@work-fabric/exchange-spi": "0.1.0"
+  }
+}

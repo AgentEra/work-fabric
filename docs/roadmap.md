@@ -28,6 +28,12 @@ Feishu collaboration-channel plugin. One explicit `@bot` message becomes one
 Intake Handoff through the public TypeScript SDK, and canonical Handoff events
 return to the original conversation through Subscription and Signal delivery.
 
+The local Node long-connection transport is complete: an `api` or `all` service
+can connect outbound to an enterprise custom-app bot with the official SDK and
+receive `im.message.receive_v1` through the same durable ingress without a
+public IP, domain, or tunnel. The existing Webhook transport remains supported;
+card actions remain Webhook-only.
+
 The phase does not add intent inference, Agent reasoning, target ranking,
 workflow automation, requirement-system writes, model/tool invocation or task
 execution. Those remain responsibilities of the configured external Agent and

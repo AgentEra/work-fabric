@@ -4,6 +4,17 @@ import {
 } from "./compose.js";
 import { loadNodeConfiguration } from "./configuration-loader.js";
 
+export async function startListeningNodeService(
+  service: Awaited<ReturnType<typeof composeNodeService>>,
+): Promise<void> {
+  try {
+    await service.start();
+  } catch (error) {
+    await service.close().catch(() => undefined);
+    throw error;
+  }
+}
+
 export async function runNodeService(
   environment: NodeJS.ProcessEnv = process.env,
   composition: NodeServiceCompositionOptions = {},
@@ -17,7 +28,7 @@ export async function runNodeService(
   });
   if (config.role === "api" || config.role === "all") {
     const { origin } = await service.listen();
-    await service.start();
+    await startListeningNodeService(service);
     process.stdout.write(`Work Fabric listening at ${origin}\n`);
     const shutdown = () => { void service.close(); };
     process.once("SIGINT", shutdown);

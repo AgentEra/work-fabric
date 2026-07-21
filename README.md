@@ -228,7 +228,7 @@ Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
 
 部署组合、权限、凭据、保留策略和本地验证见 [Feishu Connector 示例](examples/feishu-connector/README.md)；客户意向到交付运维的完整连接场景见 [飞书客户项目生命周期示例](docs/feishu-customer-lifecycle-example.md)。
 
-内置的 `collaboration-channel.feishu` 插件进一步提供可直接启动的双向协作通道：全局配置通过可替换的 Configuration Provider 加载，飞书 `@机器人` 文本进入一个外部 Agent 的 Intake Handoff，后续 Handoff 事件通过 canonical Subscription 返回原会话。插件只做连接和交接，不做自然语言理解或需求创建。完整配置见 [飞书协作通道接入](docs/guides/feishu-collaboration-channel.md)。
+内置的 `collaboration-channel.feishu` 插件进一步提供可直接启动的双向协作通道：全局配置通过可替换的 Configuration Provider 加载，飞书 `@机器人` 文本进入一个外部 Agent 的 Intake Handoff，后续 Handoff 事件通过 canonical Subscription 返回原会话。插件只做连接和交接，不做自然语言理解或需求创建。双模式步骤见 [飞书协作通道接入](docs/guides/feishu-collaboration-channel.md)，无需域名的本地配置见 [SQLite 长连接示例](examples/config/service-feishu-long-connection.yaml)。
 
 ## 查询、运维与 Console
 
