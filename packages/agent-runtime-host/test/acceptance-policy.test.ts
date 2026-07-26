@@ -44,4 +44,12 @@ describe("DeterministicAcceptancePolicy", () => {
     const unsafeBinding = { ...binding, evidence: [new Date()] };
     expect(policy.decide(snapshot({ package: { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis" } } }, target_binding: unsafeBinding }), event("workfabric.handoff.offered.v1"), false)).not.toEqual({ kind: "accept" });
   });
+  it("rejects accessor-backed capability media without invoking the getter", () => {
+    let reads = 0;
+    const media: unknown[] = [];
+    Object.defineProperty(media, "0", { enumerable: true, get() { reads += 1; return "text/markdown"; } });
+    const target = { capability_requirement: { capability_id: "information.synthesis", input_media_types: media } };
+    expect(policy.decide(snapshot({ package: { ...state.package, target }, target_binding: binding }), event("workfabric.handoff.offered.v1"), false)).not.toEqual({ kind: "accept" });
+    expect(reads).toBe(0);
+  });
 });

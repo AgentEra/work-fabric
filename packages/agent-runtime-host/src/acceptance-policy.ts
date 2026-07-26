@@ -90,7 +90,11 @@ function canonicalRequirement(value: Record<string, unknown> | null): value is R
   if (value.version_constraint !== undefined && (typeof value.version_constraint !== "string" || value.version_constraint.length === 0 || value.version_constraint.length > 256)) return false;
   for (const field of ["input_media_types", "output_media_types"] as const) {
     const media = value[field];
-    if (media !== undefined && (!Array.isArray(media) || new Set(media).size !== media.length || media.some((item) => typeof item !== "string" || item.length > 255 || !/^[^/\s]+\/[^/\s]+$/.test(item)))) return false;
+    if (media !== undefined) {
+      let safeMedia: unknown;
+      try { safeMedia = cloneFrozenJson(media, `policy.${field}`, { reject_sensitive_keys: true }); } catch { return false; }
+      if (!Array.isArray(safeMedia) || new Set(safeMedia).size !== safeMedia.length || safeMedia.some((item) => typeof item !== "string" || item.length > 255 || !/^[^/\s]+\/[^/\s]+$/.test(item))) return false;
+    }
   }
   if (value.constraints !== undefined && !safeValue(value.constraints)) return false;
   if (value.extensions !== undefined && !safeExtensions(value.extensions)) return false;
