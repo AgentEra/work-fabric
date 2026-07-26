@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { MemoryAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-memory";
-import type { RuntimeDriverResult } from "@work-fabric/agent-runtime-spi";
+import type { AgentRuntimeDriver, RuntimeDriverResult } from "@work-fabric/agent-runtime-spi";
 import type { HandoffReadModel, OperationResult } from "@work-fabric/sdk-typescript";
 
 import { AgentRuntimeHost, type AgentRuntimeHostConfig } from "../src/index.js";
@@ -42,4 +42,59 @@ describe("AgentRuntimeHost recovery", () => {
     expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("succeeded");
     await host.close();
   });
+
+  it("retains result_ready after an ambiguous Result submission so restart retries the same Result", async () => {
+    const state = await readyState();
+    const host = recoveryHost(state, { returnResult: vi.fn(async () => { throw new Error("timeout"); }) });
+
+    await host.start();
+
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("result_ready");
+    await host.close();
+  });
+
+  it("converges a recovered received run after an equivalent remote decline", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);
+    const host = recoveryHost(state, { lifecycle: "offered", decision: { kind: "decline", code: "not_targeted" } });
+
+    await host.start();
+
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("cancelled");
+    await host.close();
+  });
+
+  it("converges a recovered running run to succeeded from an authoritative remote Result without executing", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);
+    const claim = await state.claimRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", now: setupNow, lease_seconds: 60, allowed_states: ["received"] });
+    if (claim === null) throw new Error("claim setup failed");
+    await state.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", fencing_token: claim.fencing_token, expected_state: "received", next_state: "accepted", now: setupNow });
+    await state.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", fencing_token: claim.fencing_token, expected_state: "accepted", next_state: "running", now: setupNow });
+    const execute = vi.fn(async () => runtimeResult);
+    const host = recoveryHost(state, { lifecycle: "result_returned", result: runtimeResult, execute });
+
+    await host.start();
+
+    expect(execute).not.toHaveBeenCalled();
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("succeeded");
+    await host.close();
+  });
 });
+
+async function readyState(): Promise<MemoryAgentRuntimeStateStore> {
+  const state = new MemoryAgentRuntimeStateStore();
+  await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);
+  const claim = await state.claimRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", now: setupNow, lease_seconds: 60, allowed_states: ["received"] });
+  if (claim === null) throw new Error("claim setup failed");
+  await state.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", fencing_token: claim.fencing_token, expected_state: "received", next_state: "accepted", now: setupNow });
+  await state.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", fencing_token: claim.fencing_token, expected_state: "accepted", next_state: "running", now: setupNow });
+  await state.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", fencing_token: claim.fencing_token, expected_state: "running", next_state: "result_ready", now: setupNow, result: runtimeResult, result_digest: "digest" });
+  return state;
+}
+
+function recoveryHost(state: MemoryAgentRuntimeStateStore, options: { readonly lifecycle?: string; readonly result?: RuntimeDriverResult; readonly returnResult?: ReturnType<typeof vi.fn>; readonly decision?: { readonly kind: "decline"; readonly code: "not_targeted" }; readonly execute?: AgentRuntimeDriver["execute"] } = {}) {
+  const lifecycle = options.lifecycle ?? "accepted";
+  const snapshot = (): HandoffReadModel => ({ tenant_id: "tenant-1", partition_id: "handoff:handoff-1", handoff_id: "handoff-1", stream_version: 2, state: { lifecycle_state: lifecycle, resource_version: 2, recipient: { actor_id: "actor-runtime" }, result: options.result ?? null }, latest_status: null } as unknown as HandoffReadModel);
+  return new AgentRuntimeHost({ config, session: { handoffs: { returnResult: options.returnResult ?? vi.fn(async () => operation(3)), accept: vi.fn(async () => operation(2)), decline: vi.fn(async () => operation(2)), reportStatus: vi.fn(async () => operation(3)) } as never, incoming: async function* () {}, close: async () => undefined, session_id: "session-1", closed: Promise.resolve({ reason: "closed" as const }) }, state, driver: { manifest: { driver_type: "test", protocol_version: "1", capability_ids: ["information.synthesis"] }, execute: options.execute ?? vi.fn(async () => runtimeResult) }, packageLoader: { load: vi.fn() } as never, policy: { decide: () => options.decision ?? ({ kind: "accept" as const }) }, queries: { getHandoff: vi.fn(async () => snapshot()) }, now: () => recoveryNow });
+}

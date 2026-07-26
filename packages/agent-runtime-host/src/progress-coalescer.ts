@@ -51,6 +51,11 @@ export class ProgressCoalescer {
 
   private enqueueFlush(): Promise<void> {
     this.flushing = this.flushing.then(async () => {
+      // A second timer can enqueue while an async emit is in flight.  Compute
+      // the delay inside the serialized chain, after the prior emit has set
+      // lastEmittedAt, so those updates cannot be emitted back-to-back.
+      const wait = Math.max(0, this.intervalMs - (this.clock() - this.lastEmittedAt));
+      if (wait > 0) await new Promise<void>((resolve) => setTimeout(resolve, wait));
       const update = this.pending;
       if (update === null) return;
       this.pending = null;

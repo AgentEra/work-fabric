@@ -39,4 +39,28 @@ describe("ProgressCoalescer", () => {
       message: "x".repeat(4_096),
     }));
   });
+
+  it("does not emit a pending update back-to-back while the prior async emit is completing", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      const emitted: RuntimeProgress[] = [];
+      const coalescer = new ProgressCoalescer(100, async (value) => {
+        emitted.push(value);
+        if (value.sequence === 1) await new Promise<void>((resolve) => { release = resolve; });
+      });
+
+      await coalescer.push(update(1));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(emitted).toEqual([update(1)]);
+      await coalescer.push(update(2));
+      release();
+      await vi.advanceTimersByTimeAsync(99);
+      expect(emitted).toEqual([update(1)]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(emitted).toEqual([update(1), update(2)]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

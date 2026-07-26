@@ -21,3 +21,10 @@
 
 - The composition entry point accepts an already-open `AgentEndpointSession` or a `startSession` factory. The runnable application wiring remains intentionally provider-neutral and can supply its selected Gateway factory without putting Driver details in the Host.
 - Result convergence only accepts a conflict as successful when the re-read Handoff has the equivalent terminal Result payload; semantically different commands are not replayed.
+
+## Formal review follow-up
+
+- Ambiguous or transient Result command failures now retain `result_ready`; a later expired-lease recovery replays the same idempotency key rather than creating a failed local run.
+- Progress emission waits from the completion timestamp of the prior asynchronous emit, preventing a queued update from bypassing the interval.
+- Recovery now terminalizes a successfully declined local `received` run.
+- An authoritative, validated remote Result converges recovered `received`, `accepted`, `running`, or `result_ready` state to `succeeded` without invoking the Driver.

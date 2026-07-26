@@ -89,6 +89,17 @@ function digest(result: RuntimeDriverResult): string {
   return createHash("sha256").update(canonical(result)).digest("hex");
 }
 
+function remoteResult(snapshot: HandoffReadModel): RuntimeDriverResult | null {
+  if (typeof snapshot.state !== "object" || snapshot.state === null || Array.isArray(snapshot.state)) return null;
+  const result = (snapshot.state as Record<string, unknown>).result;
+  if (typeof result !== "object" || result === null || Array.isArray(result)) return null;
+  // The public Handoff state is authoritative only if it is still a valid
+  // Runtime Result payload; do not manufacture a local success from malformed
+  // projection data.
+  resultPayload(snapshot.handoff_id, result as RuntimeDriverResult);
+  return result as RuntimeDriverResult;
+}
+
 function deliveryEvent(incoming: IncomingHandoff): ProtocolEvent {
   const event = incoming.delivery.events.find((candidate) => candidate.wfhandoff === incoming.handoff.handoff_id);
   if (event === undefined) throw new AgentRuntimeHostError("invalid_delivery", incoming.delivery.delivery_id);
@@ -161,7 +172,7 @@ export class AgentRuntimeHost {
           this.dependencies.config.tenant_id,
           incoming.handoff.handoff_id,
         );
-        if (run !== null) await this.convergeTerminal(run, terminal);
+        if (run !== null) await this.convergeTerminal(run, terminal, incoming.handoff);
       }
       return;
     }
@@ -257,7 +268,7 @@ export class AgentRuntimeHost {
       const snapshot = await this.dependencies.queries.getHandoff(run.handoff_id, { signal: this.shutdown.signal });
       const remote = lifecycle(snapshot);
       if (remote !== null && TERMINAL_LIFECYCLES.has(remote)) {
-        await this.convergeTerminal(run, remote);
+        await this.convergeTerminal(run, remote, snapshot);
       } else if (run.state === "result_ready" && run.result !== null) {
         const claim = await this.claim(run.handoff_id, ["result_ready"]);
         if (claim !== null) await this.submitReadyResult(run.handoff_id, claim, this.shutdown.signal);
@@ -267,19 +278,46 @@ export class AgentRuntimeHost {
         const recoveredEvent = { type: "workfabric.handoff.offered.v1", wfactor: "" } as ProtocolEvent;
         const decision = this.dependencies.policy.decide(snapshot, recoveredEvent, false);
         if (decision.kind === "accept") await this.claimAndRun(run.handoff_id, snapshot, this.shutdown.signal);
-        else if (decision.kind === "decline") await this.issueDecline(run.handoff_id, snapshot, this.shutdown.signal);
+        else if (decision.kind === "decline") {
+          await this.issueDecline(run.handoff_id, snapshot, this.shutdown.signal);
+          const claim = await this.claim(run.handoff_id, ["received"]);
+          if (claim !== null) await this.transition(claim, "received", "cancelled");
+        }
       }
     }
   }
 
-  private async convergeTerminal(run: RuntimeRunRecord, remote: string): Promise<void> {
+  private async convergeTerminal(
+    run: RuntimeRunRecord,
+    remote: string,
+    snapshot: HandoffReadModel,
+  ): Promise<void> {
     const claim = await this.claim(run.handoff_id, [run.state]);
     if (claim === null) return;
-    if (run.state === "result_ready" && ["result_returned", "verified", "closed"].includes(remote)) {
-      await this.transition(claim, "result_ready", "succeeded");
+    if (["result_returned", "verified", "closed"].includes(remote)) {
+      const result = remoteResult(snapshot);
+      if (result === null) throw new AgentRuntimeHostError("invalid_remote_result", run.handoff_id);
+      await this.convergeResult(claim, result);
       return;
     }
     await this.transition(claim, run.state, "cancelled");
+  }
+
+  private async convergeResult(claim: RuntimeRunRecord, result: RuntimeDriverResult): Promise<void> {
+    let state = claim.state;
+    if (state === "received") {
+      await this.transition(claim, "received", "accepted");
+      state = "accepted";
+    }
+    if (state === "accepted") {
+      await this.transition(claim, "accepted", "running");
+      state = "running";
+    }
+    if (state === "running") {
+      await this.transition(claim, "running", "result_ready", result);
+      state = "result_ready";
+    }
+    if (state === "result_ready") await this.transition(claim, "result_ready", "succeeded");
   }
 
   private async claimAndRun(handoffId: string, snapshot: HandoffReadModel, signal: AbortSignal): Promise<void> {
@@ -336,6 +374,12 @@ export class AgentRuntimeHost {
       await this.transition(claim, "result_ready", "succeeded");
     } catch (error) {
       try { await coalescer?.flush(); } catch { /* a fenced run cannot safely publish further progress */ }
+      if (state === "result_ready" && !combined.aborted) {
+        // Result persistence has succeeded.  A failure while submitting (or
+        // confirming) the external Result is ambiguous, so retain it for a
+        // later owner to replay with the same idempotency key.
+        return;
+      }
       if (combined.aborted) {
         await this.tryTransition(claim, state, "cancelled");
       } else {
@@ -358,9 +402,11 @@ export class AgentRuntimeHost {
       resultPayload(handoffId, claim.result);
       await this.issueResult(handoffId, claim.result, signal);
       await this.transition(claim, "result_ready", "succeeded");
-    } catch (error) {
-      if (signal.aborted) await this.tryTransition(claim, "result_ready", "cancelled");
-      else await this.tryTransition(claim, "result_ready", "failed", boundedFailure(error));
+    } catch {
+      // The command may have reached Work Fabric even when its response was
+      // lost. Keep the validated durable Result and let a later lease holder
+      // replay the same idempotency key; only an authoritative terminal
+      // Delivery is allowed to dispose of result_ready.
     }
   }
 
