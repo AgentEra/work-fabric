@@ -10,8 +10,8 @@ import { AgentRuntimeHost, DeterministicAcceptancePolicy, HandoffPackageLoader }
 import { BearerTokenProvider, WorkFabricClient, type HandoffOfferPayload } from "@work-fabric/sdk-typescript";
 import { describe, expect, it } from "vitest";
 
-import { dailyAssistantEndpointRegistration, dailyAssistantGatewayConfig } from "../../../examples/agently-agent-runtime/src/subscription.js";
-import { composeNodeService, parseServiceConfig } from "../src/index.js";
+import { composeNodeService, parseServiceConfig } from "@work-fabric/service-node";
+import { dailyAssistantEndpointRegistration, dailyAssistantGatewayConfig } from "../src/subscription.js";
 import { startFakeOpenAiCompatibleServer } from "./fake-openai-compatible-server.js";
 
 const tenantId = "tenant-daily-e2e";
