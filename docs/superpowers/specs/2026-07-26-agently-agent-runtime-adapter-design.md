@@ -184,13 +184,15 @@ idempotency key; those remain Host responsibilities.
 The Endpoint Inbox projection intentionally carries only routing facts and a
 Handoff snapshot. The Host obtains execution inputs through public APIs:
 
-1. read the authorized Handoff snapshot;
-2. list the Handoff events;
-3. locate and validate the immutable offer event;
+1. read the authorized Handoff read model with `getHandoff`;
+2. decode the complete, versioned Package from the read model's `state`;
+3. list the Handoff events to validate provenance, sequence, and current
+   stream version without assuming the public event projection exposes the
+   original Package;
 4. extract Intent, Context Bundle, acceptance criteria, authority scope,
-   priority, and deadlines;
-5. verify that the offer and current snapshot identify the same Handoff and
-   target.
+   priority, and deadlines from the snapshot Package;
+5. verify that the event stream and current snapshot identify the same
+   Handoff, lifecycle, and target.
 
 No Runtime package is allowed to import a Work Fabric persistence adapter or
 query Work Fabric SQLite/PostgreSQL directly.
