@@ -6,9 +6,8 @@ import type {
   FeishuLongConnectionStatus,
 } from "@work-fabric/connector-feishu";
 import type { JsonObject } from "@work-fabric/exchange-spi";
+import { composeNodeService, parseServiceConfig } from "@work-fabric/service-node";
 import { describe, expect, it } from "vitest";
-
-import { composeNodeService, parseServiceConfig } from "../src/index.js";
 
 class FakeLongConnectionClient implements FeishuLongConnectionClient {
   handler: FeishuLongConnectionHandler | undefined;
