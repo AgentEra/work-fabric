@@ -25,6 +25,16 @@ service:
 
   identities:
     - authentication_evidence:
+        bearer_token: ${FEISHU_CONNECTOR_ACCESS_TOKEN}
+      principal:
+        principal_id: principal-feishu-connector
+        tenant_id: tenant-local
+        actor_claims:
+          - actor_id: actor-feishu-user
+            actor_type: human
+            endpoint_ids: [endpoint-feishu-user]
+        attributes: {}
+    - authentication_evidence:
         bearer_token: ${WORK_FABRIC_ADMIN_TOKEN}
       principal:
         principal_id: principal-work-fabric-admin
@@ -46,6 +56,20 @@ service:
         attributes: {}
 
   authority_rules:
+    - tenant_id: tenant-local
+      principal_id: principal-feishu-connector
+      actor_id: actor-feishu-user
+      actor_type: human
+      endpoint_id: endpoint-feishu-user
+      action: workfabric.handoff.offer.v1
+      resource_id: null
+    - tenant_id: tenant-local
+      principal_id: principal-feishu-connector
+      actor_id: actor-feishu-user
+      actor_type: human
+      endpoint_id: endpoint-feishu-user
+      action: workfabric.operations.connector-ingress.read.v1
+      resource_id: feishu-primary
     - tenant_id: tenant-local
       principal_id: principal-work-fabric-admin
       actor_id: actor-work-fabric-admin

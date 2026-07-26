@@ -23,48 +23,50 @@ From the repository root, install the isolated Python worker environment:
 uv sync --project runtimes/agently-worker
 ```
 
-Put secrets outside the repository. A local shell or ignored `.env` may declare names only:
-
-```bash
-WORK_FABRIC_CONFIG=
-WORK_FABRIC_AGENT_RUNTIME_CONFIG=
-WORK_FABRIC_CURSOR_SECRET=
-WORK_FABRIC_ADMISSION_FINGERPRINT_KEY=
-WORK_FABRIC_ADMISSION_GRANT_KEY=
-WORK_FABRIC_ADMIN_TOKEN=
-INTAKE_AGENT_ACCESS_TOKEN=
-FEISHU_APP_ID=
-FEISHU_APP_SECRET=
-FEISHU_CONNECTOR_ACCESS_TOKEN=
-AGENTLY_MODEL_API_KEY=
-```
-
 Service YAML owns Work Fabric storage, identities, Authority, HTTP listener, Connector and Feishu configuration. Runtime YAML owns the Work Fabric connection, Runtime participant, role/capabilities, acceptance policy, concurrency, Runtime State, worker executable/workspace/timeout, and model provider. Do not copy model credentials into service YAML, Handoff data, Results, SQLite, logs, or task JSON.
 
 Provision the Endpoint before starting the Runtime. The shipped scripts read
 environment variables only; command-line configuration overrides are
-unsupported. Run the Service and Runtime in separate terminals. First, in each
-terminal (or in a shell file sourced by each terminal), set absolute paths from
-the repository root:
+unsupported. Generate one shared environment file outside the repository, then
+source that exact file in every terminal. This keeps the Service identity and
+Runtime client on the same `INTAKE_AGENT_ACCESS_TOKEN`; do not independently
+generate tokens per terminal. The following creates `$HOME/.config` file with
+owner-only permissions and never puts a real secret in this guide:
 
 ```bash
 REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
-export WORK_FABRIC_CONFIG="$REPOSITORY_ROOT/examples/config/service-feishu-long-connection.yaml"
-export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$REPOSITORY_ROOT/examples/config/agent-runtime-agently.yaml"
-export WORK_FABRIC_CURSOR_SECRET="$(openssl rand -hex 32)"
-export WORK_FABRIC_ADMISSION_FINGERPRINT_KEY="$(openssl rand -hex 32)"
-export WORK_FABRIC_ADMISSION_GRANT_KEY="$(openssl rand -hex 32)"
-export WORK_FABRIC_ADMIN_TOKEN="$(openssl rand -hex 32)"
-export INTAKE_AGENT_ACCESS_TOKEN="$(openssl rand -hex 32)"
-export FEISHU_APP_ID="cli_..."
-export FEISHU_APP_SECRET="..."
-export FEISHU_CONNECTOR_ACCESS_TOKEN="$(openssl rand -hex 32)"
-export AGENTLY_MODEL_API_KEY="..."
+WORK_FABRIC_SHARED_ENV="$HOME/.config/work-fabric/agently-daily-assistant.env"
+
+if [ ! -f "$WORK_FABRIC_SHARED_ENV" ]; then
+  mkdir -p "$(dirname "$WORK_FABRIC_SHARED_ENV")"
+  (
+    umask 077
+    {
+      printf 'export REPOSITORY_ROOT=%q\n' "$REPOSITORY_ROOT"
+      printf '%s\n' 'export WORK_FABRIC_CONFIG="$REPOSITORY_ROOT/examples/config/service-feishu-long-connection.yaml"'
+      printf '%s\n' 'export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$REPOSITORY_ROOT/examples/config/agent-runtime-agently.yaml"'
+      printf 'export WORK_FABRIC_CURSOR_SECRET=%q\n' "$(openssl rand -hex 32)"
+      printf 'export WORK_FABRIC_ADMISSION_FINGERPRINT_KEY=%q\n' "$(openssl rand -hex 32)"
+      printf 'export WORK_FABRIC_ADMISSION_GRANT_KEY=%q\n' "$(openssl rand -hex 32)"
+      printf 'export WORK_FABRIC_ADMIN_TOKEN=%q\n' "$(openssl rand -hex 32)"
+      printf 'export INTAKE_AGENT_ACCESS_TOKEN=%q\n' "$(openssl rand -hex 32)"
+      printf '%s\n' 'export FEISHU_APP_ID=REPLACE_WITH_FEISHU_APP_ID'
+      printf '%s\n' 'export FEISHU_APP_SECRET=REPLACE_WITH_FEISHU_APP_SECRET'
+      printf 'export FEISHU_CONNECTOR_ACCESS_TOKEN=%q\n' "$(openssl rand -hex 32)"
+      printf '%s\n' 'export AGENTLY_MODEL_API_KEY=REPLACE_WITH_MODEL_API_KEY'
+    } > "$WORK_FABRIC_SHARED_ENV"
+  )
+  printf 'Created %s; replace the three REPLACE_WITH_* values before use.\n' "$WORK_FABRIC_SHARED_ENV"
+fi
+
+source "$WORK_FABRIC_SHARED_ENV"
 ```
 
 ### Terminal 1 — Service
 
 ```bash
+WORK_FABRIC_SHARED_ENV="$HOME/.config/work-fabric/agently-daily-assistant.env"
+source "$WORK_FABRIC_SHARED_ENV"
 cd "$REPOSITORY_ROOT"
 npm run service:start
 ```
@@ -72,6 +74,8 @@ npm run service:start
 ### Terminal 2 — Runtime
 
 ```bash
+WORK_FABRIC_SHARED_ENV="$HOME/.config/work-fabric/agently-daily-assistant.env"
+source "$WORK_FABRIC_SHARED_ENV"
 cd "$REPOSITORY_ROOT"
 npm run agent-runtime:provision
 npm run agent-runtime:start

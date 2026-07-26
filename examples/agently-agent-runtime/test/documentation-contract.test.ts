@@ -3,9 +3,11 @@ import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 
 import { loadAgentRuntimeConfiguration } from "@work-fabric/agent-runtime-host";
+import { loadNodeConfiguration } from "@work-fabric/service-node";
 
 const guide = new URL("../../../docs/guides/agently-agent-runtime.md", import.meta.url);
 const runtimeYaml = new URL("../../config/agent-runtime-agently.yaml", import.meta.url);
+const serviceYaml = new URL("../../config/service-feishu-long-connection.yaml", import.meta.url);
 
 describe("Agently Runtime operator guide", () => {
   it("documents the supported absolute environment contract and separate process startup", async () => {
@@ -39,6 +41,37 @@ describe("Agently Runtime operator guide", () => {
     expect(loaded.driver.config.provider.api_key).toBe("model-contract-token");
     expect(source).toContain("INTAKE_AGENT_ACCESS_TOKEN");
     expect(source).toContain("AGENTLY_MODEL_API_KEY");
+  });
+
+  it("uses one ignored environment file whose intake token is shared by Service and Runtime", async () => {
+    const source = await readFile(guide, "utf8");
+    const shared = {
+      WORK_FABRIC_CONFIG: serviceYaml.pathname,
+      WORK_FABRIC_AGENT_RUNTIME_CONFIG: runtimeYaml.pathname,
+      WORK_FABRIC_CURSOR_SECRET: "x".repeat(32),
+      WORK_FABRIC_ADMISSION_FINGERPRINT_KEY: "f".repeat(32),
+      WORK_FABRIC_ADMISSION_GRANT_KEY: "g".repeat(32),
+      WORK_FABRIC_ADMIN_TOKEN: "admin-contract-token",
+      INTAKE_AGENT_ACCESS_TOKEN: "shared-intake-contract-token",
+      FEISHU_APP_ID: "cli_0123456789abcdef",
+      FEISHU_APP_SECRET: "feishu-contract-secret",
+      FEISHU_CONNECTOR_ACCESS_TOKEN: "connector-contract-token",
+      AGENTLY_MODEL_API_KEY: "model-contract-token",
+    };
+
+    const [service, runtime] = await Promise.all([
+      loadNodeConfiguration(shared),
+      loadAgentRuntimeConfiguration(shared),
+    ]);
+    const intakeIdentity = service.service.identities.find((identity) =>
+      identity.principal.principal_id === "principal-intake-agent"
+    );
+    expect(intakeIdentity?.authentication_evidence.bearer_token).toBe("shared-intake-contract-token");
+    expect(runtime.service.work_fabric.access_token).toBe("shared-intake-contract-token");
+    expect(source).toContain('WORK_FABRIC_SHARED_ENV="$HOME/.config/work-fabric/agently-daily-assistant.env"');
+    expect(source.match(/WORK_FABRIC_SHARED_ENV="\$HOME\/\.config\/work-fabric\/agently-daily-assistant\.env"/g)).toHaveLength(3);
+    expect(source.match(/source "\$WORK_FABRIC_SHARED_ENV"/g)).toHaveLength(3);
+    expect(source).not.toContain('export INTAKE_AGENT_ACCESS_TOKEN="$(openssl rand');
   });
 
   it("describes the Console Operations Delivery view without claiming unavailable raw cursor details", async () => {
