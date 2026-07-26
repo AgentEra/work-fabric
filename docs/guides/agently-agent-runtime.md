@@ -26,9 +26,17 @@ uv sync --project runtimes/agently-worker
 Put secrets outside the repository. A local shell or ignored `.env` may declare names only:
 
 ```bash
+WORK_FABRIC_CONFIG=
+WORK_FABRIC_AGENT_RUNTIME_CONFIG=
+WORK_FABRIC_CURSOR_SECRET=
+WORK_FABRIC_ADMISSION_FINGERPRINT_KEY=
+WORK_FABRIC_ADMISSION_GRANT_KEY=
+WORK_FABRIC_ADMIN_TOKEN=
+INTAKE_AGENT_ACCESS_TOKEN=
+FEISHU_APP_ID=
+FEISHU_APP_SECRET=
+FEISHU_CONNECTOR_ACCESS_TOKEN=
 AGENTLY_MODEL_API_KEY=
-WF_BASE_URL=
-WF_ACCESS_TOKEN=
 ```
 
 Service YAML owns Work Fabric storage, identities, Authority, HTTP listener, Connector and Feishu configuration. Runtime YAML owns the Work Fabric connection, Runtime participant, role/capabilities, acceptance policy, concurrency, Runtime State, worker executable/workspace/timeout, and model provider. Do not copy model credentials into service YAML, Handoff data, Results, SQLite, logs, or task JSON.

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { workspacePath } from "@work-fabric/agent-runtime-host";
+import type { AgentlyProcessDriverObservation } from "@work-fabric/adapter-agent-runtime-agently";
 
 import {
   DAILY_E2E,
@@ -65,6 +66,7 @@ describe("Daily Assistant real boundaries", () => {
     let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
     let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
     let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
+    const workerObservations: AgentlyProcessDriverObservation[] = [];
     try {
       model = await startFakeOpenAiCompatibleServer({ structuredOutput: {
         request_summary: "创建一个新需求", response: "需求已整理，建议交给需求分析角色确认", missing_information: ["期望上线日期"],
@@ -78,7 +80,7 @@ describe("Daily Assistant real boundaries", () => {
       const startedModel = model;
       fixture.register(() => startedService.service.close());
       await provisionDailyAssistant(startedService.origin);
-      runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory });
+      runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory, onWorkerObservation: (observation) => workerObservations.push(observation) });
       if (runtime === undefined) throw new Error("runtime did not start");
       const firstRuntime = runtime;
       fixture.register(() => firstRuntime.close());
@@ -107,7 +109,7 @@ describe("Daily Assistant real boundaries", () => {
         expect((extensions as Record<string, unknown>)["workfabric.agent/assistant_output"]).toMatchObject({ handoff_draft_required: true });
       });
       await runtime.close();
-      runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory });
+      runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory, onWorkerObservation: (observation) => workerObservations.push(observation) });
       const restartedRuntime = runtime;
       fixture.register(() => restartedRuntime.close());
       expect(startedModel.requests).toHaveLength(1);
@@ -156,6 +158,19 @@ describe("Daily Assistant real boundaries", () => {
         completedEvents,
         startedModel.requests,
       );
+      expect(workerObservations).toHaveLength(2);
+      for (const observation of workerObservations) {
+        expect(observation.task_json).toContain('"handoff_id"');
+        assertNoFixtureSecrets(
+          observation.task_json,
+          observation.stdout,
+          observation.stderr,
+          observation.runtime_log,
+        );
+      }
+      // Scan each public command surface separately. A combined Handoff
+      // snapshot must not hide a credential leak in either payload.
+      assertNoFixtureSecrets(completed.latest_status, completed.state.result);
     } finally {
       await fixture.close();
     }

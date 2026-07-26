@@ -12,10 +12,30 @@ export const MAX_STDIN_BYTES = 1_048_576;
 export const MAX_STDOUT_LINE_BYTES = 262_144;
 export const MAX_STDOUT_RECORDS = 1_024;
 export const MAX_STDERR_BYTES = 65_536;
+/** Test/debug observation is intentionally smaller than protocol input/output bounds. */
+export const MAX_OBSERVED_STDOUT_BYTES = 65_536;
+export const MAX_RUNTIME_LOG_BYTES = 16_384;
 
 export class AgentlyWorkerError extends Error {
   readonly name = "AgentlyWorkerError";
   constructor(readonly code: `agently_worker_${string}`, message: string, readonly diagnostic?: string) { super(message); }
+}
+
+/**
+ * A bounded, opt-in observation of one real child-process execution. It is
+ * deliberately outside Runtime YAML and the Driver SPI: production callers
+ * receive no task or process bytes unless they explicitly provide this
+ * constructor-only diagnostic hook.
+ */
+export interface AgentlyProcessDriverObservation {
+  readonly task_json: string;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly runtime_log: string;
+}
+
+export interface AgentlyProcessDriverOptions {
+  readonly observer?: (observation: AgentlyProcessDriverObservation) => void;
 }
 
 function error(code: `agently_worker_${string}`, message: string, diagnostic?: string): AgentlyWorkerError {
@@ -47,7 +67,10 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
     capability_ids: ["collaboration.request.intake", "information.synthesis", "collaboration.handoff.draft"],
   });
 
-  constructor(private readonly config: AgentlyRuntimeDriverConfig) {}
+  constructor(
+    private readonly config: AgentlyRuntimeDriverConfig,
+    private readonly options: AgentlyProcessDriverOptions = {},
+  ) {}
 
   async execute(task: RuntimeTaskPackage, progress: (update: RuntimeProgress) => Promise<void>, signal: AbortSignal): Promise<RuntimeDriverResult> {
     if (signal.aborted) throw error("agently_worker_cancelled", "Agently worker execution was cancelled");
@@ -79,6 +102,8 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
       let terminal: RuntimeDriverResult | undefined;
       let lastSequence = 0;
       let stderr = Buffer.alloc(0);
+      let observedStdout = Buffer.alloc(0);
+      let runtimeLog = "worker_started";
       const reader = new NdjsonReader(MAX_STDOUT_LINE_BYTES, MAX_STDOUT_RECORDS);
       let timeout: NodeJS.Timeout | undefined;
       let grace: NodeJS.Timeout | undefined;
@@ -89,10 +114,28 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
         if (timeout !== undefined) clearTimeout(timeout);
         signal.removeEventListener("abort", abort);
       };
+      const appendRuntimeLog = (line: string) => {
+        if (runtimeLog.length >= MAX_RUNTIME_LOG_BYTES) return;
+        runtimeLog += `\n${line.slice(0, MAX_RUNTIME_LOG_BYTES - runtimeLog.length - 1)}`;
+      };
+      const observe = () => {
+        if (this.options.observer === undefined) return;
+        try {
+          this.options.observer({
+            task_json: JSON.stringify(request.task),
+            stdout: observedStdout.toString("utf8"),
+            stderr: stderr.toString("utf8"),
+            runtime_log: runtimeLog,
+          });
+        } catch { /* an optional diagnostic observer must not affect execution */ }
+      };
       const settle = (outcome: { readonly result: RuntimeDriverResult } | { readonly failure: AgentlyWorkerError }) => {
         if (settled) return;
         settled = true;
         cleanup();
+        if ("result" in outcome) appendRuntimeLog("worker_completed");
+        else appendRuntimeLog(`worker_failed:${outcome.failure.code}`);
+        observe();
         if ("result" in outcome) resolve(outcome.result); else reject(outcome.failure);
       };
       const terminate = (failure: AgentlyWorkerError) => {
@@ -120,6 +163,13 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
       const stdoutDone = (async () => {
         for await (const chunk of stdout) {
           if (!accepting) return;
+          if (observedStdout.length < MAX_OBSERVED_STDOUT_BYTES) {
+            observedStdout = Buffer.concat([
+              observedStdout,
+              chunk.subarray(0, MAX_OBSERVED_STDOUT_BYTES - observedStdout.length),
+            ]);
+          }
+          appendRuntimeLog("worker_stdout");
           for (const raw of reader.push(chunk)) {
             if (!accepting) return;
             const record = parseAgentlyWorkerRecord(raw, request.command_id);

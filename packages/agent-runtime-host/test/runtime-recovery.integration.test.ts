@@ -54,6 +54,43 @@ describe("AgentRuntimeHost recovery", () => {
     await recoveredHost.close();
   });
 
+  it("opens a lazily created Gateway Session before recovering a received Run", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);
+    const accept = vi.fn(async () => operation(2));
+    const reportStatus = vi.fn(async () => operation(3));
+    const returnResult = vi.fn(async () => operation(4));
+    const execute = vi.fn(async () => runtimeResult);
+    const session = {
+      handoffs: { accept, reportStatus, returnResult, decline: vi.fn() } as never,
+      incoming: async function* () {},
+      close: vi.fn(async () => undefined),
+      session_id: "session-lazy",
+      closed: Promise.resolve({ reason: "closed" as const }),
+    };
+    const startSession = vi.fn(async () => session);
+    const host = new AgentRuntimeHost({
+      config,
+      startSession,
+      state,
+      driver: { manifest: { driver_type: "test", protocol_version: "1", capability_ids: ["information.synthesis"] }, execute },
+      packageLoader: { load: vi.fn(async () => ({ snapshot: acceptedSnapshot(), events: [], task: { tenant_id: "tenant-1", handoff_id: "handoff-1" } })) } as never,
+      policy: { decide: vi.fn() },
+      queries: { getHandoff: vi.fn(async () => acceptedSnapshot()) },
+      now: () => recoveryNow,
+    });
+
+    await host.start();
+
+    expect(startSession).toHaveBeenCalledTimes(1);
+    expect(accept).toHaveBeenCalledTimes(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect(returnResult).toHaveBeenCalledTimes(1);
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("succeeded");
+    await host.close();
+    expect(session.close).toHaveBeenCalledTimes(1);
+  });
+
   it("reuses a durably captured result without invoking the model after a restart", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);

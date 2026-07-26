@@ -123,6 +123,7 @@ export class AgentRuntimeHost {
   private readonly pending: IncomingHandoff[] = [];
   private running = 0;
   private intake: Promise<void> | null = null;
+  private starting: Promise<void> | null = null;
   private started = false;
   private closing = false;
 
@@ -136,10 +137,36 @@ export class AgentRuntimeHost {
 
   async start(): Promise<void> {
     if (this.started) return;
-    this.started = true;
-    await this.recover();
-    if (this.session === null) this.session = await this.dependencies.startSession!();
-    this.intake = this.consume();
+    if (this.starting !== null) return this.starting;
+    const start = this.startInternal();
+    this.starting = start;
+    try {
+      await start;
+    } finally {
+      if (!this.started) this.starting = null;
+    }
+  }
+
+  private async startInternal(): Promise<void> {
+    let createdSession: AgentEndpointSession | null = null;
+    try {
+      if (this.session === null) {
+        createdSession = await this.dependencies.startSession!();
+        this.session = createdSession;
+      }
+      await this.recover();
+      if (this.closing) throw new AgentRuntimeHostError("runtime_closing", this.dependencies.config.runtime_id);
+      this.intake = this.consume();
+      this.started = true;
+    } catch (cause) {
+      this.intake = null;
+      this.started = false;
+      if (createdSession !== null) {
+        this.session = null;
+        try { await createdSession.close(); } catch { /* preserve startup failure */ }
+      }
+      throw cause;
+    }
   }
 
   async handle(incoming: IncomingHandoff): Promise<void> {

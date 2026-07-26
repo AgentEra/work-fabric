@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import { AgentlyProcessDriver } from "@work-fabric/adapter-agent-runtime-agently";
+import { AgentlyProcessDriver, type AgentlyProcessDriverObservation } from "@work-fabric/adapter-agent-runtime-agently";
 import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-sqlite";
 import { AgentGateway } from "@work-fabric/agent-gateway";
 import { AgentRuntimeHost, DeterministicAcceptancePolicy, HandoffPackageLoader } from "@work-fabric/agent-runtime-host";
@@ -127,6 +127,8 @@ export async function startRealAgentlyRuntime(input: {
   readonly modelBaseUrl: string;
   readonly directory: string;
   readonly timeoutSeconds?: number;
+  /** Test-only bounded process observation; never configured by production YAML. */
+  readonly onWorkerObservation?: (observation: AgentlyProcessDriverObservation) => void;
 }) {
   const statePath = join(input.directory, "runtime-state.db");
   const workspaceRoot = join(input.directory, "workspaces");
@@ -135,7 +137,7 @@ export async function startRealAgentlyRuntime(input: {
     python: { executable: join(process.cwd(), "runtimes/agently-worker/.venv/bin/python"), module: "work_fabric_agently_runtime" },
     workspace_root: workspaceRoot, execution_timeout_seconds: input.timeoutSeconds ?? 20, cancellation_grace_seconds: 1,
     provider: { type: "OpenAICompatible", base_url: input.modelBaseUrl, model: "fake-work-fabric-model", api_key: DAILY_E2E.modelToken }, development_mode: true,
-  });
+  }, { observer: input.onWorkerObservation });
   const fabric = e2eClient(input.baseUrl, DAILY_E2E.runtimeToken, DAILY_E2E.runtimeActorId, DAILY_E2E.runtimeEndpointId);
   const gateway = new AgentGateway({ endpoints: fabric.endpoints, subscriptions: fabric.subscriptions, queries: fabric.queries, handoffs: fabric.handoffs }, dailyAssistantGatewayConfig({ actorId: DAILY_E2E.runtimeActorId, endpointId: DAILY_E2E.runtimeEndpointId, subscriptionId: DAILY_E2E.subscriptionId, queueCapacity: 8 }));
   const role = { role_id: "daily-assistant", version: 1, display_name: "Daily Assistant", description: "E2E runtime", capability_ids: ["information.synthesis"] } as const;

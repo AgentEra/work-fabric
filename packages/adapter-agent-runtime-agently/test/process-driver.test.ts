@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
 
-import { AgentlyRuntimeDriverFactory, validateAgentlyRuntimeDriverConfig } from "../src/index.js";
+import { AgentlyProcessDriver, AgentlyRuntimeDriverFactory, validateAgentlyRuntimeDriverConfig } from "../src/index.js";
 
 const worker = fileURLToPath(new URL("./fixtures/fake-worker.mjs", import.meta.url));
 
@@ -15,13 +15,15 @@ const task = (scenario: string): RuntimeTaskPackage => ({
   accept_by: "2026-01-01T00:00:00.000Z", result_due_at: "2026-01-01T01:00:00.000Z", workspace_path: "/tmp/workspace",
 });
 
-async function runFixture(scenario: string, options: { readonly timeout?: number; readonly grace?: number; readonly signal?: AbortSignal; readonly onProgress?: (item: unknown) => Promise<void> } = {}) {
+async function runFixture(scenario: string, options: { readonly timeout?: number; readonly grace?: number; readonly signal?: AbortSignal; readonly onProgress?: (item: unknown) => Promise<void>; readonly onObservation?: (item: unknown) => void } = {}) {
   const config = validateAgentlyRuntimeDriverConfig({
     python: { executable: worker, module: "work_fabric_agently_runtime" }, workspace_root: process.cwd(),
     execution_timeout_seconds: options.timeout ?? 2, cancellation_grace_seconds: options.grace ?? 1,
     provider: { type: "OpenAICompatible", base_url: "https://model.example.test/v1", model: "test-model", api_key: "agently-test-secret" },
   }, "test", { config_directory: process.cwd() });
-  const driver = await new AgentlyRuntimeDriverFactory().create(config);
+  const driver = options.onObservation === undefined
+    ? await new AgentlyRuntimeDriverFactory().create(config)
+    : new AgentlyProcessDriver(config, { observer: options.onObservation });
   const progress: unknown[] = [];
   const result = await driver.execute(task(scenario), async (item) => { progress.push(item); await options.onProgress?.(item); }, options.signal ?? new AbortController().signal);
   return { result, progress };
@@ -32,6 +34,19 @@ describe("AgentlyProcessDriver", () => {
     const { progress, result } = await runFixture("success");
     expect(progress).toMatchObject([{ sequence: 1 }, { sequence: 2 }]);
     expect(result.summary[0]).toMatchObject({ kind: "text" });
+  });
+
+  it("emits a bounded observer record for the actual task JSON and worker streams", async () => {
+    const observations: unknown[] = [];
+    await runFixture("success", { onObservation: (item) => observations.push(item) });
+
+    expect(observations).toHaveLength(1);
+    expect(observations[0]).toMatchObject({
+      task_json: expect.stringContaining('"handoff_id":"success"'),
+      stdout: expect.stringContaining('"type":"completed"'),
+      stderr: "",
+      runtime_log: expect.stringContaining("worker_completed"),
+    });
   });
 
   it.each(["malformed-json", "wrong-protocol", "duplicate-terminal", "progress-after-terminal", "non-monotonic-sequence", "oversized-line", "too-many-events", "deep-json", "silent-timeout", "non-zero-exit"])("fails closed for %s", async (scenario) => {
