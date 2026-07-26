@@ -17,7 +17,7 @@ The local static bearer tokens used in examples are development-only fixtures. U
 
 ## Local setup
 
-Install the isolated Python worker environment:
+From the repository root, install the isolated Python worker environment:
 
 ```bash
 uv sync --project runtimes/agently-worker
@@ -31,27 +31,45 @@ WF_BASE_URL=
 WF_ACCESS_TOKEN=
 ```
 
-Service YAML owns Work Fabric storage, identities, Authority, HTTP listener, Connector and Feishu configuration. Runtime YAML owns only the worker executable, workspace root, timeout, provider base URL/model, and runtime-local concurrency. Do not copy model credentials into service YAML, Handoff data, Results, SQLite, logs, or task JSON.
+Service YAML owns Work Fabric storage, identities, Authority, HTTP listener, Connector and Feishu configuration. Runtime YAML owns the Work Fabric connection, Runtime participant, role/capabilities, acceptance policy, concurrency, Runtime State, worker executable/workspace/timeout, and model provider. Do not copy model credentials into service YAML, Handoff data, Results, SQLite, logs, or task JSON.
 
-Provision the Endpoint before starting the Runtime:
+Provision the Endpoint before starting the Runtime. The shipped scripts read
+environment variables; `--config` is not a supported argument. These commands
+are executable with the checked-in local configuration files:
 
 ```bash
-npm run service:start -- --config ./service.yaml
+REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPOSITORY_ROOT"
+export WORK_FABRIC_CONFIG="$PWD/examples/config/service-feishu-long-connection.yaml"
+export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$PWD/examples/config/agent-runtime-agently.yaml"
+export WORK_FABRIC_CURSOR_SECRET="$(openssl rand -hex 32)"
+export WORK_FABRIC_ADMISSION_FINGERPRINT_KEY="$(openssl rand -hex 32)"
+export WORK_FABRIC_ADMISSION_GRANT_KEY="$(openssl rand -hex 32)"
+export WORK_FABRIC_ADMIN_TOKEN="$(openssl rand -hex 32)"
+export INTAKE_AGENT_ACCESS_TOKEN="$(openssl rand -hex 32)"
+export FEISHU_APP_ID="cli_..."
+export FEISHU_APP_SECRET="..."
+export FEISHU_CONNECTOR_ACCESS_TOKEN="$(openssl rand -hex 32)"
+export AGENTLY_MODEL_API_KEY="..."
+npm run service:start
 npm run agent-runtime:provision
-npm run agent-runtime:start -- --config ./runtime.yaml
+npm run agent-runtime:start
 ```
 
-For a complete local operator flow start, in order: Service, Runtime, Console, then the Feishu connector/long connection. The Runtime uses a fresh client-session ID for each process start; do not reuse a fenced session ID.
+Start the Runtime with `npm run agent-runtime:start` (without `--config`). The
+Feishu long connection is started by the configured Service plugin; it is not a
+separate process to start after the Console. Start the optional Console in a
+second terminal with `npm run console:dev`, then open the URL printed by Vite.
+The Runtime uses a fresh client-session ID for each process start; do not reuse
+a fenced session ID.
 
 ## What to observe
 
-Provisioning creates `actor-intake-agent` / `endpoint-intake-agent` and its SSE Subscription. In Console, inspect:
+Provisioning creates `actor-intake-agent` / `endpoint-intake-agent` and its SSE Subscription. In the current Console, inspect Handoffs, their timeline and relationships, connector/operations pages, and audit material. The Console does **not** currently expose an Endpoint/session page, Delivery/Ack cursor view, or Status/Result payload detail. Inspect those operational facts through the public HTTP API or the durable SQLite/PostgreSQL state instead:
 
-1. **Endpoints** for registration, active Session, lease, heartbeat and fencing token.
-2. **Deliveries** for the endpoint Subscription, Delivery ID, cursor and explicit Ack.
-3. **Handoffs** for `offered → accepted → result_returned`.
-4. **Status** for the Runtime's `Agent Runtime started` and progress updates.
-5. **Result** for `workfabric.agent/assistant_output`; a proposed downstream Handoff is Result data, not a child Handoff.
+1. **Console Handoffs** for `offered → accepted → result_returned` and relationships.
+2. **HTTP/SQLite/PostgreSQL** for Endpoint registration, active Session, lease, heartbeat, fencing token, Delivery/Ack cursor, Status, and Result payload.
+3. **Result** `workfabric.agent/assistant_output`; a proposed downstream Handoff is Result data, not a child Handoff.
 
 To send a request from Feishu, mention the configured bot in an enabled group chat (for example, `@Work Fabric create a requirement`). Admission must accept the external identity, then the collaboration-channel configuration creates the explicitly targeted Intake Handoff. Expect one Delivery Ack, explicit Accept, Status and Result rendered by the configured Feishu outbound route.
 
@@ -61,7 +79,7 @@ The deterministic release check uses only SQLite, public HTTP/SSE, the real Pyth
 
 ```bash
 npm run verify:agent-runtime
-npx vitest run packages/agent-runtime-host/test/agently-daily-assistant.e2e.test.ts
+npx vitest run examples/agently-agent-runtime/test/agently-daily-assistant.e2e.test.ts
 ```
 
 An opt-in real-model smoke test is manual and non-destructive. Copy Runtime YAML outside source control, set a chosen non-secret `provider.base_url` and `provider.model`, then explicitly provide a rotated credential:
