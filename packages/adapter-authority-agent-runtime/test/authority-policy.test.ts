@@ -290,6 +290,13 @@ describe("AgentRuntimeAuthorityPolicy", () => {
     }))).resolves.toMatchObject({ kind: "deny" });
   });
 
+  it("denies a read model with a custom prototype even when every field is own data", async () => {
+    const model = Object.assign(Object.create({ untrusted: true }), targetedSnapshot("handoff-custom-prototype")) as HandoffReadModel;
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([model]));
+
+    await expect(policy.authorize(request({ resource_id: model.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
   it("denies a dual-discriminator target even when one discriminator matches", async () => {
     const malformed = handoff("handoff-dual-target", state("handoff-dual-target", {
       package: {

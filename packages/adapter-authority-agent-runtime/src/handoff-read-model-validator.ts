@@ -75,6 +75,9 @@ function jsonValue(value: unknown, ancestors: WeakSet<object> = new WeakSet()): 
 function exactModel(value: unknown): object | null {
   const model = object(value);
   if (model === null) return null;
+  let prototype: object | null;
+  try { prototype = Object.getPrototypeOf(model) as object | null; } catch { return null; }
+  if (prototype !== Object.prototype && prototype !== null) return null;
   let keys: readonly PropertyKey[];
   try { keys = Reflect.ownKeys(model); } catch { return null; }
   if (keys.length !== MODEL_FIELDS.size || keys.some((key) => typeof key !== "string" || !MODEL_FIELDS.has(key))) return null;
