@@ -10,6 +10,8 @@ from work_fabric_agently_runtime.protocol import (
     completed_record,
     parse_request,
     read_request,
+    utf16_code_units,
+    utf8_usv_bytes,
     write_record,
 )
 
@@ -66,6 +68,38 @@ def test_matches_node_utf16_string_and_key_limits() -> None:
     value["command_id"] = "😀" * 65
     with pytest.raises(ProtocolError, match="command_id"):
         parse_request(value)
+
+
+def test_surrogates_use_node_usv_string_bytes_without_raw_encoding_errors() -> None:
+    lone_surrogate = "\ud800"
+    assert utf16_code_units(lone_surrogate) == 1
+    assert utf8_usv_bytes(lone_surrogate) == 3
+    assert utf16_code_units("😀") == 2
+    assert utf8_usv_bytes("😀") == 4
+
+    value = valid_request()
+    value["command_id"] = lone_surrogate
+    escaped_lone = json.loads(json.dumps(value, ensure_ascii=True))
+    assert parse_request(escaped_lone).command_id == "�"
+
+    value["command_id"] = "😀"
+    escaped_pair = json.loads(json.dumps(value, ensure_ascii=True))
+    assert parse_request(escaped_pair).command_id == "😀"
+
+    stream = io.StringIO()
+    write_record(
+        stream,
+        completed_record(
+            "command-1",
+            {
+                "summary": [{"kind": "text", "media_type": "text/plain", "text": lone_surrogate}],
+                "artifacts": [],
+                "evidence": [],
+                "extensions": {},
+            },
+        ),
+    )
+    assert json.loads(stream.getvalue())["result"]["summary"][0]["text"] == "�"
 
     value = valid_request()
     value["task"]["authority_scope"] = {"😀" * 129: "value"}

@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Mapping, Protocol, cast
+import logging
+import sys
+from contextlib import redirect_stdout
+from typing import Any, Mapping, Protocol, TextIO, cast
 
-from .protocol import JsonValue, ProtocolError, WorkerRequest, utf16_code_units
+from .protocol import JsonValue, ProtocolError, WorkerRequest, usv_string, utf16_code_units
 
 CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 ASSISTANT_OUTPUT_SCHEMA = {
@@ -17,6 +20,7 @@ ASSISTANT_OUTPUT_SCHEMA = {
     "handoff_draft_intent": (str, "建议交接意图；无则为空字符串", True),
     "handoff_draft_acceptance_criteria": [(str, "建议验收条件")],
 }
+_AGENTLY_LOG_SINK: TextIO | None = None
 
 
 class AssistantOutputError(ProtocolError):
@@ -34,7 +38,7 @@ class AgentPort(Protocol):
 def _non_empty_string(value: object, field: str, maximum: int = 8_192) -> str:
     if not isinstance(value, str) or not value or value.strip() != value or utf16_code_units(value) > maximum:
         raise AssistantOutputError(f"assistant output {field} is invalid")
-    return value
+    return usv_string(value)
 
 
 def role_prompt(role: Mapping[str, JsonValue]) -> str:
@@ -115,10 +119,25 @@ def configure_agently(agently: Any, request: WorkerRequest, api_key: str) -> Non
     })
 
 
-async def execute(request: WorkerRequest) -> Mapping[str, JsonValue]:
-    from agently import Agently
+def _import_agently_without_stdout() -> Any:
+    global _AGENTLY_LOG_SINK
+    if _AGENTLY_LOG_SINK is None:
+        _AGENTLY_LOG_SINK = open(os.devnull, "w", encoding="utf-8")
+    with redirect_stdout(_AGENTLY_LOG_SINK):
+        from agently import Agently
+    loggers = [logging.getLogger(), *(
+        logger for logger in logging.root.manager.loggerDict.values() if isinstance(logger, logging.Logger)
+    )]
+    for logger in loggers:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and handler.stream in (sys.stdout, sys.__stdout__):
+                handler.setStream(_AGENTLY_LOG_SINK)
+    return Agently
 
+
+async def execute(request: WorkerRequest) -> Mapping[str, JsonValue]:
     api_key = required_environment("AGENTLY_MODEL_API_KEY")
+    Agently = _import_agently_without_stdout()
     configure_agently(Agently, request, api_key)
     agent = Agently.create_agent(f"{request.task['role']['role_id']}-{request.command_id}")
     return await execute_with_agent(request, cast(AgentPort, agent))

@@ -29,3 +29,11 @@
 - Stdin now accepts exactly one JSON record with at most one terminating LF; blank, leading, trailing, and multiple-record input is rejected.
 
 Follow-up verification: `uv run pytest -q` (17 passed), `uv build`, clean wheel install, `npm run typecheck`, and `npx vitest run packages/adapter-agent-runtime-agently/test` (36 passed).
+
+## Re-review follow-up
+
+- The worker now imports Agently while stdout is redirected to a persistent null sink and reroutes any pre-existing root stdout logging handlers there. This happens before Agently configuration or execution, so the Worker owns stdout exclusively for NDJSON records.
+- Added a controlled subprocess test using the real pinned Agently package and a refused loopback endpoint. It verifies each stdout line parses as Worker protocol JSON and contains no Agently warning/error logging.
+- Added USV-string normalization for surrogate handling: lone surrogates become U+FFFD for protocol values and UTF-8 byte budgets, while valid escaped pairs remain their scalar code point. UTF-16 code-unit counting now avoids raw encoder errors.
+
+Re-review verification: `uv run pytest -q` (19 passed), local-refusal stdout isolation test, `uv build`, clean wheel install, `npm run typecheck`, and `npx vitest run packages/adapter-agent-runtime-agently/test` (36 passed).

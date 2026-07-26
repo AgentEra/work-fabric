@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import io
+import json
+import os
+import subprocess
+import sys
 
 import pytest
 
@@ -102,3 +106,26 @@ async def test_runner_rejects_a_task_that_contains_the_environment_secret_before
     assert called is False
     assert '"type":"failed"' in stdout.getvalue()
     assert secret not in stdout.getvalue()
+
+
+def test_real_agently_refusal_never_contaminates_protocol_stdout() -> None:
+    value = valid_request()
+    value["provider"]["base_url"] = "http://127.0.0.1:1/v1"
+    environment = {**os.environ, "AGENTLY_MODEL_API_KEY": "test-key"}
+
+    completed = subprocess.run(
+        [sys.executable, "-m", "work_fabric_agently_runtime"],
+        input=json.dumps(value, separators=(",", ":")) + "\n",
+        text=True,
+        capture_output=True,
+        env=environment,
+        timeout=20,
+        check=False,
+    )
+
+    assert completed.returncode == 1
+    lines = completed.stdout.splitlines()
+    assert lines
+    assert all(json.loads(line)["protocol"] == "workfabric.agent-runtime/1" for line in lines)
+    assert "[WARNING]" not in completed.stdout
+    assert "[ERROR]" not in completed.stdout

@@ -49,14 +49,22 @@ def _fail(message: str) -> None:
     raise ProtocolError(message)
 
 
+def usv_string(value: str) -> str:
+    return "".join("\ufffd" if 0xD800 <= ord(character) <= 0xDFFF else character for character in value)
+
+
 def utf16_code_units(value: str) -> int:
-    return len(value.encode("utf-16-le")) // 2
+    return sum(2 if ord(character) > 0xFFFF else 1 for character in value)
+
+
+def utf8_usv_bytes(value: str) -> int:
+    return len(usv_string(value).encode("utf-8"))
 
 
 def _string(value: object, label: str, maximum: int) -> str:
     if not isinstance(value, str) or not value or value.strip() != value or utf16_code_units(value) > maximum:
         _fail(f"{label} is invalid")
-    return value
+    return usv_string(value)
 
 
 def _exact_object(value: object, fields: tuple[str, ...], label: str) -> dict[str, object]:
@@ -74,7 +82,8 @@ def _json(value: object, budget: _JsonBudget, depth: int = 0) -> JsonValue:
     if value is None or isinstance(value, bool):
         return value
     if isinstance(value, str):
-        budget.string_bytes += len(value.encode("utf-8"))
+        value = usv_string(value)
+        budget.string_bytes += utf8_usv_bytes(value)
         if budget.string_bytes > MAX_JSON_STRING_BYTES:
             _fail("worker JSON string bytes exceed maximum bound")
         return value
@@ -92,7 +101,10 @@ def _json(value: object, budget: _JsonBudget, depth: int = 0) -> JsonValue:
     for key, child in value.items():
         if not isinstance(key, str) or utf16_code_units(key) > MAX_JSON_KEY_LENGTH:
             _fail("worker JSON key is invalid")
-        budget.string_bytes += len(key.encode("utf-8"))
+        key = usv_string(key)
+        if key in output:
+            _fail("worker JSON keys collapse under USV normalization")
+        budget.string_bytes += utf8_usv_bytes(key)
         if budget.string_bytes > MAX_JSON_STRING_BYTES:
             _fail("worker JSON string bytes exceed maximum bound")
         output[key] = _json(child, budget, depth + 1)
