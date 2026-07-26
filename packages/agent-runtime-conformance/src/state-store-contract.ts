@@ -2,6 +2,7 @@ import type {
   AgentRuntimeStateStore,
   RuntimeCommandRecord,
   RuntimeDeliveryRecord,
+  RuntimeDriverResult,
   RuntimeRunState,
 } from "@work-fabric/agent-runtime-spi";
 import { describe, expect, it } from "vitest";
@@ -47,6 +48,10 @@ function claim(owner: string, now: string, allowedStates: readonly RuntimeRunSta
     lease_seconds: 2,
     allowed_states: allowedStates,
   };
+}
+
+function result(): RuntimeDriverResult {
+  return { summary: [{ message: "complete" }], artifacts: [], evidence: [], extensions: {} };
 }
 
 export function verifyAgentRuntimeStateStoreContract(
@@ -152,9 +157,24 @@ export function verifyAgentRuntimeStateStoreContract(
         await fixture.store.createRunIfAbsent("tenant-1", "handoff-1", NOW);
         await fixture.store.claimRun(claim("host-a", NOW));
         for (const [expected_state, next_state] of [["received", "accepted"], ["accepted", "running"], ["running", "result_ready"], ["result_ready", "succeeded"]] as const) {
-          expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state, next_state, now: "2026-07-26T01:00:01.000Z" })).toBe(true);
+          expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state, next_state, now: "2026-07-26T01:00:01.000Z", ...(next_state === "result_ready" ? { result: result() } : {}) })).toBe(true);
         }
         expect(await fixture.store.listRecoverable("tenant-1", "2026-07-26T01:05:00.000Z", 10)).toEqual([]);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it("requires a result only when entering result_ready", async () => {
+      const fixture = await create();
+      try {
+        await fixture.store.createRunIfAbsent("tenant-1", "handoff-1", NOW);
+        await fixture.store.claimRun(claim("host-a", NOW));
+        expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "received", next_state: "accepted", now: "2026-07-26T01:00:01.000Z", result: result() })).toBe(false);
+        expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "received", next_state: "accepted", now: "2026-07-26T01:00:01.000Z" })).toBe(true);
+        expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "accepted", next_state: "running", now: "2026-07-26T01:00:01.100Z" })).toBe(true);
+        expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "running", next_state: "result_ready", now: "2026-07-26T01:00:01.200Z" })).toBe(false);
+        expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "running", next_state: "result_ready", now: "2026-07-26T01:00:01.200Z", result: result() })).toBe(true);
       } finally {
         await fixture.close();
       }

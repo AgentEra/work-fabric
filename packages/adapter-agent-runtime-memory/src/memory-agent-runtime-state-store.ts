@@ -142,7 +142,9 @@ export class MemoryAgentRuntimeStateStore implements AgentRuntimeStateStore {
       if (
         !this.ownsActiveLease(current, candidate.owner, candidate.fencing_token, candidate.now) ||
         current.state !== candidate.expected_state ||
-        !allowedTransitions[candidate.expected_state].includes(candidate.next_state)
+        !allowedTransitions[candidate.expected_state].includes(candidate.next_state) ||
+        (candidate.next_state === "result_ready" && candidate.result === undefined) ||
+        (candidate.next_state !== "result_ready" && candidate.result !== undefined)
       ) return false;
       const next: RuntimeRunRecord = {
         ...current,
