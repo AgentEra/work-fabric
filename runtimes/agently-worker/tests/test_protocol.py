@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 
 import pytest
 
@@ -8,6 +9,7 @@ from work_fabric_agently_runtime.protocol import (
     ProtocolError,
     completed_record,
     parse_request,
+    read_request,
     write_record,
 )
 
@@ -57,6 +59,25 @@ def test_request_rejects_excessive_json_bounds() -> None:
         current = current["nested"]
     with pytest.raises(ProtocolError, match="depth"):
         parse_request(value)
+
+
+def test_matches_node_utf16_string_and_key_limits() -> None:
+    value = valid_request()
+    value["command_id"] = "😀" * 65
+    with pytest.raises(ProtocolError, match="command_id"):
+        parse_request(value)
+
+    value = valid_request()
+    value["task"]["authority_scope"] = {"😀" * 129: "value"}
+    with pytest.raises(ProtocolError, match="key"):
+        parse_request(value)
+
+
+@pytest.mark.parametrize("prefix, suffix", [(b"\n", b""), (b"", b"\n\n"), (b"", b"\n \n")])
+def test_read_request_allows_only_one_json_line_and_one_optional_newline(prefix: bytes, suffix: bytes) -> None:
+    raw = json.dumps(valid_request(), separators=(",", ":")).encode("utf-8")
+    with pytest.raises(ProtocolError, match="exactly one"):
+        read_request(io.BytesIO(prefix + raw + suffix))
 
 
 def test_write_record_is_compact_ndjson_and_flushes() -> None:

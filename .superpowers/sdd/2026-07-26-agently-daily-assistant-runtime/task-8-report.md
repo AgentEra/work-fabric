@@ -20,3 +20,12 @@
 ## Notes
 
 - The first `uv` invocation needed sandbox approval to access its existing local cache; dependency resolution then completed without changing any required pins.
+
+## Review follow-up
+
+- Moved the 120-second timeout from model request body options to the supported OpenAICompatible provider transport `timeout` mapping. An offline test uses the installed 4.1.4.1 request builder and verifies `client_options.timeout.read == 120` while the request body contains no `timeout` field.
+- The runner now rejects an inbound task containing a value exactly equal to the child-environment secret before invoking its executor, emitting only the existing generic failed record.
+- String and key limits now use UTF-16 code units to match the Node protocol boundary, including astral Unicode input.
+- Stdin now accepts exactly one JSON record with at most one terminating LF; blank, leading, trailing, and multiple-record input is rejected.
+
+Follow-up verification: `uv run pytest -q` (17 passed), `uv build`, clean wheel install, `npm run typecheck`, and `npx vitest run packages/adapter-agent-runtime-agently/test` (36 passed).

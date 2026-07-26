@@ -6,6 +6,7 @@ from work_fabric_agently_runtime.assistant import (
     ASSISTANT_OUTPUT_SCHEMA,
     AssistantOutputError,
     execute_with_agent,
+    configure_agently,
     role_prompt,
     task_prompt_input,
 )
@@ -82,3 +83,17 @@ async def test_rejects_invalid_handoff_draft_from_the_model() -> None:
     agent.async_start = invalid_start  # type: ignore[method-assign]
     with pytest.raises(AssistantOutputError, match="capability"):
         await execute_with_agent(request, agent)
+
+
+def test_real_agently_timeout_is_a_provider_transport_setting_not_request_body() -> None:
+    from agently import Agently
+    from agently.builtins.plugins.ModelRequester.OpenAICompatible.plugin import OpenAICompatible
+
+    request = parse_request(valid_request())
+    configure_agently(Agently, request, "test-key")
+    agent = Agently.create_agent("timeout-shape-test")
+    agent.request.input("offline request-builder probe")
+    request_data = OpenAICompatible(agent.request.prompt, agent.request.settings).generate_request_data()
+
+    assert request_data.client_options["timeout"].read == 120
+    assert "timeout" not in request_data.request_options

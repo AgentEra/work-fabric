@@ -33,6 +33,16 @@ def _contains_secret(value: object, secrets: tuple[str, ...]) -> bool:
     return False
 
 
+def _task_contains_secret(value: object, secrets: tuple[str, ...]) -> bool:
+    if isinstance(value, str):
+        return any(value == secret for secret in secrets)
+    if isinstance(value, list):
+        return any(_task_contains_secret(item, secrets) for item in value)
+    if isinstance(value, dict):
+        return any(_task_contains_secret(key, secrets) or _task_contains_secret(item, secrets) for key, item in value.items())
+    return False
+
+
 async def run(
     request: WorkerRequest,
     *,
@@ -45,6 +55,8 @@ async def run(
     secrets = tuple(secret for secret in (*secrets, environment_secret) if secret)
     write_record(stdout, progress_record(request.command_id, 1, 0.0, "Agently worker started", _observed_at()))
     try:
+        if _task_contains_secret(request.task, secrets):
+            raise ValueError("worker task contains a configured secret")
         output = validate_assistant_output(await execute(request))
         if _contains_secret(output, secrets):
             raise ValueError("model output contains a configured secret")

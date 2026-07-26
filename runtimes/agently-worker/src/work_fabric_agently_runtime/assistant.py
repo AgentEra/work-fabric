@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Mapping, Protocol, cast
+from typing import Any, Mapping, Protocol, cast
 
-from .protocol import JsonValue, ProtocolError, WorkerRequest
+from .protocol import JsonValue, ProtocolError, WorkerRequest, utf16_code_units
 
 CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 ASSISTANT_OUTPUT_SCHEMA = {
@@ -32,7 +32,7 @@ class AgentPort(Protocol):
 
 
 def _non_empty_string(value: object, field: str, maximum: int = 8_192) -> str:
-    if not isinstance(value, str) or not value or value.strip() != value or len(value.encode("utf-8")) > maximum:
+    if not isinstance(value, str) or not value or value.strip() != value or utf16_code_units(value) > maximum:
         raise AssistantOutputError(f"assistant output {field} is invalid")
     return value
 
@@ -105,16 +105,20 @@ def required_environment(name: str) -> str:
     return value
 
 
-async def execute(request: WorkerRequest) -> Mapping[str, JsonValue]:
-    from agently import Agently
-
-    api_key = required_environment("AGENTLY_MODEL_API_KEY")
-    Agently.set_settings("OpenAICompatible", {
+def configure_agently(agently: Any, request: WorkerRequest, api_key: str) -> None:
+    agently.set_settings("OpenAICompatible", {
         "base_url": request.provider_base_url,
         "api_key": api_key,
         "model": request.provider_model,
         "request_retry": {"max_attempts": 2},
-        "request_options": {"timeout": 120},
+        "timeout": {"connect": 30, "read": 120, "write": 30, "pool": 30},
     })
+
+
+async def execute(request: WorkerRequest) -> Mapping[str, JsonValue]:
+    from agently import Agently
+
+    api_key = required_environment("AGENTLY_MODEL_API_KEY")
+    configure_agently(Agently, request, api_key)
     agent = Agently.create_agent(f"{request.task['role']['role_id']}-{request.command_id}")
     return await execute_with_agent(request, cast(AgentPort, agent))

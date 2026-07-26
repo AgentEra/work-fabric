@@ -80,3 +80,25 @@ async def test_runner_fails_closed_when_model_output_contains_the_environment_se
     assert '"type":"completed"' not in stdout.getvalue()
     assert '"type":"failed"' in stdout.getvalue()
     assert secret not in stdout.getvalue()
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_a_task_that_contains_the_environment_secret_before_execution() -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+    secret = "super-secret-token"
+    value = valid_request()
+    value["task"]["authority_scope"] = {"delegation": {"value": secret}}
+    called = False
+
+    async def fake_execute(_request):
+        nonlocal called
+        called = True
+        raise AssertionError("executor must not run")
+
+    result = await run(parse_request(value), execute=fake_execute, stdout=stdout, stderr=stderr, secrets=(secret,))
+
+    assert result == 1
+    assert called is False
+    assert '"type":"failed"' in stdout.getvalue()
+    assert secret not in stdout.getvalue()

@@ -49,8 +49,12 @@ def _fail(message: str) -> None:
     raise ProtocolError(message)
 
 
+def utf16_code_units(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
 def _string(value: object, label: str, maximum: int) -> str:
-    if not isinstance(value, str) or not value or value.strip() != value or len(value) > maximum:
+    if not isinstance(value, str) or not value or value.strip() != value or utf16_code_units(value) > maximum:
         _fail(f"{label} is invalid")
     return value
 
@@ -86,7 +90,7 @@ def _json(value: object, budget: _JsonBudget, depth: int = 0) -> JsonValue:
         _fail("worker JSON is invalid")
     output: dict[str, JsonValue] = {}
     for key, child in value.items():
-        if not isinstance(key, str) or len(key) > MAX_JSON_KEY_LENGTH:
+        if not isinstance(key, str) or utf16_code_units(key) > MAX_JSON_KEY_LENGTH:
             _fail("worker JSON key is invalid")
         budget.string_bytes += len(key.encode("utf-8"))
         if budget.string_bytes > MAX_JSON_STRING_BYTES:
@@ -229,9 +233,10 @@ def read_request(stream: object = None) -> WorkerRequest:
     if not isinstance(raw, bytes) or len(raw) > 1_048_576:
         _fail("worker request exceeds input bound")
     try:
-        lines = [line for line in raw.decode("utf-8").splitlines() if line]
-        if len(lines) != 1:
+        if raw.endswith(b"\n"):
+            raw = raw[:-1]
+        if not raw or b"\n" in raw or b"\r" in raw:
             _fail("worker request must be exactly one NDJSON record")
-        return parse_request(json.loads(lines[0]))
+        return parse_request(json.loads(raw.decode("utf-8")))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise ProtocolError("worker request is invalid JSON") from error
