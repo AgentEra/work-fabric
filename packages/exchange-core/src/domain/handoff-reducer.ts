@@ -10,6 +10,11 @@ const TERMINAL_STATES: ReadonlySet<HandoffLifecycleState> = new Set([
   "transferred",
 ]);
 
+/** Domain lifecycle terminality; result_returned and verified can still evolve. */
+export function isTerminalHandoffLifecycle(state: HandoffLifecycleState): boolean {
+  return TERMINAL_STATES.has(state);
+}
+
 function requireStreamVersion(
   state: HandoffState | null,
   streamVersion: number,
@@ -208,7 +213,7 @@ export function evolveHandoff(
       `Handoff event ID mismatch: expected ${state.handoff_id}, received ${event.handoff_id}`,
     );
   }
-  if (TERMINAL_STATES.has(state.lifecycle_state)) {
+  if (isTerminalHandoffLifecycle(state.lifecycle_state)) {
     throw new Error(`Handoff is terminal in state ${state.lifecycle_state}`);
   }
   if (

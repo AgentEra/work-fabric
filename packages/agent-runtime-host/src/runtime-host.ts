@@ -154,6 +154,14 @@ export class AgentRuntimeHost {
       received_at: this.now(),
       acknowledged_at: null,
     });
+    // A service Ack releases the Delivery for good, but it is not an
+    // acceptance of responsibility.  Create the local Run before that Ack so
+    // a process failure in the interval leaves durable custody for recovery.
+    const captured = await this.dependencies.state.createRunIfAbsent(
+      this.dependencies.config.tenant_id,
+      incoming.handoff.handoff_id,
+      this.now(),
+    );
     const acknowledgement = await incoming.acknowledgeSignal("acknowledged");
     if (acknowledgement.kind !== "acknowledged") throw new AgentRuntimeHostError("delivery_ack_failed", incoming.delivery.delivery_id);
     await this.dependencies.state.markDeliveryAcknowledged(
@@ -179,15 +187,10 @@ export class AgentRuntimeHost {
       }
       return;
     }
-    const created = await this.dependencies.state.createRunIfAbsent(
-      this.dependencies.config.tenant_id,
-      incoming.handoff.handoff_id,
-      this.now(),
-    );
     const decision = this.dependencies.policy.decide(
       incoming.handoff,
       event,
-      created.run.state !== "received",
+      captured.run.state !== "received",
     );
     if (decision.kind === "ignore") return;
     if (decision.kind === "decline") {

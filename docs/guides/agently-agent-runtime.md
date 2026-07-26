@@ -34,14 +34,15 @@ WF_ACCESS_TOKEN=
 Service YAML owns Work Fabric storage, identities, Authority, HTTP listener, Connector and Feishu configuration. Runtime YAML owns the Work Fabric connection, Runtime participant, role/capabilities, acceptance policy, concurrency, Runtime State, worker executable/workspace/timeout, and model provider. Do not copy model credentials into service YAML, Handoff data, Results, SQLite, logs, or task JSON.
 
 Provision the Endpoint before starting the Runtime. The shipped scripts read
-environment variables; `--config` is not a supported argument. These commands
-are executable with the checked-in local configuration files:
+environment variables only; command-line configuration overrides are
+unsupported. Run the Service and Runtime in separate terminals. First, in each
+terminal (or in a shell file sourced by each terminal), set absolute paths from
+the repository root:
 
 ```bash
 REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
-cd "$REPOSITORY_ROOT"
-export WORK_FABRIC_CONFIG="$PWD/examples/config/service-feishu-long-connection.yaml"
-export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$PWD/examples/config/agent-runtime-agently.yaml"
+export WORK_FABRIC_CONFIG="$REPOSITORY_ROOT/examples/config/service-feishu-long-connection.yaml"
+export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$REPOSITORY_ROOT/examples/config/agent-runtime-agently.yaml"
 export WORK_FABRIC_CURSOR_SECRET="$(openssl rand -hex 32)"
 export WORK_FABRIC_ADMISSION_FINGERPRINT_KEY="$(openssl rand -hex 32)"
 export WORK_FABRIC_ADMISSION_GRANT_KEY="$(openssl rand -hex 32)"
@@ -51,21 +52,32 @@ export FEISHU_APP_ID="cli_..."
 export FEISHU_APP_SECRET="..."
 export FEISHU_CONNECTOR_ACCESS_TOKEN="$(openssl rand -hex 32)"
 export AGENTLY_MODEL_API_KEY="..."
+```
+
+### Terminal 1 — Service
+
+```bash
+cd "$REPOSITORY_ROOT"
 npm run service:start
+```
+
+### Terminal 2 — Runtime
+
+```bash
+cd "$REPOSITORY_ROOT"
 npm run agent-runtime:provision
 npm run agent-runtime:start
 ```
 
-Start the Runtime with `npm run agent-runtime:start` (without `--config`). The
-Feishu long connection is started by the configured Service plugin; it is not a
-separate process to start after the Console. Start the optional Console in a
-second terminal with `npm run console:dev`, then open the URL printed by Vite.
-The Runtime uses a fresh client-session ID for each process start; do not reuse
-a fenced session ID.
+The Feishu long connection is started by the configured Service plugin; it is
+not a separate process to start after the Console. Start the optional Console
+in a third terminal with `npm run console:dev`, then open the URL printed by
+Vite. The Runtime uses a fresh client-session ID for each process start; do not
+reuse a fenced session ID.
 
 ## What to observe
 
-Provisioning creates `actor-intake-agent` / `endpoint-intake-agent` and its SSE Subscription. In the current Console, inspect Handoffs, their timeline and relationships, connector/operations pages, and audit material. The Console does **not** currently expose an Endpoint/session page, Delivery/Ack cursor view, or Status/Result payload detail. Inspect those operational facts through the public HTTP API or the durable SQLite/PostgreSQL state instead:
+Provisioning creates `actor-intake-agent` / `endpoint-intake-agent` and its SSE Subscription. The current Console **Operations → Deliveries** view shows Delivery operational state and attempts. It does **not** expose raw subscription cursors or Delivery/Status/Result payload bodies. The Console also has no Endpoint/session page. Inspect those omitted operational facts through the public HTTP API or durable SQLite/PostgreSQL state instead:
 
 1. **Console Handoffs** for `offered → accepted → result_returned` and relationships.
 2. **HTTP/SQLite/PostgreSQL** for Endpoint registration, active Session, lease, heartbeat, fencing token, Delivery/Ack cursor, Status, and Result payload.
@@ -82,11 +94,18 @@ npm run verify:agent-runtime
 npx vitest run examples/agently-agent-runtime/test/agently-daily-assistant.e2e.test.ts
 ```
 
-An opt-in real-model smoke test is manual and non-destructive. Copy Runtime YAML outside source control, set a chosen non-secret `provider.base_url` and `provider.model`, then explicitly provide a rotated credential:
+An opt-in real-model smoke test is manual and non-destructive. Copy Runtime YAML
+outside source control, set a chosen non-secret `provider.base_url` and
+`provider.model`, point the Runtime at that absolute copy, then explicitly
+provide a rotated credential:
 
 ```bash
+mkdir -p "$HOME/.config/work-fabric"
+cp "$REPOSITORY_ROOT/examples/config/agent-runtime-agently.yaml" "$HOME/.config/work-fabric/agent-runtime.yaml"
+# Edit provider.base_url and provider.model in $HOME/.config/work-fabric/agent-runtime.yaml.
+export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$HOME/.config/work-fabric/agent-runtime.yaml"
 export AGENTLY_MODEL_API_KEY=rotated-secret
-npm run agent-runtime:start -- --config ./runtime.yaml
+npm run agent-runtime:start
 ```
 
 Submit one `information.synthesis` Handoff, confirm Status and Result, then remove the credential. This path is not CI and must not enable Actions or external mutations.

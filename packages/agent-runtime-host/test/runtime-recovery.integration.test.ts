@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MemoryAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-memory";
 import type { AgentRuntimeDriver, RuntimeDriverResult } from "@work-fabric/agent-runtime-spi";
+import type { IncomingHandoff } from "@work-fabric/agent-gateway";
 import type { HandoffReadModel, OperationResult } from "@work-fabric/sdk-typescript";
 
 import { AgentRuntimeHost, type AgentRuntimeHostConfig } from "../src/index.js";
@@ -14,6 +15,45 @@ const acceptedSnapshot = (): HandoffReadModel => ({ tenant_id: "tenant-1", parti
 const config: AgentRuntimeHostConfig = { runtime_id: "runtime-1", tenant_id: "tenant-1", actor_id: "actor-runtime", endpoint_id: "endpoint-runtime", max_active_runs: 1, queue_capacity: 2, run_lease_seconds: 60, progress_interval_ms: 100, workspace_root: "/tmp/runtime-workspaces" };
 
 describe("AgentRuntimeHost recovery", () => {
+  it("recovers a Run durably captured before an acknowledged Delivery can crash", async () => {
+    class CrashAfterAcknowledgementStateStore extends MemoryAgentRuntimeStateStore {
+      private crashOnce = true;
+
+      override async markDeliveryAcknowledged(tenantId: string, deliveryId: string, acknowledgedAt: string): Promise<boolean> {
+        const marked = await super.markDeliveryAcknowledged(tenantId, deliveryId, acknowledgedAt);
+        if (this.crashOnce) {
+          this.crashOnce = false;
+          throw new Error("simulated process crash after Delivery Ack");
+        }
+        return marked;
+      }
+    }
+
+    const state = new CrashAfterAcknowledgementStateStore();
+    const execute = vi.fn(async () => runtimeResult);
+    const delivered: IncomingHandoff = {
+      partition_id: "handoff:handoff-1",
+      delivery: {
+        delivery_id: "delivery-before-crash", subscription_id: "subscription-1", attempt: 1,
+        events: [{ specversion: "1.0", id: "event-offered", source: "urn:test", type: "workfabric.handoff.offered.v1", subject: "handoff-1", time: setupNow, datacontenttype: "application/json", dataschema: "urn:test", wftenant: "tenant-1", wfexchange: "exchange-1", wfthread: "thread-1", wfhandoff: "handoff-1", wfactor: "actor-sender", wfendpoint: "endpoint-sender", wfsequence: 1, wfvisibility: "participants", data: {} }],
+        next_cursor: "cursor-1", delivered_at: setupNow, visibility_expires_at: "2026-07-26T00:01:00.000Z",
+      },
+      handoff: { ...acceptedSnapshot(), state: { lifecycle_state: "offered", resource_version: 1 }, stream_version: 1 },
+      acknowledgeSignal: vi.fn(async () => ({ kind: "acknowledged", cursor: "cursor-1" } as const)),
+    };
+    const crashedHost = recoveryHost(state, { lifecycle: "offered", execute });
+
+    await expect(crashedHost.handle(delivered)).rejects.toThrow("simulated process crash");
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("received");
+
+    const recoveredHost = recoveryHost(state, { lifecycle: "offered", execute });
+    await recoveredHost.start();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("succeeded");
+    await recoveredHost.close();
+  });
+
   it("reuses a durably captured result without invoking the model after a restart", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);
@@ -113,5 +153,5 @@ async function readyState(): Promise<MemoryAgentRuntimeStateStore> {
 function recoveryHost(state: MemoryAgentRuntimeStateStore, options: { readonly lifecycle?: string; readonly result?: RuntimeDriverResult; readonly returnResult?: ReturnType<typeof vi.fn>; readonly decision?: { readonly kind: "decline"; readonly code: "not_targeted" }; readonly execute?: AgentRuntimeDriver["execute"] } = {}) {
   const lifecycle = options.lifecycle ?? "accepted";
   const snapshot = (): HandoffReadModel => ({ tenant_id: "tenant-1", partition_id: "handoff:handoff-1", handoff_id: "handoff-1", stream_version: 2, state: { lifecycle_state: lifecycle, resource_version: 2, recipient: { actor_id: "actor-runtime" }, result: options.result ?? null }, latest_status: null } as unknown as HandoffReadModel);
-  return new AgentRuntimeHost({ config, session: { handoffs: { returnResult: options.returnResult ?? vi.fn(async () => operation(3)), accept: vi.fn(async () => operation(2)), decline: vi.fn(async () => operation(2)), reportStatus: vi.fn(async () => operation(3)) } as never, incoming: async function* () {}, close: async () => undefined, session_id: "session-1", closed: Promise.resolve({ reason: "closed" as const }) }, state, driver: { manifest: { driver_type: "test", protocol_version: "1", capability_ids: ["information.synthesis"] }, execute: options.execute ?? vi.fn(async () => runtimeResult) }, packageLoader: { load: vi.fn() } as never, policy: { decide: () => options.decision ?? ({ kind: "accept" as const }) }, queries: { getHandoff: vi.fn(async () => snapshot()) }, now: () => recoveryNow });
+  return new AgentRuntimeHost({ config, session: { handoffs: { returnResult: options.returnResult ?? vi.fn(async () => operation(3)), accept: vi.fn(async () => operation(2)), decline: vi.fn(async () => operation(2)), reportStatus: vi.fn(async () => operation(3)) } as never, incoming: async function* () {}, close: async () => undefined, session_id: "session-1", closed: Promise.resolve({ reason: "closed" as const }) }, state, driver: { manifest: { driver_type: "test", protocol_version: "1", capability_ids: ["information.synthesis"] }, execute: options.execute ?? vi.fn(async () => runtimeResult) }, packageLoader: { load: vi.fn(async () => ({ snapshot: snapshot(), events: [], task: { tenant_id: "tenant-1", handoff_id: "handoff-1" } })) } as never, policy: { decide: () => options.decision ?? ({ kind: "accept" as const }) }, queries: { getHandoff: vi.fn(async () => snapshot()) }, now: () => recoveryNow });
 }

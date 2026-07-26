@@ -113,30 +113,32 @@ describe("EndpointInboxProjector", () => {
     await expect(store.listPartitions(query)).resolves.toEqual({ items: [] });
   });
 
-  it("deactivates terminal Handoffs", async () => {
+  it.each(["target_unavailable", "closed", "declined", "expired", "cancelled", "transferred"])("deactivates the domain-terminal %s Handoff", async (terminal) => {
     const store = new MemoryEndpointInboxStore();
     const projector = new EndpointInboxProjector(store);
     await projector.apply(event());
-
     await projector.apply(event({
-      event_id: "event_02",
-      event_type: "workfabric.handoff.closed.v1",
+      event_id: `event_${terminal}`,
+      event_type: `workfabric.handoff.${terminal}.v1`,
       stream_version: 2,
       partition_position: 2,
-      protocol_data: {
-        resource_version: 2,
-        change: {
-          change_type: "closed",
-          from_state: "verified",
-          to_state: "closed",
-          changed_fields: ["lifecycle_state"],
-          details: {},
-        },
-        receipt: null,
-      },
+      protocol_data: { resource_version: 2, change: { change_type: terminal, from_state: "offered", to_state: terminal, changed_fields: ["lifecycle_state"], details: {} }, receipt: null },
     }));
-
     await expect(store.listPartitions(query)).resolves.toEqual({ items: [] });
+  });
+
+  it.each(["result_returned", "verified"])("keeps transitional %s Handoffs visible", async (transitional) => {
+    const store = new MemoryEndpointInboxStore();
+    const projector = new EndpointInboxProjector(store);
+    await projector.apply(event());
+    await projector.apply(event({
+      event_id: `event_${transitional}`,
+      event_type: `workfabric.handoff.${transitional}.v1`,
+      stream_version: 2,
+      partition_position: 2,
+      protocol_data: { resource_version: 2, change: { change_type: transitional, from_state: "accepted", to_state: transitional, changed_fields: ["lifecycle_state"], details: {} }, receipt: null },
+    }));
+    await expect(store.listPartitions(query)).resolves.toMatchObject({ items: [{ partition_id: "handoff:handoff_01" }] });
   });
 
   it("rebuilds one Tenant deterministically from committed records", async () => {

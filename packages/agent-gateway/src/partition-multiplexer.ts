@@ -105,6 +105,11 @@ export class PartitionMultiplexer {
   private synchronize(partitions: readonly string[]): void {
     for (const partition of partitions) {
       if (this.streams.has(partition)) continue;
+      // `streams` includes a partition removed from the active Inbox whose
+      // terminal Delivery remains unacknowledged.  It still owns a transport
+      // slot until that Delivery advances the cursor, so it shares the same
+      // hard cap as currently active partitions.
+      if (this.streams.size >= this.dependencies.maxPartitions) break;
       const controller = new AbortController();
       const abort = () => controller.abort(this.controller.signal.reason);
       this.controller.signal.addEventListener("abort", abort, { once: true });

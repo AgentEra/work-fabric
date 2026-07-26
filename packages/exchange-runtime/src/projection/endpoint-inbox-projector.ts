@@ -7,7 +7,7 @@ import type {
   ProjectionCheckpointStore,
   ProjectionFailureStore,
 } from "@work-fabric/exchange-spi";
-import type { Clock } from "@work-fabric/exchange-core";
+import { isTerminalHandoffLifecycle, type Clock, type HandoffLifecycleState } from "@work-fabric/exchange-core";
 import type { RuntimeOwnershipFence } from "../runtime-ownership-fence.js";
 
 export const ENDPOINT_INBOX_PROJECTOR_ID = "workfabric.endpoint-inbox.v1";
@@ -18,14 +18,6 @@ export type EndpointInboxProjectionRunResult =
   | { readonly kind: "blocked"; readonly position: number; readonly event_id: string; readonly reason: string };
 
 const HANDOFF_EVENT = /^workfabric\.handoff\.[a-z][a-z0-9_]*\.v1$/;
-const TERMINAL_STATES = new Set([
-  "closed",
-  "declined",
-  "expired",
-  "cancelled",
-  "transferred",
-]);
-
 function object(value: unknown, label: string): JsonObject {
   if (value === null || Array.isArray(value) || typeof value !== "object") {
     throw new TypeError(`${label} must be an object`);
@@ -96,7 +88,9 @@ export class EndpointInboxProjector {
       observed_position: record.partition_position,
       visible_actor_ids: [...record.visible_actor_ids],
       visible_endpoint_ids: [...record.visible_endpoint_ids],
-      active: !TERMINAL_STATES.has(state.state),
+      // Keep this projection aligned with the Core domain lifecycle. In
+      // particular, result_returned and verified remain actionable states.
+      active: !isTerminalHandoffLifecycle(state.state as HandoffLifecycleState),
     };
     await this.store.upsertRoutingFact(fact);
   }
