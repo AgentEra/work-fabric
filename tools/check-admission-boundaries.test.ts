@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -34,6 +34,18 @@ describe("Collaboration Admission architecture boundaries", () => {
     await expect(checkAdmissionBoundaries()).resolves.toMatchObject({
       source_files: expect.any(Number),
       admission_imports: expect.any(Number),
+      responsibility_violations: 0,
+      sensitive_sink_violations: 0,
+    });
+  });
+
+  it("ignores an ignored Python virtual environment without relaxing source symlink checks", async () => {
+    const root = await fixture({
+      "packages/admission-runtime/src/safe.ts": "export const safe = true;\n",
+    });
+    await mkdir(join(root, "runtimes/agently-worker/.venv/bin"), { recursive: true });
+    await symlink(process.execPath, join(root, "runtimes/agently-worker/.venv/bin/python"));
+    await expect(checkAdmissionBoundaries(root)).resolves.toMatchObject({
       responsibility_violations: 0,
       sensitive_sink_violations: 0,
     });

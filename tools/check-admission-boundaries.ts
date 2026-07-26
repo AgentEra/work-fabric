@@ -56,7 +56,7 @@ interface SourceAnalysis {
 
 const sourceExtension = /\.(?:[cm]?[jt]s|[jt]sx)$/i;
 const excludedDirectories = new Set([
-  ".cache", ".git", ".hg", ".parcel-cache", ".scratch", ".superpowers",
+  ".cache", ".git", ".hg", ".parcel-cache", ".scratch", ".superpowers", ".venv",
   ".svn", ".temp", ".tmp", ".turbo", ".worktrees", "node_modules",
   "scratch", "temp", "tmp",
 ]);

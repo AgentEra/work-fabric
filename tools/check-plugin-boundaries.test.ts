@@ -45,6 +45,15 @@ describe("configuration and collaboration-channel boundaries", () => {
     });
   });
 
+  it("ignores an ignored Python virtual environment without relaxing source symlink checks", async () => {
+    const root = await fixture(allowedSdkImport);
+    await mkdir(join(root, "runtimes/agently-worker/.venv/bin"), { recursive: true });
+    await symlink(process.execPath, join(root, "runtimes/agently-worker/.venv/bin/python"));
+    await expect(checkPluginBoundaries(root)).resolves.toMatchObject({
+      responsibility_violations: 0,
+    });
+  });
+
   it("allows the one production SDK import anywhere inside the Node Adapter", async () => {
     await expect(checkPluginBoundaries(await fixture(allowedSdkImport))).resolves.toMatchObject({
       sdk_imports: 1,
