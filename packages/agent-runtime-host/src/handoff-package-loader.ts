@@ -2,6 +2,7 @@ import type { AgentRoleProfile, RuntimeJsonObject, RuntimeTaskPackage } from "@w
 import type { HandoffEventQuery, HandoffReadModel, ProtocolEvent, RequestOptions } from "@work-fabric/sdk-typescript";
 
 import { invalid } from "./errors.js";
+import { normalizeRfc3339 } from "./rfc3339.js";
 import { cloneFrozenJson } from "./safe-json.js";
 
 export interface RuntimeHandoffQueries {
@@ -36,8 +37,10 @@ function id(value: unknown, path: string): string {
 }
 
 function timestamp(value: unknown, path: string, now: string): string {
-  if (typeof value !== "string" || !Number.isFinite(Date.parse(value)) || Date.parse(value) <= Date.parse(now)) invalid("expired_timestamp", path);
-  return value;
+  const normalized = normalizeRfc3339(value, path, "expired_timestamp");
+  const normalizedNow = normalizeRfc3339(now, "now", "expired_timestamp");
+  if (Date.parse(normalized) <= Date.parse(normalizedNow)) invalid("expired_timestamp", path);
+  return normalized;
 }
 
 function jsonObject(value: unknown, path: string): RuntimeJsonObject {
@@ -56,8 +59,23 @@ function target(value: unknown, path: string): JsonRecord {
   const keys = Object.keys(item);
   if (keys.length !== 1 || !["actor_id", "endpoint_id", "capability_requirement"].includes(keys[0]!)) invalid("invalid_snapshot", path);
   if (keys[0] === "actor_id" || keys[0] === "endpoint_id") id(item[keys[0]!], `${path}.${keys[0]}`);
-  else jsonObject(item.capability_requirement, `${path}.capability_requirement`);
+  else capabilityRequirement(item.capability_requirement, `${path}.capability_requirement`);
   return item;
+}
+
+function capabilityRequirement(value: unknown, path: string): void {
+  const item = record(value, path);
+  const allowed = ["capability_id", "version_constraint", "input_media_types", "output_media_types", "constraints", "extensions"];
+  if (!Object.hasOwn(item, "capability_id") || Object.keys(item).some((key) => !allowed.includes(key))) invalid("invalid_snapshot", path);
+  const capabilityId = id(item.capability_id, `${path}.capability_id`);
+  if (!/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(capabilityId)) invalid("invalid_snapshot", `${path}.capability_id`);
+  if (item.version_constraint !== undefined && (typeof item.version_constraint !== "string" || item.version_constraint.length === 0 || item.version_constraint.length > 256)) invalid("invalid_snapshot", `${path}.version_constraint`);
+  for (const field of ["input_media_types", "output_media_types"] as const) {
+    const media = item[field];
+    if (media !== undefined && (!Array.isArray(media) || new Set(media).size !== media.length || media.some((entry) => typeof entry !== "string" || entry.length > 255 || !/^[^/\s]+\/[^/\s]+$/.test(entry)))) invalid("invalid_snapshot", `${path}.${field}`);
+  }
+  if (item.constraints !== undefined) jsonObject(item.constraints, `${path}.constraints`);
+  if (item.extensions !== undefined) jsonObject(item.extensions, `${path}.extensions`);
 }
 
 function actor(value: unknown, path: string): void {
@@ -111,7 +129,7 @@ export class HandoffPackageLoader {
     if (state.handoff_id !== handoffId || state.resource_version !== snapshot.stream_version) invalid("snapshot_version_mismatch", "state");
     const threadId = id(state.thread_id, "state.thread_id");
     if (typeof state.lifecycle_state !== "string" || !LIFECYCLES.has(state.lifecycle_state)) invalid("unsupported_lifecycle", "state.lifecycle_state");
-    if (typeof state.created_at !== "string" || !Number.isFinite(Date.parse(state.created_at)) || typeof state.updated_at !== "string" || !Number.isFinite(Date.parse(state.updated_at))) invalid("invalid_snapshot", "state.timestamps");
+    normalizeRfc3339(state.created_at, "state.created_at", "invalid_snapshot"); normalizeRfc3339(state.updated_at, "state.updated_at", "invalid_snapshot");
     actor(state.initiator, "state.initiator"); actor(state.verifier, "state.verifier");
     if (state.recipient !== null) actor(state.recipient, "state.recipient");
     if (state.current_responsible_actor !== null) actor(state.current_responsible_actor, "state.current_responsible_actor");
@@ -122,7 +140,7 @@ export class HandoffPackageLoader {
       actor(binding.resolved_by, "state.target_binding.resolved_by");
       id(binding.resolver_endpoint_id, "state.target_binding.resolver_endpoint_id");
       if (binding.delegation_id !== null) id(binding.delegation_id, "state.target_binding.delegation_id");
-      if (typeof binding.resolved_at !== "string" || !Number.isFinite(Date.parse(binding.resolved_at))) invalid("invalid_snapshot", "state.target_binding.resolved_at");
+      normalizeRfc3339(binding.resolved_at, "state.target_binding.resolved_at", "invalid_snapshot");
       objectArray(binding.evidence, "state.target_binding.evidence", 128);
     }
     const handoffPackage = record(state.package, "state.package"); exact(handoffPackage, PACKAGE_FIELDS, "state.package");

@@ -70,4 +70,11 @@ describe("HandoffPackageLoader", () => {
     expect(Object.isFrozen(loaded.events)).toBe(true);
     expect(Object.isFrozen(loaded.task)).toBe(true);
   });
+
+  it("rejects invalid calendar timestamps before producing a task", async () => {
+    const invalidCalendar = structuredClone(snapshot) as unknown as { state: { package: { accept_by: string } } };
+    invalidCalendar.state.package.accept_by = "2026-02-30T00:00:00Z";
+    const client = { getHandoff: vi.fn(async () => invalidCalendar as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
+    await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-01-01T00:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).rejects.toThrow("expired_timestamp");
+  });
 });

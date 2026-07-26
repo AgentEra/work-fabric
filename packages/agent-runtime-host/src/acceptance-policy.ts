@@ -1,5 +1,7 @@
 import type { HandoffReadModel, ProtocolEvent } from "@work-fabric/sdk-typescript";
 
+import { normalizeRfc3339 } from "./rfc3339.js";
+
 export type AcceptanceDecision =
   | { readonly kind: "accept" }
   | { readonly kind: "decline"; readonly code: "not_targeted" | "unsupported_capability" | "expired" | "terminal" | "authority_missing" | "already_running" }
@@ -29,8 +31,8 @@ function equalTarget(target: unknown, options: DeterministicAcceptancePolicyOpti
     || (keys.length === 1 && keys[0] === "endpoint_id" && value.endpoint_id === options.endpoint_id);
 }
 
-function rfc3339Utc(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) && Number.isFinite(Date.parse(value));
+function rfc3339(value: unknown): string | null {
+  try { return normalizeRfc3339(value, "timestamp"); } catch { return null; }
 }
 
 function canonicalBinding(value: unknown, options: DeterministicAcceptancePolicyOptions): boolean {
@@ -41,7 +43,7 @@ function canonicalBinding(value: unknown, options: DeterministicAcceptancePolicy
     && actor !== null && Object.keys(actor).length === 2 && typeof actor.actor_id === "string" && ["human", "agent", "system"].includes(actor.actor_type as string)
     && typeof binding.resolver_endpoint_id === "string" && binding.resolver_endpoint_id.length > 0
     && (binding.delegation_id === null || typeof binding.delegation_id === "string")
-    && rfc3339Utc(binding.resolved_at)
+    && rfc3339(binding.resolved_at) !== null
     && Array.isArray(binding.evidence);
 }
 
@@ -62,16 +64,31 @@ export class DeterministicAcceptancePolicy {
     if (handoffPackage === null) return { kind: "decline", code: "terminal" };
     const authority = object(handoffPackage.authority_scope);
     if (authority === null || typeof authority.delegation_id !== "string" || authority.delegation_id.length === 0 || !Array.isArray(authority.scopes) || authority.scopes.length === 0 || !Array.isArray(authority.resource_refs)) return { kind: "decline", code: "authority_missing" };
-    if (!rfc3339Utc(authority.expires_at) || Date.parse(authority.expires_at) <= Date.parse(this.now())) return { kind: "decline", code: "expired" };
-    if (!rfc3339Utc(handoffPackage.accept_by) || Date.parse(handoffPackage.accept_by) <= Date.parse(this.now())) return { kind: "decline", code: "expired" };
+    const now = rfc3339(this.now());
+    const authorityExpiry = rfc3339(authority.expires_at);
+    const acceptBy = rfc3339(handoffPackage.accept_by);
+    if (now === null || authorityExpiry === null || Date.parse(authorityExpiry) <= Date.parse(now)) return { kind: "decline", code: "expired" };
+    if (acceptBy === null || Date.parse(acceptBy) <= Date.parse(now)) return { kind: "decline", code: "expired" };
     const target = object(handoffPackage.target);
     if (target === null) return { kind: "decline", code: "not_targeted" };
     if (Object.hasOwn(target, "capability_requirement")) {
+      if (Object.keys(target).length !== 1) return { kind: "decline", code: "not_targeted" };
       const requirement = object(target.capability_requirement);
-      if (requirement === null || typeof requirement.capability_id !== "string" || !this.options.allowed_capability_ids.includes(requirement.capability_id)) return { kind: "decline", code: "unsupported_capability" };
+      if (!canonicalRequirement(requirement) || !this.options.allowed_capability_ids.includes(requirement.capability_id)) return { kind: "decline", code: "unsupported_capability" };
       if (!canonicalBinding(state.target_binding, this.options)) return { kind: "decline", code: "not_targeted" };
     } else if (!equalTarget(target, this.options)) return { kind: "decline", code: "not_targeted" };
     if (alreadyRunning) return { kind: "decline", code: "already_running" };
     return { kind: "accept" };
   }
+}
+
+function canonicalRequirement(value: Record<string, unknown> | null): value is Record<string, unknown> & { readonly capability_id: string } {
+  if (value === null || !Object.hasOwn(value, "capability_id") || Object.keys(value).some((key) => !["capability_id", "version_constraint", "input_media_types", "output_media_types", "constraints", "extensions"].includes(key))) return false;
+  if (typeof value.capability_id !== "string" || !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(value.capability_id) || value.capability_id.length > 128) return false;
+  if (value.version_constraint !== undefined && (typeof value.version_constraint !== "string" || value.version_constraint.length === 0 || value.version_constraint.length > 256)) return false;
+  for (const field of ["input_media_types", "output_media_types"] as const) {
+    const media = value[field];
+    if (media !== undefined && (!Array.isArray(media) || new Set(media).size !== media.length || media.some((item) => typeof item !== "string" || item.length > 255 || !/^[^/\s]+\/[^/\s]+$/.test(item)))) return false;
+  }
+  return true;
 }

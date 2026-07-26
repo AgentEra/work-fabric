@@ -11,8 +11,14 @@ describe("protocol mapping", () => {
     const payload = statusPayload("handoff-1", {
       sequence: 2, progress: 0.5, message: "Working", observed_at: "2026-07-26T00:00:00.000Z",
     });
-    expect(payload.status).toMatchObject({ status_report_id: "status:handoff-1:2", execution_status: "in_progress", progress: 0.5, message: [{ kind: "text", media_type: "text/plain", text: "Working" }], observed_at: "2026-07-26T00:00:00.000Z", blocked_on: [] });
+    expect(payload.status).toMatchObject({ status_report_id: expect.stringMatching(/^status-[a-f0-9]{48}-2$/), execution_status: "in_progress", progress: 0.5, message: [{ kind: "text", media_type: "text/plain", text: "Working" }], observed_at: "2026-07-26T00:00:00.000Z", blocked_on: [] });
     expect(schemas.validate("urn:work-fabric:schema:v1:handoff-status-command", payload)).toEqual({ valid: true });
+    const maxHandoff = "h".repeat(128);
+    const bounded = statusPayload(maxHandoff, { sequence: Number.MAX_SAFE_INTEGER, progress: null, message: "Working", observed_at: "2026-07-26T00:00:00.000Z" });
+    const statusReportId = bounded.status.status_report_id as string;
+    expect(statusReportId.length).toBeLessThanOrEqual(128);
+    expect(statusReportId).toContain(String(Number.MAX_SAFE_INTEGER));
+    expect(schemas.validate("urn:work-fabric:schema:v1:handoff-status-command", bounded)).toEqual({ valid: true });
   });
 
   it("maps a driver result without allowing forbidden extensions", () => {

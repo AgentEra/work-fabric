@@ -1,4 +1,5 @@
 import type { RuntimeDriverResult, RuntimeJsonObject, RuntimeJsonValue, RuntimeProgress } from "@work-fabric/agent-runtime-spi";
+import { createHash } from "node:crypto";
 import type { HandoffResultPayload, HandoffStatusPayload } from "@work-fabric/sdk-typescript";
 
 import { invalid } from "./errors.js";
@@ -126,7 +127,8 @@ export function statusPayload(handoffId: string, update: RuntimeProgress): Hando
   if (update.progress !== null && (typeof update.progress !== "number" || !Number.isFinite(update.progress) || update.progress < 0 || update.progress > 1)) invalid("invalid_progress", "progress");
   if (typeof update.message !== "string" || update.message.length === 0 || update.message.length > 4_096) invalid("invalid_progress", "message");
   timestamp(update.observed_at, "observed_at");
-  return { handoff_id: handoffId, status: { status_report_id: `status:${handoffId}:${update.sequence}`, execution_status: "in_progress", ...(update.progress === null ? {} : { progress: update.progress }), message: [{ kind: "text", media_type: "text/plain", text: update.message }], observed_at: update.observed_at, blocked_on: [] } };
+  const statusReportId = `status-${createHash("sha256").update(handoffId).digest("hex").slice(0, 48)}-${update.sequence}`;
+  return { handoff_id: handoffId, status: { status_report_id: statusReportId, execution_status: "in_progress", ...(update.progress === null ? {} : { progress: update.progress }), message: [{ kind: "text", media_type: "text/plain", text: update.message }], observed_at: update.observed_at, blocked_on: [] } };
 }
 
 export function resultPayload(handoffId: string, result: RuntimeDriverResult): HandoffResultPayload {

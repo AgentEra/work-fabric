@@ -32,7 +32,10 @@ describe("DeterministicAcceptancePolicy", () => {
   it("ignores own status or result redelivery", () => expect(policy.decide(snapshot(), event("workfabric.handoff.status_reported.v1", "actor-1"), false)).toEqual({ kind: "ignore", code: "own_update" }));
   it.each([
     ["non-RFC3339 deadline", { ...state.package, accept_by: "tomorrow" }],
+    ["invalid calendar deadline", { ...state.package, accept_by: "2027-02-30T00:00:00Z" }],
     ["multi-discriminator direct target", { ...state.package, target: { actor_id: "actor-1", endpoint_id: "endpoint-1" } }],
     ["extra direct target field", { ...state.package, target: { actor_id: "actor-1", extra: true } }],
-  ])("fails closed for %s", (_name, handoffPackage) => expect(policy.decide(snapshot({ package: handoffPackage }), event("workfabric.handoff.offered.v1"), false)).not.toEqual({ kind: "accept" }));
+    ["capability target with direct Actor", { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis" }, actor_id: "actor-1" } }],
+    ["capability requirement unknown field", { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis", unexpected: true } } }],
+  ])("fails closed for %s", (_name, handoffPackage) => expect(policy.decide(snapshot({ package: handoffPackage, target_binding: binding }), event("workfabric.handoff.offered.v1"), false)).not.toEqual({ kind: "accept" }));
 });
