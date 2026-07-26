@@ -156,11 +156,13 @@ It does not itself commit a downstream business-system mutation.
 
 ### `information.synthesis`
 
-Summarize, organize, or answer questions from the Context explicitly supplied
-and authorized for the Handoff.
+Summarize, organize, or answer questions from content actually supplied and
+authorized in the Handoff. A future Context Provider may add materialized
+Context after applying its visibility and Authority checks.
 
-It does not imply access to all tenant documents, conversations, or knowledge
-systems.
+It does not imply access to all tenant documents, conversations, knowledge
+systems, or the contents behind a Context reference. The first version has no
+Context materialization or long-term Memory Provider.
 
 ### `collaboration.handoff.draft`
 
@@ -258,7 +260,8 @@ is enforced separately for each protocol operation.
 Each Handoff supplies the minimum AuthorityScope needed for its work. The
 first version needs only authority to:
 
-- read the Handoff package and authorized Context;
+- read the public Handoff package, including its Context reference but not
+  repository content hidden behind that reference;
 - accept or decline its assigned Handoff;
 - report execution status;
 - return a Result.
@@ -447,7 +450,8 @@ Workspace content are excluded from default logs and metrics.
 4. mention the Feishu bot with a supported natural-language request;
 5. observe Delivery Ack, Handoff acceptance, progress, and structured Result;
 6. verify that a downstream request is only a draft;
-7. restart the Runtime and prove the Handoff is not executed twice;
+7. restart after the validated Result is durable and prove the completed
+   Handoff does not call the model again;
 8. send a second request and prove continued operation.
 
 ## Success criteria

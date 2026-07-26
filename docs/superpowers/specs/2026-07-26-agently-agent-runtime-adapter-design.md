@@ -152,7 +152,8 @@ The host passes an immutable `AgentExecutionTask` containing:
 - stable `execution_id`, `handoff_id`, and attempt;
 - work reference;
 - intent content parts;
-- the authorized Context Bundle, if present;
+- the authorized Context reference and any content explicitly materialized by
+  a configured external Context Provider;
 - complete acceptance criteria;
 - deadlines and priority;
 - advertised capability ID;
@@ -189,13 +190,21 @@ Handoff snapshot. The Host obtains execution inputs through public APIs:
 3. list the Handoff events to validate provenance, sequence, and current
    stream version without assuming the public event projection exposes the
    original Package;
-4. extract Intent, Context Bundle, acceptance criteria, authority scope,
+4. extract Intent, Context reference, acceptance criteria, authority scope,
    priority, and deadlines from the snapshot Package;
 5. verify that the event stream and current snapshot identify the same
    Handoff, lifecycle, and target.
 
 No Runtime package is allowed to import a Work Fabric persistence adapter or
 query Work Fabric SQLite/PostgreSQL directly.
+
+The current public surface validates and preserves a Context reference but
+does not expose Context Repository content to an external Runtime. The first
+implementation therefore consumes Handoff Intent and other content actually
+present in the public Package, and carries the Context reference as metadata.
+A future Context Provider may materialize referenced content after enforcing
+tenant, Actor, Endpoint, visibility, version, digest, and AuthorityScope. That
+Provider is an external extension and does not authorize a database shortcut.
 
 ## Responsibility policy
 
@@ -313,7 +322,9 @@ use TriggerFlow merely to wrap one model call.
 Inputs are rendered into distinct sections:
 
 - immutable work intent;
-- authorized Context;
+- authorized Intent and other inline Package content;
+- optional Context content materialized by a configured external Provider
+  (none in the first implementation);
 - acceptance criteria;
 - output contract;
 - non-negotiable restrictions.
@@ -426,7 +437,9 @@ are fixed:
   privilege Authority rules.
 - Validate Endpoint registration, advertised capabilities, and target binding
   before acceptance.
-- Enforce Context visibility through Work Fabric Query APIs.
+- Do not materialize Context content without a Provider that enforces tenant,
+  Actor, Endpoint, visibility, version, digest, and AuthorityScope; the first
+  implementation has no such Provider.
 - Never expose Work Fabric credentials to model prompts or Agently Workspace.
 - Never expose model credentials to Work Fabric.
 - Do not log full Context, prompts, model responses, process environment,
@@ -471,7 +484,12 @@ Workspace content are excluded from default logs and metrics.
 
 - Delivery persists before Ack;
 - duplicate Delivery does not duplicate Accept, execution, status, or Result;
-- accepted Handoff executes exactly once;
+- an accepted Handoff has one logical Runtime run and no concurrent duplicate
+  execution; after a validated result is durably captured, restart never
+  calls the model again;
+- a process attempt whose outcome is unknown before durable result capture
+  may be retried; the first version exposes no mutating tools, so such a retry
+  cannot duplicate an external business side effect;
 - restart between Ack/Accept, Accept/execute, and execute/Result recovers;
 - terminal Handoff aborts execution;
 - Host ignores its own status/result events as new work;
