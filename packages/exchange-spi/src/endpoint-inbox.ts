@@ -46,5 +46,6 @@ export interface EndpointInboxStore extends ExchangeAdapter {
   listPartitions(
     input: EndpointInboxPartitionQuery,
   ): Promise<EndpointInboxPartitionPage>;
+  clearPartitionProjection(tenantId: string, partitionId: string): Promise<void>;
   clearTenantProjection(tenantId: string): Promise<void>;
 }

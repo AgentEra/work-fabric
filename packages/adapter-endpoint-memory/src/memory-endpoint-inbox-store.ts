@@ -146,4 +146,12 @@ export class MemoryEndpointInboxStore implements EndpointInboxStore {
       if (fact.tenant_id === tenantId) this.facts.delete(key);
     }
   }
+
+  async clearPartitionProjection(tenantId: string, partitionId: string): Promise<void> {
+    for (const [key, fact] of this.facts) {
+      if (fact.tenant_id === tenantId && fact.partition_id === partitionId) {
+        this.facts.delete(key);
+      }
+    }
+  }
 }

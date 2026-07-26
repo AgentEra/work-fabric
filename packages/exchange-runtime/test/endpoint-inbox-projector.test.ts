@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { MemoryEndpointInboxStore } from "@work-fabric/adapter-endpoint-memory";
-import type { EventRecord } from "@work-fabric/exchange-spi";
+import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
+import type { EventJournal, EventRecord } from "@work-fabric/exchange-spi";
 
-import { EndpointInboxProjector } from "../src/index.js";
+import { ENDPOINT_INBOX_PROJECTOR_ID, EndpointInboxProjector } from "../src/index.js";
 
 function event(
   overrides: Partial<EventRecord> = {},
@@ -53,7 +54,36 @@ const query = {
   limit: 10,
 };
 
+class StaticJournal implements EventJournal {
+  constructor(private readonly records: readonly EventRecord[]) {}
+  async readStream() { return []; }
+  async readPartition(partitionId: string, afterPosition: number, limit: number) {
+    return this.records.filter((record) => record.partition_id === partitionId && record.partition_position > afterPosition).slice(0, limit);
+  }
+}
+
 describe("EndpointInboxProjector", () => {
+  it("owns a checkpoint, records a partial projection block, and rebuilds its partition", async () => {
+    const store = new MemoryEndpointInboxStore();
+    const persistence = new MemoryExchangePersistence();
+    const projector = new EndpointInboxProjector(
+      store,
+      new StaticJournal([
+        event(),
+        event({ event_id: "event_02", partition_position: 2, stream_version: 2, protocol_data: { resource_version: 1, change: { change_type: "invalid", from_state: "offered", to_state: "accepted", changed_fields: [], details: {} }, receipt: null } }),
+      ]),
+      persistence,
+      persistence,
+      { now: () => "2026-07-15T00:00:00Z" },
+    );
+
+    await expect(projector.runPartition("handoff:handoff_01", 10)).resolves.toMatchObject({ kind: "blocked", position: 1, event_id: "event_02" });
+    expect(await persistence.loadProjectionCheckpoint(ENDPOINT_INBOX_PROJECTOR_ID, "handoff:handoff_01")).toBe(1);
+    expect(await persistence.listProjectionFailures(ENDPOINT_INBOX_PROJECTOR_ID, "handoff:handoff_01")).toHaveLength(1);
+
+    await expect(projector.rebuildPartition("tenant_01", "handoff:handoff_01", 1)).rejects.toThrow(/blocked/);
+  });
+
   it("projects only routing facts for every visible audience", async () => {
     const store = new MemoryEndpointInboxStore();
     const projector = new EndpointInboxProjector(store);

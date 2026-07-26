@@ -52,12 +52,12 @@ export function createSqliteEndpointInboxStore(
     tenant_id: tenantId,
     store_kind: "endpoint-inbox",
     target: new MemoryEndpointInboxStore(),
-    mutations: new Set(["upsertRoutingFact", "clearTenantProjection"]),
+    mutations: new Set(["upsertRoutingFact", "clearPartitionProjection", "clearTenantProjection"]),
     tenant_guard(method, args) {
       assertTenant(
         method === "upsertRoutingFact"
           ? (args[0] as { tenant_id?: unknown } | undefined)?.tenant_id
-          : method === "clearTenantProjection"
+          : method === "clearTenantProjection" || method === "clearPartitionProjection"
             ? args[0]
             : (args[0] as { tenant_id?: unknown } | undefined)?.tenant_id,
         tenantId,

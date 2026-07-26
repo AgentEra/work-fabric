@@ -27,7 +27,11 @@ describe("memory Node service composition", () => {
     await expect(service.http.dispatch({ method: "GET", url: "/health/live" }))
       .resolves.toMatchObject({ status_code: 200 });
     await expect(service.runProjection("partition-empty", 100))
-      .resolves.toMatchObject({ handoff: { kind: "idle" }, collaboration: { kind: "idle" } });
+      .resolves.toMatchObject({
+        handoff: { kind: "idle" },
+        endpoint_inbox: { kind: "idle" },
+        collaboration: { kind: "idle" },
+      });
     await service.close();
   });
 });

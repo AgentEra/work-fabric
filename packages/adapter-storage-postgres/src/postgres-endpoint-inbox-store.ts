@@ -176,4 +176,13 @@ export class PostgresEndpointInboxStore implements EndpointInboxStore {
       );
     });
   }
+
+  async clearPartitionProjection(tenantId: string, partitionId: string): Promise<void> {
+    await this.run(tenantId, async (client) => {
+      await client.query(
+        "DELETE FROM work_fabric_endpoint_inbox_facts WHERE tenant_id=$1 AND partition_id=$2",
+        [tenantId, partitionId],
+      );
+    });
+  }
 }

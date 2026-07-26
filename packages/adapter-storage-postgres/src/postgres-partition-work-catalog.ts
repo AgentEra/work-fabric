@@ -23,6 +23,14 @@ export const CLUSTER_RUNTIME_MIGRATION = {
   ),
 } as const;
 
+export const ENDPOINT_INBOX_PROJECTION_MIGRATION = {
+  id: "011_endpoint_inbox_projection",
+  sql: readFileSync(
+    new URL("../migrations/011_endpoint_inbox_projection.sql", import.meta.url),
+    "utf8",
+  ),
+} as const;
+
 const manifest: ClusterCapabilityManifest = {
   profile: "workfabric.cluster.v1",
   adapter: "postgres",
@@ -88,6 +96,13 @@ WHERE ready.tenant_id = $1
       WHERE checkpoint.tenant_id = ready.tenant_id
         AND checkpoint.partition_id = ready.partition_id
         AND checkpoint.projector_id = 'workfabric.handoff.read-model.v1'
+    ), 0)
+    WHEN 'endpoint_inbox_projection' THEN ready.observed_position > COALESCE((
+      SELECT checkpoint.position
+      FROM work_fabric_projection_checkpoints AS checkpoint
+      WHERE checkpoint.tenant_id = ready.tenant_id
+        AND checkpoint.partition_id = ready.partition_id
+        AND checkpoint.projector_id = 'workfabric.endpoint-inbox.v1'
     ), 0)
     WHEN 'collaboration_projection' THEN ready.observed_position > COALESCE((
       SELECT checkpoint.position

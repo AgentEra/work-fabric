@@ -57,6 +57,7 @@ import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import {
   ClusterHost,
   CollaborationProjectionHandler,
+  EndpointInboxProjectionHandler,
   HandoffProjectionHandler,
   OutboxWakeupHandler,
   PartitionWorker,
@@ -95,7 +96,6 @@ import {
   DefaultSubscriptionDeliveryPolicy,
   EndpointInboxProjector,
   EndpointInboxQueryService,
-  HANDOFF_PROJECTOR_ID,
   HandoffProjector,
   MemoryHandoffReadModelStore,
   MemorySubscriptionStore,
@@ -636,6 +636,7 @@ export interface ComposedNodeService {
   readonly admission: CollaborationAdmissionService | null;
   runProjection(partitionId: string, limit: number): Promise<{
     readonly handoff: Awaited<ReturnType<HandoffProjector["runPartition"]>>;
+    readonly endpoint_inbox: Awaited<ReturnType<EndpointInboxProjector["runPartition"]>>;
     readonly collaboration: Awaited<ReturnType<CollaborationProjector["runPartition"]>>;
   }>;
   rebuildProjection(partitionId: string, limit: number): Promise<void>;
@@ -731,22 +732,13 @@ export async function composeNodeService(
     storage.handoffs,
     clock,
   );
-  const endpointInboxProjector = new EndpointInboxProjector(storage.endpointInbox);
-  async function projectHandoffPartition(partitionId: string, limit: number) {
-    const position = await storage.persistence.loadProjectionCheckpoint(
-      HANDOFF_PROJECTOR_ID,
-      partitionId,
-    );
-    const handoff = await handoffProjector.runPartition(partitionId, limit);
-    if (handoff.kind !== "advanced") return handoff;
-    const records = await storage.persistence.readPartition(
-      partitionId,
-      position,
-      handoff.processed,
-    );
-    for (const record of records) await endpointInboxProjector.apply(record);
-    return handoff;
-  }
+  const endpointInboxProjector = new EndpointInboxProjector(
+    storage.endpointInbox,
+    storage.persistence,
+    storage.persistence,
+    storage.persistence,
+    clock,
+  );
   const collaborationProjector = new CollaborationProjector(
     storage.persistence,
     storage.persistence,
@@ -774,7 +766,8 @@ export async function composeNodeService(
       max_work_keys: 10_000,
       turn_limit: 100,
       async turn(partitionId, limit) {
-        await projectHandoffPartition(partitionId, limit);
+        await handoffProjector.runPartition(partitionId, limit);
+        await endpointInboxProjector.runPartition(partitionId, limit);
         await collaborationProjector.runPartition(partitionId, limit);
         await localSignalDispatcher.dispatchPartitionTurn(partitionId, config.tenant_id, limit);
       },
@@ -784,10 +777,16 @@ export async function composeNodeService(
     async handle(...args: Parameters<ExchangeApplication["handle"]>) {
       const result = await application.handle(...args);
       const resourceId = result.resource?.resource_id;
-      if (result.operation_status === "accepted" && result.resource?.resource_type === "handoff" && typeof resourceId === "string") {
+      if (
+        localPump !== undefined &&
+        result.operation_status === "accepted" &&
+        result.resource?.resource_type === "handoff" &&
+        typeof resourceId === "string"
+      ) {
         const partitionId = handoffPartitionId(config.tenant_id, resourceId);
-        await projectHandoffPartition(partitionId, 10_000);
-        localPump?.wake(partitionId);
+        await handoffProjector.runPartition(partitionId, 10_000);
+        await endpointInboxProjector.runPartition(partitionId, 10_000);
+        localPump.wake(partitionId);
       }
       return result;
     },
@@ -845,6 +844,7 @@ export async function composeNodeService(
         row_lease_seconds: config.cluster.lease_seconds,
       }),
       new HandoffProjectionHandler(handoffProjector),
+      new EndpointInboxProjectionHandler(endpointInboxProjector),
       new CollaborationProjectionHandler(collaborationProjector),
       new SignalDeliveryHandler(workerDependencies.signal_dispatcher),
     ];
@@ -1061,15 +1061,28 @@ export async function composeNodeService(
     http,
     admission: admissionComposition?.service ?? null,
     async runProjection(partitionId, limit) {
-      const handoff = await projectHandoffPartition(partitionId, limit);
+      const handoff = await handoffProjector.runPartition(partitionId, limit);
+      const endpointInbox = await endpointInboxProjector.runPartition(
+        partitionId,
+        limit,
+      );
       const collaborationResult = await collaborationProjector.runPartition(
         partitionId,
         limit,
       );
-      return { handoff, collaboration: collaborationResult };
+      return {
+        handoff,
+        endpoint_inbox: endpointInbox,
+        collaboration: collaborationResult,
+      };
     },
     async rebuildProjection(partitionId, limit) {
       await handoffProjector.rebuildPartition(partitionId, limit);
+      await endpointInboxProjector.rebuildPartition(
+        config.tenant_id,
+        partitionId,
+        limit,
+      );
       await collaborationProjector.rebuildPartition(config.tenant_id, partitionId, limit);
     },
     start: startService,

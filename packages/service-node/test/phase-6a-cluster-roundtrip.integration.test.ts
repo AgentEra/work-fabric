@@ -19,6 +19,7 @@ import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import {
   ClusterHost,
   CollaborationProjectionHandler,
+  EndpointInboxProjectionHandler,
   HandoffProjectionHandler,
   OutboxWakeupHandler,
   PartitionWorker,
@@ -45,6 +46,7 @@ import {
 } from "@work-fabric/exchange-spi";
 import {
   DefaultSubscriptionDeliveryPolicy,
+  EndpointInboxProjector,
   HandoffProjector,
   MemoryHandoffReadModelStore,
   MemorySubscriptionStore,
@@ -214,6 +216,7 @@ class FaultInjectingCluster
     const kinds: readonly PartitionWorkKind[] = [
       "outbox_wakeup",
       "handoff_projection",
+      "endpoint_inbox_projection",
       "collaboration_projection",
       "signal_delivery",
     ];
@@ -396,6 +399,13 @@ describe("Phase 6A clustered runtime roundtrip", () => {
     const handoffProjector = new HandoffProjector(
       persistence, persistence, persistence, handoffs, clock,
     );
+    const endpointInboxProjector = new EndpointInboxProjector(
+      storage.endpointInbox,
+      persistence,
+      persistence,
+      persistence,
+      clock,
+    );
     const collaborationProjector = new CollaborationProjector(
       persistence, persistence, persistence, handoffs, operations.collaboration, clock,
     );
@@ -408,6 +418,7 @@ describe("Phase 6A clustered runtime roundtrip", () => {
         row_lease_seconds: 10,
       }),
       new HandoffProjectionHandler(handoffProjector),
+      new EndpointInboxProjectionHandler(endpointInboxProjector),
       new CollaborationProjectionHandler(collaborationProjector),
       new SignalDeliveryHandler(dispatcher),
     ];

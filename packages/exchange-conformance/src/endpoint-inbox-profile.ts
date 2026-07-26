@@ -95,6 +95,9 @@ export async function verifyEndpointInboxProfile(
   assert.deepEqual(await store.listPartitions(query), { items: [] });
 
   await store.upsertRoutingFact(fact({ tenant_id: "tenant_other", handoff_id: "h_other", partition_id: "handoff:h_other" }));
+  await store.upsertRoutingFact(fact({ handoff_id: "h_partition", partition_id: "handoff:partition", last_event_id: "event_partition" }));
+  await store.clearPartitionProjection("tenant_profile_01", "handoff:partition");
+  assert.equal((await store.listPartitions(query)).items.some((item) => item.partition_id === "handoff:partition"), false);
   await store.clearTenantProjection("tenant_profile_01");
   assert.deepEqual(await store.listPartitions(query), { items: [] });
   assert.equal((await store.listPartitions({ ...query, tenant_id: "tenant_other" })).items.length, 1);
