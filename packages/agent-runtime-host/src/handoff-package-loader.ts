@@ -16,6 +16,18 @@ export interface LoadedRuntimeHandoff {
   readonly task: RuntimeTaskPackage;
 }
 
+/**
+ * The Host explicitly declares whether it is loading an unaccepted Offer or
+ * resuming an authoritative accepted Handoff. This prevents a recovery path
+ * from accidentally weakening the admission deadline for an Offer.
+ */
+export type RuntimeHandoffLoadMode = "offered" | "accepted";
+
+export interface RuntimeHandoffLoadOptions {
+  readonly signal?: AbortSignal;
+  readonly mode?: RuntimeHandoffLoadMode;
+}
+
 type JsonRecord = Record<string, unknown>;
 
 const STATE_FIELDS = ["handoff_id", "thread_id", "resource_version", "lifecycle_state", "initiator", "recipient", "verifier", "current_responsible_actor", "target_binding", "package", "result", "parent_handoff_id", "child_handoff_id", "created_at", "updated_at"] as const;
@@ -37,7 +49,12 @@ function id(value: unknown, path: string): string {
   return value;
 }
 
-function timestamp(value: unknown, path: string, now: string): string {
+function timestamp(value: unknown, path: string): string {
+  const parsed = parseRfc3339(value, path, "expired_timestamp");
+  return parsed.canonical;
+}
+
+function futureTimestamp(value: unknown, path: string, now: string): string {
   const parsed = parseRfc3339(value, path, "expired_timestamp");
   const parsedNow = parseRfc3339(now, "now", "expired_timestamp");
   if (compareRfc3339(parsed, parsedNow) <= 0) invalid("expired_timestamp", path);
@@ -100,7 +117,7 @@ function authority(value: unknown, path: string, now: string): RuntimeJsonObject
   id(item.delegation_id, `${path}.delegation_id`);
   if (!Array.isArray(item.scopes) || item.scopes.length === 0 || item.scopes.length > 64 || item.scopes.some((item) => typeof item !== "string" || item.length === 0)) invalid("invalid_snapshot", `${path}.scopes`);
   if (!Array.isArray(item.resource_refs) || item.resource_refs.length > 128 || item.resource_refs.some((item) => typeof item !== "string" || item.length === 0)) invalid("invalid_snapshot", `${path}.resource_refs`);
-  timestamp(item.expires_at, `${path}.expires_at`, now);
+  futureTimestamp(item.expires_at, `${path}.expires_at`, now);
   if (typeof item.may_redelegate !== "boolean") invalid("invalid_snapshot", `${path}.may_redelegate`);
   if (Object.hasOwn(item, "extensions")) jsonObject(item.extensions, `${path}.extensions`);
   return item as RuntimeJsonObject;
@@ -121,15 +138,17 @@ function criteria(value: unknown, path: string): readonly RuntimeJsonObject[] {
 export class HandoffPackageLoader {
   constructor(private readonly queries: RuntimeHandoffQueries, private readonly tenantId: string, private readonly role: AgentRoleProfile, private readonly now: () => string = () => new Date().toISOString()) {}
 
-  async load(handoffId: string, workspacePath: string, signal?: AbortSignal): Promise<LoadedRuntimeHandoff> {
+  async load(handoffId: string, workspacePath: string, options: RuntimeHandoffLoadOptions = {}): Promise<LoadedRuntimeHandoff> {
     id(handoffId, "handoff_id");
     if (typeof workspacePath !== "string" || workspacePath.length === 0) invalid("invalid_workspace_path", "workspace_path");
-    const snapshot = cloneFrozenJson(await this.queries.getHandoff(handoffId, signal === undefined ? {} : { signal }), "snapshot");
+    const snapshot = cloneFrozenJson(await this.queries.getHandoff(handoffId, options.signal === undefined ? {} : { signal: options.signal }), "snapshot");
     if (snapshot.tenant_id !== this.tenantId || snapshot.handoff_id !== handoffId || !Number.isSafeInteger(snapshot.stream_version) || snapshot.stream_version < 1) invalid("snapshot_identity_mismatch", "snapshot");
     const state = record(snapshot.state, "state"); exact(state, STATE_FIELDS, "state");
     if (state.handoff_id !== handoffId || state.resource_version !== snapshot.stream_version) invalid("snapshot_version_mismatch", "state");
     const threadId = id(state.thread_id, "state.thread_id");
     if (typeof state.lifecycle_state !== "string" || !LIFECYCLES.has(state.lifecycle_state)) invalid("unsupported_lifecycle", "state.lifecycle_state");
+    const mode = options.mode ?? "offered";
+    if (state.lifecycle_state !== mode) invalid("snapshot_lifecycle_mismatch", "state.lifecycle_state");
     normalizeRfc3339(state.created_at, "state.created_at", "invalid_snapshot"); normalizeRfc3339(state.updated_at, "state.updated_at", "invalid_snapshot");
     actor(state.initiator, "state.initiator"); actor(state.verifier, "state.verifier");
     if (state.recipient !== null) actor(state.recipient, "state.recipient");
@@ -153,9 +172,11 @@ export class HandoffPackageLoader {
     const acceptanceCriteria = criteria(handoffPackage.acceptance_criteria, "state.package.acceptance_criteria");
     actor(handoffPackage.verifier, "state.package.verifier");
     if (handoffPackage.priority !== "low" && handoffPackage.priority !== "normal" && handoffPackage.priority !== "high" && handoffPackage.priority !== "critical") invalid("invalid_snapshot", "state.package.priority");
-    const acceptBy = timestamp(handoffPackage.accept_by, "state.package.accept_by", this.now());
-    const resultDueAt = timestamp(handoffPackage.result_due_at, "state.package.result_due_at", this.now());
-    const events = await this.readEvents(handoffId, snapshot.stream_version, signal);
+    const acceptBy = mode === "offered"
+      ? futureTimestamp(handoffPackage.accept_by, "state.package.accept_by", this.now())
+      : timestamp(handoffPackage.accept_by, "state.package.accept_by");
+    const resultDueAt = futureTimestamp(handoffPackage.result_due_at, "state.package.result_due_at", this.now());
+    const events = await this.readEvents(handoffId, snapshot.stream_version, options.signal);
     const task = cloneFrozenJson({ tenant_id: this.tenantId, handoff_id: handoffId, thread_id: threadId, stream_version: snapshot.stream_version, role: this.role, capability_id: this.capabilityId(handoffPackage.target), intent, context_reference: contextReference, authority_scope: authorityScope, acceptance_criteria: acceptanceCriteria, priority: handoffPackage.priority, accept_by: acceptBy, result_due_at: resultDueAt, workspace_path: workspacePath }, "task") as RuntimeTaskPackage;
     return Object.freeze({ snapshot, events, task });
   }

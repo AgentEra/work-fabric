@@ -87,6 +87,27 @@ describe("HandoffPackageLoader", () => {
     await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000000001Z").load("handoff-1", "/workspace/t1/h1")).resolves.toMatchObject({ task: { accept_by: "2026-07-26T12:00:00.000000002Z" } });
   });
 
+  it("keeps accepting deadlines for an already accepted execution snapshot while enforcing its execution deadlines", async () => {
+    const accepted = structuredClone(snapshot) as unknown as {
+      state: { lifecycle_state: string; package: { accept_by: string; result_due_at: string; authority_scope: { expires_at: string } } };
+    };
+    accepted.state.lifecycle_state = "accepted";
+    accepted.state.package.accept_by = "2026-07-26T11:59:59.000Z";
+    accepted.state.package.result_due_at = "2026-07-26T13:00:00.000Z";
+    accepted.state.package.authority_scope.expires_at = "2026-07-26T13:00:00.000Z";
+    const client = { getHandoff: vi.fn(async () => accepted as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
+
+    await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1", { mode: "accepted" })).resolves.toMatchObject({ task: { accept_by: "2026-07-26T11:59:59Z" } });
+  });
+
+  it("still rejects an expired accepting deadline while the execution snapshot remains offered", async () => {
+    const expiredOffer = structuredClone(snapshot) as unknown as { state: { package: { accept_by: string } } };
+    expiredOffer.state.package.accept_by = "2026-07-26T11:59:59.000Z";
+    const client = { getHandoff: vi.fn(async () => expiredOffer as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
+
+    await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).rejects.toThrow("expired_timestamp");
+  });
+
   it("rejects accessor-backed arrays without invoking their getters", async () => {
     let reads = 0;
     const accessorArray: unknown[] = [];

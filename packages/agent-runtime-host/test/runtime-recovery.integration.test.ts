@@ -158,6 +158,25 @@ describe("AgentRuntimeHost recovery", () => {
     await host.close();
   });
 
+  it.each(["accepted", "running"] as const)("resumes an accepted remote Handoff from local %s state exactly once", async (stateBeforeRestart) => {
+    const state = new MemoryAgentRuntimeStateStore();
+    await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);
+    const claim = await state.claimRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", now: setupNow, lease_seconds: 60, allowed_states: ["received"] });
+    if (claim === null) throw new Error("claim setup failed");
+    await state.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", fencing_token: claim.fencing_token, expected_state: "received", next_state: "accepted", now: setupNow });
+    if (stateBeforeRestart === "running") {
+      await state.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "runtime-1", fencing_token: claim.fencing_token, expected_state: "accepted", next_state: "running", now: setupNow });
+    }
+    const execute = vi.fn(async () => runtimeResult);
+    const host = recoveryHost(state, { lifecycle: "accepted", execute });
+
+    await host.start();
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("succeeded");
+    await host.close();
+  });
+
   it("drains a recovered running run to cancelled from an authoritative terminal Handoff without executing", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     await state.createRunIfAbsent("tenant-1", "handoff-1", setupNow);

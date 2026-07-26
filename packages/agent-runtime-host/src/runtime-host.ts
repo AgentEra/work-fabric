@@ -56,10 +56,6 @@ export interface AgentRuntimeHostDependencies {
 const TERMINAL_LIFECYCLES = new Set([
   "cancelled", "expired", "declined", "result_returned", "verified", "closed", "transferred", "target_unavailable",
 ]);
-const CANCELLING_LIFECYCLES = new Set([
-  "cancelled", "expired", "declined", "transferred", "target_unavailable",
-]);
-
 function lifecycle(snapshot: HandoffReadModel): string | null {
   const state = snapshot.state;
   if (typeof state !== "object" || state === null || Array.isArray(state)) return null;
@@ -189,18 +185,6 @@ export class AgentRuntimeHost {
       incoming.handoff.handoff_id,
       this.now(),
     );
-    const acknowledgement = await incoming.acknowledgeSignal("acknowledged");
-    if (acknowledgement.kind !== "acknowledged") throw new AgentRuntimeHostError("delivery_ack_failed", incoming.delivery.delivery_id);
-    await this.dependencies.state.markDeliveryAcknowledged(
-      this.dependencies.config.tenant_id,
-      incoming.delivery.delivery_id,
-      this.now(),
-    );
-    // A queue-full path durably records a receipt then asks the Gateway to
-    // retry it.  That receipt has no acknowledgement timestamp and must be
-    // allowed to enter the lifecycle on the retry Delivery.
-    if (!receipt.created && receipt.record.acknowledged_at !== null) return;
-
     const terminal = lifecycle(incoming.handoff);
     if (terminal !== null && TERMINAL_LIFECYCLES.has(terminal)) {
       const active = this.active.get(incoming.handoff.handoff_id);
@@ -212,8 +196,14 @@ export class AgentRuntimeHost {
         );
         if (run !== null) await this.convergeTerminal(run, terminal, incoming.handoff);
       }
+      await this.acknowledge(incoming);
       return;
     }
+    await this.acknowledge(incoming);
+    // A queue-full path durably records a receipt then asks the Gateway to
+    // retry it.  That receipt has no acknowledgement timestamp and must be
+    // allowed to enter the lifecycle on the retry Delivery.
+    if (!receipt.created && receipt.record.acknowledged_at !== null) return;
     const decision = this.dependencies.policy.decide(
       incoming.handoff,
       event,
@@ -298,6 +288,18 @@ export class AgentRuntimeHost {
     }
   }
 
+  private async acknowledge(incoming: IncomingHandoff): Promise<void> {
+    const acknowledgement = await incoming.acknowledgeSignal("acknowledged");
+    if (acknowledgement.kind !== "acknowledged") {
+      throw new AgentRuntimeHostError("delivery_ack_failed", incoming.delivery.delivery_id);
+    }
+    await this.dependencies.state.markDeliveryAcknowledged(
+      this.dependencies.config.tenant_id,
+      incoming.delivery.delivery_id,
+      this.now(),
+    );
+  }
+
   private async recover(): Promise<void> {
     const runs = await this.dependencies.state.listRecoverable(
       this.dependencies.config.tenant_id,
@@ -335,13 +337,21 @@ export class AgentRuntimeHost {
   ): Promise<void> {
     const claim = await this.claim(run.handoff_id, [run.state]);
     if (claim === null) return;
+    await this.convergeTerminalClaim(claim, remote, snapshot);
+  }
+
+  private async convergeTerminalClaim(
+    claim: RuntimeRunRecord,
+    remote: string,
+    snapshot: HandoffReadModel,
+  ): Promise<void> {
     if (["result_returned", "verified", "closed"].includes(remote)) {
       const result = remoteResult(snapshot);
-      if (result === null) throw new AgentRuntimeHostError("invalid_remote_result", run.handoff_id);
+      if (result === null) throw new AgentRuntimeHostError("invalid_remote_result", claim.handoff_id);
       await this.convergeResult(claim, result);
       return;
     }
-    await this.transition(claim, run.state, "cancelled");
+    await this.transition(claim, claim.state, "cancelled");
   }
 
   private async convergeResult(claim: RuntimeRunRecord, result: RuntimeDriverResult): Promise<void> {
@@ -380,7 +390,7 @@ export class AgentRuntimeHost {
       const loaded = await this.dependencies.packageLoader.load(
         handoffId,
         workspacePath(this.dependencies.config.workspace_root, this.dependencies.config.tenant_id, handoffId),
-        combined,
+        { signal: combined, mode: lifecycle(snapshot) === "accepted" ? "accepted" : "offered" },
       );
       if (state === "received") {
         await this.issueAccept(handoffId, loaded.snapshot, combined);
@@ -422,13 +432,14 @@ export class AgentRuntimeHost {
         return;
       }
       if (combined.aborted) {
+        if (await this.convergeRemoteTerminal(claim, handoffId)) return;
         await this.tryTransition(claim, state, "cancelled");
       } else {
         // A remote cancellation may win between the Driver's local progress
         // update and its command reaching Work Fabric. A failed status write
         // is not a failed execution in that case: re-read the public Handoff
         // and converge the currently owned local run before reporting failure.
-        if (await this.convergeRemoteCancellation(claim, handoffId)) return;
+        if (await this.convergeRemoteTerminal(claim, handoffId)) return;
         try {
           const failureProgress: RuntimeProgress = { sequence: lastProgress + 1, progress: null, message: "Agent Runtime failed", observed_at: this.now() };
           await this.issueStatus(handoffId, failureProgress, combined);
@@ -449,6 +460,7 @@ export class AgentRuntimeHost {
       await this.issueResult(handoffId, claim.result, signal);
       await this.transition(claim, "result_ready", "succeeded");
     } catch {
+      if (await this.convergeRemoteTerminal(claim, handoffId)) return;
       // The command may have reached Work Fabric even when its response was
       // lost. Keep the validated durable Result and let a later lease holder
       // replay the same idempotency key; only an authoritative terminal
@@ -456,7 +468,7 @@ export class AgentRuntimeHost {
     }
   }
 
-  private async convergeRemoteCancellation(
+  private async convergeRemoteTerminal(
     claim: RuntimeRunRecord,
     handoffId: string,
   ): Promise<boolean> {
@@ -465,19 +477,19 @@ export class AgentRuntimeHost {
         signal: this.shutdown.signal,
       });
       const remoteLifecycle = lifecycle(remote);
-      if (remoteLifecycle === null || !CANCELLING_LIFECYCLES.has(remoteLifecycle)) return false;
+      if (remoteLifecycle === null || !TERMINAL_LIFECYCLES.has(remoteLifecycle)) return false;
       const current = await this.dependencies.state.getRun(
         this.dependencies.config.tenant_id,
         handoffId,
       );
       if (current === null) return false;
       if (["succeeded", "failed", "cancelled"].includes(current.state)) return true;
-      await this.tryTransition(claim, current.state, "cancelled");
+      await this.convergeTerminalClaim({ ...current, owner: claim.owner, fencing_token: claim.fencing_token }, remoteLifecycle, remote);
       const converged = await this.dependencies.state.getRun(
         this.dependencies.config.tenant_id,
         handoffId,
       );
-      return converged?.state === "cancelled";
+      return converged?.state === "succeeded" || converged?.state === "cancelled";
     } catch {
       // Preserve the original execution error if the public control plane is
       // unavailable; recovery will make the same authoritative check later.
