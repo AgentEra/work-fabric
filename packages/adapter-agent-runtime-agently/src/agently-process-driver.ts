@@ -87,7 +87,6 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
 
       const cleanup = () => {
         if (timeout !== undefined) clearTimeout(timeout);
-        if (grace !== undefined) clearTimeout(grace);
         signal.removeEventListener("abort", abort);
       };
       const settle = (outcome: { readonly result: RuntimeDriverResult } | { readonly failure: AgentlyWorkerError }) => {
@@ -104,7 +103,7 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
           if (childExited || closeObserved) settle({ failure }); else child.once("close", () => settle({ failure }));
           return;
         }
-        grace = setTimeout(() => { if (!childExited) signalProcessGroup(child.pid, "SIGKILL"); }, this.config.cancellation_grace_seconds * 1_000);
+        grace = setTimeout(() => { grace = undefined; signalProcessGroup(child.pid, "SIGKILL"); }, this.config.cancellation_grace_seconds * 1_000);
         if (childExited || closeObserved) settle({ failure }); else child.once("close", () => settle({ failure }));
       };
       const abort = () => terminate(error("agently_worker_cancelled", "Agently worker execution was cancelled"));

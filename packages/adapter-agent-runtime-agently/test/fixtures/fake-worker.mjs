@@ -37,6 +37,14 @@ process.stdin.on("end", () => {
       setInterval(() => {}, 1_000);
       break;
     }
+    case "parent-exits-descendant": {
+      const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); process.stdout.write('ready\\n'); setInterval(() => {}, 1000)"], { stdio: ["ignore", "pipe", "ignore"] });
+      descendant.stdout.once("data", () => {
+        emit(record("progress", { sequence: 1, progress: null, message: `descendant:${descendant.pid}`, observed_at: "2026-01-01T00:00:00.000Z" }));
+        setInterval(() => {}, 1_000);
+      });
+      break;
+    }
     default: throw new Error("unknown scenario");
   }
 });

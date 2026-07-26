@@ -83,4 +83,29 @@ describe("AgentlyProcessDriver", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(() => process.kill(descendantPid, 0)).toThrow();
   });
+
+  it("keeps the grace-period group kill after the parent exits while an API-key-bearing descendant ignores SIGTERM", async () => {
+    const controller = new AbortController();
+    let descendantPid = 0;
+    let progressed!: () => void;
+    const progress = new Promise<void>((resolve) => { progressed = resolve; });
+    const pending = runFixture("parent-exits-descendant", {
+      grace: 1,
+      signal: controller.signal,
+      onProgress: async (item) => {
+        descendantPid = Number((item as { readonly message: string }).message.slice("descendant:".length));
+        progressed();
+      },
+    });
+    await progress;
+    const started = Date.now();
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: "agently_worker_cancelled" });
+    expect(Date.now() - started).toBeLessThan(500);
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    let alive = false;
+    try { process.kill(descendantPid, 0); alive = true; } catch { /* process group cleanup succeeded */ }
+    finally { if (alive) { try { process.kill(descendantPid, "SIGKILL"); } catch { /* already exited */ } } }
+    expect(alive).toBe(false);
+  });
 });

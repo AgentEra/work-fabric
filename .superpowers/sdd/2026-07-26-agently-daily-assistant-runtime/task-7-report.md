@@ -23,3 +23,7 @@
 - POSIX workers launch in a detached process group; timeout and cancellation signal the group (`SIGTERM`, then `SIGKILL`) so descendants inheriting the API-key environment cannot remain alive. Unsupported Windows process-group isolation fails before spawning.
 - Result collection entries now require plain enumerable own-data objects.
 - Protocol traversal is descriptor-based and bounded across the whole record by depth, 10,000 JSON nodes, and 128 KiB of UTF-8 strings.
+
+## Process-group cleanup follow-up
+
+- A scheduled grace-period `SIGKILL` is now independent of Driver settlement: the parent may exit and the caller may receive a bounded cancellation error, but the detached process group is still killed after grace to remove descendants that inherited the provider API key and ignored `SIGTERM`.
