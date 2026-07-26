@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -144,6 +144,15 @@ function partitionId(handoffId: string): string {
   return `partition:${createHash("sha256").update(JSON.stringify({ root_handoff_id: handoffId, tenant_id: tenantId })).digest("hex")}`;
 }
 
+async function filesBelow(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  return (await Promise.all(entries.map(async (entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return filesBelow(path);
+    return entry.isFile() ? [path] : [];
+  }))).flat();
+}
+
 describe("Daily Assistant real boundaries", () => {
   it("completes and recovers the Daily Assistant Handoff through real boundaries", async () => {
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-daily-e2e-"));
@@ -166,7 +175,8 @@ describe("Daily Assistant real boundaries", () => {
       const firstRuntime = runtime;
       const offered = await startedService.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-e2e-offer-1" });
       const handoffId = resourceId(offered);
-      expect(await startedService.human.queries.listHandoffEvents(handoffId)).toHaveLength(1);
+      const initialEvents = await startedService.human.queries.listHandoffEvents(handoffId);
+      expect(initialEvents).toHaveLength(1);
       await eventually(async () => expect(
         await client(startedService.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
           .endpoints.listInboxPartitions("endpoint-intake-agent"),
@@ -202,6 +212,15 @@ describe("Daily Assistant real boundaries", () => {
       const persisted = await readFile(join(directory, "runtime-state.db"));
       expect(persisted.toString("utf8")).not.toContain(modelToken);
       expect(persisted.toString("utf8")).not.toContain(runtimeToken);
+      const durableSurfaces = await Promise.all(
+        (await filesBelow(directory)).map(async (path) => readFile(path, "utf8")),
+      );
+      for (const surface of durableSurfaces) {
+        expect(surface).not.toContain(modelToken);
+        expect(surface).not.toContain(runtimeToken);
+      }
+      const completedEvents = await startedService.human.queries.listHandoffEvents(handoffId);
+      expect(completedEvents.length).toBeGreaterThanOrEqual(4);
     } finally {
       await Promise.allSettled([
         runtime?.close(),
