@@ -82,7 +82,9 @@ npm run service:start
 
 `deny` 可以与 exact allow 和 `all_internal_members` 同时存在，并始终优先。`all_internal_members` 不是裸 `"*"`，也不代表“群里所有人”；它只代表配置 external tenant 中被飞书 Contact API 确认的 active internal human。Agent 和 system 主体必须 exact allow。
 
-启用 `all_internal_members` 时，企业自建应用必须拥有 Contact v3 批量获取用户信息接口所需的应用身份通讯录权限，并把应用可见范围覆盖预期员工。飞书接口只返回应用有权看到的目录记录；查询不到某个 open_id 时，Work Fabric 只能记录 `unknown`，不能可靠断言其是 external 或 guest，因此一律 fail closed。群成员身份、跨租户共享群关系和“能否 @ 机器人”都不能替代目录证据。
+启用 `all_internal_members` 时，企业自建应用必须为应用身份开通 Contact v3 批量获取用户信息接口所需的两个最小 scope：`contact:contact.base:readonly`（获取通讯录基本信息）和 `contact:user.employee:readonly`（获取用户受雇信息）。前者允许按 `open_id` 查询目录记录，后者使响应包含 `status.is_activated`、`status.is_exited` 等在职状态；只开通前者时，飞书会成功返回用户但裁剪 `status`，Work Fabric 会按 `evidence_unavailable` 失败关闭。权限变更必须完成发布和管理员审批，并把应用通讯录可见范围覆盖预期员工。
+
+飞书接口只返回应用有权看到的目录记录；查询不到某个 `open_id` 时，Work Fabric 只能记录 `unknown`，不能可靠断言其是 external 或 guest，因此一律 fail closed。群成员身份、跨租户共享群关系和“能否 @ 机器人”都不能替代目录证据。
 
 以下值只通过环境变量或其他 Secret Provider 注入，不写入 YAML 明文、Handoff、Decision、Console 或日志：
 

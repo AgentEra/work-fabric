@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import * as lark from "@larksuiteoapi/node-sdk";
 
 import { reconstructFeishuMessageEvent } from "../src/event-envelope.js";
 
@@ -28,6 +29,59 @@ function validEvent(): Record<string, unknown> {
 }
 
 describe("reconstructFeishuMessageEvent", () => {
+  it("reconstructs the flattened callback produced by the official EventDispatcher", async () => {
+    let callback: unknown;
+    const logger = {
+      error: (..._args: unknown[]) => undefined,
+      warn: (..._args: unknown[]) => undefined,
+      info: (..._args: unknown[]) => undefined,
+      debug: (..._args: unknown[]) => undefined,
+      trace: (..._args: unknown[]) => undefined,
+    };
+    const dispatcher = new lark.EventDispatcher({
+      logger,
+      loggerLevel: lark.LoggerLevel.error,
+    }).register({
+      "im.message.receive_v1": async (data: unknown) => {
+        callback = data;
+      },
+    });
+
+    await dispatcher.invoke({
+      schema: "2.0",
+      header: {
+        event_id: "event-sdk-1",
+        event_type: "im.message.receive_v1",
+        create_time: "1784160000000",
+        tenant_key: "tenant-key-1",
+      },
+      event: {
+        sender: {
+          sender_id: { open_id: "ou-human" },
+          sender_type: "user",
+        },
+        message: {
+          message_id: "om-sdk-1",
+          chat_id: "oc-1",
+          chat_type: "group",
+          message_type: "text",
+          content: "{\"text\":\"hello\"}",
+          mentions: [{
+            key: "@_user_1",
+            id: { open_id: "ou-bot" },
+            name: "Work Fabric",
+          }],
+        },
+      },
+    }, { needCheck: false });
+
+    expect(callback).toBeDefined();
+    expect(Reflect.ownKeys(callback as object).filter(
+      (key) => typeof key === "symbol",
+    )).toHaveLength(1);
+    expect(() => reconstructFeishuMessageEvent(callback)).not.toThrow();
+  });
+
   it("reconstructs only the normalized message envelope fields", () => {
     const input = validEvent();
     Object.assign(input, { raw_secret: "must-not-pass" });
