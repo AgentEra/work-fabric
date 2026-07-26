@@ -8,10 +8,10 @@ import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime
 import { AgentGateway } from "@work-fabric/agent-gateway";
 import { AgentRuntimeHost, DeterministicAcceptancePolicy, HandoffPackageLoader } from "@work-fabric/agent-runtime-host";
 import { BearerTokenProvider, WorkFabricClient, type HandoffOfferPayload } from "@work-fabric/sdk-typescript";
-import { composeNodeService, parseServiceConfig } from "@work-fabric/service-node";
 import { describe, expect, it } from "vitest";
 
 import { dailyAssistantEndpointRegistration, dailyAssistantGatewayConfig } from "../../../examples/agently-agent-runtime/src/subscription.js";
+import { composeNodeService, parseServiceConfig } from "../src/index.js";
 import { startFakeOpenAiCompatibleServer } from "./fake-openai-compatible-server.js";
 
 const tenantId = "tenant-daily-e2e";
@@ -147,37 +147,42 @@ function partitionId(handoffId: string): string {
 describe("Daily Assistant real boundaries", () => {
   it("completes and recovers the Daily Assistant Handoff through real boundaries", async () => {
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-daily-e2e-"));
-    const model = await startFakeOpenAiCompatibleServer({ structuredOutput: {
-      request_summary: "创建一个新需求", response: "需求已整理，建议交给需求分析角色确认", missing_information: ["期望上线日期"],
-      handoff_draft_required: true, handoff_draft_reason: "需要专业需求分析", handoff_draft_capability: "requirements.analysis",
-      handoff_draft_intent: "梳理需求范围并确认验收标准", handoff_draft_acceptance_criteria: ["范围得到业务方确认"],
-    } });
-    const service = await startSqliteWorkFabric(directory);
+    let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
+    let service: Awaited<ReturnType<typeof startSqliteWorkFabric>> | undefined;
     let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
     try {
-      await provisionDailyAssistant(service.origin);
-      runtime = await startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory });
+      model = await startFakeOpenAiCompatibleServer({ structuredOutput: {
+        request_summary: "创建一个新需求", response: "需求已整理，建议交给需求分析角色确认", missing_information: ["期望上线日期"],
+        handoff_draft_required: true, handoff_draft_reason: "需要专业需求分析", handoff_draft_capability: "requirements.analysis",
+        handoff_draft_intent: "梳理需求范围并确认验收标准", handoff_draft_acceptance_criteria: ["范围得到业务方确认"],
+      } });
+      service = await startSqliteWorkFabric(directory);
+      if (service === undefined || model === undefined) throw new Error("E2E resources did not start");
+      const startedService = service;
+      const startedModel = model;
+      await provisionDailyAssistant(startedService.origin);
+      runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory });
       if (runtime === undefined) throw new Error("runtime did not start");
       const firstRuntime = runtime;
-      const offered = await service.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-e2e-offer-1" });
+      const offered = await startedService.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-e2e-offer-1" });
       const handoffId = resourceId(offered);
-      expect(await service.human.queries.listHandoffEvents(handoffId)).toHaveLength(1);
+      expect(await startedService.human.queries.listHandoffEvents(handoffId)).toHaveLength(1);
       await eventually(async () => expect(
-        await client(service.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
+        await client(startedService.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
           .endpoints.listInboxPartitions("endpoint-intake-agent"),
       ).toMatchObject({ items: [{ partition_id: partitionId(handoffId) }] }));
       await expect(
-        client(service.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
+        client(startedService.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
           .subscriptions.get("subscription-intake-agent"),
       ).resolves.toMatchObject({ endpoint_id: "endpoint-intake-agent", delivery: { mode: "sse" } });
       await expect(
-        client(service.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
+        client(startedService.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
           .queries.getHandoff(handoffId),
       ).resolves.toMatchObject({ state: { lifecycle_state: "offered" } });
       await eventually(async () => expect(await runtimeRun(firstRuntime.statePath, handoffId)).not.toBeNull(), 7_000);
-      await eventually(async () => expect(model.requests).toHaveLength(1), 7_000);
+      await eventually(async () => expect(startedModel.requests).toHaveLength(1), 7_000);
       await eventually(async () => {
-        const handoff = await service.human.queries.getHandoff(handoffId);
+        const handoff = await startedService.human.queries.getHandoff(handoffId);
         expect(handoff.state.lifecycle_state).toBe("result_returned");
         const result = handoff.state.result;
         if (result === null || typeof result !== "object" || Array.isArray(result)) throw new Error("expected Handoff result");
@@ -186,21 +191,23 @@ describe("Daily Assistant real boundaries", () => {
         expect((extensions as Record<string, unknown>)["workfabric.agent/assistant_output"]).toMatchObject({ handoff_draft_required: true });
       });
       await runtime.close();
-      runtime = await startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory });
-      expect(model.requests).toHaveLength(1);
-      const second = await service.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-e2e-offer-2" });
+      runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory });
+      expect(startedModel.requests).toHaveLength(1);
+      const second = await startedService.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-e2e-offer-2" });
       const secondHandoffId = resourceId(second);
       await eventually(async () => {
-        expect((await service.human.queries.getHandoff(secondHandoffId)).state.lifecycle_state).toBe("result_returned");
+        expect((await startedService.human.queries.getHandoff(secondHandoffId)).state.lifecycle_state).toBe("result_returned");
       });
-      expect(model.requests).toHaveLength(2);
+      expect(startedModel.requests).toHaveLength(2);
       const persisted = await readFile(join(directory, "runtime-state.db"));
       expect(persisted.toString("utf8")).not.toContain(modelToken);
       expect(persisted.toString("utf8")).not.toContain(runtimeToken);
     } finally {
-      await runtime?.close().catch(() => undefined);
-      await service.service.close();
-      await model.close();
+      await Promise.allSettled([
+        runtime?.close(),
+        service?.service.close(),
+        model?.close(),
+      ]);
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
