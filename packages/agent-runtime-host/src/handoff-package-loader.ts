@@ -21,6 +21,7 @@ type JsonRecord = Record<string, unknown>;
 const STATE_FIELDS = ["handoff_id", "thread_id", "resource_version", "lifecycle_state", "initiator", "recipient", "verifier", "current_responsible_actor", "target_binding", "package", "result", "parent_handoff_id", "child_handoff_id", "created_at", "updated_at"] as const;
 const PACKAGE_FIELDS = ["work_reference", "target", "intent", "context", "authority_scope", "acceptance_criteria", "verifier", "priority", "accept_by", "result_due_at"] as const;
 const LIFECYCLES = new Set(["target_resolution_pending", "target_unavailable", "offered", "accepted", "result_returned", "verified", "rework_requested", "closed", "declined", "expired", "cancelled", "transferred"]);
+const EVENT_PAGE_LIMIT = 100;
 
 function record(value: unknown, path: string): JsonRecord {
   if (typeof value !== "object" || value === null || Array.isArray(value) || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) invalid("invalid_snapshot", path);
@@ -169,8 +170,8 @@ export class HandoffPackageLoader {
     const events: ProtocolEvent[] = [];
     let fromVersion = 1;
     while (fromVersion <= streamVersion) {
-      const page = cloneFrozenJson(await this.queries.listHandoffEvents(handoffId, signal === undefined ? { fromVersion, limit: 256 } : { fromVersion, limit: 256, signal }), "events") as readonly ProtocolEvent[];
-      if (page.length === 0 || page.length > 256 || events.length + page.length > 4_096) invalid("event_sequence", "events");
+      const page = cloneFrozenJson(await this.queries.listHandoffEvents(handoffId, signal === undefined ? { fromVersion, limit: EVENT_PAGE_LIMIT } : { fromVersion, limit: EVENT_PAGE_LIMIT, signal }), "events") as readonly ProtocolEvent[];
+      if (page.length === 0 || page.length > EVENT_PAGE_LIMIT || events.length + page.length > 4_096) invalid("event_sequence", "events");
       for (const event of page) {
         if (event.wftenant !== this.tenantId || event.wfhandoff !== handoffId || event.wfsequence !== fromVersion) invalid("event_sequence", "events");
         events.push(event); fromVersion += 1;

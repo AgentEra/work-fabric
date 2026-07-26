@@ -115,6 +115,8 @@ Work Fabric 由以下逻辑能力组成：
 - Codex 作为 Agent Runtime 暴露的代码实施能力，或作为独立 Agent Endpoint。
 - Git、需求系统和部署平台通过 Connector 提供工作引用、状态事件和结果写回。
 
+The executable Daily Assistant Runtime reference and its local/Feishu/operator guide are in [docs/guides/agently-agent-runtime.md](docs/guides/agently-agent-runtime.md). It is an external Runtime Host: Work Fabric Core continues to own only protocol, authority, Handoff and delivery facts.
+
 ## HTTP Service Binding
 
 阶段 3B 已提供 `@work-fabric/transport-http`。它把同一个 Exchange Application、Query、Subscription 与 Health 能力绑定为 Node.js HTTP 服务；Fastify 只是包内实现，不进入公共接口。人、Agent、Console 和外部系统使用同一套 API，差别只来自可信身份、代表关系与 Authority Policy，不存在 Console 专用或 Agent 专用的状态通道。

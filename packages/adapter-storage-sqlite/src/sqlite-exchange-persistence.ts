@@ -80,6 +80,12 @@ function boundedReason(value: unknown, label: string): asserts value is string {
   }
 }
 
+function cursor(value: unknown, label: string): asserts value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 2048) {
+    throw new TypeError(`${label} must contain 1 to 2048 characters`);
+  }
+}
+
 function parseJson<T>(value: unknown): T {
   if (typeof value !== "string") throw new Error("SQLite JSON column is invalid");
   return JSON.parse(value) as T;
@@ -180,8 +186,7 @@ function validateDelivery(delivery: PendingDeliveryRecord): void {
   if (delivery.to_position <= delivery.from_position) {
     throw new RangeError("delivery to_position must be after from_position");
   }
-  identity(delivery.next_cursor, "delivery next_cursor");
-  if (delivery.next_cursor.length > 2048) throw new RangeError("cursor is too long");
+  cursor(delivery.next_cursor, "delivery next_cursor");
   positive(delivery.attempt, "delivery attempt");
   timestamp(delivery.delivered_at, "delivery delivered_at");
   timestamp(delivery.visibility_expires_at, "delivery visibility_expires_at");

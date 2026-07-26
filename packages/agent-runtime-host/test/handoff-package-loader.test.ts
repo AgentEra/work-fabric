@@ -33,7 +33,7 @@ describe("HandoffPackageLoader", () => {
     expect(loaded.task.intent).toEqual(snapshotPackage.package.intent);
     expect(loaded.task.acceptance_criteria).toEqual(snapshotPackage.package.acceptance_criteria);
     expect(loaded.task.stream_version).toBe(snapshot.stream_version);
-    expect(client.listHandoffEvents).toHaveBeenCalledWith("handoff-1", expect.objectContaining({ fromVersion: 1, limit: 256 }));
+    expect(client.listHandoffEvents).toHaveBeenCalledWith("handoff-1", expect.objectContaining({ fromVersion: 1, limit: 100 }));
   });
 
   it("rejects gapped or unbounded provenance streams", async () => {

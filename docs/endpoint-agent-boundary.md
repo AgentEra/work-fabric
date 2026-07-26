@@ -52,6 +52,10 @@ sequenceDiagram
 
 Ack 不能推断 Accept，Accept 也不能替代 Ack。Gateway 不自动调用其中任何一个。
 
+## Daily Assistant Runtime Host
+
+`@work-fabric/agent-runtime-host` and the Agently adapter are an external Runtime Host reference implementation, not an execution feature of Work Fabric Core. They load the authorized Handoff Package through the public SDK, durably record Delivery and Run state locally, explicitly acknowledge and accept, invoke a worker outside the Fabric, and return Status/Result through the same public contract. The `daily-assistant` Role Profile and Capability declarations are Runtime extension points; they do not change Core's target-resolution or execution boundary. See [Agently Daily Assistant Runtime](guides/agently-agent-runtime.md) for operation and verification.
+
 ## 模块
 
 - `@work-fabric/endpoint-directory`：技术中立的注册、Session、发现与显式目标资格服务。

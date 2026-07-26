@@ -90,8 +90,7 @@ export class SignalDispatcher {
         assertRuntimeSubscription(subscription);
         if (
           subscription.tenant_id !== tenantId ||
-          (subscription.delivery_mode !== "sse" &&
-            subscription.delivery_mode !== "webhook")
+          subscription.delivery_mode !== "webhook"
         ) {
           continue;
         }

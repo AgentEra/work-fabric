@@ -110,6 +110,8 @@ flowchart TB
 
 Agent Endpoint 声明身份、能力、协议版本、可用性和回调方式。阶段 4A 的 Endpoint Directory 保存这些可验证事实和单活 fenced Session；Agent Gateway 只通过统一 TypeScript SDK 维护租约、发现收件分区并接收 Durable SSE。Runtime 自己持久化 Delivery、显式 Ack，再自行决定是否接受责任、如何执行、何时报告状态和返回结果。
 
+`@work-fabric/agent-runtime-host` is one external Runtime Host implementation. Its Role Profile and Capability declarations are Runtime extension points; they do not make Exchange Core a model, tool, memory, scheduling, or execution engine.
+
 Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具备独立身份、交接状态和回调能力时作为独立 Endpoint。无论采用哪种模式，代码执行过程都不进入 Work Fabric。
 
 ### Legacy & AI-native Systems

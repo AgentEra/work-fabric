@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { AgentGatewayConfig } from "@work-fabric/agent-gateway";
 import type { EndpointRegistration, SubscriptionDocument } from "@work-fabric/sdk-typescript";
 
@@ -18,7 +19,7 @@ export function dailyAssistantGatewayConfig(input: {
   };
   return {
     endpoint_id: input.endpointId, subscription,
-    open_session: { client_session_id: `daily-assistant-${process.pid}`, protocol_version: "1", capabilities: DAILY_ASSISTANT_CAPABILITIES, availability: "available", requested_lease_seconds: 60, expected_registration_version: 1 },
+    open_session: { client_session_id: `daily-assistant-${process.pid}-${randomUUID()}`, protocol_version: "1.0", capabilities: DAILY_ASSISTANT_CAPABILITIES, availability: "available", requested_lease_seconds: 60, expected_registration_version: 1 },
     inbox_refresh_ms: 5_000, max_active_partitions: 8, incoming_queue_capacity: input.queueCapacity,
     heartbeat_retry_count: 2, heartbeat_backoff_ms: 250, graceful_close_timeout_ms: 10_000,
   };
@@ -27,8 +28,14 @@ export function dailyAssistantGatewayConfig(input: {
 export function dailyAssistantEndpointRegistration(): EndpointRegistration {
   return {
     endpoint_id: "endpoint-intake-agent", actor: { actor_id: "actor-intake-agent", actor_type: "agent" },
-    endpoint_type: "agent", display_name: "Daily Assistant", protocol_versions: ["1"], bindings: [],
+    endpoint_type: "native_agent", display_name: "Daily Assistant", protocol_versions: ["1.0"],
+    bindings: [{
+      binding_type: "local_process",
+      uri: "urn:work-fabric:agent-gateway:daily-assistant",
+      security_schemes: ["bearer"],
+      extensions: {},
+    }],
     allowed_capability_ids: DAILY_ASSISTANT_CAPABILITY_IDS,
-    limits: { max_inline_content_bytes: 262_144, max_concurrent_handoffs: 2 }, administrative_state: "active", registration_version: 1,
+    limits: { max_inline_content_bytes: 262_144, max_concurrent_handoffs: 2 }, administrative_state: "enabled", registration_version: 1,
   };
 }

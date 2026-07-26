@@ -93,7 +93,9 @@ import { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import {
   CursorPullService,
   DefaultSubscriptionDeliveryPolicy,
+  EndpointInboxProjector,
   EndpointInboxQueryService,
+  HANDOFF_PROJECTOR_ID,
   HandoffProjector,
   MemoryHandoffReadModelStore,
   MemorySubscriptionStore,
@@ -729,6 +731,22 @@ export async function composeNodeService(
     storage.handoffs,
     clock,
   );
+  const endpointInboxProjector = new EndpointInboxProjector(storage.endpointInbox);
+  async function projectHandoffPartition(partitionId: string, limit: number) {
+    const position = await storage.persistence.loadProjectionCheckpoint(
+      HANDOFF_PROJECTOR_ID,
+      partitionId,
+    );
+    const handoff = await handoffProjector.runPartition(partitionId, limit);
+    if (handoff.kind !== "advanced") return handoff;
+    const records = await storage.persistence.readPartition(
+      partitionId,
+      position,
+      handoff.processed,
+    );
+    for (const record of records) await endpointInboxProjector.apply(record);
+    return handoff;
+  }
   const collaborationProjector = new CollaborationProjector(
     storage.persistence,
     storage.persistence,
@@ -756,12 +774,24 @@ export async function composeNodeService(
       max_work_keys: 10_000,
       turn_limit: 100,
       async turn(partitionId, limit) {
-        await handoffProjector.runPartition(partitionId, limit);
+        await projectHandoffPartition(partitionId, limit);
         await collaborationProjector.runPartition(partitionId, limit);
         await localSignalDispatcher.dispatchPartitionTurn(partitionId, config.tenant_id, limit);
       },
     });
   }
+  const applicationWithLocalWake = {
+    async handle(...args: Parameters<ExchangeApplication["handle"]>) {
+      const result = await application.handle(...args);
+      const resourceId = result.resource?.resource_id;
+      if (result.operation_status === "accepted" && result.resource?.resource_type === "handoff" && typeof resourceId === "string") {
+        const partitionId = handoffPartitionId(config.tenant_id, resourceId);
+        await projectHandoffPartition(partitionId, 10_000);
+        localPump?.wake(partitionId);
+      }
+      return result;
+    },
+  };
   const pluginServices = new Map<string, unknown>([
     ["workfabric.tenant_id", config.tenant_id],
     ["channel.routes", channelRoutes],
@@ -924,7 +954,7 @@ export async function composeNodeService(
     30,
   );
   const http = createHttpService({
-    application,
+    application: applicationWithLocalWake,
     authenticator: new BearerAuthenticationEvidenceMapper(),
     identity,
     authority,
@@ -1031,7 +1061,7 @@ export async function composeNodeService(
     http,
     admission: admissionComposition?.service ?? null,
     async runProjection(partitionId, limit) {
-      const handoff = await handoffProjector.runPartition(partitionId, limit);
+      const handoff = await projectHandoffPartition(partitionId, limit);
       const collaborationResult = await collaborationProjector.runPartition(
         partitionId,
         limit,
