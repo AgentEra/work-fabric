@@ -1,0 +1,149 @@
+import { randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
+import { dirname } from "node:path";
+
+import { validateDriverManifest, type AgentRuntimeDriver, type AgentRuntimeDriverFactory, type RuntimeDriverResult, type RuntimeProgress, type RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
+
+import { type AgentlyRuntimeDriverConfig, validateAgentlyRuntimeDriverConfig } from "./config.js";
+import { NdjsonReader } from "./ndjson-reader.js";
+import { AGENTLY_WORKER_PROTOCOL, parseAgentlyWorkerRecord, type AgentlyWorkerRequestV1 } from "./protocol.js";
+
+export const MAX_STDIN_BYTES = 1_048_576;
+export const MAX_STDOUT_LINE_BYTES = 262_144;
+export const MAX_STDOUT_RECORDS = 1_024;
+export const MAX_STDERR_BYTES = 65_536;
+
+export class AgentlyWorkerError extends Error {
+  readonly name = "AgentlyWorkerError";
+  constructor(readonly code: `agently_worker_${string}`, message: string, readonly diagnostic?: string) { super(message); }
+}
+
+function error(code: `agently_worker_${string}`, message: string, diagnostic?: string): AgentlyWorkerError {
+  return diagnostic === undefined ? new AgentlyWorkerError(code, message) : new AgentlyWorkerError(code, message, diagnostic);
+}
+
+function secretIn(value: unknown, secret: string, depth = 0): boolean {
+  if (depth > 32 || typeof value === "string") return typeof value === "string" && value.includes(secret);
+  if (value === null || typeof value !== "object") return false;
+  return Array.isArray(value) ? value.some((item) => secretIn(item, secret, depth + 1)) : Object.values(value).some((item) => secretIn(item, secret, depth + 1));
+}
+
+function redact(stderr: Buffer, secret: string): string {
+  return stderr.toString("utf8").replaceAll(secret, "[REDACTED]");
+}
+
+function requestFor(task: RuntimeTaskPackage, config: AgentlyRuntimeDriverConfig): AgentlyWorkerRequestV1 {
+  return { protocol: AGENTLY_WORKER_PROTOCOL, command_id: randomUUID(), task, provider: { type: "OpenAICompatible", base_url: config.provider.base_url, model: config.provider.model } };
+}
+
+export class AgentlyProcessDriver implements AgentRuntimeDriver {
+  readonly manifest = validateDriverManifest({
+    driver_type: "agently", protocol_version: "1",
+    capability_ids: ["collaboration.request.intake", "information.synthesis", "collaboration.handoff.draft"],
+  });
+
+  constructor(private readonly config: AgentlyRuntimeDriverConfig) {}
+
+  async execute(task: RuntimeTaskPackage, progress: (update: RuntimeProgress) => Promise<void>, signal: AbortSignal): Promise<RuntimeDriverResult> {
+    if (signal.aborted) throw error("agently_worker_cancelled", "Agently worker execution was cancelled");
+    if (secretIn(task, this.config.provider.api_key)) throw error("agently_worker_input", "Agently worker request contains a configured secret");
+    const request = requestFor(task, this.config);
+    let input: string;
+    try { input = `${JSON.stringify(request)}\n`; } catch { throw error("agently_worker_input", "Agently worker request is not serializable"); }
+    if (Buffer.byteLength(input, "utf8") > MAX_STDIN_BYTES) throw error("agently_worker_input", "Agently worker request exceeds its bound");
+
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(this.config.python.executable, ["-m", this.config.python.module], {
+        cwd: dirname(this.config.workspace_root), stdio: ["pipe", "pipe", "pipe"], shell: false,
+        env: { PATH: process.env.PATH ?? "", LANG: process.env.LANG ?? "C.UTF-8", PYTHONIOENCODING: "utf-8", AGENTLY_MODEL_API_KEY: this.config.provider.api_key },
+      });
+    } catch { throw error("agently_worker_spawn", "Unable to start Agently worker"); }
+    const stdin = child.stdin;
+    const stdout = child.stdout;
+    const stderrOutput = child.stderr;
+    if (stdin === null || stdout === null || stderrOutput === null) {
+      try { child.kill("SIGKILL"); } catch { /* process has already gone away */ }
+      throw error("agently_worker_spawn", "Agently worker standard streams are unavailable");
+    }
+
+    return new Promise<RuntimeDriverResult>((resolve, reject) => {
+      let settled = false;
+      let accepting = true;
+      let terminal: RuntimeDriverResult | undefined;
+      let lastSequence = 0;
+      let stderr = Buffer.alloc(0);
+      const reader = new NdjsonReader(MAX_STDOUT_LINE_BYTES, MAX_STDOUT_RECORDS);
+      let timeout: NodeJS.Timeout | undefined;
+      let grace: NodeJS.Timeout | undefined;
+
+      const cleanup = () => {
+        if (timeout !== undefined) clearTimeout(timeout);
+        if (grace !== undefined) clearTimeout(grace);
+        signal.removeEventListener("abort", abort);
+      };
+      const settle = (outcome: { readonly result: RuntimeDriverResult } | { readonly failure: AgentlyWorkerError }) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        if ("result" in outcome) resolve(outcome.result); else reject(outcome.failure);
+      };
+      const terminate = (failure: AgentlyWorkerError) => {
+        if (!accepting) return;
+        accepting = false;
+        try { child.kill("SIGTERM"); } catch { /* process has already gone away */ }
+        grace = setTimeout(() => { if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* process has already gone away */ } } }, this.config.cancellation_grace_seconds * 1_000);
+        child.once("close", () => settle({ failure }));
+      };
+      const abort = () => terminate(error("agently_worker_cancelled", "Agently worker execution was cancelled"));
+
+      signal.addEventListener("abort", abort, { once: true });
+      timeout = setTimeout(() => terminate(error("agently_worker_timeout", "Agently worker execution timed out")), this.config.execution_timeout_seconds * 1_000);
+
+      child.on("error", () => terminate(error("agently_worker_spawn", "Unable to start Agently worker")));
+      stderrOutput.on("data", (chunk: Buffer) => {
+        if (stderr.length >= MAX_STDERR_BYTES) return;
+        stderr = Buffer.concat([stderr, chunk.subarray(0, MAX_STDERR_BYTES - stderr.length)]);
+      });
+      const stdoutDone = (async () => {
+        for await (const chunk of stdout) {
+          if (!accepting) return;
+          for (const raw of reader.push(chunk)) {
+            if (!accepting) return;
+            const record = parseAgentlyWorkerRecord(raw, request.command_id);
+            if (secretIn(record, this.config.provider.api_key)) throw error("agently_worker_protocol", "Agently worker attempted to return a secret");
+            if (terminal !== undefined) throw error("agently_worker_protocol", "Agently worker emitted records after a terminal record");
+            if (record.type === "progress") {
+              if (record.sequence <= lastSequence) throw error("agently_worker_protocol", "Agently worker progress sequence is not increasing");
+              lastSequence = record.sequence;
+              await progress({ sequence: record.sequence, progress: record.progress, message: record.message, observed_at: record.observed_at });
+            } else if (record.type === "completed") terminal = record.result;
+            else throw error("agently_worker_failed", "Agently worker reported failure");
+          }
+        }
+        reader.finish();
+      })();
+      void stdoutDone.catch((cause: unknown) => terminate(cause instanceof AgentlyWorkerError ? cause : error("agently_worker_protocol", "Agently worker emitted an invalid protocol record")));
+      child.on("close", (exitCode, terminationSignal) => {
+        void stdoutDone.then(() => {
+          if (settled) return;
+          if (!accepting) return;
+          accepting = false;
+          if (exitCode !== 0 || terminationSignal !== null) { settle({ failure: error("agently_worker_exit", "Agently worker exited unsuccessfully", redact(stderr, this.config.provider.api_key)) }); return; }
+          if (terminal === undefined) { settle({ failure: error("agently_worker_protocol", "Agently worker did not emit exactly one completed record") }); return; }
+          settle({ result: terminal });
+        }, () => undefined);
+      });
+      stdin.on("error", () => terminate(error("agently_worker_input", "Unable to write Agently worker request")));
+      stdin.end(input);
+    });
+  }
+}
+
+export class AgentlyRuntimeDriverFactory implements AgentRuntimeDriverFactory<AgentlyRuntimeDriverConfig> {
+  readonly type = "agent-runtime.agently";
+  validate(value: unknown, path: string): AgentlyRuntimeDriverConfig {
+    return validateAgentlyRuntimeDriverConfig(value, path);
+  }
+  async create(config: AgentlyRuntimeDriverConfig): Promise<AgentRuntimeDriver> { return new AgentlyProcessDriver(config); }
+}
