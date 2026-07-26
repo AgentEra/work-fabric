@@ -36,6 +36,26 @@ verifyAgentRuntimeStateStoreContract("SQLite Agent Runtime state", async () => {
 });
 
 describe("SQLite Agent Runtime state durability", () => {
+  it("bounds JSON nodes across the entire RuntimeDriverResult before transition", async () => {
+    const store = new SqliteAgentRuntimeStateStore({ location: ":memory:" });
+    const transition = (result: { summary: readonly Record<string, never>[]; artifacts: readonly Record<string, never>[]; evidence: readonly Record<string, never>[]; extensions: Record<string, never> }) => store.transitionRun({
+      tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1,
+      expected_state: "running", next_state: "result_ready", now: "2026-07-26T01:00:00.003Z", result,
+    });
+    try {
+      await store.createRunIfAbsent("tenant-1", "handoff-1", NOW);
+      await store.claimRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", now: NOW, lease_seconds: 2, allowed_states: ["received"] });
+      await store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "received", next_state: "accepted", now: "2026-07-26T01:00:00.001Z" });
+      await store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "accepted", next_state: "running", now: "2026-07-26T01:00:00.002Z" });
+
+      await expect(transition({ summary: Array.from({ length: 9_996 }, () => ({})), artifacts: [], evidence: [], extensions: {} })).rejects.toThrow("too deeply nested or large");
+      expect(await store.getRun("tenant-1", "handoff-1")).toMatchObject({ state: "running", result: null });
+      await expect(transition({ summary: Array.from({ length: 9_995 }, () => ({})), artifacts: [], evidence: [], extensions: {} })).resolves.toBe(true);
+    } finally {
+      await store.close();
+    }
+  });
+
   it("rejects non-RFC3339 claim timestamps before changing fencing state", async () => {
     const store = new SqliteAgentRuntimeStateStore({ location: ":memory:" });
     const invalidTimestamps = [

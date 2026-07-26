@@ -59,9 +59,14 @@ function leaseExpiry(now: string, seconds: number): string {
   return new Date(Date.parse(timestamp(now, "now")) + seconds * 1_000).toISOString();
 }
 
-function validateJson(value: unknown, depth = 0, counter = { value: 0 }): RuntimeJsonValue {
+function countJsonNode(counter: { value: number }): void {
   counter.value += 1;
-  if (counter.value > 10_000 || depth > 20) throw new RangeError("Runtime driver result is too deeply nested or large");
+  if (counter.value > 10_000) throw new RangeError("Runtime driver result is too deeply nested or large");
+}
+
+function validateJson(value: unknown, depth = 0, counter = { value: 0 }): RuntimeJsonValue {
+  countJsonNode(counter);
+  if (depth > 20) throw new RangeError("Runtime driver result is too deeply nested or large");
   if (value === null || typeof value === "boolean") return value;
   if (typeof value === "string") {
     if (value.length > 100_000) throw new RangeError("Runtime driver result string is too large");
@@ -81,21 +86,28 @@ function validateJson(value: unknown, depth = 0, counter = { value: 0 }): Runtim
   return output;
 }
 
-function validateJsonObject(value: unknown, field: string): RuntimeJsonObject {
+function validateJsonObject(value: unknown, field: string, counter: { value: number }): RuntimeJsonObject {
   if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) {
     throw new TypeError(`${field} must be an object`);
   }
-  return validateJson(value) as RuntimeJsonObject;
+  return validateJson(value, 0, counter) as RuntimeJsonObject;
+}
+
+function validateJsonObjectArray(value: readonly unknown[], field: string, counter: { value: number }): readonly RuntimeJsonObject[] {
+  countJsonNode(counter);
+  return value.map((item) => validateJsonObject(item, field, counter));
 }
 
 function serializeResult(value: RuntimeDriverResult): string {
   if (value === null || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 4 || !("summary" in value) || !("artifacts" in value) || !("evidence" in value) || !("extensions" in value)) throw new TypeError("Runtime driver result has invalid fields");
   if (!Array.isArray(value.summary) || !Array.isArray(value.artifacts) || !Array.isArray(value.evidence)) throw new TypeError("Runtime driver result collections must be arrays");
+  const counter = { value: 0 };
+  countJsonNode(counter);
   const result: RuntimeDriverResult = {
-    summary: value.summary.map((item) => validateJsonObject(item, "summary entry")),
-    artifacts: value.artifacts.map((item) => validateJsonObject(item, "artifact entry")),
-    evidence: value.evidence.map((item) => validateJsonObject(item, "evidence entry")),
-    extensions: validateJsonObject(value.extensions, "extensions"),
+    summary: validateJsonObjectArray(value.summary, "summary entry", counter),
+    artifacts: validateJsonObjectArray(value.artifacts, "artifact entry", counter),
+    evidence: validateJsonObjectArray(value.evidence, "evidence entry", counter),
+    extensions: validateJsonObject(value.extensions, "extensions", counter),
   };
   const serialized = JSON.stringify(result);
   if (serialized.length > 1_000_000) throw new RangeError("Runtime driver result is too large");
