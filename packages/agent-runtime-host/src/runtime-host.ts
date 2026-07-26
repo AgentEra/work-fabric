@@ -134,8 +134,8 @@ export class AgentRuntimeHost {
   async start(): Promise<void> {
     if (this.started) return;
     this.started = true;
-    if (this.session === null) this.session = await this.dependencies.startSession!();
     await this.recover();
+    if (this.session === null) this.session = await this.dependencies.startSession!();
     this.intake = this.consume();
   }
 

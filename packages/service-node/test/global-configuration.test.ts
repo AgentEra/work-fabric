@@ -58,6 +58,7 @@ describe("global node configuration", () => {
             FEISHU_APP_SECRET: "synthetic-app-secret",
             FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
             INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
+            WORK_FABRIC_ADMIN_TOKEN: "synthetic-admin-token",
           },
         },
       );
@@ -86,6 +87,7 @@ describe("global node configuration", () => {
       FEISHU_APP_SECRET: "synthetic-app-secret",
       FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
       INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
+      WORK_FABRIC_ADMIN_TOKEN: "synthetic-admin-token",
     });
 
     expect(loaded.service).toMatchObject({
@@ -104,6 +106,12 @@ describe("global node configuration", () => {
     expect(plugin).not.toHaveProperty("credentials.verification_token");
     expect(plugin).not.toHaveProperty("credentials.encrypt_key");
     expect(plugin).not.toHaveProperty("inbound.route_id");
+    expect(loaded.agent_runtime_authority.grants["daily-assistant"]).toMatchObject({
+      principal_id: "principal-intake-agent",
+      actor_id: "actor-intake-agent",
+      endpoint_id: "endpoint-intake-agent",
+      subscription_id: "subscription-intake-agent",
+    });
   });
 
   it("loads service and plugin instances from one YAML Provider with declared environment secrets", async () => {

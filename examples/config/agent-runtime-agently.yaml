@@ -1,0 +1,93 @@
+api_version: workfabric.config/v1
+
+service:
+  runtime_id: daily-assistant-local
+  development_mode: true
+  work_fabric:
+    base_url: http://127.0.0.1:8787
+    tenant_id: tenant-local
+    exchange_id: exchange-local
+    actor_id: actor-intake-agent
+    endpoint_id: endpoint-intake-agent
+    subscription_id: subscription-intake-agent
+    access_token: ${INTAKE_AGENT_ACCESS_TOKEN}
+  acceptance:
+    mode: accept_all_targeted
+    require_explicit_target: true
+    reject_expired_handoffs: true
+    require_authority_scope: true
+    allowed_capability_ids:
+      - collaboration.request.intake
+      - information.synthesis
+      - collaboration.handoff.draft
+  concurrency:
+    max_active_runs: 2
+    queue_capacity: 32
+  state:
+    provider: sqlite
+    location: ./var/daily-assistant-runtime.db
+    busy_timeout_ms: 5000
+
+role:
+  role_id: daily-assistant
+  version: 1
+  display_name: 日常助理 Agent
+  description: 团队共享的协作入口与日常事务助理
+
+participant:
+  actor_id: actor-intake-agent
+  actor_type: agent
+  endpoint_id: endpoint-intake-agent
+
+capabilities:
+  - capability_id: collaboration.request.intake
+    version: 1.0.0
+    name: Collaboration request intake
+    description: Normalize an explicitly assigned collaboration request
+    input_media_types: [text/plain, text/markdown, application/json]
+    output_media_types: [application/json]
+    input_schema_refs: []
+    output_schema_refs: []
+    interaction_modes: [asynchronous, status_updates]
+    constraints: {}
+    extensions: {}
+  - capability_id: information.synthesis
+    version: 1.0.0
+    name: Information synthesis
+    description: Synthesize content actually supplied and authorized in one Handoff
+    input_media_types: [text/plain, text/markdown, application/json]
+    output_media_types: [application/json]
+    input_schema_refs: []
+    output_schema_refs: []
+    interaction_modes: [asynchronous, status_updates]
+    constraints: {}
+    extensions: {}
+  - capability_id: collaboration.handoff.draft
+    version: 1.0.0
+    name: Handoff draft
+    description: Return a downstream Handoff proposal without dispatching it
+    input_media_types: [text/plain, text/markdown, application/json]
+    output_media_types: [application/json]
+    input_schema_refs: []
+    output_schema_refs: []
+    interaction_modes: [asynchronous, status_updates]
+    constraints: {}
+    extensions: {}
+
+plugins:
+  instances:
+    agently-primary:
+      type: agent-runtime.agently
+      enabled: true
+      config:
+        python:
+          executable: ./runtimes/agently-worker/.venv/bin/python
+          module: work_fabric_agently_runtime
+        workspace_root: ./var/agently-workspaces
+        execution_timeout_seconds: 900
+        cancellation_grace_seconds: 10
+        provider:
+          type: OpenAICompatible
+          base_url: https://provider.example/v1
+          model: configured-model
+          api_key: ${AGENTLY_MODEL_API_KEY}

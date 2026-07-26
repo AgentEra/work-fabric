@@ -2,6 +2,7 @@ import type { AgentRoleProfile } from "@work-fabric/agent-runtime-spi";
 
 export interface AgentRuntimeServiceConfiguration {
   readonly runtime_id: string;
+  readonly development_mode: boolean;
   readonly work_fabric: {
     readonly base_url: string;
     readonly tenant_id: string;
@@ -13,10 +14,13 @@ export interface AgentRuntimeServiceConfiguration {
   };
   readonly acceptance: {
     readonly mode: "accept_all_targeted";
+    readonly require_explicit_target: true;
+    readonly reject_expired_handoffs: true;
+    readonly require_authority_scope: true;
     readonly allowed_capability_ids: readonly string[];
   };
   readonly concurrency: { readonly max_active_runs: number; readonly queue_capacity: number };
-  readonly state: { readonly provider: "sqlite"; readonly location: string };
+  readonly state: { readonly provider: "sqlite"; readonly location: string; readonly busy_timeout_ms: number };
 }
 
 export interface AgentRuntimeParticipant {

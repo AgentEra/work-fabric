@@ -5,7 +5,7 @@ import { loadAgentRuntimeConfiguration } from "../src/index.js";
 const base = {
   api_version: "workfabric.config/v1",
   service: {
-    runtime_id: "daily-runtime",
+    runtime_id: "daily-runtime", development_mode: true,
     work_fabric: {
       base_url: "http://127.0.0.1:8787",
       tenant_id: "tenant-1",
@@ -17,10 +17,13 @@ const base = {
     },
     acceptance: {
       mode: "accept_all_targeted",
+      require_explicit_target: true,
+      reject_expired_handoffs: true,
+      require_authority_scope: true,
       allowed_capability_ids: ["information.synthesis"],
     },
     concurrency: { max_active_runs: 2, queue_capacity: 32 },
-    state: { provider: "sqlite", location: "./var/runtime.db" },
+    state: { provider: "sqlite", location: "./var/runtime.db", busy_timeout_ms: 5_000 },
   },
   role: {
     role_id: "daily-assistant", version: 1, display_name: "Daily Assistant",

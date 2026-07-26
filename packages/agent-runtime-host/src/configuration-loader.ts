@@ -57,31 +57,39 @@ function capability(value: unknown, path: string): string {
 
 function capabilityList(value: unknown, path: string): readonly string[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 64) invalid("invalid_capabilities", path);
-  const items = value.map((item, index) => capability(item, `${path}.${index}`));
+  const items = value.map((item, index) => {
+    if (typeof item === "string") return capability(item, `${path}.${index}`);
+    const descriptor = object(item, `${path}.${index}`);
+    return capability(descriptor.capability_id, `${path}.${index}.capability_id`);
+  });
   if (new Set(items).size !== items.length) invalid("invalid_capabilities", path);
   return items;
 }
 
 function validateService(value: unknown, path: string): AgentRuntimeServiceConfiguration {
-  const root = object(value, path); exact(root, ["runtime_id", "work_fabric", "acceptance", "concurrency", "state"], path);
+  const root = object(value, path); exact(root, ["runtime_id", "development_mode", "work_fabric", "acceptance", "concurrency", "state"], path);
   const workFabric = object(root.work_fabric, `${path}.work_fabric`);
   exact(workFabric, ["base_url", "tenant_id", "exchange_id", "actor_id", "endpoint_id", "subscription_id", "access_token"], `${path}.work_fabric`);
   const acceptance = object(root.acceptance, `${path}.acceptance`);
-  exact(acceptance, ["mode", "allowed_capability_ids"], `${path}.acceptance`);
+  exact(acceptance, ["mode", "require_explicit_target", "reject_expired_handoffs", "require_authority_scope", "allowed_capability_ids"], `${path}.acceptance`);
   if (acceptance.mode !== "accept_all_targeted") invalid("invalid_acceptance_mode", `${path}.acceptance.mode`);
+  for (const field of ["require_explicit_target", "reject_expired_handoffs", "require_authority_scope"] as const) {
+    if (acceptance[field] !== true) invalid("invalid_acceptance_policy", `${path}.acceptance.${field}`);
+  }
   const concurrency = object(root.concurrency, `${path}.concurrency`);
   exact(concurrency, ["max_active_runs", "queue_capacity"], `${path}.concurrency`);
   const state = object(root.state, `${path}.state`);
-  exact(state, ["provider", "location"], `${path}.state`);
+  exact(state, ["provider", "location", "busy_timeout_ms"], `${path}.state`);
   if (state.provider !== "sqlite") invalid("invalid_state_provider", `${path}.state.provider`);
   return {
     runtime_id: string(root.runtime_id, `${path}.runtime_id`, 128),
+    development_mode: root.development_mode === true,
     work_fabric: {
       base_url: string(workFabric.base_url, `${path}.work_fabric.base_url`), tenant_id: string(workFabric.tenant_id, `${path}.work_fabric.tenant_id`, 128), exchange_id: string(workFabric.exchange_id, `${path}.work_fabric.exchange_id`, 128), actor_id: string(workFabric.actor_id, `${path}.work_fabric.actor_id`, 128), endpoint_id: string(workFabric.endpoint_id, `${path}.work_fabric.endpoint_id`, 128), subscription_id: string(workFabric.subscription_id, `${path}.work_fabric.subscription_id`, 128), access_token: string(workFabric.access_token, `${path}.work_fabric.access_token`, 1024),
     },
-    acceptance: { mode: "accept_all_targeted", allowed_capability_ids: capabilityList(acceptance.allowed_capability_ids, `${path}.acceptance.allowed_capability_ids`) },
+    acceptance: { mode: "accept_all_targeted", require_explicit_target: true, reject_expired_handoffs: true, require_authority_scope: true, allowed_capability_ids: capabilityList(acceptance.allowed_capability_ids, `${path}.acceptance.allowed_capability_ids`) },
     concurrency: { max_active_runs: positive(concurrency.max_active_runs, `${path}.concurrency.max_active_runs`, 128), queue_capacity: positive(concurrency.queue_capacity, `${path}.concurrency.queue_capacity`, 100_000) },
-    state: { provider: "sqlite", location: string(state.location, `${path}.state.location`) },
+    state: { provider: "sqlite", location: string(state.location, `${path}.state.location`), busy_timeout_ms: positive(state.busy_timeout_ms, `${path}.state.busy_timeout_ms`, 60_000) },
   };
 }
 
