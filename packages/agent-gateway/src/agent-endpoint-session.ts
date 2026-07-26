@@ -35,7 +35,7 @@ export interface AgentGatewayClient {
     SubscriptionClient,
     "get" | "put" | "acknowledgeDelivery" | "stream"
   >;
-  readonly queries: Pick<QueryClient, "getHandoff">;
+  readonly queries: Pick<QueryClient, "getHandoff" | "listHandoffEvents">;
   readonly handoffs: HandoffClient;
 }
 

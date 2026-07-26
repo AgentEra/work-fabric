@@ -125,7 +125,10 @@ function fakeClient(options: {
         await waitForAbort(request?.signal);
       },
     },
-    queries: { getHandoff: vi.fn(async () => structuredClone(handoff)) },
+    queries: {
+      getHandoff: vi.fn(async () => structuredClone(handoff)),
+      listHandoffEvents: vi.fn(async () => []),
+    },
     handoffs: { accept },
   } as unknown as AgentGatewayClient;
   return { client, acknowledge, heartbeat, accept };
@@ -153,6 +156,14 @@ function config() {
 }
 
 describe("AgentGateway", () => {
+  it("exposes only public Handoff query operations", () => {
+    const client = fakeClient().client;
+    expect(Object.keys(client.queries).sort()).toEqual([
+      "getHandoff", "listHandoffEvents",
+    ]);
+    expect(client.queries).not.toHaveProperty("persistence");
+  });
+
   it("delivers incoming Handoffs without implicit Ack or Accept", async () => {
     const fake = fakeClient();
     const gateway = new AgentGateway(fake.client, config());
