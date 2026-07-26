@@ -1,55 +1,33 @@
-import type {
-  FeishuLongConnectionAcceptance,
-  FeishuLongConnectionClient,
-  FeishuLongConnectionClientFactory,
-  FeishuLongConnectionHandler,
-  FeishuLongConnectionStatus,
-} from "@work-fabric/connector-feishu";
 import type { JsonObject } from "@work-fabric/exchange-spi";
 import { composeNodeService, parseServiceConfig } from "@work-fabric/service-node";
 import { describe, expect, it } from "vitest";
 
-class FakeLongConnectionClient implements FeishuLongConnectionClient {
-  handler: FeishuLongConnectionHandler | undefined;
-  snapshot: FeishuLongConnectionStatus = {
-    state: "connecting",
-    code: "connecting",
-    reconnect_attempts: 0,
-    changed_at: "2026-07-17T00:00:00.000Z",
-  };
+import {
+  DAILY_E2E,
+  partitionId,
+  provisionDailyAssistant,
+  runtimeRun,
+  startDailyAssistantWorkFabric,
+  startRealAgentlyRuntime,
+} from "./daily-assistant-e2e-builders.js";
+import {
+  FakeFeishuLongConnectionClientFactory,
+  NeutralE2eFixture,
+  eventually,
+} from "./e2e-support.js";
+import { startFakeOpenAiCompatibleServer } from "./fake-openai-compatible-server.js";
 
-  start(handler: FeishuLongConnectionHandler): Promise<void> {
-    this.handler = handler;
-    return Promise.resolve();
-  }
+const dailyFixtureSecrets = Object.freeze([
+  DAILY_E2E.runtimeToken,
+  DAILY_E2E.modelToken,
+  DAILY_E2E.adminToken,
+  DAILY_E2E.humanToken,
+]);
 
-  status(): FeishuLongConnectionStatus {
-    return { ...this.snapshot };
-  }
-
-  stop(): Promise<void> {
-    this.snapshot = {
-      ...this.snapshot,
-      state: "stopped",
-      code: "stopped",
-    };
-    return Promise.resolve();
-  }
-
-  emit(body: JsonObject): Promise<FeishuLongConnectionAcceptance> {
-    if (this.handler === undefined) throw new Error("fake_not_started");
-    return this.handler(body);
-  }
-}
-
-class FakeLongConnectionClientFactory
-implements FeishuLongConnectionClientFactory {
-  readonly clients: FakeLongConnectionClient[] = [];
-
-  create(): FeishuLongConnectionClient {
-    const client = new FakeLongConnectionClient();
-    this.clients.push(client);
-    return client;
+function assertNoDailyFixtureSecrets(...surfaces: readonly unknown[]): void {
+  for (const surface of surfaces) {
+    const text = typeof surface === "string" ? surface : JSON.stringify(surface);
+    for (const secret of dailyFixtureSecrets) expect(text).not.toContain(secret);
   }
 }
 
@@ -178,7 +156,7 @@ describe("Feishu long connection collaboration channel E2E", () => {
         max_attempts: 3,
       },
     };
-    const longConnections = new FakeLongConnectionClientFactory();
+    const longConnections = new FakeFeishuLongConnectionClientFactory();
     const service = await composeNodeService(parseServiceConfig({
       storage_profile: "memory-demo",
       development_mode: true,
@@ -317,4 +295,113 @@ describe("Feishu long connection collaboration channel E2E", () => {
     expect(client.status()).toMatchObject({ state: "stopped", code: "stopped" });
     expect(sent).toHaveLength(2);
   }, 10_000);
+
+  it("passes a Feishu mention through the Daily Assistant Runtime and renders its Result", async () => {
+    const fixture = await NeutralE2eFixture.create("work-fabric-feishu-daily-");
+    const sent: Array<Record<string, unknown>> = [];
+    const longConnections = new FakeFeishuLongConnectionClientFactory();
+    const systemFetch = globalThis.fetch.bind(globalThis);
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.hostname !== "open.feishu.cn") return systemFetch(input, init);
+      if (url.pathname.includes("tenant_access_token")) {
+        return new Response(JSON.stringify({ code: 0, msg: "success", tenant_access_token: "tenant-token", expire: 7200 }), { status: 200 });
+      }
+      sent.push(JSON.parse(await request.clone().text()) as Record<string, unknown>);
+      return new Response(JSON.stringify({ code: 0, msg: "success", data: { message_id: `om-result-${sent.length}` } }), { status: 200 });
+    }) as typeof globalThis.fetch;
+    let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
+    let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
+    let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
+    try {
+      model = await startFakeOpenAiCompatibleServer({ structuredOutput: {
+        request_summary: "创建一个新需求", response: "需求已整理，建议交给需求分析角色确认", missing_information: ["期望上线日期"],
+        handoff_draft_required: true, handoff_draft_reason: "需要专业需求分析", handoff_draft_capability: "requirements.analysis",
+        handoff_draft_intent: "梳理需求范围并确认验收标准", handoff_draft_acceptance_criteria: ["范围得到业务方确认"],
+      } });
+      fixture.register(() => model!.close());
+      service = await startDailyAssistantWorkFabric({
+        directory: fixture.directory,
+        composition: {
+          configuration_revision: "e2e:feishu-daily-assistant",
+          fetch,
+          feishu_long_connection_client_factory: longConnections,
+          plugins: {
+            "feishu-primary": {
+              type: "collaboration-channel.feishu",
+              enabled: true,
+              config: {
+                connector_id: "feishu-primary", external_tenant_id: "tenant-key", bot_open_id: "ou-bot",
+                credentials: { app_id: "app", app_secret: "secret", work_fabric_access_token: DAILY_E2E.humanToken },
+                inbound: { enabled: true, transport: "long_connection", mention_only: true, intake_target: { actor_id: DAILY_E2E.runtimeActorId, endpoint_id: DAILY_E2E.runtimeEndpointId } },
+                outbound: {
+                  enabled: true, default_render_mode: "text",
+                  channels: { results: { receive_id_type: "chat_id", receive_id: "oc-results" } },
+                  subscriptions: {
+                    results: {
+                      channel_ref: "results",
+                      owner: { actor_id: DAILY_E2E.humanActorId, actor_type: "human", endpoint_id: DAILY_E2E.humanEndpointId },
+                      filter: { event_types: ["workfabric.handoff.result_returned.v1"] },
+                    },
+                  },
+                },
+                identities: [{ external_open_id: "ou-human", actor_id: DAILY_E2E.humanActorId, actor_type: "human", endpoint_id: DAILY_E2E.humanEndpointId }],
+                worker: { poll_interval_ms: 10, lease_seconds: 30, batch_limit: 10, max_attempts: 3 },
+              },
+            },
+          },
+        },
+      });
+      fixture.register(() => service!.service.close());
+      await provisionDailyAssistant(service.origin);
+      runtime = await startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory: fixture.directory });
+      fixture.register(() => runtime!.close());
+      const client = longConnections.clients[0];
+      if (client === undefined) throw new Error("fake long connection did not start");
+      client.snapshot = { ...client.snapshot, state: "connected", code: "connected" };
+      const mention: JsonObject = {
+        schema: "2.0",
+        header: { event_id: "event-daily-1", event_type: "im.message.receive_v1", create_time: "1784073600000", tenant_key: "tenant-key" },
+        event: {
+          sender: { sender_id: { open_id: "ou-human" }, sender_type: "user" },
+          message: {
+            message_id: "om-daily-1", chat_id: "oc-original", chat_type: "group", message_type: "text",
+            content: '{"text":"@_user_1 创建一个新需求"}',
+            mentions: [{ key: "@_user_1", id: { open_id: "ou-bot" }, name: "Work Fabric" }],
+          },
+        },
+      };
+      await expect(client.emit(mention)).resolves.toMatchObject({ accepted: true, duplicate: false });
+      await expect(client.emit(mention)).resolves.toMatchObject({ accepted: true, duplicate: true });
+      const handoffId = "handoff-daily-1";
+      await eventually(async () => {
+        const handoff = await service!.human.queries.getHandoff(handoffId);
+        expect(handoff.state.lifecycle_state).toBe("result_returned");
+        // Ingress targets the Agent identity.  The Gateway binding and
+        // delivery below prove that it was consumed by this exact Endpoint;
+        // it deliberately does not make a channel connector choose an
+        // execution endpoint when an Agent role later has several Endpoints.
+        expect(handoff.state).toMatchObject({ package: { target: { actor_id: DAILY_E2E.runtimeActorId } } });
+        expect(await service!.runtime.endpoints.listInboxPartitions(DAILY_E2E.runtimeEndpointId))
+          .toMatchObject({ items: [{ partition_id: partitionId(handoffId) }] });
+        expect((await runtimeRun(runtime!.statePath, handoffId))?.state).toBe("succeeded");
+      }, 15_000);
+      // The fake retains only bounded request metadata, never prompt bodies.
+      // Replaying the exact same Feishu ingress must therefore still yield one
+      // and only one model invocation for this isolated fixture.
+      await eventually(async () => expect(model!.requests).toHaveLength(1), 5_000);
+      await eventually(async () => expect(sent.some((message) => JSON.stringify(message).includes("workfabric.handoff.result_returned.v1"))).toBe(true), 10_000);
+      expect(sent.some((message) => message.receive_id === "oc-results")).toBe(true);
+      const completed = await service.human.queries.getHandoff(handoffId);
+      const events = await service.human.queries.listHandoffEvents(handoffId);
+      expect(completed.state.child_handoff_id).toBeNull();
+      // Ingress is duplicate-safe, delivery reaches the external Runtime once,
+      // and neither the public channel payload nor the model fake's deliberately
+      // bounded metadata retains a service/runtime/model/human credential.
+      assertNoDailyFixtureSecrets(completed, events, model.requests, sent);
+    } finally {
+      await fixture.close();
+    }
+  }, 30_000);
 });

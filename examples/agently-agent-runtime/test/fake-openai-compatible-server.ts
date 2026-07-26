@@ -3,6 +3,8 @@ import { createServer, type IncomingMessage, type Server } from "node:http";
 export interface FakeOpenAiCompatibleServer {
   readonly baseUrl: string;
   readonly requests: readonly { readonly handoffId: string | null; readonly path: string }[];
+  /** Number of model responses abandoned before this local fake could finish. */
+  readonly abortedResponses: number;
   requestCountFor(handoffId: string): number;
   close(): Promise<void>;
 }
@@ -27,7 +29,16 @@ function handoffId(value: string): string | null {
         const match = /"handoff_id"\s*:\s*"([^"\\]{1,128})"/.exec(current);
         if (match !== null) return match[1] ?? null;
       } else if (Array.isArray(current)) pending.push(...current);
-      else if (current !== null && typeof current === "object") pending.push(...Object.values(current));
+      else if (current !== null && typeof current === "object") {
+        const fields = current as Record<string, unknown>;
+        // Agently can preserve task input as a structured value instead of a
+        // JSON-encoded string. Retain only the bounded identifier used by the
+        // test; request bodies and credentials are never retained.
+        if (typeof fields.handoff_id === "string" && /^[^"\\]{1,128}$/.test(fields.handoff_id)) {
+          return fields.handoff_id;
+        }
+        pending.push(...Object.values(fields));
+      }
     }
   } catch { /* only used for bounded test observability */ }
   return null;
@@ -38,6 +49,7 @@ export async function startFakeOpenAiCompatibleServer(
   options: FakeOpenAiCompatibleServerOptions,
 ): Promise<FakeOpenAiCompatibleServer> {
   const requests: Array<{ handoffId: string | null; path: string }> = [];
+  let abortedResponses = 0;
   const server = createServer(async (request, response) => {
     const payload = await body(request);
     if (request.method === "POST") {
@@ -47,6 +59,9 @@ export async function startFakeOpenAiCompatibleServer(
       response.writeHead(404).end();
       return;
     }
+    response.once("close", () => {
+      if (!response.writableEnded) abortedResponses += 1;
+    });
     if (options.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
     const event = JSON.stringify({
       id: "chatcmpl-work-fabric-test",
@@ -78,6 +93,7 @@ export async function startFakeOpenAiCompatibleServer(
   return {
     baseUrl: `http://127.0.0.1:${address.port}/v1`,
     get requests() { return Object.freeze(requests.map((request) => ({ ...request }))); },
+    get abortedResponses() { return abortedResponses; },
     requestCountFor(id) { return requests.filter((request) => request.handoffId === id).length; },
     close: () => new Promise<void>((resolve, reject) => server.close((error) => error === undefined ? resolve() : reject(error))),
   };

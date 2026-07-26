@@ -1,138 +1,23 @@
 import { readFile, readdir } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-import { AgentlyProcessDriver } from "@work-fabric/adapter-agent-runtime-agently";
-import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-sqlite";
-import { AgentGateway } from "@work-fabric/agent-gateway";
-import { AgentRuntimeHost, DeterministicAcceptancePolicy, HandoffPackageLoader } from "@work-fabric/agent-runtime-host";
-import { BearerTokenProvider, WorkFabricClient, type HandoffOfferPayload } from "@work-fabric/sdk-typescript";
 import { describe, expect, it } from "vitest";
 
-import { composeNodeService, parseServiceConfig } from "@work-fabric/service-node";
-import { dailyAssistantEndpointRegistration, dailyAssistantGatewayConfig } from "../src/subscription.js";
+import { workspacePath } from "@work-fabric/agent-runtime-host";
+
+import {
+  DAILY_E2E,
+  dailyAssistantOffer,
+  e2eClient,
+  partitionId,
+  provisionDailyAssistant,
+  resourceId,
+  runtimeRun,
+  startDailyAssistantWorkFabric,
+  startRealAgentlyRuntime,
+} from "./daily-assistant-e2e-builders.js";
 import { startFakeOpenAiCompatibleServer } from "./fake-openai-compatible-server.js";
 import { NeutralE2eFixture, eventually } from "./e2e-support.js";
-
-const tenantId = "tenant-daily-e2e";
-const exchangeId = "exchange-daily-e2e";
-const runtimeToken = "runtime-test-token";
-const modelToken = "model-test-token";
-
-function future(seconds: number): string {
-  return new Date(Date.now() + seconds * 1_000).toISOString();
-}
-
-function client(origin: string, token: string, actorId: string, endpointId: string): WorkFabricClient {
-  return new WorkFabricClient({
-    baseUrl: origin,
-    tenantId,
-    exchangeId,
-    representation: { actorId, endpointId },
-    authentication: new BearerTokenProvider(token),
-    streamReconnect: { baseDelayMs: 10, maxDelayMs: 25, maxReconnects: 8 },
-  });
-}
-
-function dailyAssistantOffer(target: HandoffOfferPayload["target"] = { actor_id: "actor-intake-agent" }): HandoffOfferPayload {
-  return {
-    work_reference: { uri: "urn:work-fabric:e2e:daily-assistant", extensions: {} },
-    target,
-    intent: [{ kind: "text", media_type: "text/plain", text: "创建一个新需求" }],
-    authority_scope: {
-      delegation_id: "delegation-daily-e2e", scopes: ["work:read", "result:write"], resource_refs: ["urn:work-fabric:e2e:daily-assistant"],
-      expires_at: future(3_600), may_redelegate: false,
-    },
-    acceptance_criteria: [{ criterion_id: "assistant-response", description: "Returns a structured assistant response", required: true, result_schema_ref: null, required_evidence_types: [] }],
-    verifier: { actor_id: "actor-human", actor_type: "human" },
-    priority: "normal", accept_by: future(1_800), result_due_at: future(3_600),
-  };
-}
-
-async function startSqliteWorkFabric(directory: string) {
-  let handoffSequence = 0;
-  let otherSequence = 0;
-  const identities = [
-    { authentication_evidence: { bearer_token: "admin-test-token" }, principal: { principal_id: "principal-admin", tenant_id: tenantId, actor_claims: [{ actor_id: "actor-work-fabric-admin", actor_type: "system" as const, endpoint_ids: ["endpoint-work-fabric-admin"] }], attributes: {} } },
-    { authentication_evidence: { bearer_token: "human-test-token" }, principal: { principal_id: "principal-human", tenant_id: tenantId, actor_claims: [{ actor_id: "actor-human", actor_type: "human" as const, endpoint_ids: ["endpoint-human"] }], attributes: {} } },
-    { authentication_evidence: { bearer_token: runtimeToken }, principal: { principal_id: "principal-intake-agent", tenant_id: tenantId, actor_claims: [{ actor_id: "actor-intake-agent", actor_type: "agent" as const, endpoint_ids: ["endpoint-intake-agent"] }], attributes: {} } },
-  ];
-  const service = await composeNodeService(parseServiceConfig({
-    storage_profile: "sqlite-local", role: "all", development_mode: true, tenant_id: tenantId, exchange_id: exchangeId,
-    cursor_secret: "c".repeat(32), sqlite: { location: join(directory, "work-fabric.db"), busy_timeout_ms: 5_000 },
-    admission: { subject_fingerprint_key: "f".repeat(32), grant_active_key_id: "primary", grant_keys: { primary: "g".repeat(32) }, grant_ttl_seconds: 120, max_evidence_cache_entries: 100 },
-    identities,
-    authority_rules: [
-      { tenant_id: tenantId, principal_id: "principal-admin", actor_id: "actor-work-fabric-admin", actor_type: "system", endpoint_id: "endpoint-work-fabric-admin", action: "workfabric.endpoint.provision.v1", resource_id: "endpoint-intake-agent" },
-      { tenant_id: tenantId, principal_id: "principal-human", actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human", action: "workfabric.handoff.offer.v1", resource_id: null },
-      { tenant_id: tenantId, principal_id: "principal-human", actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human", action: "workfabric.query.handoff.read.v1", resource_id: "handoff-daily-1" },
-      { tenant_id: tenantId, principal_id: "principal-human", actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human", action: "workfabric.query.handoff.read.v1", resource_id: "handoff-daily-2" },
-      { tenant_id: tenantId, principal_id: "principal-intake-agent", actor_id: "actor-intake-agent", actor_type: "agent", endpoint_id: "endpoint-intake-agent", action: "workfabric.subscription.pull.v1", resource_id: "subscription-intake-agent" },
-    ],
-    listen: { host: "127.0.0.1", port: 0 },
-  }), {
-    ids: {
-      nextId(kind) {
-        if (kind === "handoff") return `handoff-daily-${++handoffSequence}`;
-        return `${kind}-daily-${++otherSequence}`;
-      },
-    },
-    agent_runtime_authority: { grants: { "daily-assistant": { tenant_id: tenantId, principal_id: "principal-intake-agent", actor_id: "actor-intake-agent", endpoint_id: "endpoint-intake-agent", subscription_id: "subscription-intake-agent" } } },
-  });
-  const { origin } = await service.listen();
-  await service.start();
-  return { service, origin, human: client(origin, "human-test-token", "actor-human", "endpoint-human") };
-}
-
-async function provisionDailyAssistant(origin: string): Promise<void> {
-  await client(origin, "admin-test-token", "actor-work-fabric-admin", "endpoint-work-fabric-admin")
-    .endpoints.provision("endpoint-intake-agent", dailyAssistantEndpointRegistration());
-}
-
-async function startRealAgentlyRuntime(input: { baseUrl: string; modelBaseUrl: string; directory: string; timeoutSeconds?: number }) {
-  const statePath = join(input.directory, "runtime-state.db");
-  const workspaceRoot = join(input.directory, "workspaces");
-  const state = new SqliteAgentRuntimeStateStore({ location: statePath, busy_timeout_ms: 5_000 });
-  const driverConfiguration = {
-    python: { executable: join(process.cwd(), "runtimes/agently-worker/.venv/bin/python"), module: "work_fabric_agently_runtime" },
-    workspace_root: workspaceRoot, execution_timeout_seconds: input.timeoutSeconds ?? 20, cancellation_grace_seconds: 1,
-    provider: { type: "OpenAICompatible", base_url: input.modelBaseUrl, model: "fake-work-fabric-model", api_key: modelToken }, development_mode: true,
-  } as const;
-  const driver = new AgentlyProcessDriver(driverConfiguration);
-  const fabric = client(input.baseUrl, runtimeToken, "actor-intake-agent", "endpoint-intake-agent");
-  const gateway = new AgentGateway({
-    endpoints: fabric.endpoints,
-    subscriptions: fabric.subscriptions,
-    queries: fabric.queries,
-    handoffs: fabric.handoffs,
-  }, dailyAssistantGatewayConfig({ actorId: "actor-intake-agent", endpointId: "endpoint-intake-agent", subscriptionId: "subscription-intake-agent", queueCapacity: 8 }));
-  const role = { role_id: "daily-assistant", version: 1, display_name: "Daily Assistant", description: "E2E runtime", capability_ids: ["information.synthesis"] } as const;
-  const host = new AgentRuntimeHost({
-    config: { runtime_id: "daily-e2e-runtime", tenant_id: tenantId, actor_id: "actor-intake-agent", endpoint_id: "endpoint-intake-agent", max_active_runs: 1, queue_capacity: 8, run_lease_seconds: 60, progress_interval_ms: 1_000, workspace_root: workspaceRoot },
-    startSession: () => gateway.start(), state, driver,
-    packageLoader: new HandoffPackageLoader(fabric.queries, tenantId, role), queries: fabric.queries,
-    policy: new DeterministicAcceptancePolicy({ actor_id: "actor-intake-agent", endpoint_id: "endpoint-intake-agent", allowed_capability_ids: ["information.synthesis"] }),
-  });
-  await host.start();
-  return { close: () => host.close(), statePath, workspaceRoot };
-}
-
-async function runtimeRun(statePath: string, handoffId: string) {
-  const state = new SqliteAgentRuntimeStateStore({ location: statePath, busy_timeout_ms: 5_000 });
-  try { return await state.getRun(tenantId, handoffId); } finally { await state.close(); }
-}
-
-function resourceId(result: { readonly resource: unknown }): string {
-  const resource = result.resource;
-  if (resource === null || typeof resource !== "object" || Array.isArray(resource) || typeof (resource as Record<string, unknown>).resource_id !== "string") {
-    throw new Error(`offer did not return a Handoff resource: ${JSON.stringify(result)}`);
-  }
-  return (resource as { readonly resource_id: string }).resource_id;
-}
-
-function partitionId(handoffId: string): string {
-  return `partition:${createHash("sha256").update(JSON.stringify({ root_handoff_id: handoffId, tenant_id: tenantId })).digest("hex")}`;
-}
 
 async function filesBelow(directory: string): Promise<string[]> {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -143,12 +28,42 @@ async function filesBelow(directory: string): Promise<string[]> {
   }))).flat();
 }
 
+const validAssistantOutput = Object.freeze({
+  request_summary: "创建一个新需求",
+  response: "需求已整理，建议交给需求分析角色确认",
+  missing_information: ["期望上线日期"],
+  handoff_draft_required: true,
+  handoff_draft_reason: "需要专业需求分析",
+  handoff_draft_capability: "requirements.analysis",
+  handoff_draft_intent: "梳理需求范围并确认验收标准",
+  handoff_draft_acceptance_criteria: ["范围得到业务方确认"],
+});
+
+/**
+ * These are intentionally development-only fixture values.  The assertion is
+ * made against every externally observable/public and durable surface the E2E
+ * owns, so the fake model's bounded metadata cannot mask a credential leak.
+ */
+const fixtureSecrets = Object.freeze([
+  DAILY_E2E.runtimeToken,
+  DAILY_E2E.modelToken,
+  DAILY_E2E.adminToken,
+  DAILY_E2E.humanToken,
+]);
+
+function assertNoFixtureSecrets(...surfaces: readonly unknown[]): void {
+  for (const surface of surfaces) {
+    const text = typeof surface === "string" ? surface : JSON.stringify(surface);
+    for (const secret of fixtureSecrets) expect(text).not.toContain(secret);
+  }
+}
+
 describe("Daily Assistant real boundaries", () => {
   it("completes and recovers the Daily Assistant Handoff through real boundaries", async () => {
     const fixture = await NeutralE2eFixture.create("work-fabric-daily-e2e-");
     const { directory } = fixture;
     let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
-    let service: Awaited<ReturnType<typeof startSqliteWorkFabric>> | undefined;
+    let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
     let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
     try {
       model = await startFakeOpenAiCompatibleServer({ structuredOutput: {
@@ -157,7 +72,7 @@ describe("Daily Assistant real boundaries", () => {
         handoff_draft_intent: "梳理需求范围并确认验收标准", handoff_draft_acceptance_criteria: ["范围得到业务方确认"],
       } });
       fixture.register(() => model!.close());
-      service = await startSqliteWorkFabric(directory);
+      service = await startDailyAssistantWorkFabric({ directory });
       if (service === undefined || model === undefined) throw new Error("E2E resources did not start");
       const startedService = service;
       const startedModel = model;
@@ -172,16 +87,13 @@ describe("Daily Assistant real boundaries", () => {
       const initialEvents = await startedService.human.queries.listHandoffEvents(handoffId);
       expect(initialEvents).toHaveLength(1);
       await eventually(async () => expect(
-        await client(startedService.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
-          .endpoints.listInboxPartitions("endpoint-intake-agent"),
+        await startedService.runtime.endpoints.listInboxPartitions(DAILY_E2E.runtimeEndpointId),
       ).toMatchObject({ items: [{ partition_id: partitionId(handoffId) }] }));
       await expect(
-        client(startedService.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
-          .subscriptions.get("subscription-intake-agent"),
-      ).resolves.toMatchObject({ endpoint_id: "endpoint-intake-agent", delivery: { mode: "sse" } });
+        startedService.runtime.subscriptions.get(DAILY_E2E.subscriptionId),
+      ).resolves.toMatchObject({ endpoint_id: DAILY_E2E.runtimeEndpointId, delivery: { mode: "sse" } });
       await expect(
-        client(startedService.origin, runtimeToken, "actor-intake-agent", "endpoint-intake-agent")
-          .queries.getHandoff(handoffId),
+        startedService.runtime.queries.getHandoff(handoffId),
       ).resolves.toMatchObject({ state: { lifecycle_state: "offered" } });
       await eventually(async () => expect(await runtimeRun(firstRuntime.statePath, handoffId)).not.toBeNull(), 7_000);
       await eventually(async () => expect(startedModel.requests).toHaveLength(1), 7_000);
@@ -205,20 +117,175 @@ describe("Daily Assistant real boundaries", () => {
         expect((await startedService.human.queries.getHandoff(secondHandoffId)).state.lifecycle_state).toBe("result_returned");
       });
       expect(startedModel.requests).toHaveLength(2);
-      const persisted = await readFile(join(directory, "runtime-state.db"));
-      expect(persisted.toString("utf8")).not.toContain(modelToken);
-      expect(persisted.toString("utf8")).not.toContain(runtimeToken);
+
+      // The Host resolves an opaque, tenant-separated workspace per Handoff.
+      // Neither raw identifier can become a path segment, and one Handoff's
+      // workspace cannot be reused by another Handoff or another tenant.
+      const firstWorkspace = workspacePath(firstRuntime.workspaceRoot, DAILY_E2E.tenantId, handoffId);
+      const secondWorkspace = workspacePath(firstRuntime.workspaceRoot, DAILY_E2E.tenantId, secondHandoffId);
+      const otherTenantWorkspace = workspacePath(firstRuntime.workspaceRoot, "tenant-daily-e2e-other", handoffId);
+      expect(firstWorkspace).not.toBe(secondWorkspace);
+      expect(firstWorkspace).not.toBe(otherTenantWorkspace);
+      expect(firstWorkspace).not.toContain(handoffId);
+      expect(secondWorkspace).not.toContain(secondHandoffId);
+      expect(otherTenantWorkspace).not.toContain(DAILY_E2E.tenantId);
+      const firstWorkspaceFiles = await filesBelow(firstWorkspace);
+      const secondWorkspaceFiles = await filesBelow(secondWorkspace);
+      for (const path of firstWorkspaceFiles) expect(path).not.toContain(secondHandoffId);
+      for (const path of secondWorkspaceFiles) expect(path).not.toContain(handoffId);
+      const [firstWorkspaceContents, secondWorkspaceContents] = await Promise.all([
+        Promise.all(firstWorkspaceFiles.map((path) => readFile(path, "utf8"))),
+        Promise.all(secondWorkspaceFiles.map((path) => readFile(path, "utf8"))),
+      ]);
+      for (const content of firstWorkspaceContents) expect(content).not.toContain(secondHandoffId);
+      for (const content of secondWorkspaceContents) expect(content).not.toContain(handoffId);
+
       const durableSurfaces = await Promise.all(
         (await filesBelow(directory)).map(async (path) => readFile(path, "utf8")),
       );
-      for (const surface of durableSurfaces) {
-        expect(surface).not.toContain(modelToken);
-        expect(surface).not.toContain(runtimeToken);
-      }
       const completedEvents = await startedService.human.queries.listHandoffEvents(handoffId);
       expect(completedEvents.length).toBeGreaterThanOrEqual(4);
+      const completed = await startedService.human.queries.getHandoff(handoffId);
+      expect(completed.state.child_handoff_id).toBeNull();
+      // Service/runtime SQLite rows and workspace bytes, public Status/Result
+      // snapshots and Events, and the fake model's bounded metadata are all
+      // credential-free.  The test never captures raw request bodies or logs.
+      assertNoFixtureSecrets(
+        durableSurfaces,
+        completed,
+        completedEvents,
+        startedModel.requests,
+      );
     } finally {
       await fixture.close();
     }
   }, 30_000);
+
+  it("keeps an ungranted Runtime outside the Handoff and model boundary", async () => {
+    const fixture = await NeutralE2eFixture.create("work-fabric-daily-deny-");
+    let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
+    let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
+    try {
+      model = await startFakeOpenAiCompatibleServer({ structuredOutput: validAssistantOutput });
+      fixture.register(() => model!.close());
+      service = await startDailyAssistantWorkFabric({ directory: fixture.directory, runtimeAuthority: false });
+      fixture.register(() => service!.service.close());
+      await provisionDailyAssistant(service.origin);
+      const offered = await service.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-no-grant" });
+      await expect(startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory: fixture.directory }))
+        .rejects.toThrow();
+      expect(model.requests).toHaveLength(0);
+      await expect(service.human.queries.getHandoff(resourceId(offered)))
+        .resolves.toMatchObject({ state: { lifecycle_state: "offered" } });
+    } finally {
+      await fixture.close();
+    }
+  }, 20_000);
+
+  it("does not let the Daily Assistant read or execute a Handoff for another Actor", async () => {
+    const fixture = await NeutralE2eFixture.create("work-fabric-daily-wrong-target-");
+    let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
+    let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
+    let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
+    try {
+      model = await startFakeOpenAiCompatibleServer({ structuredOutput: validAssistantOutput });
+      fixture.register(() => model!.close());
+      service = await startDailyAssistantWorkFabric({ directory: fixture.directory });
+      fixture.register(() => service!.service.close());
+      await provisionDailyAssistant(service.origin);
+      runtime = await startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory: fixture.directory });
+      fixture.register(() => runtime!.close());
+      const offered = await service.human.handoffs.offer(dailyAssistantOffer({ actor_id: "actor-other-agent" }), { idempotencyKey: "daily-assistant-wrong-target" });
+      const handoffId = resourceId(offered);
+      await expect(service.runtime.queries.getHandoff(handoffId)).rejects.toThrow();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(model.requests).toHaveLength(0);
+      expect(await runtimeRun(runtime.statePath, handoffId)).toBeNull();
+    } finally {
+      await fixture.close();
+    }
+  }, 20_000);
+
+  it("contains malformed worker output as a failed local run without a Result", async () => {
+    const fixture = await NeutralE2eFixture.create("work-fabric-daily-malformed-");
+    let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
+    let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
+    let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
+    try {
+      model = await startFakeOpenAiCompatibleServer({ structuredOutput: { response: "missing required output fields" } });
+      fixture.register(() => model!.close());
+      service = await startDailyAssistantWorkFabric({ directory: fixture.directory });
+      fixture.register(() => service!.service.close());
+      await provisionDailyAssistant(service.origin);
+      runtime = await startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory: fixture.directory });
+      fixture.register(() => runtime!.close());
+      const handoffId = resourceId(await service.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-malformed" }));
+      await eventually(async () => expect((await runtimeRun(runtime!.statePath, handoffId))?.state).toBe("failed"), 10_000);
+      const handoff = await service.human.queries.getHandoff(handoffId);
+      expect(handoff.state.lifecycle_state).toBe("accepted");
+      expect(handoff.state.result).toBeNull();
+      // The configured model client may safely retry a malformed response;
+      // the Fabric-visible invariant is that no Result is ever published.
+      expect(model.requests.length).toBeGreaterThanOrEqual(1);
+    } finally {
+      await fixture.close();
+    }
+  }, 20_000);
+
+  it("fails a timed-out Worker without publishing a Result", async () => {
+    const fixture = await NeutralE2eFixture.create("work-fabric-daily-stop-");
+    let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
+    let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
+    let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
+    try {
+      model = await startFakeOpenAiCompatibleServer({ structuredOutput: validAssistantOutput, delayMs: 3_000 });
+      fixture.register(() => model!.close());
+      service = await startDailyAssistantWorkFabric({ directory: fixture.directory });
+      fixture.register(() => service!.service.close());
+      await provisionDailyAssistant(service.origin);
+      runtime = await startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory: fixture.directory, timeoutSeconds: 1 });
+      fixture.register(() => runtime!.close());
+      const timeoutId = resourceId(await service.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-timeout" }));
+      await eventually(async () => expect((await runtimeRun(runtime!.statePath, timeoutId))?.state).toBe("failed"), 10_000);
+      await eventually(async () => expect(model!.abortedResponses).toBeGreaterThanOrEqual(1), 5_000);
+      expect((await service.human.queries.getHandoff(timeoutId)).state.result).toBeNull();
+
+    } finally {
+      await fixture.close();
+    }
+  }, 20_000);
+
+  it("drains an active cancellation through public boundaries without a Result or child Handoff", async () => {
+    const fixture = await NeutralE2eFixture.create("work-fabric-daily-cancel-");
+    let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
+    let service: Awaited<ReturnType<typeof startDailyAssistantWorkFabric>> | undefined;
+    let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
+    try {
+      model = await startFakeOpenAiCompatibleServer({ structuredOutput: validAssistantOutput, delayMs: 5_000 });
+      fixture.register(() => model!.close());
+      service = await startDailyAssistantWorkFabric({ directory: fixture.directory });
+      fixture.register(() => service!.service.close());
+      await provisionDailyAssistant(service.origin);
+      runtime = await startRealAgentlyRuntime({ baseUrl: service.origin, modelBaseUrl: model.baseUrl, directory: fixture.directory });
+      fixture.register(() => runtime!.close());
+      const handoffId = resourceId(await service.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-cancel" }));
+      await eventually(async () => expect(model!.requests.length).toBeGreaterThanOrEqual(1), 10_000);
+      const accepted = await service.human.queries.getHandoff(handoffId);
+      await service.human.handoffs.cancel(
+        { handoff_id: handoffId, reason: [{ kind: "text", media_type: "text/plain", text: "request withdrawn" }] },
+        { expectedVersion: accepted.stream_version, idempotencyKey: "daily-assistant-cancel-command" },
+      );
+
+      await eventually(async () => expect((await runtimeRun(runtime!.statePath, handoffId))?.state).toBe("cancelled"), 10_000);
+      await eventually(async () => expect(model!.abortedResponses).toBeGreaterThanOrEqual(1), 5_000);
+      const cancelled = await service.human.queries.getHandoff(handoffId);
+      expect(cancelled.state).toMatchObject({ lifecycle_state: "cancelled", result: null });
+      const events = await service.human.queries.listHandoffEvents(handoffId);
+      expect(events.map((event) => event.type)).not.toContain("workfabric.handoff.result_returned.v1");
+      expect(events.map((event) => event.type)).not.toContain("workfabric.handoff.transferred.v1");
+    } finally {
+      await fixture.close();
+    }
+  }, 30_000);
+
 });
