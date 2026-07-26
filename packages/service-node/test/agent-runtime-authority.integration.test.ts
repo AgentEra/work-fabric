@@ -18,6 +18,43 @@ const runtime = {
   subscription_id: "subscription-intake-agent",
 };
 
+function handoffState(id: string, target: Record<string, string>) {
+  return {
+    handoff_id: id,
+    thread_id: `thread:${id}`,
+    resource_version: 1,
+    lifecycle_state: "offered",
+    initiator: { actor_id: "actor-initiator", actor_type: "human" },
+    recipient: null,
+    verifier: { actor_id: "actor-verifier", actor_type: "human" },
+    current_responsible_actor: null,
+    target_binding: null,
+    package: {
+      work_reference: { uri: "urn:work:item:1" },
+      target,
+      intent: [],
+      context: null,
+      authority_scope: {
+        delegation_id: "delegation-runtime",
+        scopes: [],
+        resource_refs: [],
+        expires_at: "2026-07-20T01:00:00.000Z",
+        may_redelegate: false,
+      },
+      acceptance_criteria: [],
+      verifier: { actor_id: "actor-verifier", actor_type: "human" },
+      priority: "normal",
+      accept_by: "2026-07-20T01:00:00.000Z",
+      result_due_at: "2026-07-20T02:00:00.000Z",
+    },
+    result: null,
+    parent_handoff_id: null,
+    child_handoff_id: null,
+    created_at: "2026-07-20T00:00:00.000Z",
+    updated_at: "2026-07-20T00:00:00.000Z",
+  };
+}
+
 function storage(): NodeStorageComposition {
   const persistence = new MemoryExchangePersistence();
   const operations = new MemoryOperationsFixture();
@@ -48,13 +85,7 @@ describe("Agent Runtime authority composition", () => {
       partition_id: "handoff:handoff-targeted",
       handoff_id: "handoff-targeted",
       stream_version: 1,
-      state: {
-        lifecycle_state: "offered",
-        package: { target: { actor_id: runtime.actor_id } },
-        target_binding: null,
-        recipient: null,
-        current_responsible_actor: null,
-      },
+      state: handoffState("handoff-targeted", { actor_id: runtime.actor_id }),
       latest_status: null,
     });
     await owned.handoffs.putHandoff({
@@ -62,13 +93,7 @@ describe("Agent Runtime authority composition", () => {
       partition_id: "handoff:handoff-unassigned",
       handoff_id: "handoff-unassigned",
       stream_version: 1,
-      state: {
-        lifecycle_state: "offered",
-        package: { target: { actor_id: "actor-other" } },
-        target_binding: null,
-        recipient: null,
-        current_responsible_actor: null,
-      },
+      state: handoffState("handoff-unassigned", { actor_id: "actor-other" }),
       latest_status: null,
     });
     const service = await composeNodeService(parseServiceConfig({

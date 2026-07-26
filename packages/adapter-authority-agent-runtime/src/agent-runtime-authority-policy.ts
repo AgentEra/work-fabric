@@ -5,8 +5,10 @@ import type {
   CapabilityManifest,
   HandoffReadModelStore,
 } from "@work-fabric/exchange-spi";
+import type { HandoffState, HandoffTarget } from "@work-fabric/exchange-core";
 
 import type { AgentRuntimeAuthorityGrant } from "./config.js";
+import { validateRuntimeHandoffReadModel } from "./handoff-read-model-validator.js";
 
 const MAXIMUM_ID_LENGTH = 255;
 const SELF_ENDPOINT_ACTIONS = new Set([
@@ -30,20 +32,6 @@ const RESPONSIBLE_HANDOFF_ACTIONS = new Set([
   "workfabric.query.handoff.read.v1",
   "workfabric.handoff.report_status.v1",
   "workfabric.handoff.return_result.v1",
-]);
-const HANDOFF_LIFECYCLE_STATES = new Set([
-  "target_resolution_pending",
-  "target_unavailable",
-  "offered",
-  "accepted",
-  "result_returned",
-  "verified",
-  "rework_requested",
-  "closed",
-  "declined",
-  "expired",
-  "cancelled",
-  "transferred",
 ]);
 
 const manifest = Object.freeze({
@@ -81,39 +69,28 @@ function validGrant(value: unknown): value is AgentRuntimeAuthorityGrant {
     .every((field) => boundedIdentifier(ownData(value, field)));
 }
 
-function targetMatches(value: unknown, grant: AgentRuntimeAuthorityGrant): boolean {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  return ownData(value, "actor_id") === grant.actor_id || ownData(value, "endpoint_id") === grant.endpoint_id;
+function targetMatches(target: HandoffTarget, grant: AgentRuntimeAuthorityGrant): boolean {
+  if ("actor_id" in target) return target.actor_id === grant.actor_id;
+  if ("endpoint_id" in target) return target.endpoint_id === grant.endpoint_id;
+  return false;
 }
 
-function object(value: unknown): object | null {
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+function responsibleActorMatches(actor: HandoffState["recipient"], grant: AgentRuntimeAuthorityGrant): boolean {
+  return actor !== null && actor.actor_id === grant.actor_id;
 }
 
-function responsibleActorMatches(value: unknown, grant: AgentRuntimeAuthorityGrant): boolean {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    && ownData(value, "actor_id") === grant.actor_id;
+function targeted(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
+  return targetMatches(state.package.target, grant)
+    || (state.target_binding !== null && targetMatches(state.target_binding.target, grant));
 }
 
-function targeted(state: object, grant: AgentRuntimeAuthorityGrant): boolean {
-  const packageValue = ownData(state, "package");
-  const packageTarget = typeof packageValue === "object" && packageValue !== null && !Array.isArray(packageValue)
-    ? ownData(packageValue, "target")
-    : undefined;
-  const binding = ownData(state, "target_binding");
-  const bindingTarget = typeof binding === "object" && binding !== null && !Array.isArray(binding)
-    ? ownData(binding, "target")
-    : undefined;
-  return targetMatches(packageTarget, grant) || targetMatches(bindingTarget, grant);
+function responsible(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
+  return responsibleActorMatches(state.recipient, grant)
+    && responsibleActorMatches(state.current_responsible_actor, grant);
 }
 
-function responsible(state: object, grant: AgentRuntimeAuthorityGrant): boolean {
-  return responsibleActorMatches(ownData(state, "recipient"), grant)
-    && responsibleActorMatches(ownData(state, "current_responsible_actor"), grant);
-}
-
-function previouslyAccepted(state: object, grant: AgentRuntimeAuthorityGrant): boolean {
-  return responsibleActorMatches(ownData(state, "recipient"), grant);
+function previouslyAccepted(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
+  return responsibleActorMatches(state.recipient, grant);
 }
 
 function exactRuntimeGrant(request: AuthorityRequest, grants: readonly AgentRuntimeAuthorityGrant[]): AgentRuntimeAuthorityGrant | null {
@@ -173,14 +150,10 @@ export class AgentRuntimeAuthorityPolicy implements AuthorityPolicy {
       || (!TARGETED_HANDOFF_ACTIONS.has(action) && !RESPONSIBLE_HANDOFF_ACTIONS.has(action))) return DENY;
     try {
       const model = await this.handoffs.getHandoff(resourceId);
-      const modelObject = object(model);
-      if (modelObject === null
-        || ownData(modelObject, "tenant_id") !== grant.tenant_id
-        || ownData(modelObject, "handoff_id") !== resourceId) return DENY;
-      const state = object(ownData(modelObject, "state"));
-      if (state === null) return DENY;
-      const lifecycleState = ownData(state, "lifecycle_state");
-      if (typeof lifecycleState !== "string" || !HANDOFF_LIFECYCLE_STATES.has(lifecycleState)) return DENY;
+      const handoff = validateRuntimeHandoffReadModel(model, grant.tenant_id, resourceId);
+      if (handoff === null) return DENY;
+      const { state } = handoff;
+      const lifecycleState = state.lifecycle_state;
       if (action === "workfabric.query.handoff.read.v1" && (targeted(state, grant) || previouslyAccepted(state, grant))) return ALLOW;
       if (TARGETED_HANDOFF_ACTIONS.has(action) && lifecycleState === "offered" && targeted(state, grant)) return ALLOW;
       if (RESPONSIBLE_HANDOFF_ACTIONS.has(action) && lifecycleState === "accepted" && responsible(state, grant)) return ALLOW;

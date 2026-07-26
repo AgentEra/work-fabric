@@ -46,35 +46,73 @@ function request(overrides: Partial<AuthorityRequest> = {}): AuthorityRequest {
   };
 }
 
-function handoff(id: string, state: HandoffReadModel["state"], tenantId = grant.tenant_id): HandoffReadModel {
+function state(id: string, overrides: Record<string, unknown> = {}): HandoffReadModel["state"] {
+  return {
+    handoff_id: id,
+    thread_id: `thread:${id}`,
+    resource_version: 1,
+    lifecycle_state: "offered",
+    initiator: { actor_id: "actor-initiator", actor_type: "human" },
+    recipient: null,
+    verifier: { actor_id: "actor-verifier", actor_type: "human" },
+    current_responsible_actor: null,
+    target_binding: null,
+    package: {
+      work_reference: { uri: "urn:work:item:1" },
+      target: { actor_id: grant.actor_id },
+      intent: [],
+      context: null,
+      authority_scope: {
+        delegation_id: "delegation-runtime",
+        scopes: [],
+        resource_refs: [],
+        expires_at: "2026-07-20T01:00:00.000Z",
+        may_redelegate: false,
+      },
+      acceptance_criteria: [],
+      verifier: { actor_id: "actor-verifier", actor_type: "human" },
+      priority: "normal",
+      accept_by: "2026-07-20T01:00:00.000Z",
+      result_due_at: "2026-07-20T02:00:00.000Z",
+    },
+    result: null,
+    parent_handoff_id: null,
+    child_handoff_id: null,
+    created_at: "2026-07-20T00:00:00.000Z",
+    updated_at: "2026-07-20T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function packageFor(id: string): Record<string, unknown> {
+  const candidate = state(id).package;
+  if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) throw new Error("expected package fixture");
+  return candidate as Record<string, unknown>;
+}
+
+function handoff(id: string, handoffState: HandoffReadModel["state"] = state(id), tenantId = grant.tenant_id): HandoffReadModel {
   return {
     tenant_id: tenantId,
     partition_id: `handoff:${id}`,
     handoff_id: id,
     stream_version: 1,
-    state,
+    state: handoffState,
     latest_status: null,
   };
 }
 
 function targetedSnapshot(id: string, target: Pick<AgentRuntimeAuthorityGrant, "actor_id" | "endpoint_id"> = grant): HandoffReadModel {
-  return handoff(id, {
-    lifecycle_state: "offered",
-    package: { target: { actor_id: target.actor_id } },
-    target_binding: null,
-    recipient: null,
-    current_responsible_actor: null,
-  });
+  return handoff(id, state(id, { package: { ...packageFor(id), target: { actor_id: target.actor_id } } }));
 }
 
 function acceptedSnapshot(id: string): HandoffReadModel {
-  return handoff(id, {
+  return handoff(id, state(id, {
     lifecycle_state: "accepted",
-    package: { target: { endpoint_id: grant.endpoint_id } },
+    package: { ...packageFor(id), target: { endpoint_id: grant.endpoint_id } },
     target_binding: null,
     recipient: { actor_id: grant.actor_id, actor_type: "agent" },
     current_responsible_actor: { actor_id: grant.actor_id, actor_type: "agent" },
-  });
+  }));
 }
 
 function store(models: readonly HandoffReadModel[] = []): HandoffReadModelStore {
@@ -154,13 +192,12 @@ describe("AgentRuntimeAuthorityPolicy", () => {
   });
 
   it("allows targeted commands only while the Handoff is offered", async () => {
-    const nonOffered = handoff("handoff-targeted-accepted", {
+    const nonOffered = handoff("handoff-targeted-accepted", state("handoff-targeted-accepted", {
       lifecycle_state: "accepted",
-      package: { target: { actor_id: grant.actor_id } },
-      target_binding: null,
+      package: { ...packageFor("handoff-targeted-accepted"), target: { actor_id: grant.actor_id } },
       recipient: { actor_id: "actor-other", actor_type: "agent" },
       current_responsible_actor: { actor_id: "actor-other", actor_type: "agent" },
-    });
+    }));
     const policy = new AgentRuntimeAuthorityPolicy([grant], store([nonOffered]));
 
     await expect(policy.authorize(request({ resource_id: nonOffered.handoff_id }))).resolves.toEqual({ kind: "allow" });
@@ -186,13 +223,12 @@ describe("AgentRuntimeAuthorityPolicy", () => {
   });
 
   it("allows responsible commands only while the Handoff is accepted", async () => {
-    const terminal = handoff("handoff-responsible-terminal", {
+    const terminal = handoff("handoff-responsible-terminal", state("handoff-responsible-terminal", {
       lifecycle_state: "result_returned",
-      package: { target: { actor_id: "actor-other" } },
-      target_binding: null,
+      package: { ...packageFor("handoff-responsible-terminal"), target: { actor_id: "actor-other" } },
       recipient: { actor_id: grant.actor_id, actor_type: "agent" },
       current_responsible_actor: { actor_id: grant.actor_id, actor_type: "agent" },
-    });
+    }));
     const policy = new AgentRuntimeAuthorityPolicy([grant], store([terminal]));
 
     await expect(policy.authorize(request({ resource_id: terminal.handoff_id }))).resolves.toEqual({ kind: "allow" });
@@ -202,13 +238,12 @@ describe("AgentRuntimeAuthorityPolicy", () => {
   });
 
   it("allows a previously accepted recipient to read a terminal Handoff without granting further commands", async () => {
-    const terminal = handoff("handoff-terminal", {
-      package: { target: { actor_id: "actor-other" } },
-      target_binding: null,
+    const terminal = handoff("handoff-terminal", state("handoff-terminal", {
+      package: { ...packageFor("handoff-terminal"), target: { actor_id: "actor-other" } },
       recipient: { actor_id: grant.actor_id, actor_type: "agent" },
       current_responsible_actor: null,
       lifecycle_state: "closed",
-    });
+    }));
     const policy = new AgentRuntimeAuthorityPolicy([grant], store([terminal]));
 
     await expect(policy.authorize(request({ resource_id: terminal.handoff_id }))).resolves.toEqual({ kind: "allow" });
@@ -253,6 +288,54 @@ describe("AgentRuntimeAuthorityPolicy", () => {
       action: "workfabric.handoff.accept.v1",
       resource_id: "handoff-prototype",
     }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("denies a dual-discriminator target even when one discriminator matches", async () => {
+    const malformed = handoff("handoff-dual-target", state("handoff-dual-target", {
+      package: {
+        ...packageFor("handoff-dual-target"),
+        target: { actor_id: grant.actor_id, endpoint_id: "endpoint-other" },
+      },
+    }));
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([malformed]));
+
+    await expect(policy.authorize(request({ resource_id: malformed.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+    await expect(policy.authorize(request({ action: "workfabric.handoff.accept.v1", resource_id: malformed.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("denies malformed recipient shapes and model-state identity mismatches", async () => {
+    const malformedRecipient = handoff("handoff-malformed-recipient", state("handoff-malformed-recipient", {
+      lifecycle_state: "accepted",
+      recipient: { actor_id: grant.actor_id },
+      current_responsible_actor: { actor_id: grant.actor_id, actor_type: "agent" },
+    }));
+    const mismatchedState = handoff("handoff-model-id", state("handoff-state-id"));
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([malformedRecipient, mismatchedState]));
+
+    await expect(policy.authorize(request({ action: "workfabric.handoff.report_status.v1", resource_id: malformedRecipient.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+    await expect(policy.authorize(request({ resource_id: mismatchedState.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("denies a state with accessor-backed recipient data", async () => {
+    const accessorState = structuredClone(acceptedSnapshot("handoff-accessor").state) as Record<string, unknown>;
+    Object.defineProperty(accessorState, "recipient", {
+      enumerable: true,
+      get() { return { actor_id: grant.actor_id, actor_type: "agent" }; },
+    });
+    const model = handoff("handoff-accessor", accessorState as HandoffReadModel["state"]);
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([model]));
+
+    await expect(policy.authorize(request({
+      action: "workfabric.handoff.report_status.v1",
+      resource_id: model.handoff_id,
+    }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("denies a read model with a non-object latest status", async () => {
+    const model = { ...targetedSnapshot("handoff-primitive-status"), latest_status: "invalid" } as unknown as HandoffReadModel;
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([model]));
+
+    await expect(policy.authorize(request({ resource_id: model.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
   });
 
   it("does not derive authority from Capability declarations", async () => {

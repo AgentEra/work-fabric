@@ -13,3 +13,6 @@ export type {
 export type {
   AgentRuntimeHandoffAccess,
 } from "./handoff-access.js";
+export {
+  validateRuntimeHandoffReadModel,
+} from "./handoff-read-model-validator.js";
