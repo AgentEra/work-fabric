@@ -4,4 +4,5 @@ export * from "./configuration-loader.js";
 export * from "./errors.js";
 export * from "./handoff-package-loader.js";
 export * from "./protocol-mapping.js";
+export * from "./safe-json.js";
 export * from "./workspace-locator.js";

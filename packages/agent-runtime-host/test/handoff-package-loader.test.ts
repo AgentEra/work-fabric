@@ -54,4 +54,20 @@ describe("HandoffPackageLoader", () => {
     const client = { getHandoff: vi.fn(async () => unavailableDigest as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
     await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).resolves.toMatchObject({ task: { context_reference: { digest: null } } });
   });
+
+  it("rejects non-JSON values and returns detached frozen public values", async () => {
+    const unsafe = structuredClone(snapshot) as unknown as { state: { package: { intent: unknown[] } } };
+    unsafe.state.package.intent = [new Date()];
+    const unsafeClient = { getHandoff: vi.fn(async () => unsafe as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
+    await expect(new HandoffPackageLoader(unsafeClient, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).rejects.toThrow("invalid_snapshot");
+
+    const source = structuredClone(snapshot);
+    const client = { getHandoff: vi.fn(async () => source), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
+    const loaded = await new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1");
+    (source.state as { package: { intent: [{ text: string }] } }).package.intent[0].text = "mutated";
+    expect(loaded.task.intent[0]).toMatchObject({ text: "Summarize" });
+    expect(Object.isFrozen(loaded.snapshot)).toBe(true);
+    expect(Object.isFrozen(loaded.events)).toBe(true);
+    expect(Object.isFrozen(loaded.task)).toBe(true);
+  });
 });

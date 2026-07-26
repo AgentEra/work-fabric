@@ -137,6 +137,9 @@ export async function loadAgentRuntimeConfiguration(options: LoadAgentRuntimeCon
     "collaboration.handoff.draft",
   ]);
   if (role.capability_ids.some((item) => !supportedCapabilities.has(item))) invalid("capabilities", "capabilities");
+  if (snapshot.value.service.acceptance.allowed_capability_ids.some((item) => !role.capability_ids.includes(item))) {
+    invalid("invalid_capability", "service.acceptance.allowed_capability_ids");
+  }
   const instances = Object.entries(snapshot.value.plugins.instances).filter(([, item]) => item.enabled && item.type === "agent-runtime.agently");
   if (instances.length !== 1) invalid("driver_instance_invalid", "plugins.instances");
   const [instance_id, instance] = instances[0]!;

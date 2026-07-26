@@ -71,4 +71,10 @@ describe("loadAgentRuntimeConfiguration", () => {
   ])("rejects %s", async (_name, mutate, expected) => {
     await expect(loadAgentRuntimeConfiguration({ document: document(mutate(structuredClone(base))), environment: {} })).rejects.toThrow(expected);
   });
+
+  it("rejects acceptance capabilities outside the declared Driver role", async () => {
+    const value = structuredClone(base);
+    value.service.acceptance.allowed_capability_ids.push("unsupported.capability");
+    await expect(loadAgentRuntimeConfiguration({ document: document(value), environment: { AGENT_RUNTIME_WORK_FABRIC_TOKEN: "wf-token", AGENTLY_MODEL_API_KEY: "model-token" } })).rejects.toThrow("acceptance.allowed_capability_ids");
+  });
 });

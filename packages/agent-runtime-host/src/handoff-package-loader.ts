@@ -2,6 +2,7 @@ import type { AgentRoleProfile, RuntimeJsonObject, RuntimeTaskPackage } from "@w
 import type { HandoffEventQuery, HandoffReadModel, ProtocolEvent, RequestOptions } from "@work-fabric/sdk-typescript";
 
 import { invalid } from "./errors.js";
+import { cloneFrozenJson } from "./safe-json.js";
 
 export interface RuntimeHandoffQueries {
   getHandoff(id: string, options?: RequestOptions): Promise<HandoffReadModel>;
@@ -104,7 +105,7 @@ export class HandoffPackageLoader {
   async load(handoffId: string, workspacePath: string, signal?: AbortSignal): Promise<LoadedRuntimeHandoff> {
     id(handoffId, "handoff_id");
     if (typeof workspacePath !== "string" || workspacePath.length === 0) invalid("invalid_workspace_path", "workspace_path");
-    const snapshot = await this.queries.getHandoff(handoffId, signal === undefined ? {} : { signal });
+    const snapshot = cloneFrozenJson(await this.queries.getHandoff(handoffId, signal === undefined ? {} : { signal }), "snapshot");
     if (snapshot.tenant_id !== this.tenantId || snapshot.handoff_id !== handoffId || !Number.isSafeInteger(snapshot.stream_version) || snapshot.stream_version < 1) invalid("snapshot_identity_mismatch", "snapshot");
     const state = record(snapshot.state, "state"); exact(state, STATE_FIELDS, "state");
     if (state.handoff_id !== handoffId || state.resource_version !== snapshot.stream_version) invalid("snapshot_version_mismatch", "state");
@@ -136,7 +137,8 @@ export class HandoffPackageLoader {
     const acceptBy = timestamp(handoffPackage.accept_by, "state.package.accept_by", this.now());
     const resultDueAt = timestamp(handoffPackage.result_due_at, "state.package.result_due_at", this.now());
     const events = await this.readEvents(handoffId, snapshot.stream_version, signal);
-    return { snapshot, events, task: { tenant_id: this.tenantId, handoff_id: handoffId, thread_id: threadId, stream_version: snapshot.stream_version, role: this.role, capability_id: this.capabilityId(handoffPackage.target), intent, context_reference: contextReference, authority_scope: authorityScope, acceptance_criteria: acceptanceCriteria, priority: handoffPackage.priority, accept_by: acceptBy, result_due_at: resultDueAt, workspace_path: workspacePath } };
+    const task = cloneFrozenJson({ tenant_id: this.tenantId, handoff_id: handoffId, thread_id: threadId, stream_version: snapshot.stream_version, role: this.role, capability_id: this.capabilityId(handoffPackage.target), intent, context_reference: contextReference, authority_scope: authorityScope, acceptance_criteria: acceptanceCriteria, priority: handoffPackage.priority, accept_by: acceptBy, result_due_at: resultDueAt, workspace_path: workspacePath }, "task") as RuntimeTaskPackage;
+    return Object.freeze({ snapshot, events, task });
   }
 
   private capabilityId(value: unknown): string | null {
@@ -149,7 +151,7 @@ export class HandoffPackageLoader {
     const events: ProtocolEvent[] = [];
     let fromVersion = 1;
     while (fromVersion <= streamVersion) {
-      const page = await this.queries.listHandoffEvents(handoffId, signal === undefined ? { fromVersion, limit: 256 } : { fromVersion, limit: 256, signal });
+      const page = cloneFrozenJson(await this.queries.listHandoffEvents(handoffId, signal === undefined ? { fromVersion, limit: 256 } : { fromVersion, limit: 256, signal }), "events") as readonly ProtocolEvent[];
       if (page.length === 0 || page.length > 256 || events.length + page.length > 4_096) invalid("event_sequence", "events");
       for (const event of page) {
         if (event.wftenant !== this.tenantId || event.wfhandoff !== handoffId || event.wfsequence !== fromVersion) invalid("event_sequence", "events");
@@ -157,7 +159,7 @@ export class HandoffPackageLoader {
       }
     }
     if (events.length === 0 || events.at(-1)?.wfsequence !== streamVersion) invalid("event_sequence", "events");
-    return events;
+    return Object.freeze(events);
   }
 }
 
