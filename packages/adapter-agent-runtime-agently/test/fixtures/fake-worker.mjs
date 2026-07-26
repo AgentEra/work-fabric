@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from "node:child_process";
 // macOS's script launcher may synthesize this locale hint after spawn; it was
 // not inherited from the Driver's explicit environment allowlist.
 delete process.env.__CF_USER_TEXT_ENCODING;
@@ -25,6 +26,17 @@ process.stdin.on("end", () => {
     case "non-zero-exit": complete(); process.exitCode = 9; break;
     case "print-env-keys": emit(record("completed", { result: { summary: [{ kind: "text", text: "env" }], artifacts: [], evidence: [], extensions: { "workfabric.dev/child_env_keys": Object.keys(process.env).sort() } } })); break;
     case "ignore-term": process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000); break;
+    case "delayed-invalid":
+      emit(record("progress", { sequence: 1, progress: 0.1, message: "waiting", observed_at: "2026-01-01T00:00:00.000Z" }));
+      setTimeout(() => { process.stdout.write("{invalid-json}\n"); }, 1_000);
+      break;
+    case "spawn-descendant": {
+      process.on("SIGTERM", () => {});
+      const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
+      emit(record("progress", { sequence: 1, progress: null, message: `descendant:${descendant.pid}`, observed_at: "2026-01-01T00:00:00.000Z" }));
+      setInterval(() => {}, 1_000);
+      break;
+    }
     default: throw new Error("unknown scenario");
   }
 });

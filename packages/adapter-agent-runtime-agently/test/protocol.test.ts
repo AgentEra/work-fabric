@@ -27,4 +27,25 @@ describe("Agently worker protocol", () => {
   ])("rejects a record outside the exact protocol", (record) => {
     expect(() => parseAgentlyWorkerRecord(record, "command-1")).toThrow();
   });
+
+  it.each(["summary", "artifacts", "evidence"] as const)("rejects non-object %s entries", (collection) => {
+    for (const entry of [null, "text", [], new Date(), Object.create(null)]) {
+      expect(() => parseAgentlyWorkerRecord({ protocol: "workfabric.agent-runtime/1", type: "completed", command_id: "command-1", result: { summary: collection === "summary" ? [entry] : [], artifacts: collection === "artifacts" ? [entry] : [], evidence: collection === "evidence" ? [entry] : [], extensions: {} } }, "command-1")).toThrow();
+    }
+  });
+
+  it("does not invoke getters while rejecting a record", () => {
+    let reads = 0;
+    const entry = {};
+    Object.defineProperty(entry, "secret", { enumerable: true, get() { reads += 1; return "unexpected"; } });
+    expect(() => parseAgentlyWorkerRecord({ protocol: "workfabric.agent-runtime/1", type: "completed", command_id: "command-1", result: { summary: [entry], artifacts: [], evidence: [], extensions: {} } }, "command-1")).toThrow();
+    expect(reads).toBe(0);
+  });
+
+  it("rejects records exceeding aggregate JSON node or string-byte bounds", () => {
+    const nodes = Object.fromEntries(Array.from({ length: 10_000 }, (_item, index) => [`k${index}`, index]));
+    const record = { protocol: "workfabric.agent-runtime/1", type: "completed", command_id: "command-1", result: { summary: [nodes], artifacts: [], evidence: [], extensions: {} } };
+    expect(() => parseAgentlyWorkerRecord(record, "command-1")).toThrow();
+    expect(() => parseAgentlyWorkerRecord({ protocol: "workfabric.agent-runtime/1", type: "completed", command_id: "command-1", result: { summary: [{ kind: "text", text: "x".repeat(131_073) }], artifacts: [], evidence: [], extensions: {} } }, "command-1")).toThrow();
+  });
 });

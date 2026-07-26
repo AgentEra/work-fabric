@@ -36,6 +36,11 @@ function requestFor(task: RuntimeTaskPackage, config: AgentlyRuntimeDriverConfig
   return { protocol: AGENTLY_WORKER_PROTOCOL, command_id: randomUUID(), task, provider: { type: "OpenAICompatible", base_url: config.provider.base_url, model: config.provider.model } };
 }
 
+function signalProcessGroup(pid: number | undefined, signal: NodeJS.Signals): boolean {
+  if (process.platform === "win32" || pid === undefined || !Number.isSafeInteger(pid) || pid < 1) return false;
+  try { process.kill(-pid, signal); return true; } catch { return false; }
+}
+
 export class AgentlyProcessDriver implements AgentRuntimeDriver {
   readonly manifest = validateDriverManifest({
     driver_type: "agently", protocol_version: "1",
@@ -46,6 +51,7 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
 
   async execute(task: RuntimeTaskPackage, progress: (update: RuntimeProgress) => Promise<void>, signal: AbortSignal): Promise<RuntimeDriverResult> {
     if (signal.aborted) throw error("agently_worker_cancelled", "Agently worker execution was cancelled");
+    if (process.platform === "win32") throw error("agently_worker_spawn", "Agently worker process-group isolation is unavailable on this platform");
     if (secretIn(task, this.config.provider.api_key)) throw error("agently_worker_input", "Agently worker request contains a configured secret");
     const request = requestFor(task, this.config);
     let input: string;
@@ -55,7 +61,7 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
     let child: ReturnType<typeof spawn>;
     try {
       child = spawn(this.config.python.executable, ["-m", this.config.python.module], {
-        cwd: dirname(this.config.workspace_root), stdio: ["pipe", "pipe", "pipe"], shell: false,
+        cwd: dirname(this.config.workspace_root), stdio: ["pipe", "pipe", "pipe"], shell: false, detached: true,
         env: { PATH: process.env.PATH ?? "", LANG: process.env.LANG ?? "C.UTF-8", PYTHONIOENCODING: "utf-8", AGENTLY_MODEL_API_KEY: this.config.provider.api_key },
       });
     } catch { throw error("agently_worker_spawn", "Unable to start Agently worker"); }
@@ -76,6 +82,8 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
       const reader = new NdjsonReader(MAX_STDOUT_LINE_BYTES, MAX_STDOUT_RECORDS);
       let timeout: NodeJS.Timeout | undefined;
       let grace: NodeJS.Timeout | undefined;
+      let closeObserved = false;
+      let childExited = false;
 
       const cleanup = () => {
         if (timeout !== undefined) clearTimeout(timeout);
@@ -91,9 +99,13 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
       const terminate = (failure: AgentlyWorkerError) => {
         if (!accepting) return;
         accepting = false;
-        try { child.kill("SIGTERM"); } catch { /* process has already gone away */ }
-        grace = setTimeout(() => { if (child.exitCode === null) { try { child.kill("SIGKILL"); } catch { /* process has already gone away */ } } }, this.config.cancellation_grace_seconds * 1_000);
-        child.once("close", () => settle({ failure }));
+        if (!signalProcessGroup(child.pid, "SIGTERM")) {
+          try { child.kill("SIGKILL"); } catch { /* process has already gone away */ }
+          if (childExited || closeObserved) settle({ failure }); else child.once("close", () => settle({ failure }));
+          return;
+        }
+        grace = setTimeout(() => { if (!childExited) signalProcessGroup(child.pid, "SIGKILL"); }, this.config.cancellation_grace_seconds * 1_000);
+        if (childExited || closeObserved) settle({ failure }); else child.once("close", () => settle({ failure }));
       };
       const abort = () => terminate(error("agently_worker_cancelled", "Agently worker execution was cancelled"));
 
@@ -101,6 +113,7 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
       timeout = setTimeout(() => terminate(error("agently_worker_timeout", "Agently worker execution timed out")), this.config.execution_timeout_seconds * 1_000);
 
       child.on("error", () => terminate(error("agently_worker_spawn", "Unable to start Agently worker")));
+      child.on("exit", () => { childExited = true; });
       stderrOutput.on("data", (chunk: Buffer) => {
         if (stderr.length >= MAX_STDERR_BYTES) return;
         stderr = Buffer.concat([stderr, chunk.subarray(0, MAX_STDERR_BYTES - stderr.length)]);
@@ -125,6 +138,7 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
       })();
       void stdoutDone.catch((cause: unknown) => terminate(cause instanceof AgentlyWorkerError ? cause : error("agently_worker_protocol", "Agently worker emitted an invalid protocol record")));
       child.on("close", (exitCode, terminationSignal) => {
+        closeObserved = true;
         void stdoutDone.then(() => {
           if (settled) return;
           if (!accepting) return;

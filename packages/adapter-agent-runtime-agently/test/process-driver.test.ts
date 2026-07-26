@@ -1,4 +1,3 @@
-import { ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
@@ -16,7 +15,7 @@ const task = (scenario: string): RuntimeTaskPackage => ({
   accept_by: "2026-01-01T00:00:00.000Z", result_due_at: "2026-01-01T01:00:00.000Z", workspace_path: "/tmp/workspace",
 });
 
-async function runFixture(scenario: string, options: { readonly timeout?: number; readonly grace?: number; readonly signal?: AbortSignal } = {}) {
+async function runFixture(scenario: string, options: { readonly timeout?: number; readonly grace?: number; readonly signal?: AbortSignal; readonly onProgress?: (item: unknown) => Promise<void> } = {}) {
   const config = validateAgentlyRuntimeDriverConfig({
     python: { executable: worker, module: "work_fabric_agently_runtime" }, workspace_root: process.cwd(),
     execution_timeout_seconds: options.timeout ?? 2, cancellation_grace_seconds: options.grace ?? 1,
@@ -24,7 +23,7 @@ async function runFixture(scenario: string, options: { readonly timeout?: number
   }, "test", { config_directory: process.cwd() });
   const driver = await new AgentlyRuntimeDriverFactory().create(config);
   const progress: unknown[] = [];
-  const result = await driver.execute(task(scenario), async (item) => { progress.push(item); }, options.signal ?? new AbortController().signal);
+  const result = await driver.execute(task(scenario), async (item) => { progress.push(item); await options.onProgress?.(item); }, options.signal ?? new AbortController().signal);
   return { result, progress };
 }
 
@@ -45,12 +44,43 @@ describe("AgentlyProcessDriver", () => {
   });
 
   it("sends graceful termination then forced termination after cancellation grace", async () => {
-    const kill = vi.spyOn(ChildProcess.prototype, "kill");
+    const kill = vi.spyOn(process, "kill");
     const controller = new AbortController();
     const pending = runFixture("ignore-term", { grace: 1, signal: controller.signal });
     setTimeout(() => controller.abort(), 50);
     await expect(pending).rejects.toMatchObject({ code: "agently_worker_cancelled" });
-    expect(kill.mock.calls.map(([signal]) => signal)).toEqual(expect.arrayContaining(["SIGTERM", "SIGKILL"]));
+    expect(kill.mock.calls.map(([_pid, signal]) => signal)).toEqual(expect.arrayContaining(["SIGTERM", "SIGKILL"]));
     kill.mockRestore();
+  });
+
+  it("rejects promptly when the child closes while a delayed progress sink has buffered invalid output", async () => {
+    const start = Date.now();
+    const outcome = await Promise.race([
+      runFixture("delayed-invalid", { timeout: 3, onProgress: async () => { await new Promise((resolve) => setTimeout(resolve, 1_500)); } }).then(() => "resolved", (failure: { readonly code: string }) => failure.code),
+      new Promise<string>((resolve) => setTimeout(() => resolve("hung"), 2_800)),
+    ]);
+    expect(outcome).toBe("agently_worker_protocol");
+    expect(Date.now() - start).toBeLessThan(2_800);
+  });
+
+  it("terminates the entire worker process group, including an API-key-bearing descendant", async () => {
+    const controller = new AbortController();
+    let descendantPid = 0;
+    let progressed!: () => void;
+    const progress = new Promise<void>((resolve) => { progressed = resolve; });
+    const pending = runFixture("spawn-descendant", {
+      grace: 1,
+      signal: controller.signal,
+      onProgress: async (item) => {
+        const message = (item as { readonly message: string }).message;
+        descendantPid = Number(message.slice("descendant:".length));
+        progressed();
+      },
+    });
+    await progress;
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: "agently_worker_cancelled" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(() => process.kill(descendantPid, 0)).toThrow();
   });
 });

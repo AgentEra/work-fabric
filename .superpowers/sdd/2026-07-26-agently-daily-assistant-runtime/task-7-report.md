@@ -16,3 +16,10 @@
 - `npm run typecheck`: completed successfully.
 - `npm ci --ignore-scripts`: completed successfully.
 - `git diff --check`: completed successfully.
+
+## Formal review follow-up
+
+- Records now retain the child `exit` state separately from stream close, so a protocol failure discovered after an asynchronous progress callback settles immediately even when the child already exited.
+- POSIX workers launch in a detached process group; timeout and cancellation signal the group (`SIGTERM`, then `SIGKILL`) so descendants inheriting the API-key environment cannot remain alive. Unsupported Windows process-group isolation fails before spawning.
+- Result collection entries now require plain enumerable own-data objects.
+- Protocol traversal is descriptor-based and bounded across the whole record by depth, 10,000 JSON nodes, and 128 KiB of UTF-8 strings.

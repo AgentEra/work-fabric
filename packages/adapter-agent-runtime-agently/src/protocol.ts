@@ -2,6 +2,8 @@ import type { RuntimeDriverResult, RuntimeJsonObject, RuntimeJsonValue, RuntimeT
 
 export const AGENTLY_WORKER_PROTOCOL = "workfabric.agent-runtime/1" as const;
 export const MAX_JSON_DEPTH = 32;
+export const MAX_JSON_NODES = 10_000;
+export const MAX_JSON_STRING_BYTES = 131_072;
 
 export interface AgentlyWorkerRequestV1 {
   readonly protocol: typeof AGENTLY_WORKER_PROTOCOL;
@@ -15,15 +17,65 @@ export type AgentlyWorkerRecordV1 =
   | { readonly protocol: typeof AGENTLY_WORKER_PROTOCOL; readonly type: "completed"; readonly command_id: string; readonly result: RuntimeDriverResult }
   | { readonly protocol: typeof AGENTLY_WORKER_PROTOCOL; readonly type: "failed"; readonly command_id: string; readonly code: string; readonly message: string; readonly retryable: boolean };
 
-function exactObject(value: unknown, fields: readonly string[], path: string): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new TypeError(`${path} must be an object`);
+interface JsonBudget { nodes: number; stringBytes: number; readonly seen: WeakSet<object>; }
+
+function ownData(value: object, key: string | symbol, path: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined || !("value" in descriptor)) throw new TypeError(`${path} must be an own data property`);
+  return descriptor.value;
+}
+
+function plainObject(value: unknown, path: string): Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new TypeError(`${path} must be a plain object`);
   const keys = Reflect.ownKeys(value);
-  if (keys.length !== fields.length || keys.some((key) => typeof key !== "string" || !fields.includes(key)) || fields.some((key) => !Object.hasOwn(value, key))) throw new TypeError(`${path} fields are invalid`);
-  const output: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  for (const key of fields) {
+  const output: Record<string, unknown> = {};
+  for (const key of keys) {
+    if (typeof key !== "string") throw new TypeError(`${path} contains a symbol key`);
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (descriptor === undefined || !("value" in descriptor)) throw new TypeError(`${path}.${key} must be data`);
+    if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) throw new TypeError(`${path}.${key} must be an enumerable data property`);
     output[key] = descriptor.value;
+  }
+  return output;
+}
+
+function exactObject(value: unknown, fields: readonly string[], path: string): Record<string, unknown> {
+  const object = plainObject(value, path);
+  const keys = Object.keys(object);
+  if (keys.length !== fields.length || keys.some((key) => !fields.includes(key)) || fields.some((key) => !Object.hasOwn(object, key))) throw new TypeError(`${path} fields are invalid`);
+  return object;
+}
+
+function countString(value: string, budget: JsonBudget): string {
+  budget.stringBytes += Buffer.byteLength(value, "utf8");
+  if (budget.stringBytes > MAX_JSON_STRING_BYTES) throw new RangeError("worker JSON strings exceed their bound");
+  return value;
+}
+
+function json(value: unknown, budget: JsonBudget, depth = 0): RuntimeJsonValue {
+  if (depth > MAX_JSON_DEPTH) throw new RangeError("worker JSON exceeds maximum depth");
+  budget.nodes += 1;
+  if (budget.nodes > MAX_JSON_NODES) throw new RangeError("worker JSON exceeds its node bound");
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "string") return countString(value, budget);
+  if (typeof value === "number") { if (!Number.isFinite(value)) throw new TypeError("worker JSON number is invalid"); return value; }
+  if (typeof value !== "object" || value === null) throw new TypeError("worker JSON is invalid");
+  if (budget.seen.has(value)) throw new TypeError("worker JSON must not contain references");
+  budget.seen.add(value);
+  if (Array.isArray(value)) {
+    const length = ownData(value, "length", "worker JSON array");
+    if (!Number.isSafeInteger(length) || (length as number) < 0) throw new TypeError("worker JSON array length is invalid");
+    const keys = Reflect.ownKeys(value);
+    if (keys.length !== (length as number) + 1 || keys.some((key) => key !== "length" && (typeof key !== "string" || !/^(0|[1-9][0-9]*)$/.test(key) || Number(key) >= (length as number)))) throw new TypeError("worker JSON array is invalid");
+    const output: RuntimeJsonValue[] = [];
+    for (let index = 0; index < (length as number); index += 1) output.push(json(ownData(value, String(index), `worker JSON array[${index}]`), budget, depth + 1));
+    return output;
+  }
+  const object = plainObject(value, "worker JSON object");
+  const output: Record<string, RuntimeJsonValue> = {};
+  for (const [key, child] of Object.entries(object)) {
+    if (key.length > 256) throw new RangeError("worker JSON key is too large");
+    countString(key, budget);
+    output[key] = json(child, budget, depth + 1);
   }
   return output;
 }
@@ -37,34 +89,27 @@ function command(value: unknown, expected: string): void {
   if (value !== expected) throw new TypeError("worker command_id does not match request");
 }
 
-function json(value: unknown, depth = 0): RuntimeJsonValue {
-  if (depth > MAX_JSON_DEPTH) throw new RangeError("worker JSON exceeds maximum depth");
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") { if (!Number.isFinite(value)) throw new TypeError("worker JSON number is invalid"); return value; }
-  if (Array.isArray(value)) return value.map((item) => json(item, depth + 1));
-  if (typeof value !== "object" || Object.getPrototypeOf(value) !== Object.prototype) throw new TypeError("worker JSON must contain plain values");
-  const result: Record<string, RuntimeJsonValue> = Object.create(null) as Record<string, RuntimeJsonValue>;
-  for (const [key, child] of Object.entries(value)) {
-    if (key.length > 256) throw new RangeError("worker JSON key is too large");
-    result[key] = json(child, depth + 1);
-  }
-  return result;
+function jsonObject(value: unknown, path: string): RuntimeJsonObject {
+  const object = plainObject(value, path);
+  return object as RuntimeJsonObject;
 }
 
 function result(value: unknown): RuntimeDriverResult {
   const parsed = exactObject(value, ["summary", "artifacts", "evidence", "extensions"], "worker result");
   if (!Array.isArray(parsed.summary) || !Array.isArray(parsed.artifacts) || !Array.isArray(parsed.evidence)) throw new TypeError("worker result collections are invalid");
-  const extensions = json(parsed.extensions);
-  if (extensions === null || typeof extensions !== "object" || Array.isArray(extensions)) throw new TypeError("worker result extensions are invalid");
-  return { summary: parsed.summary.map((item) => json(item) as RuntimeJsonObject), artifacts: parsed.artifacts.map((item) => json(item) as RuntimeJsonObject), evidence: parsed.evidence.map((item) => json(item) as RuntimeJsonObject), extensions: extensions as RuntimeJsonObject };
+  return {
+    summary: parsed.summary.map((item, index) => jsonObject(item, `worker result.summary[${index}]`)),
+    artifacts: parsed.artifacts.map((item, index) => jsonObject(item, `worker result.artifacts[${index}]`)),
+    evidence: parsed.evidence.map((item, index) => jsonObject(item, `worker result.evidence[${index}]`)),
+    extensions: jsonObject(parsed.extensions, "worker result.extensions"),
+  };
 }
 
 export function parseAgentlyWorkerRecord(value: unknown, expectedCommandId: string): AgentlyWorkerRecordV1 {
-  json(value);
-  if (value === null || typeof value !== "object" || Array.isArray(value) || Object.getPrototypeOf(value) !== Object.prototype) throw new TypeError("worker record must be an object");
-  const discriminator = value as Record<string, unknown>;
+  const safe = json(value, { nodes: 0, stringBytes: 0, seen: new WeakSet<object>() });
+  const discriminator = plainObject(safe, "worker record");
   if (discriminator.type === "progress") {
-    const header = exactObject(value, ["protocol", "type", "command_id", "sequence", "progress", "message", "observed_at"], "worker progress record");
+    const header = exactObject(discriminator, ["protocol", "type", "command_id", "sequence", "progress", "message", "observed_at"], "worker progress record");
     if (header.protocol !== AGENTLY_WORKER_PROTOCOL) throw new TypeError("worker protocol is unsupported");
     command(header.command_id, expectedCommandId);
     if (!Number.isSafeInteger(header.sequence) || (header.sequence as number) < 1) throw new TypeError("worker progress sequence is invalid");
