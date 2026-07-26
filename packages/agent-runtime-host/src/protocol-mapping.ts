@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { HandoffResultPayload, HandoffStatusPayload } from "@work-fabric/sdk-typescript";
 
 import { invalid } from "./errors.js";
+import { normalizeRfc3339 } from "./rfc3339.js";
 
 const EXTENSION_KEY = /^[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z0-9]+(?:[.-][a-z0-9]+)*\/[a-z][a-z0-9_]*$/;
 const SENSITIVE_KEY = /(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|client[_-]?secret|private[_-]?key|api[_-]?key)/;
@@ -13,8 +14,7 @@ function identifier(value: string, path: string): string {
 }
 
 function timestamp(value: string, path: string): string {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z$/.test(value) || !Number.isFinite(Date.parse(value))) invalid("invalid_timestamp", path);
-  return value;
+  return normalizeRfc3339(value, path);
 }
 
 function record(value: unknown, path: string): Record<string, unknown> {
@@ -126,9 +126,9 @@ export function statusPayload(handoffId: string, update: RuntimeProgress): Hando
   if (!Number.isSafeInteger(update.sequence) || update.sequence < 1) invalid("invalid_progress", "sequence");
   if (update.progress !== null && (typeof update.progress !== "number" || !Number.isFinite(update.progress) || update.progress < 0 || update.progress > 1)) invalid("invalid_progress", "progress");
   if (typeof update.message !== "string" || update.message.length === 0 || update.message.length > 4_096) invalid("invalid_progress", "message");
-  timestamp(update.observed_at, "observed_at");
+  const observedAt = timestamp(update.observed_at, "observed_at");
   const statusReportId = `status-${createHash("sha256").update(handoffId).digest("hex").slice(0, 48)}-${update.sequence}`;
-  return { handoff_id: handoffId, status: { status_report_id: statusReportId, execution_status: "in_progress", ...(update.progress === null ? {} : { progress: update.progress }), message: [{ kind: "text", media_type: "text/plain", text: update.message }], observed_at: update.observed_at, blocked_on: [] } };
+  return { handoff_id: handoffId, status: { status_report_id: statusReportId, execution_status: "in_progress", ...(update.progress === null ? {} : { progress: update.progress }), message: [{ kind: "text", media_type: "text/plain", text: update.message }], observed_at: observedAt, blocked_on: [] } };
 }
 
 export function resultPayload(handoffId: string, result: RuntimeDriverResult): HandoffResultPayload {

@@ -2,7 +2,7 @@ import type { AgentRoleProfile, RuntimeJsonObject, RuntimeTaskPackage } from "@w
 import type { HandoffEventQuery, HandoffReadModel, ProtocolEvent, RequestOptions } from "@work-fabric/sdk-typescript";
 
 import { invalid } from "./errors.js";
-import { normalizeRfc3339 } from "./rfc3339.js";
+import { compareRfc3339, normalizeRfc3339, parseRfc3339 } from "./rfc3339.js";
 import { cloneFrozenJson } from "./safe-json.js";
 
 export interface RuntimeHandoffQueries {
@@ -37,10 +37,10 @@ function id(value: unknown, path: string): string {
 }
 
 function timestamp(value: unknown, path: string, now: string): string {
-  const normalized = normalizeRfc3339(value, path, "expired_timestamp");
-  const normalizedNow = normalizeRfc3339(now, "now", "expired_timestamp");
-  if (Date.parse(normalized) <= Date.parse(normalizedNow)) invalid("expired_timestamp", path);
-  return normalized;
+  const parsed = parseRfc3339(value, path, "expired_timestamp");
+  const parsedNow = parseRfc3339(now, "now", "expired_timestamp");
+  if (compareRfc3339(parsed, parsedNow) <= 0) invalid("expired_timestamp", path);
+  return parsed.canonical;
 }
 
 function jsonObject(value: unknown, path: string): RuntimeJsonObject {

@@ -77,4 +77,24 @@ describe("HandoffPackageLoader", () => {
     const client = { getHandoff: vi.fn(async () => invalidCalendar as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
     await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-01-01T00:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).rejects.toThrow("expired_timestamp");
   });
+
+  it("preserves nanosecond deadline ordering beyond Date millisecond precision", async () => {
+    const nanos = structuredClone(snapshot) as unknown as { state: { package: { authority_scope: { expires_at: string }; accept_by: string; result_due_at: string } } };
+    nanos.state.package.authority_scope.expires_at = "2026-07-26T12:00:00.000000003Z";
+    nanos.state.package.accept_by = "2026-07-26T12:00:00.000000002Z";
+    nanos.state.package.result_due_at = "2026-07-26T12:00:00.000000004Z";
+    const client = { getHandoff: vi.fn(async () => nanos as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
+    await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000000001Z").load("handoff-1", "/workspace/t1/h1")).resolves.toMatchObject({ task: { accept_by: "2026-07-26T12:00:00.000000002Z" } });
+  });
+
+  it("rejects accessor-backed arrays without invoking their getters", async () => {
+    let reads = 0;
+    const accessorArray: unknown[] = [];
+    Object.defineProperty(accessorArray, "0", { enumerable: true, get() { reads += 1; return { type: "text", text: "unsafe" }; } });
+    const unsafe = structuredClone(snapshot) as unknown as { state: { package: { intent: unknown[] } } };
+    unsafe.state.package.intent = accessorArray;
+    const client = { getHandoff: vi.fn(async () => unsafe as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
+    await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).rejects.toThrow("invalid_snapshot");
+    expect(reads).toBe(0);
+  });
 });

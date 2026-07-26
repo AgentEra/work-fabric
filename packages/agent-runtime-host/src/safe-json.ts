@@ -4,8 +4,9 @@ const MAX_DEPTH = 32;
 const MAX_NODES = 10_000;
 const MAX_STRING_BYTES = 64 * 1024;
 const MAX_TOTAL_BYTES = 1024 * 1024;
+const SENSITIVE_KEY = /(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|client[_-]?secret|private[_-]?key|api[_-]?key)/;
 
-export function cloneFrozenJson<T>(value: T, path: string): T {
+export function cloneFrozenJson<T>(value: T, path: string, options: { readonly reject_sensitive_keys?: boolean } = {}): T {
   let nodes = 0;
   let bytes = 0;
   const ancestors = new WeakSet<object>();
@@ -30,14 +31,22 @@ export function cloneFrozenJson<T>(value: T, path: string): T {
     try {
       if (Array.isArray(input)) {
         const keys = Reflect.ownKeys(input);
-        if (keys.some((key) => key !== "length" && (typeof key !== "string" || !/^\d+$/.test(key))) || keys.length !== input.length + 1) invalid("invalid_snapshot", at);
-        const output = input.map((item, index) => visit(item, `${at}.${index}`, depth + 1));
+        if (keys.length !== input.length + 1) invalid("invalid_snapshot", at);
+        const output: unknown[] = [];
+        for (const key of keys) {
+          if (key === "length") continue;
+          if (typeof key !== "string" || !/^(?:0|[1-9]\d*)$/.test(key) || Number(key) >= input.length) invalid("invalid_snapshot", at);
+          const descriptor = Object.getOwnPropertyDescriptor(input, key);
+          if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) invalid("invalid_snapshot", `${at}.${key}`);
+          output[Number(key)] = visit(descriptor.value, `${at}.${key}`, depth + 1);
+        }
         return Object.freeze(output);
       }
       if (Object.getPrototypeOf(input) !== Object.prototype && Object.getPrototypeOf(input) !== null) invalid("invalid_snapshot", at);
       const output: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
       for (const key of Reflect.ownKeys(input)) {
         if (typeof key !== "string") invalid("invalid_snapshot", at);
+        if (options.reject_sensitive_keys && SENSITIVE_KEY.test(key)) invalid("invalid_snapshot", `${at}.${key}`);
         const descriptor = Object.getOwnPropertyDescriptor(input, key);
         if (descriptor === undefined || !("value" in descriptor) || !descriptor.enumerable) invalid("invalid_snapshot", `${at}.${key}`);
         output[key] = visit(descriptor.value, `${at}.${key}`, depth + 1);

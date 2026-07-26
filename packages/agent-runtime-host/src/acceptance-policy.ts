@@ -1,6 +1,7 @@
 import type { HandoffReadModel, ProtocolEvent } from "@work-fabric/sdk-typescript";
 
-import { normalizeRfc3339 } from "./rfc3339.js";
+import { compareRfc3339, parseRfc3339, type Rfc3339Timestamp } from "./rfc3339.js";
+import { cloneFrozenJson } from "./safe-json.js";
 
 export type AcceptanceDecision =
   | { readonly kind: "accept" }
@@ -31,8 +32,8 @@ function equalTarget(target: unknown, options: DeterministicAcceptancePolicyOpti
     || (keys.length === 1 && keys[0] === "endpoint_id" && value.endpoint_id === options.endpoint_id);
 }
 
-function rfc3339(value: unknown): string | null {
-  try { return normalizeRfc3339(value, "timestamp"); } catch { return null; }
+function rfc3339(value: unknown): Rfc3339Timestamp | null {
+  try { return parseRfc3339(value, "timestamp"); } catch { return null; }
 }
 
 function canonicalBinding(value: unknown, options: DeterministicAcceptancePolicyOptions): boolean {
@@ -44,7 +45,8 @@ function canonicalBinding(value: unknown, options: DeterministicAcceptancePolicy
     && typeof binding.resolver_endpoint_id === "string" && binding.resolver_endpoint_id.length > 0
     && (binding.delegation_id === null || typeof binding.delegation_id === "string")
     && rfc3339(binding.resolved_at) !== null
-    && Array.isArray(binding.evidence);
+    && Array.isArray(binding.evidence)
+    && safeEvidence(binding.evidence);
 }
 
 const TERMINAL_LIFECYCLES = new Set([
@@ -67,8 +69,8 @@ export class DeterministicAcceptancePolicy {
     const now = rfc3339(this.now());
     const authorityExpiry = rfc3339(authority.expires_at);
     const acceptBy = rfc3339(handoffPackage.accept_by);
-    if (now === null || authorityExpiry === null || Date.parse(authorityExpiry) <= Date.parse(now)) return { kind: "decline", code: "expired" };
-    if (acceptBy === null || Date.parse(acceptBy) <= Date.parse(now)) return { kind: "decline", code: "expired" };
+    if (now === null || authorityExpiry === null || compareRfc3339(authorityExpiry, now) <= 0) return { kind: "decline", code: "expired" };
+    if (acceptBy === null || compareRfc3339(acceptBy, now) <= 0) return { kind: "decline", code: "expired" };
     const target = object(handoffPackage.target);
     if (target === null) return { kind: "decline", code: "not_targeted" };
     if (Object.hasOwn(target, "capability_requirement")) {
@@ -90,5 +92,24 @@ function canonicalRequirement(value: Record<string, unknown> | null): value is R
     const media = value[field];
     if (media !== undefined && (!Array.isArray(media) || new Set(media).size !== media.length || media.some((item) => typeof item !== "string" || item.length > 255 || !/^[^/\s]+\/[^/\s]+$/.test(item)))) return false;
   }
+  if (value.constraints !== undefined && !safeValue(value.constraints)) return false;
+  if (value.extensions !== undefined && !safeExtensions(value.extensions)) return false;
   return true;
+}
+
+function safeValue(value: unknown): boolean {
+  try { cloneFrozenJson(value, "policy", { reject_sensitive_keys: true }); return true; } catch { return false; }
+}
+
+function safeEvidence(value: readonly unknown[]): boolean {
+  try {
+    const cloned = cloneFrozenJson(value, "policy.evidence", { reject_sensitive_keys: true });
+    return Array.isArray(cloned) && cloned.every((item) => object(item) !== null);
+  } catch { return false; }
+}
+
+function safeExtensions(value: unknown): boolean {
+  const extensions = object(value);
+  if (extensions === null || Object.keys(extensions).some((key) => !/^[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z0-9]+(?:[.-][a-z0-9]+)*\/[a-z][a-z0-9_]*$/.test(key) || /(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|client[_-]?secret|private[_-]?key|api[_-]?key)/.test(key))) return false;
+  return safeValue(extensions);
 }

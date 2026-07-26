@@ -38,4 +38,10 @@ describe("DeterministicAcceptancePolicy", () => {
     ["capability target with direct Actor", { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis" }, actor_id: "actor-1" } }],
     ["capability requirement unknown field", { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis", unexpected: true } } }],
   ])("fails closed for %s", (_name, handoffPackage) => expect(policy.decide(snapshot({ package: handoffPackage, target_binding: binding }), event("workfabric.handoff.offered.v1"), false)).not.toEqual({ kind: "accept" }));
+  it("fails closed for secret-bearing requirement constraints and unsafe binding evidence", () => {
+    const target = { capability_requirement: { capability_id: "information.synthesis", constraints: { api_key: "secret" } } };
+    expect(policy.decide(snapshot({ package: { ...state.package, target }, target_binding: binding }), event("workfabric.handoff.offered.v1"), false)).not.toEqual({ kind: "accept" });
+    const unsafeBinding = { ...binding, evidence: [new Date()] };
+    expect(policy.decide(snapshot({ package: { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis" } } }, target_binding: unsafeBinding }), event("workfabric.handoff.offered.v1"), false)).not.toEqual({ kind: "accept" });
+  });
 });
