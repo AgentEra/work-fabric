@@ -36,6 +36,28 @@ verifyAgentRuntimeStateStoreContract("SQLite Agent Runtime state", async () => {
 });
 
 describe("SQLite Agent Runtime state durability", () => {
+  it("rejects non-RFC3339 claim timestamps before changing fencing state", async () => {
+    const store = new SqliteAgentRuntimeStateStore({ location: ":memory:" });
+    const invalidTimestamps = [
+      "2026-02-30T01:00:00Z",
+      "2026-07-26",
+      "2026-07-26T01:00:00",
+      "July 26, 2026 01:00:00 UTC",
+      "2026-07-26T01:00:00+24:00",
+    ];
+    try {
+      for (const [index, now] of invalidTimestamps.entries()) {
+        const handoffId = `handoff-invalid-${index}`;
+        await store.createRunIfAbsent("tenant-1", handoffId, NOW);
+        await expect(store.claimRun({ tenant_id: "tenant-1", handoff_id: handoffId, owner: "host-a", now, lease_seconds: 2, allowed_states: ["received"] })).rejects.toThrow("RFC3339");
+        expect(await store.getRun("tenant-1", handoffId)).toMatchObject({ state: "received", owner: null, fencing_token: 0, attempt: 0 });
+        expect((await store.claimRun({ tenant_id: "tenant-1", handoff_id: handoffId, owner: "host-a", now: NOW, lease_seconds: 2, allowed_states: ["received"] }))?.fencing_token).toBe(1);
+      }
+    } finally {
+      await store.close();
+    }
+  });
+
   it("normalizes offset timestamps before applying lease fencing and recovery", async () => {
     const store = new SqliteAgentRuntimeStateStore({ location: ":memory:" });
     try {
