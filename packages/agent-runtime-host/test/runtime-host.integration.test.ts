@@ -234,20 +234,32 @@ describe("AgentRuntimeHost", () => {
 
   it("converges a submitted Result when its success Delivery aborts the lost command response", async () => {
     const state = new MemoryAgentRuntimeStateStore();
+    const order: string[] = [];
+    const transitionRun = state.transitionRun.bind(state);
+    state.transitionRun = async (input) => {
+      if (input.next_state === "succeeded") order.push("succeeded");
+      return transitionRun(input);
+    };
     const offered = snapshot();
     const accepted = { ...snapshot(), stream_version: 2, state: { lifecycle_state: "accepted", resource_version: 2, recipient: { actor_id: "actor-runtime" } } } as HandoffReadModel;
     const returned = { ...snapshot(), stream_version: 3, state: { lifecycle_state: "result_returned", resource_version: 3, result: result() } } as unknown as HandoffReadModel;
     let remote = offered;
+    let remoteReadUnavailable = false;
     let host!: AgentRuntimeHost;
     const returnedDelivery: IncomingHandoff = {
       partition_id: "handoff:handoff-1",
       delivery: { delivery_id: "delivery-result-returned", subscription_id: "subscription-1", attempt: 1, events: [{ ...event(), id: "event-result-returned", type: "workfabric.handoff.result_returned.v1" }], next_cursor: "cursor-2", delivered_at: now(), visibility_expires_at: "2026-07-26T00:01:00.000Z" },
       handoff: returned,
-      acknowledgeSignal: vi.fn(async () => ({ kind: "acknowledged", cursor: "cursor-2" } as const)),
+      acknowledgeSignal: vi.fn(async () => {
+        order.push("ack");
+        expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("succeeded");
+        return { kind: "acknowledged", cursor: "cursor-2" } as const;
+      }),
     };
     const returnResult = vi.fn(async () => {
       remote = returned;
       await host.handle(returnedDelivery);
+      remoteReadUnavailable = true;
       throw new DOMException("response lost after service commit", "AbortError");
     });
     const execute = vi.fn(async () => result());
@@ -258,7 +270,10 @@ describe("AgentRuntimeHost", () => {
       driver: { manifest: { driver_type: "test", protocol_version: "1", capability_ids: ["information.synthesis"] }, execute },
       packageLoader: { load: vi.fn(async () => ({ snapshot: offered, events: [event()], task: { tenant_id: "tenant-1", handoff_id: "handoff-1" } })) } as never,
       policy: { decide: () => ({ kind: "accept" as const }) },
-      queries: { getHandoff: vi.fn(async () => remote) },
+      queries: { getHandoff: vi.fn(async () => {
+        if (remoteReadUnavailable) throw new Error("public Handoff query unavailable after commit");
+        return remote;
+      }) },
       now,
     });
     const incoming: IncomingHandoff = { partition_id: "handoff:handoff-1", delivery: { delivery_id: "delivery-offered", subscription_id: "subscription-1", attempt: 1, events: [event()], next_cursor: "cursor-1", delivered_at: now(), visibility_expires_at: "2026-07-26T00:01:00.000Z" }, handoff: offered, acknowledgeSignal: vi.fn(async () => ({ kind: "acknowledged", cursor: "cursor-1" } as const)) };
@@ -266,6 +281,7 @@ describe("AgentRuntimeHost", () => {
     await host.handle(incoming);
 
     expect(returnedDelivery.acknowledgeSignal).toHaveBeenCalledWith("acknowledged");
+    expect(order).toEqual(["succeeded", "ack"]);
     expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("succeeded");
     expect(returnResult).toHaveBeenCalledTimes(1);
     expect(execute).toHaveBeenCalledTimes(1);

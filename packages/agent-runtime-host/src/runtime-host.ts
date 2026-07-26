@@ -116,6 +116,11 @@ export class AgentRuntimeHost {
   private readonly closeGraceMs: number;
   private readonly shutdown = new AbortController();
   private readonly active = new Map<string, AbortController>();
+  private readonly activeClaims = new Map<string, RuntimeRunRecord>();
+  // Terminal Deliveries carry an authoritative Handoff snapshot. Retain that
+  // snapshot only while an active owner unwinds, so a lost command response
+  // need not re-read the public control plane to converge its durable Run.
+  private readonly terminalSnapshots = new Map<string, HandoffReadModel>();
   private readonly pending: IncomingHandoff[] = [];
   private running = 0;
   private intake: Promise<void> | null = null;
@@ -188,13 +193,22 @@ export class AgentRuntimeHost {
     const terminal = lifecycle(incoming.handoff);
     if (terminal !== null && TERMINAL_LIFECYCLES.has(terminal)) {
       const active = this.active.get(incoming.handoff.handoff_id);
-      if (active !== undefined) active.abort();
+      if (active !== undefined) {
+        this.terminalSnapshots.set(incoming.handoff.handoff_id, incoming.handoff);
+        active.abort();
+        await this.convergeActiveTerminal(
+          incoming.handoff.handoff_id,
+          terminal,
+          incoming.handoff,
+        );
+      }
       else {
         const run = await this.dependencies.state.getRun(
           this.dependencies.config.tenant_id,
           incoming.handoff.handoff_id,
         );
         if (run !== null) await this.convergeTerminal(run, terminal, incoming.handoff);
+        this.terminalSnapshots.delete(incoming.handoff.handoff_id);
       }
       await this.acknowledge(incoming);
       return;
@@ -382,6 +396,7 @@ export class AgentRuntimeHost {
     const combined = AbortSignal.any([signal, controller.signal]);
     this.active.get(handoffId)?.abort();
     this.active.set(handoffId, controller);
+    this.activeClaims.set(handoffId, claim);
     const stopLeaseRenewal = this.renewLease(claim, controller);
     let state: RuntimeRunState = claim.state;
     let lastProgress = claim.last_progress_sequence;
@@ -449,7 +464,11 @@ export class AgentRuntimeHost {
       }
     } finally {
       stopLeaseRenewal();
-      if (this.active.get(handoffId) === controller) this.active.delete(handoffId);
+      if (this.active.get(handoffId) === controller) {
+        this.active.delete(handoffId);
+        this.activeClaims.delete(handoffId);
+        this.terminalSnapshots.delete(handoffId);
+      }
     }
   }
 
@@ -473,7 +492,9 @@ export class AgentRuntimeHost {
     handoffId: string,
   ): Promise<boolean> {
     try {
-      const remote = await this.dependencies.queries.getHandoff(handoffId, {
+      const delivered = this.terminalSnapshots.get(handoffId);
+      if (delivered !== undefined) this.terminalSnapshots.delete(handoffId);
+      const remote = delivered ?? await this.dependencies.queries.getHandoff(handoffId, {
         signal: this.shutdown.signal,
       });
       const remoteLifecycle = lifecycle(remote);
@@ -495,6 +516,25 @@ export class AgentRuntimeHost {
       // unavailable; recovery will make the same authoritative check later.
       return false;
     }
+  }
+
+  private async convergeActiveTerminal(
+    handoffId: string,
+    remote: string,
+    snapshot: HandoffReadModel,
+  ): Promise<void> {
+    const activeClaim = this.activeClaims.get(handoffId);
+    if (activeClaim === undefined) return;
+    const current = await this.dependencies.state.getRun(
+      this.dependencies.config.tenant_id,
+      handoffId,
+    );
+    if (current === null || ["succeeded", "failed", "cancelled"].includes(current.state)) return;
+    await this.convergeTerminalClaim(
+      { ...current, owner: activeClaim.owner, fencing_token: activeClaim.fencing_token },
+      remote,
+      snapshot,
+    );
   }
 
   private async claim(handoffId: string, allowed: readonly RuntimeRunState[]): Promise<RuntimeRunRecord | null> {
