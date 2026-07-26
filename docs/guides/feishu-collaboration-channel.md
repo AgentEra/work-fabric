@@ -27,7 +27,22 @@ export FEISHU_APP_ID="cli_..."
 export FEISHU_APP_SECRET="..."
 export FEISHU_CONNECTOR_ACCESS_TOKEN="use-a-long-random-token"
 export INTAKE_AGENT_ACCESS_TOKEN="use-another-long-random-token"
+# This is the separate admin identity used only by `npm run agent-runtime:provision`.
+# It is not the Runtime bearer token and must not be supplied to `agent-runtime:start`.
+export WORK_FABRIC_ADMIN_TOKEN="use-a-third-long-random-token"
 npm run service:start
+```
+
+After Work Fabric is ready, provision the fixed Daily Assistant Endpoint once
+with the admin token, then start the Runtime using only
+`INTAKE_AGENT_ACCESS_TOKEN` and `AGENTLY_MODEL_API_KEY`:
+
+```bash
+npm run agent-runtime:provision
+unset WORK_FABRIC_ADMIN_TOKEN
+export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$PWD/examples/config/agent-runtime-agently.yaml"
+export AGENTLY_MODEL_API_KEY="..."
+npm run agent-runtime:start
 ```
 
 5. 把企业自建应用机器人加入测试群。`/health/live` 表示进程存活；等待 SDK 建立连接后，`/health/ready` 必须返回 200：
@@ -92,6 +107,11 @@ npm run service:start
 - `WORK_FABRIC_ADMISSION_FINGERPRINT_KEY`，用于 tenant-scoped subject fingerprint；
 - `WORK_FABRIC_ADMISSION_GRANT_KEY`，用于短时 representation grant 的签发/验证；
 - `FEISHU_CONNECTOR_ACCESS_TOKEN` 与外部 Agent/运维身份 token。
+
+`WORK_FABRIC_ADMIN_TOKEN` is a distinct administrative credential for the
+fixed Endpoint provisioning route. It is never the Runtime's bearer token:
+`agent-runtime:provision` reads it, while `agent-runtime:start` uses only the
+Runtime identity token from its own configuration.
 
 `service.admission.grant_active_key_id` 和 `grant_keys` 支持验证密钥轮换。v2 grant 同时绑定 `ingress_id` 和最终 command `idempotency_key`；HTTP Authority 要求 envelope 的 `correlation_id + idempotency_key` 与可信 grant tuple 完全一致。相同 tuple 可重试，任一分量变化都 fail closed。grant v1 缺少该完整 tuple，本版本不再接受。
 

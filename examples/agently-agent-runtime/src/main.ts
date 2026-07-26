@@ -1,5 +1,5 @@
 import { lstat, mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { join, parse, resolve } from "node:path";
 
 import { AgentlyRuntimeDriverFactory, validateAgentlyRuntimeDriverConfig } from "@work-fabric/adapter-agent-runtime-agently";
 import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-sqlite";
@@ -14,12 +14,12 @@ import {
 import type { AgentRuntimeDriver, AgentRuntimeStateStore } from "@work-fabric/agent-runtime-spi";
 import { BearerTokenProvider, WorkFabricClient } from "@work-fabric/sdk-typescript";
 
-import { DAILY_ASSISTANT_CAPABILITY_IDS } from "./capabilities.js";
 import { dailyAssistantGatewayConfig } from "./subscription.js";
 
 export interface RuntimeComposition {
   readonly runtimeId: string;
   readonly role: LoadedAgentRuntimeConfiguration["role"];
+  readonly acceptanceCapabilityIds: readonly string[];
   readonly gatewayConfig: AgentGatewayConfig;
   readonly host: ReturnType<typeof composeAgentRuntimeHost>;
 }
@@ -57,10 +57,14 @@ export async function composeAgentRuntime(
     queries: client.queries,
     policy: new DeterministicAcceptancePolicy({
       actor_id: loaded.participant.actor_id, endpoint_id: loaded.participant.endpoint_id,
-      allowed_capability_ids: DAILY_ASSISTANT_CAPABILITY_IDS,
+      allowed_capability_ids: loaded.service.acceptance.allowed_capability_ids,
     }),
   });
-  return Object.freeze({ runtimeId: loaded.service.runtime_id, role: loaded.role, gatewayConfig, host });
+  return Object.freeze({
+    runtimeId: loaded.service.runtime_id, role: loaded.role,
+    acceptanceCapabilityIds: loaded.service.acceptance.allowed_capability_ids,
+    gatewayConfig, host,
+  });
 }
 
 export function createRuntimeStateStore(
@@ -72,13 +76,39 @@ export function createRuntimeStateStore(
 /** The composition owns this root, so it never accepts a symlink or a writable shared directory. */
 export async function ensureTrustedWorkspaceRoot(root: string): Promise<void> {
   const resolved = resolve(root);
-  await mkdir(resolved, { recursive: true, mode: 0o700 });
-  const metadata = await lstat(resolved);
-  if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
-    throw new TypeError("workspace_root must be a non-symlink directory owned by this Runtime");
+  const parsed = parse(resolved);
+  let current = parsed.root;
+  const segments = resolved.slice(parsed.root.length).split(/[\\/]/).filter(Boolean);
+  for (const segment of segments) {
+    current = join(current, segment);
+    let metadata;
+    try {
+      metadata = await lstat(current);
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
+      await mkdir(current, { mode: 0o700 });
+      metadata = await lstat(current);
+    }
+    if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
+      throw new TypeError("workspace_root must not contain a symlink or non-directory component");
+    }
+    if (current !== resolved) continue;
+    if (typeof process.getuid === "function" && metadata.uid !== process.getuid()) {
+      throw new TypeError("workspace_root must be owned by the current user");
+    }
+    if ((metadata.mode & 0o022) !== 0) {
+      throw new TypeError("workspace_root must not be group or world writable");
+    }
   }
-  if ((metadata.mode & 0o022) !== 0) {
-    throw new TypeError("workspace_root must not be group or world writable");
+}
+
+export async function startComposedRuntime(composition: RuntimeComposition): Promise<RuntimeComposition> {
+  try {
+    await composition.host.start();
+    return composition;
+  } catch (error) {
+    await composition.host.close();
+    throw error;
   }
 }
 
@@ -87,12 +117,19 @@ export async function startAgentRuntime(environment: Readonly<Record<string, str
   await ensureTrustedWorkspaceRoot(loaded.driver.config.workspace_root);
   const driverConfig = validateAgentlyRuntimeDriverConfig(loaded.driver.config, "plugins.instances.agently-primary.config", { config_directory: process.cwd() });
   const driver = await new AgentlyRuntimeDriverFactory().create(driverConfig);
-  const composition = await composeAgentRuntime(
-    { ...loaded, driver: { ...loaded.driver, config: driverConfig } },
-    { driver, state: createRuntimeStateStore(loaded.service.state) },
-  );
-  await composition.host.start();
-  return composition;
+  const state = createRuntimeStateStore(loaded.service.state);
+  let composed = false;
+  try {
+    const composition = await composeAgentRuntime(
+      { ...loaded, driver: { ...loaded.driver, config: driverConfig } },
+      { driver, state },
+    );
+    composed = true;
+    return await startComposedRuntime(composition);
+  } catch (error) {
+    if (!composed) await state.close();
+    throw error;
+  }
 }
 
 async function executable(): Promise<void> {
