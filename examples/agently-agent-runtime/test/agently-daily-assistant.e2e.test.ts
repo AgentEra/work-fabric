@@ -1,6 +1,5 @@
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { AgentlyProcessDriver } from "@work-fabric/adapter-agent-runtime-agently";
@@ -13,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { composeNodeService, parseServiceConfig } from "@work-fabric/service-node";
 import { dailyAssistantEndpointRegistration, dailyAssistantGatewayConfig } from "../src/subscription.js";
 import { startFakeOpenAiCompatibleServer } from "./fake-openai-compatible-server.js";
+import { NeutralE2eFixture, eventually } from "./e2e-support.js";
 
 const tenantId = "tenant-daily-e2e";
 const exchangeId = "exchange-daily-e2e";
@@ -47,16 +47,6 @@ function dailyAssistantOffer(target: HandoffOfferPayload["target"] = { actor_id:
     verifier: { actor_id: "actor-human", actor_type: "human" },
     priority: "normal", accept_by: future(1_800), result_due_at: future(3_600),
   };
-}
-
-async function eventually(assertion: () => Promise<void>, timeoutMs = 15_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  let last: unknown;
-  while (Date.now() < deadline) {
-    try { await assertion(); return; } catch (error) { last = error; }
-    await new Promise((resolve) => setTimeout(resolve, 40));
-  }
-  throw last;
 }
 
 async function startSqliteWorkFabric(directory: string) {
@@ -155,7 +145,8 @@ async function filesBelow(directory: string): Promise<string[]> {
 
 describe("Daily Assistant real boundaries", () => {
   it("completes and recovers the Daily Assistant Handoff through real boundaries", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "work-fabric-daily-e2e-"));
+    const fixture = await NeutralE2eFixture.create("work-fabric-daily-e2e-");
+    const { directory } = fixture;
     let model: Awaited<ReturnType<typeof startFakeOpenAiCompatibleServer>> | undefined;
     let service: Awaited<ReturnType<typeof startSqliteWorkFabric>> | undefined;
     let runtime: Awaited<ReturnType<typeof startRealAgentlyRuntime>> | undefined;
@@ -165,14 +156,17 @@ describe("Daily Assistant real boundaries", () => {
         handoff_draft_required: true, handoff_draft_reason: "需要专业需求分析", handoff_draft_capability: "requirements.analysis",
         handoff_draft_intent: "梳理需求范围并确认验收标准", handoff_draft_acceptance_criteria: ["范围得到业务方确认"],
       } });
+      fixture.register(() => model!.close());
       service = await startSqliteWorkFabric(directory);
       if (service === undefined || model === undefined) throw new Error("E2E resources did not start");
       const startedService = service;
       const startedModel = model;
+      fixture.register(() => startedService.service.close());
       await provisionDailyAssistant(startedService.origin);
       runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory });
       if (runtime === undefined) throw new Error("runtime did not start");
       const firstRuntime = runtime;
+      fixture.register(() => firstRuntime.close());
       const offered = await startedService.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-e2e-offer-1" });
       const handoffId = resourceId(offered);
       const initialEvents = await startedService.human.queries.listHandoffEvents(handoffId);
@@ -202,6 +196,8 @@ describe("Daily Assistant real boundaries", () => {
       });
       await runtime.close();
       runtime = await startRealAgentlyRuntime({ baseUrl: startedService.origin, modelBaseUrl: startedModel.baseUrl, directory });
+      const restartedRuntime = runtime;
+      fixture.register(() => restartedRuntime.close());
       expect(startedModel.requests).toHaveLength(1);
       const second = await startedService.human.handoffs.offer(dailyAssistantOffer(), { idempotencyKey: "daily-assistant-e2e-offer-2" });
       const secondHandoffId = resourceId(second);
@@ -222,12 +218,7 @@ describe("Daily Assistant real boundaries", () => {
       const completedEvents = await startedService.human.queries.listHandoffEvents(handoffId);
       expect(completedEvents.length).toBeGreaterThanOrEqual(4);
     } finally {
-      await Promise.allSettled([
-        runtime?.close(),
-        service?.service.close(),
-        model?.close(),
-      ]);
-      await rm(directory, { recursive: true, force: true });
+      await fixture.close();
     }
   }, 30_000);
 });
