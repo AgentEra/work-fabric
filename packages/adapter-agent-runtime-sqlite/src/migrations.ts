@@ -23,11 +23,17 @@ export function migrateAgentRuntimeSqlite(session: SqliteSession, migrations: re
       if (!/^[0-9]{3}_[a-z0-9_]+$/.test(migration.id) || migration.sql.trim() === "") throw new TypeError("SQLite migration is invalid");
       if (seen.has(migration.id)) throw new Error(`duplicate migration ${migration.id}`);
       seen.add(migration.id);
+    }
+    const highestApplied = session.prepare("SELECT migration_id FROM agent_runtime_schema_migrations ORDER BY migration_id DESC LIMIT 1").get() as { migration_id: string } | undefined;
+    for (const migration of ordered) {
       const digest = checksum(migration.sql);
       const existing = session.prepare("SELECT checksum FROM agent_runtime_schema_migrations WHERE migration_id = ?").get(migration.id) as { checksum: string } | undefined;
       if (existing !== undefined) {
         if (existing.checksum !== digest) throw new Error(`SQLite migration checksum mismatch: ${migration.id}`);
         continue;
+      }
+      if (highestApplied !== undefined && migration.id <= highestApplied.migration_id) {
+        throw new Error(`SQLite migration out of order: ${migration.id}`);
       }
       session.exec(migration.sql);
       session.prepare("INSERT INTO agent_runtime_schema_migrations (migration_id, checksum, applied_at) VALUES (?, ?, ?)").run(migration.id, digest, new Date().toISOString());

@@ -27,11 +27,15 @@ const TRANSITIONS: Readonly<Record<RuntimeRunState, readonly RuntimeRunState[]>>
 
 function clone<T>(value: T): T { return structuredClone(value); }
 
+function timestamp(value: string, field: string): string {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) throw new TypeError(`${field} must be an ISO timestamp`);
+  return new Date(parsed).toISOString();
+}
+
 function leaseExpiry(now: string, seconds: number): string {
   if (!Number.isSafeInteger(seconds) || seconds <= 0 || seconds > 86_400) throw new RangeError("lease_seconds must be between 1 and 86400");
-  const timestamp = Date.parse(now);
-  if (!Number.isFinite(timestamp)) throw new TypeError("now must be an ISO timestamp");
-  return new Date(timestamp + seconds * 1_000).toISOString();
+  return new Date(Date.parse(timestamp(now, "now")) + seconds * 1_000).toISOString();
 }
 
 function validateJson(value: unknown, depth = 0, counter = { value: 0 }): RuntimeJsonValue {
@@ -98,23 +102,28 @@ export class SqliteAgentRuntimeStateStore implements AgentRuntimeStateStore {
 
   async recordDelivery(input: RuntimeDeliveryRecord): Promise<{ readonly created: boolean; readonly record: RuntimeDeliveryRecord }> {
     const candidate = clone(input);
+    const receivedAt = timestamp(candidate.received_at, "received_at");
+    const acknowledgedAt = candidate.acknowledged_at === null ? null : timestamp(candidate.acknowledged_at, "acknowledged_at");
+    const record = { ...candidate, received_at: receivedAt, acknowledged_at: acknowledgedAt };
     return this.write(() => {
-      const existing = this.session.prepare("SELECT * FROM agent_runtime_deliveries WHERE tenant_id = ? AND delivery_id = ?").get(candidate.tenant_id, candidate.delivery_id) as DeliveryRow | undefined;
+      const existing = this.session.prepare("SELECT * FROM agent_runtime_deliveries WHERE tenant_id = ? AND delivery_id = ?").get(record.tenant_id, record.delivery_id) as DeliveryRow | undefined;
       if (existing !== undefined) return { created: false, record: clone(existing) };
-      this.session.prepare("INSERT INTO agent_runtime_deliveries (tenant_id, delivery_id, handoff_id, partition_id, event_id, received_at, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(candidate.tenant_id, candidate.delivery_id, candidate.handoff_id, candidate.partition_id, candidate.event_id, candidate.received_at, candidate.acknowledged_at);
-      return { created: true, record: candidate };
+      this.session.prepare("INSERT INTO agent_runtime_deliveries (tenant_id, delivery_id, handoff_id, partition_id, event_id, received_at, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(record.tenant_id, record.delivery_id, record.handoff_id, record.partition_id, record.event_id, record.received_at, record.acknowledged_at);
+      return { created: true, record };
     });
   }
 
   async markDeliveryAcknowledged(tenantId: string, deliveryId: string, acknowledgedAt: string): Promise<boolean> {
-    return this.write(() => this.session.prepare("UPDATE agent_runtime_deliveries SET acknowledged_at = ? WHERE tenant_id = ? AND delivery_id = ? AND acknowledged_at IS NULL").run(acknowledgedAt, tenantId, deliveryId).changes === 1);
+    const normalizedAcknowledgedAt = timestamp(acknowledgedAt, "acknowledgedAt");
+    return this.write(() => this.session.prepare("UPDATE agent_runtime_deliveries SET acknowledged_at = ? WHERE tenant_id = ? AND delivery_id = ? AND acknowledged_at IS NULL").run(normalizedAcknowledgedAt, tenantId, deliveryId).changes === 1);
   }
 
   async createRunIfAbsent(tenantId: string, handoffId: string, now: string): Promise<{ readonly created: boolean; readonly run: RuntimeRunRecord }> {
+    const normalizedNow = timestamp(now, "now");
     return this.write(() => {
       const existing = this.getRunRow(tenantId, handoffId);
       if (existing !== undefined) return { created: false, run: runRecord(existing) };
-      this.session.prepare("INSERT INTO agent_runtime_runs (tenant_id, handoff_id, state, attempt, owner, fencing_token, lease_expires_at, last_progress_sequence, result_digest, result_json, failure_code, updated_at) VALUES (?, ?, 'received', 0, NULL, 0, NULL, 0, NULL, NULL, NULL, ?)").run(tenantId, handoffId, now);
+      this.session.prepare("INSERT INTO agent_runtime_runs (tenant_id, handoff_id, state, attempt, owner, fencing_token, lease_expires_at, last_progress_sequence, result_digest, result_json, failure_code, updated_at) VALUES (?, ?, 'received', 0, NULL, 0, NULL, 0, NULL, NULL, NULL, ?)").run(tenantId, handoffId, normalizedNow);
       const row = this.getRunRow(tenantId, handoffId);
       if (row === undefined) throw new Error("failed to create runtime run");
       return { created: true, run: runRecord(row) };
@@ -124,41 +133,47 @@ export class SqliteAgentRuntimeStateStore implements AgentRuntimeStateStore {
   async claimRun(input: Parameters<AgentRuntimeStateStore["claimRun"]>[0]): Promise<RuntimeRunRecord | null> {
     const candidate = clone(input);
     if (candidate.allowed_states.length === 0 || candidate.allowed_states.some((state) => !RUN_STATES.has(state))) return null;
-    const expiresAt = leaseExpiry(candidate.now, candidate.lease_seconds);
+    const now = timestamp(candidate.now, "now");
+    const expiresAt = leaseExpiry(now, candidate.lease_seconds);
     const states = candidate.allowed_states.map(() => "?").join(", ");
     return this.write(() => {
-      const row = this.session.prepare(`UPDATE agent_runtime_runs SET owner = ?, fencing_token = fencing_token + 1, lease_expires_at = ?, attempt = attempt + 1, updated_at = ? WHERE tenant_id = ? AND handoff_id = ? AND state IN (${states}) AND state NOT IN ('succeeded', 'failed', 'cancelled') AND (owner IS NULL OR lease_expires_at <= ?) RETURNING *`).get(candidate.owner, expiresAt, candidate.now, candidate.tenant_id, candidate.handoff_id, ...candidate.allowed_states, candidate.now) as RunRow | undefined;
+      const row = this.session.prepare(`UPDATE agent_runtime_runs SET owner = ?, fencing_token = fencing_token + 1, lease_expires_at = ?, attempt = attempt + 1, updated_at = ? WHERE tenant_id = ? AND handoff_id = ? AND state IN (${states}) AND state NOT IN ('succeeded', 'failed', 'cancelled') AND (owner IS NULL OR lease_expires_at <= ?) RETURNING *`).get(candidate.owner, expiresAt, now, candidate.tenant_id, candidate.handoff_id, ...candidate.allowed_states, now) as RunRow | undefined;
       return row === undefined ? null : runRecord(row);
     });
   }
 
   async renewRun(tenantId: string, handoffId: string, owner: string, fencingToken: number, now: string, leaseSeconds: number): Promise<boolean> {
-    const expiresAt = leaseExpiry(now, leaseSeconds);
-    return this.write(() => this.session.prepare("UPDATE agent_runtime_runs SET lease_expires_at = ?, updated_at = ? WHERE tenant_id = ? AND handoff_id = ? AND owner = ? AND fencing_token = ? AND lease_expires_at > ?").run(expiresAt, now, tenantId, handoffId, owner, fencingToken, now).changes === 1);
+    const normalizedNow = timestamp(now, "now");
+    const expiresAt = leaseExpiry(normalizedNow, leaseSeconds);
+    return this.write(() => this.session.prepare("UPDATE agent_runtime_runs SET lease_expires_at = ?, updated_at = ? WHERE tenant_id = ? AND handoff_id = ? AND owner = ? AND fencing_token = ? AND lease_expires_at > ?").run(expiresAt, normalizedNow, tenantId, handoffId, owner, fencingToken, normalizedNow).changes === 1);
   }
 
   async transitionRun(input: Parameters<AgentRuntimeStateStore["transitionRun"]>[0]): Promise<boolean> {
     const candidate = clone(input);
     if (!TRANSITIONS[candidate.expected_state].includes(candidate.next_state) || (candidate.next_state === "result_ready" && candidate.result === undefined) || (candidate.next_state !== "result_ready" && candidate.result !== undefined)) return false;
+    const now = timestamp(candidate.now, "now");
     const resultJson = candidate.result === undefined ? undefined : serializeResult(candidate.result);
-    return this.write(() => this.session.prepare("UPDATE agent_runtime_runs SET state = ?, updated_at = ?, result_digest = COALESCE(?, result_digest), result_json = COALESCE(?, result_json), failure_code = COALESCE(?, failure_code) WHERE tenant_id = ? AND handoff_id = ? AND owner = ? AND fencing_token = ? AND state = ? AND lease_expires_at > ?").run(candidate.next_state, candidate.now, candidate.result_digest ?? null, resultJson ?? null, candidate.failure_code ?? null, candidate.tenant_id, candidate.handoff_id, candidate.owner, candidate.fencing_token, candidate.expected_state, candidate.now).changes === 1);
+    return this.write(() => this.session.prepare("UPDATE agent_runtime_runs SET state = ?, updated_at = ?, result_digest = COALESCE(?, result_digest), result_json = COALESCE(?, result_json), failure_code = COALESCE(?, failure_code) WHERE tenant_id = ? AND handoff_id = ? AND owner = ? AND fencing_token = ? AND state = ? AND lease_expires_at > ?").run(candidate.next_state, now, candidate.result_digest ?? null, resultJson ?? null, candidate.failure_code ?? null, candidate.tenant_id, candidate.handoff_id, candidate.owner, candidate.fencing_token, candidate.expected_state, now).changes === 1);
   }
 
   async checkpointProgress(input: Parameters<AgentRuntimeStateStore["checkpointProgress"]>[0]): Promise<boolean> {
     const candidate = clone(input);
-    return this.write(() => this.session.prepare("UPDATE agent_runtime_runs SET last_progress_sequence = ?, updated_at = ? WHERE tenant_id = ? AND handoff_id = ? AND owner = ? AND fencing_token = ? AND lease_expires_at > ? AND last_progress_sequence < ?").run(candidate.sequence, candidate.now, candidate.tenant_id, candidate.handoff_id, candidate.owner, candidate.fencing_token, candidate.now, candidate.sequence).changes === 1);
+    const now = timestamp(candidate.now, "now");
+    return this.write(() => this.session.prepare("UPDATE agent_runtime_runs SET last_progress_sequence = ?, updated_at = ? WHERE tenant_id = ? AND handoff_id = ? AND owner = ? AND fencing_token = ? AND lease_expires_at > ? AND last_progress_sequence < ?").run(candidate.sequence, now, candidate.tenant_id, candidate.handoff_id, candidate.owner, candidate.fencing_token, now, candidate.sequence).changes === 1);
   }
 
   async recordCommand(input: RuntimeCommandRecord): Promise<{ readonly created: boolean; readonly record: RuntimeCommandRecord }> {
     const candidate = clone(input);
+    const recordedAt = timestamp(candidate.recorded_at, "recorded_at");
+    const record = { ...candidate, recorded_at: recordedAt };
     return this.write(() => {
-      const existing = this.session.prepare("SELECT * FROM agent_runtime_commands WHERE tenant_id = ? AND handoff_id = ? AND idempotency_key = ?").get(candidate.tenant_id, candidate.handoff_id, candidate.idempotency_key) as CommandRow | undefined;
+      const existing = this.session.prepare("SELECT * FROM agent_runtime_commands WHERE tenant_id = ? AND handoff_id = ? AND idempotency_key = ?").get(record.tenant_id, record.handoff_id, record.idempotency_key) as CommandRow | undefined;
       if (existing !== undefined) {
-        if (existing.command !== candidate.command || existing.resource_version !== candidate.resource_version) throw new Error("Runtime command idempotency conflict");
+        if (existing.command !== record.command || existing.resource_version !== record.resource_version) throw new Error("Runtime command idempotency conflict");
         return { created: false, record: clone(existing) };
       }
-      this.session.prepare("INSERT INTO agent_runtime_commands (tenant_id, handoff_id, command, idempotency_key, resource_version, recorded_at) VALUES (?, ?, ?, ?, ?, ?)").run(candidate.tenant_id, candidate.handoff_id, candidate.command, candidate.idempotency_key, candidate.resource_version, candidate.recorded_at);
-      return { created: true, record: candidate };
+      this.session.prepare("INSERT INTO agent_runtime_commands (tenant_id, handoff_id, command, idempotency_key, resource_version, recorded_at) VALUES (?, ?, ?, ?, ?, ?)").run(record.tenant_id, record.handoff_id, record.command, record.idempotency_key, record.resource_version, record.recorded_at);
+      return { created: true, record };
     });
   }
 
@@ -172,7 +187,8 @@ export class SqliteAgentRuntimeStateStore implements AgentRuntimeStateStore {
 
   async listRecoverable(tenantId: string, now: string, limit: number): Promise<readonly RuntimeRunRecord[]> {
     if (!Number.isSafeInteger(limit) || limit < 0 || limit > 1_000) throw new RangeError("limit must be between 0 and 1000");
-    return this.read(() => (this.session.prepare("SELECT * FROM agent_runtime_runs WHERE tenant_id = ? AND state NOT IN ('succeeded', 'failed', 'cancelled') AND (owner IS NULL OR lease_expires_at <= ?) ORDER BY updated_at ASC, handoff_id ASC LIMIT ?").all(tenantId, now, limit) as RunRow[]).map(runRecord));
+    const normalizedNow = timestamp(now, "now");
+    return this.read(() => (this.session.prepare("SELECT * FROM agent_runtime_runs WHERE tenant_id = ? AND state NOT IN ('succeeded', 'failed', 'cancelled') AND (owner IS NULL OR lease_expires_at <= ?) ORDER BY updated_at ASC, handoff_id ASC LIMIT ?").all(tenantId, normalizedNow, limit) as RunRow[]).map(runRecord));
   }
 
   async close(): Promise<void> { if (!this.closed) { this.closed = true; this.session.close(); } }

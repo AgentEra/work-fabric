@@ -36,6 +36,27 @@ verifyAgentRuntimeStateStoreContract("SQLite Agent Runtime state", async () => {
 });
 
 describe("SQLite Agent Runtime state durability", () => {
+  it("normalizes offset timestamps before applying lease fencing and recovery", async () => {
+    const store = new SqliteAgentRuntimeStateStore({ location: ":memory:" });
+    try {
+      await store.createRunIfAbsent("tenant-1", "handoff-1", NOW);
+      const claimed = await store.claimRun({
+        tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", now: NOW,
+        lease_seconds: 2, allowed_states: ["received"],
+      });
+      expect(claimed?.lease_expires_at).toBe("2026-07-26T01:00:02.000Z");
+
+      const expiredAtOffset = "2026-07-26T00:00:03.000-01:00";
+      expect((await store.listRecoverable("tenant-1", expiredAtOffset, 10)).map((run) => run.handoff_id)).toEqual(["handoff-1"]);
+      expect(await store.renewRun("tenant-1", "handoff-1", "host-a", 1, expiredAtOffset, 2)).toBe(false);
+      expect(await store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "received", next_state: "accepted", now: expiredAtOffset })).toBe(false);
+      expect(await store.checkpointProgress({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, sequence: 1, now: expiredAtOffset })).toBe(false);
+      expect((await store.claimRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-b", now: expiredAtOffset, lease_seconds: 2, allowed_states: ["received"] }))?.fencing_token).toBe(2);
+    } finally {
+      await store.close();
+    }
+  });
+
   it("rejects a non-object RuntimeDriverResult extensions payload", async () => {
     const store = new SqliteAgentRuntimeStateStore({ location: ":memory:" });
     try {

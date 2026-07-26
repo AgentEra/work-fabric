@@ -29,4 +29,16 @@ describe("agent runtime SQLite migrations", () => {
       session.close();
     }
   });
+
+  it("rejects an unseen lower migration after a higher migration was applied", () => {
+    const database = new DatabaseSync(":memory:");
+    const session = new SqliteSession({ database });
+    const laterMigration = { id: "002_agent_runtime_later", sql: "CREATE TABLE agent_runtime_later (id TEXT PRIMARY KEY);" };
+    try {
+      expect(migrateAgentRuntimeSqlite(session, [laterMigration])).toMatchObject({ applied: 1 });
+      expect(() => migrateAgentRuntimeSqlite(session, [AGENT_RUNTIME_SQLITE_MIGRATION, laterMigration])).toThrow("out of order");
+    } finally {
+      session.close();
+    }
+  });
 });
