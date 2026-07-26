@@ -1,0 +1,14 @@
+{
+  "name": "@work-fabric/adapter-agent-runtime-memory",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/agent-runtime-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/agent-runtime-conformance": "0.1.0"
+  }
+}
