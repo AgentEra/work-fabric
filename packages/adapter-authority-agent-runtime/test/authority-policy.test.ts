@@ -59,6 +59,7 @@ function handoff(id: string, state: HandoffReadModel["state"], tenantId = grant.
 
 function targetedSnapshot(id: string, target: Pick<AgentRuntimeAuthorityGrant, "actor_id" | "endpoint_id"> = grant): HandoffReadModel {
   return handoff(id, {
+    lifecycle_state: "offered",
     package: { target: { actor_id: target.actor_id } },
     target_binding: null,
     recipient: null,
@@ -68,6 +69,7 @@ function targetedSnapshot(id: string, target: Pick<AgentRuntimeAuthorityGrant, "
 
 function acceptedSnapshot(id: string): HandoffReadModel {
   return handoff(id, {
+    lifecycle_state: "accepted",
     package: { target: { endpoint_id: grant.endpoint_id } },
     target_binding: null,
     recipient: { actor_id: grant.actor_id, actor_type: "agent" },
@@ -151,6 +153,22 @@ describe("AgentRuntimeAuthorityPolicy", () => {
     }))).resolves.toMatchObject({ kind: "deny" });
   });
 
+  it("allows targeted commands only while the Handoff is offered", async () => {
+    const nonOffered = handoff("handoff-targeted-accepted", {
+      lifecycle_state: "accepted",
+      package: { target: { actor_id: grant.actor_id } },
+      target_binding: null,
+      recipient: { actor_id: "actor-other", actor_type: "agent" },
+      current_responsible_actor: { actor_id: "actor-other", actor_type: "agent" },
+    });
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([nonOffered]));
+
+    await expect(policy.authorize(request({ resource_id: nonOffered.handoff_id }))).resolves.toEqual({ kind: "allow" });
+    for (const action of ["workfabric.handoff.accept.v1", "workfabric.handoff.decline.v1"]) {
+      await expect(policy.authorize(request({ action, resource_id: nonOffered.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+    }
+  });
+
   it("allows status, Result, and terminal reads only for the accepted responsible Actor", async () => {
     const policy = new AgentRuntimeAuthorityPolicy([grant], store([acceptedSnapshot("handoff-accepted")]));
 
@@ -165,6 +183,22 @@ describe("AgentRuntimeAuthorityPolicy", () => {
       action: "workfabric.handoff.return_result.v1",
       resource_id: "handoff-unassigned",
     }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("allows responsible commands only while the Handoff is accepted", async () => {
+    const terminal = handoff("handoff-responsible-terminal", {
+      lifecycle_state: "result_returned",
+      package: { target: { actor_id: "actor-other" } },
+      target_binding: null,
+      recipient: { actor_id: grant.actor_id, actor_type: "agent" },
+      current_responsible_actor: { actor_id: grant.actor_id, actor_type: "agent" },
+    });
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([terminal]));
+
+    await expect(policy.authorize(request({ resource_id: terminal.handoff_id }))).resolves.toEqual({ kind: "allow" });
+    for (const action of ["workfabric.handoff.report_status.v1", "workfabric.handoff.return_result.v1"]) {
+      await expect(policy.authorize(request({ action, resource_id: terminal.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+    }
   });
 
   it("allows a previously accepted recipient to read a terminal Handoff without granting further commands", async () => {
@@ -208,6 +242,17 @@ describe("AgentRuntimeAuthorityPolicy", () => {
     ]) {
       await expect(policy.authorize(input)).resolves.toEqual(unknown);
     }
+  });
+
+  it("denies a projection whose Handoff identity and state are inherited from its prototype", async () => {
+    const prototypeBacked = Object.create(targetedSnapshot("handoff-prototype")) as HandoffReadModel;
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([prototypeBacked]));
+
+    await expect(policy.authorize(request({ resource_id: "handoff-prototype" }))).resolves.toMatchObject({ kind: "deny" });
+    await expect(policy.authorize(request({
+      action: "workfabric.handoff.accept.v1",
+      resource_id: "handoff-prototype",
+    }))).resolves.toMatchObject({ kind: "deny" });
   });
 
   it("does not derive authority from Capability declarations", async () => {

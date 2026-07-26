@@ -49,6 +49,7 @@ describe("Agent Runtime authority composition", () => {
       handoff_id: "handoff-targeted",
       stream_version: 1,
       state: {
+        lifecycle_state: "offered",
         package: { target: { actor_id: runtime.actor_id } },
         target_binding: null,
         recipient: null,
@@ -62,6 +63,7 @@ describe("Agent Runtime authority composition", () => {
       handoff_id: "handoff-unassigned",
       stream_version: 1,
       state: {
+        lifecycle_state: "offered",
         package: { target: { actor_id: "actor-other" } },
         target_binding: null,
         recipient: null,

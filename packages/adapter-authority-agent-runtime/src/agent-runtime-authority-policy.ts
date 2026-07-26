@@ -3,7 +3,6 @@ import type {
   AuthorityPolicy,
   AuthorityRequest,
   CapabilityManifest,
-  HandoffReadModel,
   HandoffReadModelStore,
 } from "@work-fabric/exchange-spi";
 
@@ -31,6 +30,20 @@ const RESPONSIBLE_HANDOFF_ACTIONS = new Set([
   "workfabric.query.handoff.read.v1",
   "workfabric.handoff.report_status.v1",
   "workfabric.handoff.return_result.v1",
+]);
+const HANDOFF_LIFECYCLE_STATES = new Set([
+  "target_resolution_pending",
+  "target_unavailable",
+  "offered",
+  "accepted",
+  "result_returned",
+  "verified",
+  "rework_requested",
+  "closed",
+  "declined",
+  "expired",
+  "cancelled",
+  "transferred",
 ]);
 
 const manifest = Object.freeze({
@@ -73,14 +86,16 @@ function targetMatches(value: unknown, grant: AgentRuntimeAuthorityGrant): boole
   return ownData(value, "actor_id") === grant.actor_id || ownData(value, "endpoint_id") === grant.endpoint_id;
 }
 
+function object(value: unknown): object | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+}
+
 function responsibleActorMatches(value: unknown, grant: AgentRuntimeAuthorityGrant): boolean {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     && ownData(value, "actor_id") === grant.actor_id;
 }
 
-function targeted(model: HandoffReadModel, grant: AgentRuntimeAuthorityGrant): boolean {
-  const state = model.state;
-  if (typeof state !== "object" || state === null || Array.isArray(state)) return false;
+function targeted(state: object, grant: AgentRuntimeAuthorityGrant): boolean {
   const packageValue = ownData(state, "package");
   const packageTarget = typeof packageValue === "object" && packageValue !== null && !Array.isArray(packageValue)
     ? ownData(packageValue, "target")
@@ -92,17 +107,13 @@ function targeted(model: HandoffReadModel, grant: AgentRuntimeAuthorityGrant): b
   return targetMatches(packageTarget, grant) || targetMatches(bindingTarget, grant);
 }
 
-function responsible(model: HandoffReadModel, grant: AgentRuntimeAuthorityGrant): boolean {
-  const state = model.state;
-  if (typeof state !== "object" || state === null || Array.isArray(state)) return false;
+function responsible(state: object, grant: AgentRuntimeAuthorityGrant): boolean {
   return responsibleActorMatches(ownData(state, "recipient"), grant)
     && responsibleActorMatches(ownData(state, "current_responsible_actor"), grant);
 }
 
-function previouslyAccepted(model: HandoffReadModel, grant: AgentRuntimeAuthorityGrant): boolean {
-  const state = model.state;
-  return typeof state === "object" && state !== null && !Array.isArray(state)
-    && responsibleActorMatches(ownData(state, "recipient"), grant);
+function previouslyAccepted(state: object, grant: AgentRuntimeAuthorityGrant): boolean {
+  return responsibleActorMatches(ownData(state, "recipient"), grant);
 }
 
 function exactRuntimeGrant(request: AuthorityRequest, grants: readonly AgentRuntimeAuthorityGrant[]): AgentRuntimeAuthorityGrant | null {
@@ -162,10 +173,17 @@ export class AgentRuntimeAuthorityPolicy implements AuthorityPolicy {
       || (!TARGETED_HANDOFF_ACTIONS.has(action) && !RESPONSIBLE_HANDOFF_ACTIONS.has(action))) return DENY;
     try {
       const model = await this.handoffs.getHandoff(resourceId);
-      if (model === null || model.tenant_id !== grant.tenant_id || model.handoff_id !== resourceId) return DENY;
-      if (action === "workfabric.query.handoff.read.v1" && (targeted(model, grant) || previouslyAccepted(model, grant))) return ALLOW;
-      if (TARGETED_HANDOFF_ACTIONS.has(action) && targeted(model, grant)) return ALLOW;
-      if (RESPONSIBLE_HANDOFF_ACTIONS.has(action) && responsible(model, grant)) return ALLOW;
+      const modelObject = object(model);
+      if (modelObject === null
+        || ownData(modelObject, "tenant_id") !== grant.tenant_id
+        || ownData(modelObject, "handoff_id") !== resourceId) return DENY;
+      const state = object(ownData(modelObject, "state"));
+      if (state === null) return DENY;
+      const lifecycleState = ownData(state, "lifecycle_state");
+      if (typeof lifecycleState !== "string" || !HANDOFF_LIFECYCLE_STATES.has(lifecycleState)) return DENY;
+      if (action === "workfabric.query.handoff.read.v1" && (targeted(state, grant) || previouslyAccepted(state, grant))) return ALLOW;
+      if (TARGETED_HANDOFF_ACTIONS.has(action) && lifecycleState === "offered" && targeted(state, grant)) return ALLOW;
+      if (RESPONSIBLE_HANDOFF_ACTIONS.has(action) && lifecycleState === "accepted" && responsible(state, grant)) return ALLOW;
     } catch {
       // An unavailable or malformed projection must never grant authority.
     }
