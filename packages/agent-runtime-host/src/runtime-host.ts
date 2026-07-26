@@ -56,6 +56,9 @@ export interface AgentRuntimeHostDependencies {
 const TERMINAL_LIFECYCLES = new Set([
   "cancelled", "expired", "declined", "result_returned", "verified", "closed", "transferred", "target_unavailable",
 ]);
+const CANCELLING_LIFECYCLES = new Set([
+  "cancelled", "expired", "declined", "transferred", "target_unavailable",
+]);
 
 function lifecycle(snapshot: HandoffReadModel): string | null {
   const state = snapshot.state;
@@ -217,6 +220,14 @@ export class AgentRuntimeHost {
     try {
       for await (const incoming of session.incoming()) {
         if (this.closing) break;
+        const remoteLifecycle = lifecycle(incoming.handoff);
+        // A terminal Delivery is control-plane work, not queued execution.
+        // Dispatch it immediately so it can abort an active external Driver
+        // even while the normal execution capacity is saturated.
+        if (remoteLifecycle !== null && TERMINAL_LIFECYCLES.has(remoteLifecycle)) {
+          void this.handle(incoming).catch(() => undefined);
+          continue;
+        }
         if (this.running + this.pending.length >= this.dependencies.config.max_active_runs + this.dependencies.config.queue_capacity) {
           await this.persistAndRetry(incoming);
           continue;
@@ -383,6 +394,11 @@ export class AgentRuntimeHost {
       if (combined.aborted) {
         await this.tryTransition(claim, state, "cancelled");
       } else {
+        // A remote cancellation may win between the Driver's local progress
+        // update and its command reaching Work Fabric. A failed status write
+        // is not a failed execution in that case: re-read the public Handoff
+        // and converge the currently owned local run before reporting failure.
+        if (await this.convergeRemoteCancellation(claim, handoffId)) return;
         try {
           const failureProgress: RuntimeProgress = { sequence: lastProgress + 1, progress: null, message: "Agent Runtime failed", observed_at: this.now() };
           await this.issueStatus(handoffId, failureProgress, combined);
@@ -407,6 +423,35 @@ export class AgentRuntimeHost {
       // lost. Keep the validated durable Result and let a later lease holder
       // replay the same idempotency key; only an authoritative terminal
       // Delivery is allowed to dispose of result_ready.
+    }
+  }
+
+  private async convergeRemoteCancellation(
+    claim: RuntimeRunRecord,
+    handoffId: string,
+  ): Promise<boolean> {
+    try {
+      const remote = await this.dependencies.queries.getHandoff(handoffId, {
+        signal: this.shutdown.signal,
+      });
+      const remoteLifecycle = lifecycle(remote);
+      if (remoteLifecycle === null || !CANCELLING_LIFECYCLES.has(remoteLifecycle)) return false;
+      const current = await this.dependencies.state.getRun(
+        this.dependencies.config.tenant_id,
+        handoffId,
+      );
+      if (current === null) return false;
+      if (["succeeded", "failed", "cancelled"].includes(current.state)) return true;
+      await this.tryTransition(claim, current.state, "cancelled");
+      const converged = await this.dependencies.state.getRun(
+        this.dependencies.config.tenant_id,
+        handoffId,
+      );
+      return converged?.state === "cancelled";
+    } catch {
+      // Preserve the original execution error if the public control plane is
+      // unavailable; recovery will make the same authoritative check later.
+      return false;
     }
   }
 

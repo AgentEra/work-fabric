@@ -159,16 +159,25 @@ class AgentEndpointSessionImpl implements AgentEndpointSession {
       maxPartitions: config.max_active_partitions,
       queue: this.queue,
       sleep,
-      incoming: (partitionId, delivery, handoff) => ({
+      incoming: (partitionId, delivery, handoff, deliveryAcknowledged, terminalAcknowledged) => ({
         partition_id: partitionId,
         delivery,
         handoff,
-        acknowledgeSignal: (outcome, options = {}) =>
-          this.client.subscriptions.acknowledgeDelivery(
+        acknowledgeSignal: async (outcome, options = {}) => {
+          const acknowledgement = await this.client.subscriptions.acknowledgeDelivery(
             delivery,
             outcome,
             options,
-          ),
+          );
+          if (
+            acknowledgement.kind === "acknowledged" ||
+            acknowledgement.kind === "rejected"
+          ) {
+            deliveryAcknowledged?.(acknowledgement.cursor);
+            terminalAcknowledged?.();
+          }
+          return acknowledgement;
+        },
       }),
       failed: (error) => { void this.fail("failed", error); },
     });

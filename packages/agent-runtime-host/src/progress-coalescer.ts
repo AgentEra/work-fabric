@@ -45,7 +45,9 @@ export class ProgressCoalescer {
     const wait = Math.max(0, this.intervalMs - (this.clock() - this.lastEmittedAt));
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.enqueueFlush();
+      // The Runtime Host observes a failed flush during its terminal cleanup.
+      // This timer must not create an unhandled rejection in the meantime.
+      void this.enqueueFlush().catch(() => undefined);
     }, wait);
   }
 

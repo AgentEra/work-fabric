@@ -86,6 +86,22 @@ const handoff: HandoffReadModel = {
   latest_status: null,
 };
 
+const terminalHandoff: HandoffReadModel = {
+  ...handoff,
+  state: { lifecycle_state: "cancelled" },
+};
+
+const terminalDelivery: EventDelivery = {
+  ...delivery,
+  delivery_id: "delivery_terminal",
+  next_cursor: "cursor_terminal",
+  events: [{
+    ...delivery.events[0]!,
+    id: "event_terminal",
+    type: "workfabric.handoff.cancelled.v1",
+  }],
+};
+
 function waitForAbort(signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
@@ -201,6 +217,87 @@ describe("AgentGateway", () => {
     const session = await gateway.start();
 
     await expect(session.closed).resolves.toEqual({ reason: "failed" });
+  });
+
+  it("keeps a terminal partition stream through an Inbox refresh and retires it only after a successful Ack", async () => {
+    let listCalls = 0;
+    let streamAborted = false;
+    const acknowledge = vi.fn(async (): Promise<AckResult> => ({ kind: "acknowledged", cursor: "cursor_terminal" }));
+    const client = {
+      endpoints: {
+        openSession: vi.fn(async () => structuredClone(endpointSession)),
+        heartbeat: vi.fn(async () => ({ ...endpointSession, heartbeat_sequence: 1 })),
+        closeSession: vi.fn(async () => ({ ...endpointSession, state: "closed" as const })),
+        listInboxPartitions: vi.fn(async () => ({
+          items: ++listCalls === 1 ? [{ partition_id: partitionId, latest_position: 2, active_handoff_count: 1 }] : [],
+        })),
+      },
+      subscriptions: {
+        get: vi.fn(async () => structuredClone(subscription)),
+        put: vi.fn(async () => structuredClone(subscription)),
+        acknowledgeDelivery: acknowledge,
+        async *stream(_id: string, _input: unknown, request?: { signal?: AbortSignal }) {
+          yield structuredClone(terminalDelivery);
+          await waitForAbort(request?.signal);
+          streamAborted = true;
+        },
+      },
+      queries: {
+        getHandoff: vi.fn(async () => structuredClone(terminalHandoff)),
+        listHandoffEvents: vi.fn(async () => []),
+      },
+      handoffs: { accept: vi.fn() },
+    } as unknown as AgentGatewayClient;
+    const gateway = new AgentGateway(client, { ...config(), inbox_refresh_ms: 1 });
+    const session = await gateway.start();
+    const incoming = await session.incoming()[Symbol.asyncIterator]().next();
+
+    await vi.waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(2));
+    expect(streamAborted).toBe(false);
+    await incoming.value?.acknowledgeSignal("acknowledged");
+    await vi.waitFor(() => expect(streamAborted).toBe(true));
+    await incoming.value?.acknowledgeSignal("acknowledged");
+    expect(acknowledge).toHaveBeenCalledTimes(2);
+    await session.close();
+  });
+
+  it("does not advance the Gateway resume cursor before an unacknowledged terminal Delivery can be drained after reconnect", async () => {
+    const streamInputs: unknown[] = [];
+    let connections = 0;
+    const client = {
+      endpoints: {
+        openSession: vi.fn(async () => structuredClone(endpointSession)),
+        heartbeat: vi.fn(async () => ({ ...endpointSession, heartbeat_sequence: 1 })),
+        closeSession: vi.fn(async () => ({ ...endpointSession, state: "closed" as const })),
+        listInboxPartitions: vi.fn(async () => ({ items: [{ partition_id: partitionId, latest_position: 2, active_handoff_count: 1 }] })),
+      },
+      subscriptions: {
+        get: vi.fn(async () => structuredClone(subscription)),
+        put: vi.fn(async () => structuredClone(subscription)),
+        acknowledgeDelivery: vi.fn(async (): Promise<AckResult> => ({ kind: "acknowledged", cursor: "cursor_terminal" })),
+        async *stream(_id: string, input: unknown, request?: { signal?: AbortSignal }) {
+          streamInputs.push(input);
+          if (++connections === 1) {
+            yield structuredClone(terminalDelivery);
+            return;
+          }
+          await waitForAbort(request?.signal);
+        },
+      },
+      queries: {
+        getHandoff: vi.fn(async () => structuredClone(terminalHandoff)),
+        listHandoffEvents: vi.fn(async () => []),
+      },
+      handoffs: { accept: vi.fn() },
+    } as unknown as AgentGatewayClient;
+    const gateway = new AgentGateway(client, { ...config(), inbox_refresh_ms: 1 });
+    const session = await gateway.start();
+
+    await session.incoming()[Symbol.asyncIterator]().next();
+    await vi.waitFor(() => expect(streamInputs).toHaveLength(2));
+    expect(streamInputs[1]).toMatchObject({ partitionId });
+    expect(streamInputs[1]).not.toHaveProperty("cursor");
+    await session.close();
   });
 });
 

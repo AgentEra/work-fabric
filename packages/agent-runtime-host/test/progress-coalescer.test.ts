@@ -63,4 +63,20 @@ describe("ProgressCoalescer", () => {
       vi.useRealTimers();
     }
   });
+
+  it("contains a timer-triggered publish rejection but preserves it for terminal cleanup", async () => {
+    vi.useFakeTimers();
+    try {
+      const coalescer = new ProgressCoalescer(1, async () => {
+        throw new Error("progress publish failed");
+      });
+      await coalescer.push(update(1));
+
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(coalescer.flush()).rejects.toThrow("progress publish failed");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

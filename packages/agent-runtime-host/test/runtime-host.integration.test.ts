@@ -208,6 +208,30 @@ describe("AgentRuntimeHost", () => {
     expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("failed");
   });
 
+  it("converges to cancelled when a progress command races an authoritative remote cancellation", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    const conflict: OperationResult = { ...operation(3), operation_status: "conflict" };
+    const accepted = { ...snapshot(), stream_version: 2, state: { lifecycle_state: "accepted", resource_version: 2 } } as HandoffReadModel;
+    const cancelled = { ...snapshot(), stream_version: 3, state: { lifecycle_state: "cancelled", resource_version: 3 } } as HandoffReadModel;
+    const snapshots = [snapshot(), accepted, cancelled];
+    const queries = { getHandoff: vi.fn(async () => snapshots.shift() ?? cancelled) };
+    const host = new AgentRuntimeHost({
+      config,
+      session: { handoffs: { accept: vi.fn(async () => operation(2)), decline: vi.fn(), reportStatus: vi.fn(async () => conflict), returnResult: vi.fn() } as never, incoming: async function* () {}, close: async () => undefined, session_id: "session-1", closed: Promise.resolve({ reason: "closed" as const }) },
+      state,
+      driver: { manifest: { driver_type: "test", protocol_version: "1", capability_ids: ["information.synthesis"] }, execute: vi.fn(async () => result()) },
+      packageLoader: { load: vi.fn(async () => ({ snapshot: snapshot(), events: [event()], task: { tenant_id: "tenant-1", handoff_id: "handoff-1" } })) } as never,
+      policy: { decide: () => ({ kind: "accept" as const }) },
+      queries,
+      now,
+    });
+    const incoming: IncomingHandoff = { partition_id: "handoff:handoff-1", delivery: { delivery_id: "delivery-racing-cancel", subscription_id: "subscription-1", attempt: 1, events: [event()], next_cursor: "cursor-1", delivered_at: now(), visibility_expires_at: "2026-07-26T00:01:00.000Z" }, handoff: snapshot(), acknowledgeSignal: vi.fn(async () => ({ kind: "acknowledged", cursor: "cursor-1" } as const)) };
+
+    await host.handle(incoming);
+
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("cancelled");
+  });
+
   it("cancels an active Driver run on an acknowledged terminal Delivery", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     let started!: () => void;
@@ -222,6 +246,39 @@ describe("AgentRuntimeHost", () => {
     await host.handle(cancelled);
     await handling;
     expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("cancelled");
+  });
+
+  it("prioritizes a terminal Delivery over a running Handoff so the active Driver is cancelled", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    let begin!: () => void;
+    const started = new Promise<void>((resolve) => { begin = resolve; });
+    const driver: AgentRuntimeDriver = {
+      manifest: { driver_type: "test", protocol_version: "1", capability_ids: ["information.synthesis"] },
+      execute: async (_task, _progress, signal) => {
+        begin();
+        await new Promise<void>((_resolve, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true }));
+        return result();
+      },
+    };
+    const offered: IncomingHandoff = { partition_id: "handoff:handoff-1", delivery: { delivery_id: "delivery-priority-offer", subscription_id: "subscription-1", attempt: 1, events: [event()], next_cursor: "cursor-1", delivered_at: now(), visibility_expires_at: "2026-07-26T00:01:00.000Z" }, handoff: snapshot(), acknowledgeSignal: vi.fn(async () => ({ kind: "acknowledged", cursor: "cursor-1" } as const)) };
+    const cancelled: IncomingHandoff = { ...offered, delivery: { ...offered.delivery, delivery_id: "delivery-priority-cancel", events: [{ ...event(), id: "event-priority-cancel", type: "workfabric.handoff.cancelled.v1" }] }, handoff: { ...snapshot(), state: { lifecycle_state: "cancelled", resource_version: 2 } } as HandoffReadModel, acknowledgeSignal: vi.fn(async () => ({ kind: "acknowledged", cursor: "cursor-1" } as const)) };
+    const host = new AgentRuntimeHost({
+      config,
+      session: { handoffs: { accept: vi.fn(async () => operation(2)), decline: vi.fn(), reportStatus: vi.fn(async () => operation(3)), returnResult: vi.fn() } as never, incoming: async function* () { yield offered; await started; yield cancelled; }, close: async () => undefined, session_id: "session-1", closed: Promise.resolve({ reason: "closed" as const }) },
+      state,
+      driver,
+      packageLoader: { load: vi.fn(async () => ({ snapshot: snapshot(), events: [event()], task: { tenant_id: "tenant-1", handoff_id: "handoff-1" } })) } as never,
+      policy: { decide: () => ({ kind: "accept" as const }) },
+      queries: { getHandoff: vi.fn(async () => snapshot()) }, now,
+    });
+    try {
+      await host.start();
+      await started;
+      await vi.waitFor(() => expect((state.getRun("tenant-1", "handoff-1"))).resolves.toMatchObject({ state: "cancelled" }));
+      expect(cancelled.acknowledgeSignal).toHaveBeenCalledWith("acknowledged");
+    } finally {
+      await host.close();
+    }
   });
 
   it("closes the Gateway session before the durable state provider", async () => {
