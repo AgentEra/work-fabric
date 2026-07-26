@@ -94,7 +94,7 @@ describe("Daily Assistant Runtime composition", () => {
     try {
       await mkdir(join(root, "target"));
       await symlink("target", join(root, "linked"));
-      await expect(ensureTrustedWorkspaceRoot(join(root, "linked", "runtime"))).rejects.toThrow("symlink");
+      await expect(ensureTrustedWorkspaceRoot(join(root, "linked", "runtime"), root)).rejects.toThrow("symlink");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -104,20 +104,52 @@ describe("Daily Assistant Runtime composition", () => {
     const root = await mkdtemp("/private/tmp/daily-runtime-workspace-");
     try {
       await chmod(root, 0o770);
-      await expect(ensureTrustedWorkspaceRoot(root)).rejects.toThrow("writable");
+      await expect(ensureTrustedWorkspaceRoot(root, root)).rejects.toThrow("private");
     } finally {
       await chmod(root, 0o700);
       await rm(root, { recursive: true, force: true });
     }
   });
 
+  it("rejects an unsafe intermediate directory inside the trusted boundary", async () => {
+    const boundary = await mkdtemp("/private/tmp/daily-runtime-boundary-");
+    try {
+      const intermediate = join(boundary, "shared");
+      await mkdir(intermediate, { mode: 0o700 });
+      await chmod(intermediate, 0o777);
+      await expect(
+        ensureTrustedWorkspaceRoot(join(intermediate, "runtime"), boundary),
+      ).rejects.toThrow("private");
+    } finally {
+      await rm(boundary, { recursive: true, force: true });
+    }
+  });
+
   const wrongOwner = typeof process.getuid === "function" ? it : it.skip;
+  wrongOwner("rejects a foreign-owned intermediate directory inside the trusted boundary", async () => {
+    const boundary = await mkdtemp("/private/tmp/daily-runtime-boundary-");
+    const expectedOwner = process.getuid!();
+    const getuid = vi.spyOn(process, "getuid")
+      .mockReturnValueOnce(expectedOwner)
+      .mockReturnValue(expectedOwner + 1);
+    try {
+      const intermediate = join(boundary, "foreign");
+      await mkdir(intermediate, { mode: 0o700 });
+      await expect(
+        ensureTrustedWorkspaceRoot(join(intermediate, "runtime"), boundary),
+      ).rejects.toThrow("owned");
+    } finally {
+      getuid.mockRestore();
+      await rm(boundary, { recursive: true, force: true });
+    }
+  });
+
   wrongOwner("rejects a workspace root owned by another user", async () => {
     const root = await mkdtemp("/private/tmp/daily-runtime-workspace-");
     const expectedOwner = process.getuid!();
     const getuid = vi.spyOn(process, "getuid").mockReturnValue(expectedOwner + 1);
     try {
-      await expect(ensureTrustedWorkspaceRoot(root)).rejects.toThrow("owned");
+      await expect(ensureTrustedWorkspaceRoot(root, root)).rejects.toThrow("owned");
     } finally {
       getuid.mockRestore();
       await rm(root, { recursive: true, force: true });

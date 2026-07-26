@@ -1,5 +1,5 @@
 import { lstat, mkdir } from "node:fs/promises";
-import { join, parse, resolve } from "node:path";
+import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 
 import { AgentlyRuntimeDriverFactory, validateAgentlyRuntimeDriverConfig } from "@work-fabric/adapter-agent-runtime-agently";
 import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-sqlite";
@@ -73,9 +73,18 @@ export function createRuntimeStateStore(
   return new SqliteAgentRuntimeStateStore({ location: state.location, busy_timeout_ms: state.busy_timeout_ms });
 }
 
-/** The composition owns this root, so it never accepts a symlink or a writable shared directory. */
-export async function ensureTrustedWorkspaceRoot(root: string): Promise<void> {
+/**
+ * System ancestors are checked only for symlinks and directory type. The
+ * trusted boundary and every descendant through the workspace root are
+ * Runtime-owned: current UID and mode 0700 (or stricter) are required.
+ */
+export async function ensureTrustedWorkspaceRoot(root: string, trustedBoundary: string): Promise<void> {
   const resolved = resolve(root);
+  const boundary = resolve(trustedBoundary);
+  const suffix = relative(boundary, resolved);
+  if (suffix === ".." || suffix.startsWith(`..${sep}`) || isAbsolute(suffix)) {
+    throw new TypeError("workspace_root must be inside the trusted Runtime boundary");
+  }
   const parsed = parse(resolved);
   let current = parsed.root;
   const segments = resolved.slice(parsed.root.length).split(/[\\/]/).filter(Boolean);
@@ -92,12 +101,17 @@ export async function ensureTrustedWorkspaceRoot(root: string): Promise<void> {
     if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
       throw new TypeError("workspace_root must not contain a symlink or non-directory component");
     }
-    if (current !== resolved) continue;
+    const boundarySuffix = relative(boundary, current);
+    const isRuntimeOwned = boundarySuffix === ""
+      || (!isAbsolute(boundarySuffix)
+        && boundarySuffix !== ".."
+        && !boundarySuffix.startsWith(`..${sep}`));
+    if (!isRuntimeOwned) continue;
     if (typeof process.getuid === "function" && metadata.uid !== process.getuid()) {
-      throw new TypeError("workspace_root must be owned by the current user");
+      throw new TypeError("workspace_root trusted components must be owned by the current user");
     }
-    if ((metadata.mode & 0o022) !== 0) {
-      throw new TypeError("workspace_root must not be group or world writable");
+    if ((metadata.mode & 0o077) !== 0) {
+      throw new TypeError("workspace_root trusted components must have private permissions");
     }
   }
 }
@@ -114,7 +128,8 @@ export async function startComposedRuntime(composition: RuntimeComposition): Pro
 
 export async function startAgentRuntime(environment: Readonly<Record<string, string | undefined>> = process.env): Promise<RuntimeComposition> {
   const loaded = await loadAgentRuntimeConfiguration({ environment });
-  await ensureTrustedWorkspaceRoot(loaded.driver.config.workspace_root);
+  const trustedBoundary = dirname(resolve(loaded.service.state.location));
+  await ensureTrustedWorkspaceRoot(loaded.driver.config.workspace_root, trustedBoundary);
   const driverConfig = validateAgentlyRuntimeDriverConfig(loaded.driver.config, "plugins.instances.agently-primary.config", { config_directory: process.cwd() });
   const driver = await new AgentlyRuntimeDriverFactory().create(driverConfig);
   const state = createRuntimeStateStore(loaded.service.state);

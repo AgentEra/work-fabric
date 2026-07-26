@@ -19,6 +19,7 @@
 REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPOSITORY_ROOT"
 mkdir -p "$PWD/var"
+chmod 700 "$PWD/var"
 export WORK_FABRIC_CONFIG="$PWD/examples/config/service-feishu-long-connection.yaml"
 export WORK_FABRIC_CURSOR_SECRET="$(openssl rand -hex 32)"
 export WORK_FABRIC_ADMISSION_FINGERPRINT_KEY="$(openssl rand -hex 32)"
@@ -44,6 +45,13 @@ export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$PWD/examples/config/agent-runtime-agen
 export AGENTLY_MODEL_API_KEY="..."
 npm run agent-runtime:start
 ```
+
+The Runtime treats the configured SQLite state directory (`./var` in the
+sample) as its trusted filesystem boundary. System ancestors such as `/` and
+`/Users` must be real directories and must not be symlinks, but they need not
+be Runtime-owned or private. The boundary itself and every workspace path
+component below it must be owned by the Runtime UID and have no group/world
+permissions; missing components are created with mode `0700`.
 
 5. 把企业自建应用机器人加入测试群。`/health/live` 表示进程存活；等待 SDK 建立连接后，`/health/ready` 必须返回 200：
 
