@@ -97,8 +97,13 @@ export function verifyAgentRuntimeStateStoreContract(
       const fixture = await create();
       try {
         await fixture.store.createRunIfAbsent("tenant-1", "handoff-1", NOW);
+        await fixture.store.createRunIfAbsent("tenant-1", "handoff-2", NOW);
+        await fixture.store.claimRun({
+          ...claim("host-a", NOW),
+          handoff_id: "handoff-2",
+        });
         const recoverable = await fixture.store.listRecoverable("tenant-1", "2026-07-26T01:05:00.000Z", 10);
-        expect(recoverable.map((run) => run.handoff_id)).toEqual(["handoff-1"]);
+        expect(recoverable.map((run) => run.handoff_id)).toEqual(["handoff-1", "handoff-2"]);
       } finally {
         await fixture.close();
       }
@@ -173,6 +178,75 @@ export function verifyAgentRuntimeStateStoreContract(
         await expect(fixture.store.recordCommand(commandRecord({ command: "decline" }))).rejects.toThrow();
         await expect(fixture.store.recordCommand(commandRecord({ resource_version: 2 }))).rejects.toThrow();
         await expect(fixture.store.recordCommand(commandRecord({ command: "status", idempotency_key: "status-1", resource_version: 1 }))).resolves.toMatchObject({ created: true });
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it("isolates identical identities between tenants", async () => {
+      const fixture = await create();
+      try {
+        expect((await fixture.store.recordDelivery(delivery())).created).toBe(true);
+        expect((await fixture.store.recordDelivery(delivery({ tenant_id: "tenant-2" }))).created).toBe(true);
+        expect(await fixture.store.markDeliveryAcknowledged("tenant-1", "delivery-1", "2026-07-26T01:00:01.000Z")).toBe(true);
+        expect((await fixture.store.recordDelivery(delivery({ tenant_id: "tenant-2" }))).record.acknowledged_at).toBe(null);
+
+        expect((await fixture.store.createRunIfAbsent("tenant-1", "handoff-1", NOW)).created).toBe(true);
+        expect((await fixture.store.createRunIfAbsent("tenant-2", "handoff-1", NOW)).created).toBe(true);
+        expect((await fixture.store.claimRun({ ...claim("host-a", NOW), tenant_id: "tenant-1" }))?.fencing_token).toBe(1);
+        expect((await fixture.store.getRun("tenant-2", "handoff-1"))?.owner).toBe(null);
+
+        expect((await fixture.store.recordCommand(commandRecord())).created).toBe(true);
+        expect((await fixture.store.recordCommand(commandRecord({ tenant_id: "tenant-2" }))).created).toBe(true);
+        expect(await fixture.store.listCommands("tenant-1", "handoff-1")).toHaveLength(1);
+        expect(await fixture.store.listCommands("tenant-2", "handoff-1")).toHaveLength(1);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it("clones inputs and returned delivery, run, and command records", async () => {
+      const fixture = await create();
+      try {
+        const deliveryInput = delivery();
+        const deliveryRecorded = await fixture.store.recordDelivery(deliveryInput);
+        (deliveryInput as { received_at: string }).received_at = "changed-input";
+        (deliveryRecorded.record as { received_at: string }).received_at = "changed-output";
+        expect((await fixture.store.recordDelivery(delivery())).record.received_at).toBe(NOW);
+
+        const created = await fixture.store.createRunIfAbsent("tenant-1", "handoff-1", NOW);
+        (created.run as { owner: string | null }).owner = "changed-output";
+        expect((await fixture.store.getRun("tenant-1", "handoff-1"))?.owner).toBe(null);
+        await fixture.store.claimRun(claim("host-a", NOW));
+        await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "received", next_state: "accepted", now: "2026-07-26T01:00:00.001Z" });
+        await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "accepted", next_state: "running", now: "2026-07-26T01:00:00.002Z" });
+        const result = { summary: [{ message: "original" }], artifacts: [], evidence: [], extensions: {} };
+        await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "running", next_state: "result_ready", now: "2026-07-26T01:00:00.003Z", result });
+        result.summary[0]!.message = "changed-input";
+        const storedRun = await fixture.store.getRun("tenant-1", "handoff-1");
+        expect(storedRun?.result?.summary).toEqual([{ message: "original" }]);
+        (storedRun?.result?.summary[0] as { message: string }).message = "changed-output";
+        expect((await fixture.store.getRun("tenant-1", "handoff-1"))?.result?.summary).toEqual([{ message: "original" }]);
+
+        const commandInput = commandRecord();
+        const commandRecorded = await fixture.store.recordCommand(commandInput);
+        (commandInput as { recorded_at: string }).recorded_at = "changed-input";
+        (commandRecorded.record as { recorded_at: string }).recorded_at = "changed-output";
+        expect((await fixture.store.listCommands("tenant-1", "handoff-1"))[0]?.recorded_at).toBe(NOW);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it("rejects owner mutations after lease expiry while allowing timely renewal", async () => {
+      const fixture = await create();
+      try {
+        await fixture.store.createRunIfAbsent("tenant-1", "handoff-1", NOW);
+        await fixture.store.claimRun(claim("host-a", NOW));
+        expect(await fixture.store.renewRun("tenant-1", "handoff-1", "host-a", 1, "2026-07-26T01:00:01.000Z", 2)).toBe(true);
+        expect(await fixture.store.renewRun("tenant-1", "handoff-1", "host-a", 1, "2026-07-26T01:00:03.000Z", 2)).toBe(false);
+        expect(await fixture.store.transitionRun({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, expected_state: "received", next_state: "accepted", now: "2026-07-26T01:00:03.000Z" })).toBe(false);
+        expect(await fixture.store.checkpointProgress({ tenant_id: "tenant-1", handoff_id: "handoff-1", owner: "host-a", fencing_token: 1, sequence: 1, now: "2026-07-26T01:00:03.000Z" })).toBe(false);
       } finally {
         await fixture.close();
       }
