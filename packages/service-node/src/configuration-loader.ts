@@ -1,5 +1,9 @@
 import { YamlConfigurationProvider } from "@work-fabric/adapter-configuration-yaml";
 import { admissionConfigurationValidator, type AdmissionConfigurationSection } from "@work-fabric/adapter-admission-configuration";
+import {
+  agentRuntimeAuthorityConfigurationValidator,
+  type AgentRuntimeAuthorityConfigurationSection,
+} from "@work-fabric/adapter-authority-agent-runtime";
 import { ConfigurationService, EnvironmentSecretResolver, resolveDeclaredSecrets } from "@work-fabric/configuration-runtime";
 import { FeishuPluginFactory, feishuSecretPaths, validateFeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
 import type { PluginHostConfiguration } from "@work-fabric/plugin-runtime";
@@ -10,11 +14,15 @@ export interface LoadedNodeConfiguration {
   readonly service: NodeServiceConfig;
   readonly plugins: PluginHostConfiguration;
   readonly admission: AdmissionConfigurationSection;
+  readonly agent_runtime_authority: AgentRuntimeAuthorityConfigurationSection;
 }
 
 const emptyAdmissionConfiguration: AdmissionConfigurationSection = Object.freeze({
   policies: Object.freeze({}),
   evidence_providers: Object.freeze({}),
+});
+const emptyAgentRuntimeAuthorityConfiguration: AgentRuntimeAuthorityConfigurationSection = Object.freeze({
+  grants: Object.freeze({}),
 });
 
 function object(value: unknown, field: string): Record<string, unknown> {
@@ -64,14 +72,16 @@ export async function loadNodeConfiguration(environment: Readonly<Record<string,
     clock: { now: () => new Date().toISOString() },
     validate_service: (value) => parseServiceConfig(value),
     plugin_validators: [{ type: feishu.type, validate: (value) => feishu.validate(value) }],
-    section_validators: [admissionConfigurationValidator],
+    section_validators: [admissionConfigurationValidator, agentRuntimeAuthorityConfigurationValidator],
   });
   const snapshot = await configuration.load();
   const admission = snapshot.value.sections.admission ?? emptyAdmissionConfiguration;
+  const agentRuntimeAuthority = snapshot.value.sections.agent_runtime_authority ?? emptyAgentRuntimeAuthorityConfiguration;
   return {
     revision: snapshot.revision,
     service: snapshot.value.service,
     plugins: snapshot.value.plugins.instances,
     admission: admission as AdmissionConfigurationSection,
+    agent_runtime_authority: agentRuntimeAuthority as AgentRuntimeAuthorityConfigurationSection,
   };
 }

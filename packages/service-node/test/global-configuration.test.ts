@@ -185,6 +185,37 @@ plugins:
     expect(() => { (loaded.admission.policies as Record<string, unknown>).later = {}; }).toThrow();
   });
 
+  it("validates and exposes the optional Agent Runtime authority grants", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "wf-config-agent-runtime-authority-")), "work-fabric.yaml");
+    await writeFile(path, `api_version: workfabric.config/v1
+service:
+  storage_profile: memory-demo
+  development_mode: true
+  tenant_id: tenant-local
+  exchange_id: exchange-local
+  cursor_secret: \${CURSOR_SECRET}
+  identities: [{authentication_evidence: {bearer_token: token}, principal: {principal_id: p, tenant_id: tenant-local, actor_claims: [{actor_id: a, actor_type: human, endpoint_ids: [e]}], attributes: {}}}]
+  authority_rules: [{tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}]
+agent_runtime_authority:
+  grants:
+    daily-assistant:
+      tenant_id: tenant-local
+      principal_id: principal-intake-agent
+      actor_id: actor-intake-agent
+      endpoint_id: endpoint-intake-agent
+      subscription_id: subscription-intake-agent
+`, "utf8");
+    const loaded = await loadNodeConfiguration({ WORK_FABRIC_CONFIG: path, CURSOR_SECRET: "x".repeat(32) });
+    expect(loaded.agent_runtime_authority.grants["daily-assistant"]).toEqual({
+      tenant_id: "tenant-local",
+      principal_id: "principal-intake-agent",
+      actor_id: "actor-intake-agent",
+      endpoint_id: "endpoint-intake-agent",
+      subscription_id: "subscription-intake-agent",
+    });
+    expect(() => { (loaded.agent_runtime_authority.grants as Record<string, unknown>).later = {}; }).toThrow();
+  });
+
   it("resolves every service Admission secret through the global secret Provider", async () => {
     const path = join(await mkdtemp(join(tmpdir(), "wf-config-admission-secrets-")), "work-fabric.yaml");
     await writeFile(path, `api_version: workfabric.config/v1

@@ -22,6 +22,10 @@ import {
   CompositeAuthorityPolicy,
   type AdmissionAuthorityRule,
 } from "@work-fabric/adapter-authority-admission";
+import {
+  AgentRuntimeAuthorityPolicy,
+  type AgentRuntimeAuthorityConfigurationSection,
+} from "@work-fabric/adapter-authority-agent-runtime";
 import { FeishuDirectoryEvidenceProvider } from "@work-fabric/adapter-directory-feishu";
 import {
   AdmissionIdentityProvider,
@@ -206,6 +210,7 @@ export interface NodeServiceCompositionOptions {
   readonly configuration_revision?: string;
   readonly plugins?: PluginHostConfiguration;
   readonly admission?: AdmissionConfigurationSection;
+  readonly agent_runtime_authority?: AgentRuntimeAuthorityConfigurationSection;
   /** Deployment-owned Admission persistence ports; defaults to the selected storage profile. */
   readonly admission_stores?: {
     readonly bindings: ParticipantBindingStore;
@@ -694,13 +699,19 @@ export async function composeNodeService(
     "protocol/spec/interaction-payloads.json",
   );
   const localIdentity = new LocalIdentityProvider(config.identities);
+  const runtimeAuthority = new AgentRuntimeAuthorityPolicy(
+    Object.values(options.agent_runtime_authority?.grants ?? {}),
+    storage.handoffs,
+  );
   const localAuthority = new LocalAuthorityPolicy(config.authority_rules);
   const identity = admissionComposition === undefined
     ? localIdentity
     : new CompositeIdentityProvider([admissionComposition.identity, localIdentity]);
-  const authority = admissionComposition === undefined
-    ? localAuthority
-    : new CompositeAuthorityPolicy([admissionComposition.authority, localAuthority]);
+  const authority = new CompositeAuthorityPolicy([
+    ...(admissionComposition === undefined ? [] : [admissionComposition.authority]),
+    runtimeAuthority,
+    localAuthority,
+  ]);
   const application = new ExchangeApplication({
     persistence: storage.persistence,
     identity,
