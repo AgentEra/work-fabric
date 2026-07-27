@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
+import {
+  canonicalCitizenDigest,
+  type CapabilityExecutionContext,
+  type CapabilityExecutionRequest,
+} from "@work-fabric/network-citizen-spi";
 
 import type { RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
 
@@ -69,6 +73,18 @@ function task(): RuntimeTaskPackage {
   };
 }
 
+function hostSafeJson<T>(value: T): T {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map((item) => hostSafeJson(item))) as T;
+  }
+  const result = Object.create(null) as Record<string, unknown>;
+  for (const [key, item] of Object.entries(value)) {
+    result[key] = hostSafeJson(item);
+  }
+  return Object.freeze(result) as T;
+}
+
 describe("CapabilityProviderDriver", () => {
   it("executes typed facts and returns a machine result without authoring user copy", async () => {
     const execute = vi.fn(async () => ({
@@ -116,6 +132,48 @@ describe("CapabilityProviderDriver", () => {
       },
     }]);
     expect(JSON.stringify(result)).not.toContain("已");
+  });
+
+  it("accepts the frozen null-prototype JSON emitted by the Runtime Host", async () => {
+    const execute = vi.fn(async (
+      _request: CapabilityExecutionRequest,
+      _context: CapabilityExecutionContext,
+    ) => ({
+      outcome: "succeeded" as const,
+      data: { message_id: "message-1", sent_at: "2026-07-27T10:01:00.000Z" },
+      artifacts: [],
+    }));
+    const driver = new CapabilityProviderDriver({
+      citizen_id: "feishu-actions",
+      endpoint_id: "endpoint-feishu-actions",
+      capabilities: ["feishu.message.send"],
+      executor: { describeCapabilities: () => [declaration], execute },
+    });
+
+    await expect(driver.execute(
+      hostSafeJson(task()),
+      async () => undefined,
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      extensions: { "workfabric.dev/capability_outcome": "succeeded" },
+    });
+    expect(execute).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: expect.objectContaining({
+          target: { kind: "current_conversation" },
+        }),
+      }),
+      expect.objectContaining({
+        authority_evidence: expect.objectContaining({
+          original_handoff_id: "handoff-original",
+        }),
+      }),
+    );
+    const [request, context] = execute.mock.calls[0]!;
+    expect(Object.getPrototypeOf(request.input)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(context.authority_evidence)).toBe(
+      Object.prototype,
+    );
   });
 
   it("fails closed when the bound authority extension is missing", async () => {

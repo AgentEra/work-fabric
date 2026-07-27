@@ -95,6 +95,7 @@ import {
 import {
   DirectoryTargetEligibilityVerifier,
   EndpointDirectoryService,
+  NetworkCitizenBindingConstraintEvaluator,
 } from "@work-fabric/endpoint-directory";
 import { NetworkCitizenDirectoryService } from "@work-fabric/network-citizen-directory";
 import type { NetworkCitizenStore } from "@work-fabric/network-citizen-spi";
@@ -112,6 +113,7 @@ import {
 } from "@work-fabric/exchange-runtime";
 import type {
   ContextRepository,
+  CapabilityConstraintEvaluator,
   DeliveryStateStore,
   EndpointDirectoryStore,
   EndpointInboxStore,
@@ -209,6 +211,11 @@ export interface NodeServiceCompositionOptions {
    * the Citizen catalog without coupling service-node to a vendor database.
    */
   readonly network_citizen_store?: NetworkCitizenStore;
+  /**
+   * Deployment-owned vocabulary for Capability target constraints. The
+   * default understands only the exact Network Citizen + Contract binding.
+   */
+  readonly target_constraint_evaluator?: CapabilityConstraintEvaluator;
   /** Deployment-owned clock; useful for deterministic integration profiles. */
   readonly clock?: Clock;
   readonly cluster_worker?: NodeClusterWorkerDependencies;
@@ -809,6 +816,9 @@ export async function composeNodeService(
     target_eligibility: new DirectoryTargetEligibilityVerifier({
       store: storage.endpointDirectory,
       clock,
+      constraintEvaluator:
+        options.target_constraint_evaluator ??
+        new NetworkCitizenBindingConstraintEvaluator(),
     }),
   });
   const handoffProjector = new HandoffProjector(

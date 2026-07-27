@@ -268,6 +268,12 @@ CRUD/追加、OpenAPI、幂等、资源所有权与稳定错误；文档上下�
 `@work-fabric/governance-confirmation` 消费绑定人、文档、输入摘要和过期时间
 的单次确认凭证。
 
+参考闭环已经通过 SQLite + 公共 HTTP/SSE + TypeScript SDK 验证：动态
+Citizen/Contract 绑定、辅助 Handoff Offer/目标解析、Provider
+Gateway/Host、类型化 Result 与 Agent 调用状态均走正式边界。目标约束默认
+精确绑定 Citizen 与 Contract digest；新的约束词汇通过 SPI 注入，不修改
+Core。
+
 Provider 只返回类型化事实，不写用户文案；助理 Agent 独占最终语义回复；
 Channel 只运输 canonical Result。Agent 看不到飞书密钥和原始厂商响应，
 Core、Host 与 Catalog 均不依赖飞书实现。完整边界与接入说明见

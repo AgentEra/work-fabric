@@ -63,6 +63,13 @@ function commandKey(
     .slice(0, 32)}`;
 }
 
+function bindingEvidenceId(request: CapabilityInvocationRequest): string {
+  return `capability-binding-${createHash("sha256")
+    .update(`${request.original_handoff_id}\u0000${request.invocation_id}`)
+    .digest("hex")
+    .slice(0, 32)}`;
+}
+
 function workReference(request: CapabilityInvocationRequest): string {
   return `urn:work-fabric:capability-invocation:${encodeURIComponent(
     request.original_handoff_id,
@@ -150,8 +157,8 @@ function offerPayload(
     work_reference: {
       uri,
       extensions: {
-        original_handoff_id: request.original_handoff_id,
-        invocation_id: request.invocation_id,
+        "workfabric.dev/original_handoff_id": request.original_handoff_id,
+        "workfabric.dev/invocation_id": request.invocation_id,
       },
     },
     target: {
@@ -180,7 +187,7 @@ function offerPayload(
       result_schema_ref: contract.output_schema?.uri ?? null,
       required_evidence_types: [],
       extensions: {
-        contract_digest: candidate.contract_digest,
+        "workfabric.dev/contract_digest": candidate.contract_digest,
       },
     }],
     verifier,
@@ -459,11 +466,19 @@ export class HandoffCapabilityInvocationPort
       handoff_id: handoffId,
       resolved_target: { endpoint_id: candidate.endpoint_id },
       evidence: [{
-        evidence_type: "network_citizen_contract_binding",
-        citizen_id: candidate.citizen_id,
-        declaration_id: candidate.capability_id,
-        declaration_version: candidate.capability_version,
-        contract_digest: candidate.contract_digest,
+        evidence_id: bindingEvidenceId(request),
+        evidence_type: "contract_binding",
+        content: {
+          kind: "data",
+          schema_ref:
+            "urn:work-fabric:schema:network-citizen-contract-binding:1",
+          data: {
+            citizen_id: candidate.citizen_id,
+            declaration_id: candidate.capability_id,
+            declaration_version: candidate.capability_version,
+            contract_digest: candidate.contract_digest,
+          },
+        },
       }],
     };
     const options: ExistingHandoffCommandOptions = {

@@ -95,8 +95,10 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
       authority: {
         authorize: async ({ request }) => ({
           delegation_id: "delegation-capability-1",
-          scopes: [request.capability_id],
-          resource_refs: [],
+          scopes: ["capability:invoke"],
+          resource_refs: [
+            `urn:work-fabric:capability-invocation:${request.original_handoff_id}:${request.invocation_id}`,
+          ],
           expires_at: request.deadline,
           may_redelegate: false,
           extensions: {

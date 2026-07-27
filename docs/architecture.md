@@ -453,6 +453,14 @@ Provider 通过普通 Endpoint Delivery/Ack/Accept 接收辅助 Handoff，在自
 Provider 状态，Fabric Core 不执行厂商操作。调用状态、Provider 状态、Agent
 Runtime 状态分别持久化，可独立重试和恢复。
 
+辅助 Handoff 的目标约束冻结 `selected_citizen_id` 与
+`contract_digest`。默认 Directory evaluator 只解释这组标准约束；其他约束
+词汇通过组合根注入，不耦合存储或 Provider。部署必须显式授予 Agent
+`handoff.offer`；Runtime 的附加策略只允许 Agent 解析和查询自己发起的辅助
+Handoff，不扩大到其他参与者的工作。目标绑定证据使用正式 WFPP Evidence
+结构，事件的 `changed_fields` 去重后才进入 SSE，确保所有公共 Binding 得到
+同一份可验证事实。
+
 首个 Feishu 实现把动作和文档 Context 注册为两个 Citizen；飞书凭据、OpenAPI、
 幂等、文档所有权和 revision 完全封装在 Provider，删除确认由独立 Governance
 模块负责。该实现验证模块可以新增而无需修改 Exchange Core。

@@ -42,6 +42,9 @@ const CLAIM_HOLDER_ACTIONS = new Set([
   "workfabric.handoff.release_claim.v1",
   "workfabric.handoff.accept.v1",
 ]);
+const INITIATOR_RESOLUTION_ACTIONS = new Set([
+  "workfabric.handoff.resolve_target.v1",
+]);
 
 const manifest = Object.freeze({
   profile: "exchange.authority.v1",
@@ -100,6 +103,17 @@ function responsible(state: HandoffState, grant: AgentRuntimeAuthorityGrant): bo
 
 function previouslyAccepted(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
   return responsibleActorMatches(state.recipient, grant);
+}
+
+function initiated(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
+  return state.initiator.actor_type === "agent"
+    && state.initiator.actor_id === grant.actor_id;
+}
+
+function hasExternallyResolvedCapabilityTarget(state: HandoffState): boolean {
+  const target = state.package.target;
+  return "capability_requirement" in target
+    && target.capability_requirement.assignment_mode === "external_resolution";
 }
 
 function activeClaimMatches(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
@@ -172,6 +186,7 @@ export class AgentRuntimeAuthorityPolicy implements AuthorityPolicy {
         && !RESPONSIBLE_HANDOFF_ACTIONS.has(action)
         && !CLAIMABLE_HANDOFF_ACTIONS.has(action)
         && !CLAIM_HOLDER_ACTIONS.has(action)
+        && !INITIATOR_RESOLUTION_ACTIONS.has(action)
       )) return DENY;
     try {
       const model = await this.handoffs.getHandoff(resourceId);
@@ -181,7 +196,18 @@ export class AgentRuntimeAuthorityPolicy implements AuthorityPolicy {
       const lifecycleState = state.lifecycle_state;
       if (
         action === "workfabric.query.handoff.read.v1"
-        && (targeted(state, grant) || previouslyAccepted(state, grant) || activeClaimMatches(state, grant))
+        && (
+          targeted(state, grant)
+          || previouslyAccepted(state, grant)
+          || activeClaimMatches(state, grant)
+          || initiated(state, grant)
+        )
+      ) return ALLOW;
+      if (
+        INITIATOR_RESOLUTION_ACTIONS.has(action)
+        && lifecycleState === "target_resolution_pending"
+        && initiated(state, grant)
+        && hasExternallyResolvedCapabilityTarget(state)
       ) return ALLOW;
       if (CLAIMABLE_HANDOFF_ACTIONS.has(action) && lifecycleState === "claimable") return ALLOW;
       if (CLAIM_HOLDER_ACTIONS.has(action) && lifecycleState === "claimed" && activeClaimMatches(state, grant)) return ALLOW;

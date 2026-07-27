@@ -47,6 +47,15 @@ Channel only transports that Result. No transfer, target ranking, workflow
 automation, model/tool execution, vendor credential, or Feishu SDK enters
 Exchange Core, Catalog or Agent Host.
 
+The release gate includes a SQLite-backed public HTTP/SSE reference loop:
+Agent Catalog discovery and Contract binding -> standard auxiliary Handoff ->
+Capability Provider Gateway/Host -> typed result -> Agent invocation state.
+It verifies exact Citizen/Contract target constraints, initiator-scoped
+resolution/read authority, WFPP-compliant binding evidence, restart-safe state
+boundaries and the absence of credentials or vendor responses. The real Agently
+worker and Feishu Channel roundtrip remain independently tested adapters; this
+composite gate avoids coupling either vendor implementation into the Fabric.
+
 ## Phase 10 completion boundary
 
 Phase 10 adds the technology-neutral Network Citizen model for modules that

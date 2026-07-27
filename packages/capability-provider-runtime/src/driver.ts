@@ -22,11 +22,15 @@ export interface CapabilityProviderDriverOptions {
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 
 function object(value: unknown, label: string): Record<string, unknown> {
+  const prototype =
+    value !== null && typeof value === "object"
+      ? Object.getPrototypeOf(value)
+      : undefined;
   if (
     value === null ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Object.prototype
+    (prototype !== Object.prototype && prototype !== null)
   ) throw new TypeError(`${label} is invalid`);
   return value as Record<string, unknown>;
 }
@@ -45,7 +49,9 @@ function requestInput(task: RuntimeTaskPackage): CitizenJsonObject {
     content.kind !== "data" ||
     typeof content.schema_ref !== "string"
   ) throw new TypeError("capability intent is invalid");
-  return object(content.data, "capability input") as CitizenJsonObject;
+  return structuredClone(
+    object(content.data, "capability input"),
+  ) as CitizenJsonObject;
 }
 
 function authority(task: RuntimeTaskPackage): {
@@ -78,7 +84,7 @@ function authority(task: RuntimeTaskPackage): {
     ),
     capability_version: version,
     contract_digest: digest as `sha256:${string}`,
-    evidence: evidence as CitizenJsonObject,
+    evidence: structuredClone(evidence) as CitizenJsonObject,
   };
 }
 

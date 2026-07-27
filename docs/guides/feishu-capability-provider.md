@@ -42,39 +42,38 @@ Context Provider 独立发布 `feishu.document.context`。每个声明含版本�
 
 ## 3. 配置
 
-下列是 Provider 配置负载，可由全局 `ConfigurationProvider` 的 YAML、数据库
-或远程实现提供；消费者只调用同一配置接口。`credential_ref` 是部署内部的
-引用，不是密钥。实际 `FEISHU_APP_ID` 和 `FEISHU_APP_SECRET` 由 Credential
-Provider 从环境或 Secret Manager 解析：
+下列是**独立 Provider 组合根**传给 `validateFeishuProviderConfig()` 的配置
+负载，可由全局 `ConfigurationProvider` 的 YAML、数据库或远程实现提供；
+消费者只调用同一配置接口。它不是 `service-node` 当前内置
+`plugins.instances` 中的 Channel 插件，也不能把
+`capability-provider.feishu` 直接加入服务节点 YAML；Provider 是独立接入
+网络的 Citizen 进程，部署组合根拥有它的启动和关闭。
+
+`credential_ref` 是部署内部的引用，不是密钥。实际 `FEISHU_APP_ID` 和
+`FEISHU_APP_SECRET` 由 Credential Provider 从环境或 Secret Manager 解析：
 
 ```yaml
-plugins:
-  instances:
-    feishu-actions:
-      type: capability-provider.feishu
-      enabled: true
-      config:
-        credential_ref: feishu-primary
-        open_api:
-          base_url: https://open.feishu.cn
-          request_timeout_ms: 10000
-          max_response_bytes: 131072
-        state:
-          type: sqlite
-          location: ./var/feishu-provider.db
-          busy_timeout_ms: 5000
-        capability_citizen:
-          citizen_id: feishu-actions
-          principal_id: principal-feishu-actions
-          actor_id: actor-feishu-actions
-          endpoint_id: endpoint-feishu-actions
-          registration_version: 1
-        context_citizen:
-          citizen_id: feishu-context
-          principal_id: principal-feishu-context
-          actor_id: actor-feishu-context
-          endpoint_id: endpoint-feishu-context
-          registration_version: 1
+credential_ref: feishu-primary
+open_api:
+  base_url: https://open.feishu.cn
+  request_timeout_ms: 10000
+  max_response_bytes: 131072
+state:
+  type: sqlite
+  location: ./var/feishu-provider.db
+  busy_timeout_ms: 5000
+capability_citizen:
+  citizen_id: feishu-actions
+  principal_id: principal-feishu-actions
+  actor_id: actor-feishu-actions
+  endpoint_id: endpoint-feishu-actions
+  registration_version: 1
+context_citizen:
+  citizen_id: feishu-context
+  principal_id: principal-feishu-context
+  actor_id: actor-feishu-context
+  endpoint_id: endpoint-feishu-context
+  registration_version: 1
 ```
 
 `validateFeishuProviderConfig()` 严格拒绝未知字段和内嵌 secret。开发可用
@@ -131,11 +130,34 @@ const driver = new CapabilityProviderDriver({
 独立的 leased Citizen session。Provider Endpoint 仍按普通 Endpoint
 Provision、Subscription、SSE、Ack、Accept、Result 流程接入；没有私有旁路。
 
+Capability Endpoint 的动态 `CapabilityDescriptor.constraints` 必须发布本次
+绑定所需的两个标准约束：
+
+```yaml
+constraints:
+  selected_citizen_id: feishu-actions
+  contract_digest: sha256:<64 lowercase hex>
+```
+
+`service-node` 默认只解释这组精确绑定约束，并逐项核对所选 Citizen 和冻结的
+Contract digest；缺字段、未知约束或不匹配都会失败关闭。其他 Provider 若要
+使用新的约束词汇，应在组合根注入自己的
+`CapabilityConstraintEvaluator`，而不是修改 Exchange Core。
+
 Agent 侧组合使用 `CatalogCapabilityResolver`、
 `JsonSchemaInvocationValidator(new FeishuCapabilitySchemaRegistry())`、
 `PollingAuxiliaryHandoffWaiter` 和部署注入的 `InvocationAuthorityProvider`。
 配置中的 `max_invocations_per_handoff` 最大为 4，namespace 应限制为
 `feishu.`。
+
+启用能力调用的 Agent Principal 还必须由部署显式授予
+`workfabric.handoff.offer.v1`（`resource_id: null`）。Agent Runtime Authority
+只额外允许它查询自己发起的辅助 Handoff，以及为该 Handoff 的待解析
+Capability target 绑定 Endpoint；不能解析或读取其他发起者的 Handoff。
+Provider 继续只拥有自身 Endpoint 的 Delivery/Ack/Accept/Status/Result 权限。
+一次 Capability Authority 的 `scopes` 使用协议合法值
+`capability:invoke`，并至少绑定一个非空 `resource_ref`；完整声明和
+Contract digest 仍由运行时动态发现，不写入 YAML。
 
 ## 5. 飞书权限与资源授权
 
@@ -183,5 +205,8 @@ npm run typecheck
 ```
 
 跨模块测试覆盖 Agent 请求、契约和 Schema 绑定、辅助 Handoff、Provider
-执行、类型化续写输入、原 Handoff 责任不转移和凭据不泄漏。真实飞书 smoke
-test 应使用专用测试文件夹，只删除本次测试创建的文档。
+执行、类型化续写输入、原 Handoff 责任不转移和凭据不泄漏。其中
+`feishu-capability-provider.e2e.test.ts` 使用 SQLite、真实公共 HTTP/SSE、
+TypeScript SDK、Citizen session、Gateway 和 Host 完成整条参考闭环；飞书
+OpenAPI 只在 Provider 边界替换为测试 backend。真实飞书 smoke test 应使用
+专用测试文件夹，只删除本次测试创建的文档。

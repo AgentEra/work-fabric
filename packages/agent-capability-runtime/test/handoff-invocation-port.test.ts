@@ -170,6 +170,10 @@ describe("HandoffCapabilityInvocationPort", () => {
       thread_id: request.thread_id,
       work_reference: {
         uri: "urn:work-fabric:capability-invocation:handoff-original-1:invocation-create-1",
+        extensions: {
+          "workfabric.dev/original_handoff_id": request.original_handoff_id,
+          "workfabric.dev/invocation_id": request.invocation_id,
+        },
       },
       target: {
         capability_requirement: {
@@ -182,17 +186,31 @@ describe("HandoffCapabilityInvocationPort", () => {
           },
         },
       },
+      acceptance_criteria: [{
+        extensions: {
+          "workfabric.dev/contract_digest": candidate.contract_digest,
+        },
+      }],
       result_due_at: request.deadline,
     });
     expect(deps.handoffs.resolveTarget).toHaveBeenCalledWith({
       handoff_id: "handoff-auxiliary-1",
       resolved_target: { endpoint_id: candidate.endpoint_id },
       evidence: [{
-        evidence_type: "network_citizen_contract_binding",
-        citizen_id: candidate.citizen_id,
-        declaration_id: candidate.capability_id,
-        declaration_version: candidate.capability_version,
-        contract_digest: candidate.contract_digest,
+        evidence_id:
+          "capability-binding-10ac72268c6cd1b81f96e26da2943249",
+        evidence_type: "contract_binding",
+        content: {
+          kind: "data",
+          schema_ref:
+            "urn:work-fabric:schema:network-citizen-contract-binding:1",
+          data: {
+            citizen_id: candidate.citizen_id,
+            declaration_id: candidate.capability_id,
+            declaration_version: candidate.capability_version,
+            contract_digest: candidate.contract_digest,
+          },
+        },
       }],
     }, expect.objectContaining({ expectedVersion: 1 }));
   });

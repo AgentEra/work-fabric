@@ -287,6 +287,13 @@ Provider 内部拥有 OpenAPI、幂等执行、资源所有权、revision 校验
 Agent、Core 和 Channel 看不到密钥或厂商响应。删除需由独立 Governance
 确认服务提供并原子消费单次 proof。
 
+Capability Endpoint 会随动态 session 发布
+`selected_citizen_id` / `contract_digest` 约束。默认目标资格校验器只处理
+这组严格绑定；新的约束语义必须通过窄
+`CapabilityConstraintEvaluator` SPI 注入。Agent 可 Offer 辅助 Handoff，
+但运行时附加 Authority 只允许它解析和读取自己发起的那一条，不因发现
+Citizen 或声明而获得执行权限。
+
 `capability-provider` 返回事实，不生成对话答复；`decision-body` 解释事实并
 独占最终文案；`channel` 只投递 canonical Result。一个进程可以共同托管这些
 Runtime，但不会合并 Citizen 身份、Authority、状态或职责。

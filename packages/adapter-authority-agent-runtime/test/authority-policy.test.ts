@@ -115,6 +115,32 @@ function acceptedSnapshot(id: string): HandoffReadModel {
   }));
 }
 
+function initiatedCapabilitySnapshot(
+  id: string,
+  lifecycle_state: "target_resolution_pending" | "offered" | "result_returned" =
+    "target_resolution_pending",
+): HandoffReadModel {
+  return handoff(id, state(id, {
+    lifecycle_state,
+    initiator: { actor_id: grant.actor_id, actor_type: "agent" },
+    current_responsible_actor:
+      lifecycle_state === "result_returned"
+        ? null
+        : { actor_id: grant.actor_id, actor_type: "agent" },
+    package: {
+      ...packageFor(id),
+      target: {
+        capability_requirement: {
+          capability_id: "feishu.document.create",
+          version_constraint: "1.0.0",
+          assignment_mode: "external_resolution",
+          constraints: {},
+        },
+      },
+    },
+  }));
+}
+
 function claimableSnapshot(id: string): HandoffReadModel {
   return handoff(id, state(id, {
     lifecycle_state: "claimable",
@@ -214,6 +240,64 @@ describe("AgentRuntimeAuthorityPolicy", () => {
     await expect(policy.authorize(request({
       action: "workfabric.subscription.read.v1",
       resource_id: `${grant.subscription_id}-other`,
+    }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("allows an Agent to resolve and track only its own auxiliary Capability Handoff", async () => {
+    const pending = initiatedCapabilitySnapshot("handoff-aux-pending");
+    const offered = initiatedCapabilitySnapshot("handoff-aux-offered", "offered");
+    const terminal = initiatedCapabilitySnapshot(
+      "handoff-aux-terminal",
+      "result_returned",
+    );
+    const policy = new AgentRuntimeAuthorityPolicy(
+      [grant],
+      store([pending, offered, terminal]),
+    );
+
+    await expect(policy.authorize(request({
+      action: "workfabric.handoff.resolve_target.v1",
+      resource_id: pending.handoff_id,
+    }))).resolves.toEqual({ kind: "allow" });
+    for (const snapshot of [pending, offered, terminal]) {
+      await expect(policy.authorize(request({
+        action: "workfabric.query.handoff.read.v1",
+        resource_id: snapshot.handoff_id,
+      }))).resolves.toEqual({ kind: "allow" });
+    }
+    await expect(policy.authorize(request({
+      action: "workfabric.handoff.resolve_target.v1",
+      resource_id: offered.handoff_id,
+    }))).resolves.toMatchObject({ kind: "deny" });
+    await expect(policy.authorize(request({
+      action: "workfabric.handoff.return_result.v1",
+      resource_id: pending.handoff_id,
+    }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
+  it("does not resolve another initiator's Capability Handoff", async () => {
+    const pending = handoff(
+      "handoff-aux-other",
+      state("handoff-aux-other", {
+        lifecycle_state: "target_resolution_pending",
+        package: {
+          ...packageFor("handoff-aux-other"),
+          target: {
+            capability_requirement: {
+              capability_id: "feishu.document.create",
+              version_constraint: "1.0.0",
+              assignment_mode: "external_resolution",
+              constraints: {},
+            },
+          },
+        },
+      }),
+    );
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([pending]));
+
+    await expect(policy.authorize(request({
+      action: "workfabric.handoff.resolve_target.v1",
+      resource_id: pending.handoff_id,
     }))).resolves.toMatchObject({ kind: "deny" });
   });
 

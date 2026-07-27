@@ -1120,6 +1120,12 @@ describe("Handoff Event encoding", () => {
     );
 
     expect(resolvedEncoding.events[0]?.protocol_data.change).toMatchObject({
+      changed_fields: [
+        "lifecycle_state",
+        "target_binding",
+        "updated_at",
+        "resource_version",
+      ],
       details: {
         work_reference_uri: "urn:work:item:42",
         capability_ids: ["software.implementation"],
@@ -1130,6 +1136,12 @@ describe("Handoff Event encoding", () => {
         delegation_id: "delegation_resolver",
       },
     });
+    expect(
+      schemas.validate(
+        "urn:work-fabric:schema:v1:event-data",
+        resolvedEncoding.events[0]?.protocol_data,
+      ),
+    ).toEqual({ valid: true });
     expect(
       canonicalJson(resolvedEncoding.events[0]?.protocol_data),
     ).not.toMatch(/private_policy_hint|private_score|evidence/);

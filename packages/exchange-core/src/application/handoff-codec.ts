@@ -628,7 +628,7 @@ function projectEvent(event: HandoffEvent): EventProjection {
   }
 }
 
-function unique(values: readonly string[]): string[] {
+function unique<T extends string>(values: readonly T[]): T[] {
   return [...new Set(values)];
 }
 
@@ -651,7 +651,7 @@ function changedFields(
     "resource_version",
     "updated_at",
   ];
-  return candidates.filter(
+  return unique(candidates).filter(
     (field) =>
       field === "latest_status" || stateFieldChanged(before, after, field),
   );
