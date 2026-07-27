@@ -1,0 +1,16 @@
+{
+  "name": "@work-fabric/adapter-network-citizen-sqlite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/network-citizen-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/network-citizen-directory": "0.1.0"
+  }
+}
