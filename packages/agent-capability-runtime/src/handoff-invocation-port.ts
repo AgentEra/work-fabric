@@ -158,9 +158,11 @@ function offerPayload(
       capability_requirement: {
         capability_id: request.capability_id,
         version_constraint: request.version_constraint,
-        assignment_mode: "explicit_resolution",
-        selected_citizen_id: candidate.citizen_id,
-        contract_digest: candidate.contract_digest,
+        assignment_mode: "external_resolution",
+        constraints: {
+          selected_citizen_id: candidate.citizen_id,
+          contract_digest: candidate.contract_digest,
+        },
       },
     },
     intent: [{

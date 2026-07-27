@@ -175,6 +175,11 @@ describe("HandoffCapabilityInvocationPort", () => {
         capability_requirement: {
           capability_id: request.capability_id,
           version_constraint: request.version_constraint,
+          assignment_mode: "external_resolution",
+          constraints: {
+            selected_citizen_id: candidate.citizen_id,
+            contract_digest: candidate.contract_digest,
+          },
         },
       },
       result_due_at: request.deadline,

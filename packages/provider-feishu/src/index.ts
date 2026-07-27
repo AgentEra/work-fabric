@@ -6,5 +6,6 @@ export * from "./executor.js";
 export * from "./execution-adapter.js";
 export * from "./memory-store.js";
 export * from "./openapi-backend.js";
+export * from "./schema-registry.js";
 export * from "./sqlite-store.js";
 export * from "./validation.js";

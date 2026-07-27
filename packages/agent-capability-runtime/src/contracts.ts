@@ -84,6 +84,13 @@ export interface InvocationSchemaValidator {
   }>;
 }
 
+export interface InvocationSchemaRegistry {
+  load(
+    reference: CitizenSchemaReference,
+    signal: AbortSignal,
+  ): Promise<unknown>;
+}
+
 export type AuxiliaryHandoffTerminal =
   | {
       readonly outcome: "succeeded";
