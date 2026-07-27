@@ -68,6 +68,10 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
           id: "chat-1",
         }),
       },
+      shared_folder: {
+        token: "fld-shared-team",
+        policy_ref: "feishu.shared-folder.default",
+      },
       now: () => "2026-07-27T10:00:01.000Z",
     });
     const providerDriver = new CapabilityProviderDriver({
@@ -110,6 +114,9 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
               contract_digest: candidate.contract_digest,
               allowed_target_refs: [],
               allowed_document_tokens: [],
+              allowed_resource_policy_refs: [
+                "feishu.shared-folder.default",
+              ],
               confirmation_proof_refs: [],
             },
           },

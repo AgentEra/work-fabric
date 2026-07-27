@@ -99,6 +99,7 @@ export type FeishuCapabilityOutcome =
 export interface FeishuInvocationAuthority {
   readonly allowed_target_refs: readonly string[];
   readonly allowed_document_tokens: readonly string[];
+  readonly allowed_resource_policy_refs: readonly string[];
   readonly confirmation_proof_refs: readonly string[];
 }
 

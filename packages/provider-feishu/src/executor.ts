@@ -42,6 +42,10 @@ export interface FeishuCapabilityExecutorDependencies {
   readonly ownership: FeishuResourceOwnershipStore;
   readonly confirmation: FeishuConfirmationVerifier;
   readonly targets: FeishuConversationTargetResolver;
+  readonly shared_folder: {
+    readonly token: string;
+    readonly policy_ref: string;
+  };
   readonly now?: () => string;
 }
 
@@ -177,19 +181,19 @@ export class FeishuCapabilityExecutor {
       }
       case "document_create": {
         if (
-          input.folder_token !== undefined &&
-          !request.authority.allowed_target_refs.includes(
-            `feishu://folder/${input.folder_token}`,
+          !request.authority.allowed_resource_policy_refs.includes(
+            this.dependencies.shared_folder.policy_ref,
           )
         ) {
-          return rejected("target_not_allowed", "Document folder is not authorized");
+          return rejected(
+            "authority_denied",
+            "Shared folder policy is not authorized",
+          );
         }
         const result = await this.dependencies.backend.createDocument({
           title: input.title,
           content: input.content,
-          ...(input.folder_token === undefined
-            ? {}
-            : { folder_token: input.folder_token }),
+          folder_token: this.dependencies.shared_folder.token,
           idempotency_key: request.idempotency_key,
           ...(request.signal === undefined ? {} : { signal: request.signal }),
         });

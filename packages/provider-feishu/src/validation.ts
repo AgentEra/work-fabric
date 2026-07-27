@@ -143,7 +143,6 @@ export type NormalizedFeishuInput =
       readonly kind: "document_create";
       readonly title: string;
       readonly content: SimpleDocumentContent;
-      readonly folder_token?: string;
     }
   | {
       readonly kind: "document_read";
@@ -190,14 +189,11 @@ export function normalizeFeishuInput(
       };
     }
     case "feishu.document.create": {
-      const value = exact(request.input, ["title", "content"], ["folder_token"]);
+      const value = exact(request.input, ["title", "content"]);
       return {
         kind: "document_create",
         title: string(value.title, "title", 512),
         content: content(value.content),
-        ...(value.folder_token === undefined
-          ? {}
-          : { folder_token: string(value.folder_token, "folder_token", 128) }),
       };
     }
     case "feishu.document.read": {

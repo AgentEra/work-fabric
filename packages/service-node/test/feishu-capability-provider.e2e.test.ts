@@ -396,6 +396,10 @@ describe("public Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
               id: "chat-http-loop",
             }),
           },
+          shared_folder: {
+            token: "fld-shared-team",
+            policy_ref: "feishu.shared-folder.default",
+          },
         }),
       );
       const gateway = new AgentGateway(
@@ -488,6 +492,9 @@ describe("public Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
                 contract_digest: candidate.contract_digest,
                 allowed_target_refs: [],
                 allowed_document_tokens: [],
+                allowed_resource_policy_refs: [
+                  "feishu.shared-folder.default",
+                ],
                 confirmation_proof_refs: [],
               },
             },

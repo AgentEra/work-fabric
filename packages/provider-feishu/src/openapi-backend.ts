@@ -11,14 +11,18 @@ import {
   type SimpleDocumentContent,
 } from "./contracts.js";
 
-export interface FeishuOpenApiCapabilityBackendOptions {
+export interface FeishuOpenApiRequestClientOptions {
   readonly credential_ref: string;
   readonly token_provider: FeishuTenantTokenProvider;
-  readonly messages: FeishuMessageClient;
   readonly fetch: typeof globalThis.fetch;
   readonly base_url: string;
   readonly request_timeout_ms: number;
   readonly max_response_bytes: number;
+}
+
+export interface FeishuOpenApiCapabilityBackendOptions
+  extends FeishuOpenApiRequestClientOptions {
+  readonly messages: FeishuMessageClient;
   readonly now?: () => string;
 }
 
@@ -29,7 +33,7 @@ type Json = null | boolean | number | string | Json[] | {
 function object(value: unknown, path: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new FeishuProviderBackendError(
-      "feishu_temporarily_unavailable",
+      "feishu_response_invalid",
       true,
     );
   }
@@ -121,7 +125,7 @@ async function boundedText(
   const declared = response.headers.get("content-length");
   if (declared !== null && Number(declared) > maximumBytes) {
     throw new FeishuProviderBackendError(
-      "feishu_temporarily_unavailable",
+      "feishu_response_invalid",
       true,
     );
   }
@@ -137,7 +141,7 @@ async function boundedText(
       if (total > maximumBytes) {
         await reader.cancel().catch(() => undefined);
         throw new FeishuProviderBackendError(
-          "feishu_temporarily_unavailable",
+          "feishu_response_invalid",
           true,
         );
       }
@@ -155,20 +159,144 @@ async function boundedText(
   return new TextDecoder().decode(joined);
 }
 
-export class FeishuOpenApiCapabilityBackend
-  implements FeishuCapabilityBackend {
+export class FeishuOpenApiRequestClient {
   private readonly baseUrl: string;
-  private readonly now: () => string;
 
-  constructor(private readonly options: FeishuOpenApiCapabilityBackendOptions) {
+  constructor(private readonly options: FeishuOpenApiRequestClientOptions) {
     this.baseUrl = new URL(options.base_url).toString().replace(/\/$/, "");
-    this.now = options.now ?? (() => new Date().toISOString());
     if (
       !Number.isSafeInteger(options.request_timeout_ms) ||
       options.request_timeout_ms < 1 ||
       !Number.isSafeInteger(options.max_response_bytes) ||
       options.max_response_bytes < 1
     ) throw new RangeError("Feishu OpenAPI bounds are invalid");
+  }
+
+  async request(
+    method: string,
+    path: string,
+    body?: Json,
+    signal?: AbortSignal,
+  ): Promise<unknown> {
+    let forceRefresh = false;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      let token: string;
+      try {
+        token = await this.options.token_provider.getToken(
+          this.options.credential_ref,
+          forceRefresh,
+        );
+      } catch {
+        throw new FeishuProviderBackendError(
+          "feishu_temporarily_unavailable",
+          true,
+        );
+      }
+      const controller = new AbortController();
+      const timeout = setTimeout(
+        () => controller.abort(),
+        this.options.request_timeout_ms,
+      );
+      try {
+        const combined =
+          signal === undefined
+            ? controller.signal
+            : AbortSignal.any([signal, controller.signal]);
+        const response = await this.options.fetch(
+          `${this.baseUrl}${path}`,
+          {
+            method,
+            headers: {
+              authorization: `Bearer ${token}`,
+              "content-type": "application/json; charset=utf-8",
+            },
+            ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+            signal: combined,
+          },
+        );
+        if (response.status === 401) {
+          if (attempt === 0) {
+            forceRefresh = true;
+            continue;
+          }
+          throw new FeishuProviderBackendError(
+            "feishu_authentication_failed",
+            false,
+          );
+        }
+        if (response.status === 403) {
+          throw new FeishuProviderBackendError(
+            "feishu_permission_denied",
+            false,
+          );
+        }
+        if (response.status === 404) {
+          throw new FeishuProviderBackendError("document_not_found", false);
+        }
+        if (response.status === 429) {
+          throw new FeishuProviderBackendError(
+            "feishu_rate_limited",
+            true,
+            response.headers.get("retry-after") ?? undefined,
+          );
+        }
+        if (response.status >= 500) {
+          throw new FeishuProviderBackendError(
+            "feishu_temporarily_unavailable",
+            true,
+          );
+        }
+        const text = await boundedText(
+          response,
+          this.options.max_response_bytes,
+        );
+        if (text === "" && response.ok) return {};
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          throw new FeishuProviderBackendError(
+            "feishu_response_invalid",
+            true,
+          );
+        }
+        const code = object(parsed, "response").code;
+        if (!response.ok || code !== 0) {
+          throw new FeishuProviderBackendError(
+            response.status >= 500
+              ? "feishu_temporarily_unavailable"
+              : "external_outcome_unknown",
+            response.status >= 500,
+          );
+        }
+        return parsed;
+      } catch (error) {
+        if (error instanceof FeishuProviderBackendError) throw error;
+        throw new FeishuProviderBackendError(
+          controller.signal.aborted || signal?.aborted
+            ? "deadline_exceeded"
+            : "feishu_temporarily_unavailable",
+          !signal?.aborted,
+        );
+      } finally {
+        clearTimeout(timeout);
+      }
+    }
+    throw new FeishuProviderBackendError(
+      "feishu_authentication_failed",
+      false,
+    );
+  }
+}
+
+export class FeishuOpenApiCapabilityBackend
+  implements FeishuCapabilityBackend {
+  private readonly now: () => string;
+  private readonly requests: FeishuOpenApiRequestClient;
+
+  constructor(private readonly options: FeishuOpenApiCapabilityBackendOptions) {
+    this.requests = new FeishuOpenApiRequestClient(options);
+    this.now = options.now ?? (() => new Date().toISOString());
   }
 
   async sendMessage(
@@ -391,104 +519,6 @@ export class FeishuOpenApiCapabilityBackend
     body?: Json,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    let forceRefresh = false;
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      let token: string;
-      try {
-        token = await this.options.token_provider.getToken(
-          this.options.credential_ref,
-          forceRefresh,
-        );
-      } catch {
-        throw new FeishuProviderBackendError(
-          "feishu_temporarily_unavailable",
-          true,
-        );
-      }
-      const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.options.request_timeout_ms,
-      );
-      try {
-        const combined =
-          signal === undefined
-            ? controller.signal
-            : AbortSignal.any([signal, controller.signal]);
-        const response = await this.options.fetch(`${this.baseUrl}${path}`, {
-          method,
-          headers: {
-            authorization: `Bearer ${token}`,
-            "content-type": "application/json; charset=utf-8",
-          },
-          ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-          signal: combined,
-        });
-        if (response.status === 401) {
-          forceRefresh = true;
-          continue;
-        }
-        if (response.status === 403) {
-          throw new FeishuProviderBackendError(
-            "feishu_permission_denied",
-            false,
-          );
-        }
-        if (response.status === 404) {
-          throw new FeishuProviderBackendError("document_not_found", false);
-        }
-        if (response.status === 429) {
-          throw new FeishuProviderBackendError(
-            "feishu_rate_limited",
-            true,
-            response.headers.get("retry-after") ?? undefined,
-          );
-        }
-        if (response.status >= 500) {
-          throw new FeishuProviderBackendError(
-            "feishu_temporarily_unavailable",
-            true,
-          );
-        }
-        const text = await boundedText(
-          response,
-          this.options.max_response_bytes,
-        );
-        if (text === "" && response.ok) return {};
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          throw new FeishuProviderBackendError(
-            "feishu_temporarily_unavailable",
-            true,
-          );
-        }
-        const code = object(parsed, "response").code;
-        if (!response.ok || code !== 0) {
-          throw new FeishuProviderBackendError(
-            response.status >= 500
-              ? "feishu_temporarily_unavailable"
-              : "external_outcome_unknown",
-            response.status >= 500,
-          );
-        }
-        return parsed;
-      } catch (error) {
-        if (error instanceof FeishuProviderBackendError) throw error;
-        throw new FeishuProviderBackendError(
-          controller.signal.aborted || signal?.aborted
-            ? "deadline_exceeded"
-            : "feishu_temporarily_unavailable",
-          !signal?.aborted,
-        );
-      } finally {
-        clearTimeout(timeout);
-      }
-    }
-    throw new FeishuProviderBackendError(
-      "feishu_temporarily_unavailable",
-      true,
-    );
+    return this.requests.request(method, path, body, signal);
   }
 }

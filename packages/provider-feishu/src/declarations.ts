@@ -69,7 +69,6 @@ const DEFINITIONS = Object.freeze({
   documentCreateInput: objectSchema(["title", "content"], {
     title: { type: "string", minLength: 1, maxLength: 512 },
     content,
-    folder_token: documentToken,
   }),
   documentCreateOutput: objectSchema([
     "document_token", "url", "title", "revision",

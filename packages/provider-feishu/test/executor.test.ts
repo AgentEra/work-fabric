@@ -6,6 +6,7 @@ import {
   MemoryFeishuProviderStore,
   feishuCapabilityDeclarations,
   feishuContextDeclarations,
+  feishuSchemaDocuments,
   type FeishuCapabilityBackend,
 } from "../src/index.js";
 
@@ -125,6 +126,10 @@ function executor(input: {
       ownership: store,
       confirmation,
       targets,
+      shared_folder: {
+        token: "fld-shared-team",
+        policy_ref: "feishu.shared-folder.default",
+      },
       now: () => "2026-07-27T10:00:00.000Z",
     }),
   };
@@ -146,6 +151,7 @@ function request(
     authority: {
       allowed_target_refs: ["feishu://chat/chat-current-1"],
       allowed_document_tokens: ["external-doc-1"],
+      allowed_resource_policy_refs: ["feishu.shared-folder.default"],
       confirmation_proof_refs: ["proof-delete-1"],
     },
   };
@@ -172,12 +178,50 @@ describe("Feishu Capability Provider", () => {
     expect(JSON.stringify(declarations)).not.toMatch(
       /app_id|app_secret|credential_ref|access_token/i,
     );
+    const schemas = feishuSchemaDocuments();
+    expect(
+      JSON.stringify(
+        schemas.get("urn:work-fabric:schema:feishu:documentCreateInput:1"),
+      ),
+    ).not.toContain("folder_token");
     expect(feishuContextDeclarations()).toMatchObject([
       {
         declaration_id: "feishu.document.context",
         declaration_kind: "context",
       },
     ]);
+  });
+
+  it("injects the private shared folder only after Authority policy validation", async () => {
+    const fixture = executor();
+    const denied = request(
+      "feishu.document.create",
+      {
+        title: "客户项目需求",
+        content: { media_type: "text/plain", text: "初始内容" },
+      },
+      "create-policy-denied",
+    );
+    denied.authority.allowed_resource_policy_refs = [];
+
+    await expect(fixture.executor.execute(denied)).resolves.toMatchObject({
+      outcome: "rejected",
+      code: "authority_denied",
+    });
+    expect(fixture.api.createDocument).not.toHaveBeenCalled();
+
+    const created = await fixture.executor.execute(request(
+      "feishu.document.create",
+      {
+        title: "客户项目需求",
+        content: { media_type: "text/plain", text: "初始内容" },
+      },
+      "create-policy-allowed",
+    ));
+    expect(fixture.api.createDocument).toHaveBeenCalledWith(
+      expect.objectContaining({ folder_token: "fld-shared-team" }),
+    );
+    expect(JSON.stringify(created)).not.toContain("fld-shared-team");
   });
 
   it("sends one message to the authorized current conversation and returns facts only", async () => {

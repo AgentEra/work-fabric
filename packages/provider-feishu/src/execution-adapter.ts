@@ -39,6 +39,7 @@ function authority(value: CitizenJsonObject): {
   readonly initiating_actor_id: string;
   readonly allowed_target_refs: readonly string[];
   readonly allowed_document_tokens: readonly string[];
+  readonly allowed_resource_policy_refs: readonly string[];
   readonly confirmation_proof_refs: readonly string[];
 } {
   return {
@@ -46,6 +47,9 @@ function authority(value: CitizenJsonObject): {
     initiating_actor_id: nonEmpty(value.initiating_actor_id),
     allowed_target_refs: strings(value.allowed_target_refs),
     allowed_document_tokens: strings(value.allowed_document_tokens),
+    allowed_resource_policy_refs: strings(
+      value.allowed_resource_policy_refs,
+    ),
     confirmation_proof_refs: strings(value.confirmation_proof_refs),
   };
 }
@@ -84,6 +88,8 @@ export class FeishuCapabilityExecutorPortAdapter
       authority: {
         allowed_target_refs: evidence.allowed_target_refs,
         allowed_document_tokens: evidence.allowed_document_tokens,
+        allowed_resource_policy_refs:
+          evidence.allowed_resource_policy_refs,
         confirmation_proof_refs: evidence.confirmation_proof_refs,
       },
       signal: context.signal,

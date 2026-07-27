@@ -34,6 +34,7 @@ describe("FeishuCapabilityExecutorPortAdapter", () => {
         initiating_actor_id: "human-1",
         allowed_target_refs: ["feishu://chat/chat-1"],
         allowed_document_tokens: [],
+        allowed_resource_policy_refs: ["feishu.shared-folder.default"],
         confirmation_proof_refs: [],
       },
       signal,
@@ -51,6 +52,7 @@ describe("FeishuCapabilityExecutorPortAdapter", () => {
       authority: {
         allowed_target_refs: ["feishu://chat/chat-1"],
         allowed_document_tokens: [],
+        allowed_resource_policy_refs: ["feishu.shared-folder.default"],
         confirmation_proof_refs: [],
       },
       signal,
