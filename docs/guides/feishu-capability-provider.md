@@ -62,6 +62,10 @@ state:
   type: sqlite
   location: ./var/feishu-provider.db
   busy_timeout_ms: 5000
+shared_folder:
+  token: ${FEISHU_SHARED_FOLDER_TOKEN}
+  policy_ref: feishu.shared-folder.default
+  visibility: tenant_readable
 capability_citizen:
   citizen_id: feishu-actions
   principal_id: principal-feishu-actions
@@ -113,6 +117,10 @@ const executor = new FeishuCapabilityExecutor({
   ownership: providerStore,
   confirmation: confirmationService,
   targets: conversationRouteResolver,
+  shared_folder: {
+    token: config.shared_folder.token,
+    policy_ref: config.shared_folder.policy_ref,
+  },
 });
 
 const executorPort = new FeishuCapabilityExecutorPortAdapter(executor);
@@ -193,14 +201,74 @@ Contract digest 仍由运行时动态发现，不写入 YAML。
 - 外部结果不确定时返回 `external_outcome_unknown`，不能猜测成功。
 - Provider Result 是惰性 JSON 事实，不是可执行指令，也不会直接发到聊天。
 
-## 7. 验证
+## 7. 本地整套启动
+
+仓库提供一个三应用配置包
+`examples/config/local-feishu-assistant.bundle.yaml`。三个进程只读取自己的
+Application View：
+
+- `work-fabric`：Exchange、飞书长连接 Channel、Admission 和 Authority；
+- `daily-assistant`：Agently、Agent 身份、能力调用策略；
+- `feishu-provider`：飞书 OpenAPI、共享目录策略、两个 Citizen 和独立状态。
+
+创建 owner-only 的 env 文件；其中只保存部署值和 secret，不保存动态能力
+声明。若某个 App Secret 曾进入聊天、截图或日志，应先在飞书开放平台轮换：
+
+```dotenv
+WORK_FABRIC_CURSOR_SECRET=<至少 32 字节随机值>
+WORK_FABRIC_ADMIN_TOKEN=<随机值>
+WORK_FABRIC_ADMISSION_FINGERPRINT_KEY=<随机值>
+WORK_FABRIC_ADMISSION_GRANT_KEY=<随机值>
+FEISHU_APP_ID=<企业自建应用 App ID>
+FEISHU_APP_SECRET=<已轮换 App Secret>
+FEISHU_SHARED_FOLDER_TOKEN=<共享文件夹 URL 中的 token>
+FEISHU_CONNECTOR_ACCESS_TOKEN=<随机值>
+INTAKE_AGENT_ACCESS_TOKEN=<随机值>
+FEISHU_PROVIDER_ACCESS_TOKEN=<随机值>
+AGENTLY_MODEL_API_KEY=<模型密钥>
+FEISHU_EXTERNAL_TENANT_ID=<飞书事件中的 tenant key>
+FEISHU_BOT_OPEN_ID=<机器人 open_id>
+```
+
+共享目录必须把该企业自建应用添加为可编辑协作者，并设置为“组织内获得链接的
+人可阅读”或更高的组织内可见级别。Provider 在打开任何 Endpoint/Citizen
+session 前同时探测目录列表与公开权限；预检不通过时不会形成半启动能力。
+
+```bash
+uv sync --project runtimes/agently-worker
+export WORK_FABRIC_ENV_FILE=/absolute/path/to/feishu.env
+export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml"
+
+npm run local:feishu:start
+# 另一个终端使用同一个 env 文件
+npm run local:feishu:status
+```
+
+`local:feishu:start` 严格按 Service 就绪 → 幂等 Provision → Provider → Agent
+启动，退出时反序关闭。也可在已启动的 Service 上单独运行
+`npm run local:feishu:provision`。不要并行运行两套本地 Supervisor 共享同一
+SQLite 文件。
+
+在飞书群聊中发送：
+
+```text
+@机器人 请创建一份标题为“本地联调需求”的飞书文档，内容为“这是端到端测试”。
+```
+
+预期只有一条由助理 Agent 生成的语义回复，其中包含 Provider 返回的文档
+URL；`offered`、`accepted`、Citizen ID 和 Handoff ID 不作为聊天回复。
+Console 可选，仅用于观察 Handoff/Delivery/Operations，不参与连接、认领、
+调用或回复。
+
+## 8. 验证
 
 ```bash
 npx vitest run \
   packages/agent-capability-runtime/test \
   packages/capability-provider-runtime/test \
   packages/provider-feishu/test \
-  packages/governance-confirmation/test
+  packages/governance-confirmation/test \
+  examples/feishu-capability-provider/test
 npm run typecheck
 ```
 

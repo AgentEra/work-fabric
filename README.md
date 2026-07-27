@@ -318,6 +318,21 @@ npm run service:start
 npm run console:build
 ```
 
+完整的本地飞书链路使用同一个多应用 YAML 配置包，同时启动 Exchange/Channel、
+团队共享助理和独立飞书 Capability/Context Provider：
+
+```bash
+uv sync --project runtimes/agently-worker
+export WORK_FABRIC_ENV_FILE=/absolute/path/to/feishu.env
+export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml"
+npm run local:feishu:start
+```
+
+另一个终端用同一组环境执行 `npm run local:feishu:status`。Supervisor 只负责编排
+进程和就绪检查；动态能力仍由 Citizen session 声明，飞书动作仍通过辅助
+Handoff 进入独立 Provider。详细权限、共享目录和验收步骤见
+[飞书 Capability / Context Provider 指南](docs/guides/feishu-capability-provider.md#7-本地整套启动)。
+
 Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、运维事实和窄恢复表单。它不是执行过程的必要组件，不保存协议真相，不运行 Agent/自动化，不自动 Ack SSE。部署与认证接入见 [Console 文档](docs/console.md)，运维与恢复见 [Operations 文档](docs/operations.md)，SQLite 本地部署见 [SQLite 文档](docs/sqlite-deployment.md)，性能证据见 [Phase 5 性能基线](docs/performance-baseline.md)。
 
 ## 集群分区运行时

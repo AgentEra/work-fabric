@@ -23,6 +23,19 @@ From the repository root, install the isolated Python worker environment:
 uv sync --project runtimes/agently-worker
 ```
 
+For the complete Feishu → Daily Assistant → Feishu document path, prefer the
+single bundle and Supervisor documented in
+[Feishu Capability / Context Provider](feishu-capability-provider.md#7-本地整套启动):
+
+```bash
+export WORK_FABRIC_ENV_FILE=/absolute/path/to/feishu.env
+export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml"
+npm run local:feishu:start
+```
+
+The older two-file commands below remain useful for isolating the Service or
+Agent Runtime. They do not start the independent capability Provider.
+
 Service YAML owns Work Fabric storage, identities, Authority, HTTP listener, Connector and Feishu configuration. Runtime YAML owns the Work Fabric connection, Runtime participant, role/capabilities, acceptance policy, concurrency, Runtime State, worker executable/workspace/timeout, and model provider. Do not copy model credentials into service YAML, Handoff data, Results, SQLite, logs, or task JSON.
 
 Provision the Endpoint before starting the Runtime. The shipped scripts read
@@ -86,6 +99,10 @@ not a separate process to start after the Console. Start the optional Console
 in a third terminal with `npm run console:dev`, then open the URL printed by
 Vite. The Runtime uses a fresh client-session ID for each process start; do not
 reuse a fenced session ID.
+
+When using the unified local bundle, `local:feishu:start` owns the Service,
+Provider and Agent process lifecycle. Do not also start the two manual
+terminals against the same SQLite files.
 
 ## What to observe
 
