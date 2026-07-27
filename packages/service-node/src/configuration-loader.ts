@@ -4,7 +4,12 @@ import {
   agentRuntimeAuthorityConfigurationValidator,
   type AgentRuntimeAuthorityConfigurationSection,
 } from "@work-fabric/adapter-authority-agent-runtime";
-import { ConfigurationService, EnvironmentSecretResolver, resolveDeclaredSecrets } from "@work-fabric/configuration-runtime";
+import {
+  ConfigurationService,
+  ConfigurationViewProvider,
+  EnvironmentSecretResolver,
+  resolveDeclaredSecrets,
+} from "@work-fabric/configuration-runtime";
 import { FeishuPluginFactory, feishuSecretPaths, validateFeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
 import type { PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 import { parseServiceConfig, serviceAdmissionSecretPaths, type NodeServiceConfig } from "./config.js";
@@ -59,7 +64,10 @@ export async function loadNodeConfiguration(environment: Readonly<Record<string,
   const path = environment.WORK_FABRIC_CONFIG;
   if (path === undefined || path.trim() === "") throw new Error("WORK_FABRIC_CONFIG must point to an explicit YAML configuration file");
   const yaml = new YamlConfigurationProvider({ path, max_bytes: 4 * 1024 * 1024, max_depth: 64 });
-  const document = await yaml.load();
+  const document = await new ConfigurationViewProvider({
+    provider: yaml,
+    application_id: environment.WORK_FABRIC_CONFIG_APPLICATION ?? "work-fabric",
+  }).load();
   const root = object(document.value, "configuration");
   const serviceRaw = object(root.service, "service");
   const resolved = await resolveDeclaredSecrets(document.value, collectDeclaredSecretPaths(root), {

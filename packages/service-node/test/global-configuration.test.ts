@@ -65,6 +65,47 @@ async function waitFor<T>(read: () => T | undefined, timeoutMs = 4_000): Promise
 }
 
 describe("global node configuration", () => {
+  it("selects only the work-fabric application from a shared configuration bundle", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wf-config-bundle-"));
+    const path = join(directory, "work-fabric.yaml");
+    await writeFile(path, `api_version: workfabric.config-bundle/v1
+applications:
+  work-fabric:
+    api_version: workfabric.config/v1
+    service:
+      storage_profile: memory-demo
+      development_mode: true
+      tenant_id: tenant-local
+      exchange_id: exchange-local
+      cursor_secret: \${CURSOR_SECRET}
+      identities:
+        - authentication_evidence: {bearer_token: token}
+          principal:
+            principal_id: p
+            tenant_id: tenant-local
+            actor_claims:
+              - {actor_id: a, actor_type: human, endpoint_ids: [e]}
+            attributes: {}
+      authority_rules:
+        - {tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}
+  daily-assistant:
+    api_version: workfabric.config/v1
+    service:
+      sibling_secret: \${MUST_NOT_BE_RESOLVED}
+`, "utf8");
+
+    try {
+      const loaded = await loadNodeConfiguration({
+        WORK_FABRIC_CONFIG: path,
+        CURSOR_SECRET: "x".repeat(32),
+      });
+      expect(loaded.service.tenant_id).toBe("tenant-local");
+      expect(loaded.revision).toMatch(/#work-fabric$/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("starts the real SQLite long-connection example from an isolated repository root", async () => {
     const repository = await mkdtemp(join(tmpdir(), "wf-feishu-checkout-"));
     const source = fileURLToPath(new URL(

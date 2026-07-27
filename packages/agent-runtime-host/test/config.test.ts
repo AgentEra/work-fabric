@@ -71,6 +71,28 @@ describe("loadAgentRuntimeConfiguration", () => {
     expect(loaded.driver.config.provider.api_key).toBe("model-token");
   });
 
+  it("selects the daily-assistant view from a shared configuration bundle", async () => {
+    const loaded = await loadAgentRuntimeConfiguration({
+      document: document({
+        api_version: "workfabric.config-bundle/v1",
+        applications: {
+          "work-fabric": {
+            api_version: "workfabric.config/v1",
+            service: { sibling_secret: "${MUST_NOT_BE_RESOLVED}" },
+          },
+          "daily-assistant": base,
+        },
+      }),
+      environment: {
+        AGENT_RUNTIME_WORK_FABRIC_TOKEN: "wf-token",
+        AGENTLY_MODEL_API_KEY: "model-token",
+      },
+    });
+
+    expect(loaded.service.runtime_id).toBe("daily-runtime");
+    expect(loaded.driver.config.provider.api_key).toBe("model-token");
+  });
+
   it.each([
     ["role contains authority", (value: typeof base) => ({ ...value, role: { ...value.role, authority: ["all"] } }), "role.authority"],
     ["Capability is not supported by Driver", (value: typeof base) => ({ ...value, capabilities: [...value.capabilities, "unsupported.capability"] }), "capabilities"],

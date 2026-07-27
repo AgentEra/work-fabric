@@ -1,6 +1,7 @@
 import { YamlConfigurationProvider } from "@work-fabric/adapter-configuration-yaml";
 import {
   ConfigurationService,
+  ConfigurationViewProvider,
   EnvironmentSecretResolver,
   resolveDeclaredSecrets,
   type NamedConfigurationSectionValidator,
@@ -15,6 +16,8 @@ export interface LoadAgentRuntimeConfigurationOptions {
   readonly document?: ConfigurationDocument;
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly WORK_FABRIC_AGENT_RUNTIME_CONFIG?: string;
+  readonly WORK_FABRIC_AGENT_RUNTIME_CONFIG_APPLICATION?: string;
+  readonly WORK_FABRIC_CONFIG?: string;
   readonly AGENT_RUNTIME_WORK_FABRIC_TOKEN?: string;
   readonly AGENTLY_MODEL_API_KEY?: string;
   readonly [key: string]: unknown;
@@ -165,10 +168,32 @@ function validateAgently(value: unknown, path: string): AgentlyDriverConfigurati
 }
 
 function providerFor(options: LoadAgentRuntimeConfigurationOptions): ConfigurationProvider {
-  if (options.document !== undefined) return { async load() { return options.document!; } };
-  const path = environmentOf(options).WORK_FABRIC_AGENT_RUNTIME_CONFIG;
-  if (path === undefined || path.length === 0) invalid("config_path_missing", "WORK_FABRIC_AGENT_RUNTIME_CONFIG");
-  return new YamlConfigurationProvider({ path, max_bytes: 1024 * 1024, max_depth: 64 });
+  const environment = environmentOf(options);
+  let provider: ConfigurationProvider;
+  if (options.document !== undefined) {
+    provider = { async load() { return options.document!; } };
+  } else {
+    const path =
+      environment.WORK_FABRIC_AGENT_RUNTIME_CONFIG ??
+      environment.WORK_FABRIC_CONFIG;
+    if (path === undefined || path.length === 0) {
+      invalid(
+        "config_path_missing",
+        "WORK_FABRIC_AGENT_RUNTIME_CONFIG|WORK_FABRIC_CONFIG",
+      );
+    }
+    provider = new YamlConfigurationProvider({
+      path,
+      max_bytes: 4 * 1024 * 1024,
+      max_depth: 64,
+    });
+  }
+  return new ConfigurationViewProvider({
+    provider,
+    application_id:
+      environment.WORK_FABRIC_AGENT_RUNTIME_CONFIG_APPLICATION ??
+      "daily-assistant",
+  });
 }
 
 export async function loadAgentRuntimeConfiguration(options: LoadAgentRuntimeConfigurationOptions): Promise<LoadedAgentRuntimeConfiguration> {
