@@ -1,5 +1,8 @@
 import type {
+  AgentCapabilityInvocationStore,
   AgentRuntimeStateStore,
+  CapabilityInvocationRecord,
+  CapabilityInvocationState,
   RuntimeCommandRecord,
   RuntimeDeliveryRecord,
   RuntimeDriverResult,
@@ -8,6 +11,11 @@ import type {
   RuntimeRunRecord,
   RuntimeRunState,
 } from "@work-fabric/agent-runtime-spi";
+import {
+  validateCapabilityCandidate,
+  validateCapabilityInvocationRequest,
+  validateCapabilityInvocationResult,
+} from "@work-fabric/agent-runtime-spi";
 
 import { migrateAgentRuntimeSqlite } from "./migrations.js";
 import { SqliteSession, type CallerOwnedSqliteSessionOptions, type SqliteSessionOptions } from "./sqlite-session.js";
@@ -15,6 +23,18 @@ import { SqliteSession, type CallerOwnedSqliteSessionOptions, type SqliteSession
 type RunRow = Omit<RuntimeRunRecord, "result"> & { result_json: string | null };
 type DeliveryRow = RuntimeDeliveryRecord;
 type CommandRow = RuntimeCommandRecord;
+interface InvocationRow {
+  readonly tenant_id: string;
+  readonly original_handoff_id: string;
+  readonly invocation_id: string;
+  readonly state: CapabilityInvocationState;
+  readonly request_digest: `sha256:${string}`;
+  readonly owner: string | null;
+  readonly fencing_token: number;
+  readonly lease_expires_at: string | null;
+  readonly updated_at: string;
+  readonly record_json: string;
+}
 
 const RUN_STATES = new Set<RuntimeRunState>(["received", "accepted", "running", "result_ready", "succeeded", "failed", "cancelled"]);
 const TRANSITIONS: Readonly<Record<RuntimeRunState, readonly RuntimeRunState[]>> = {
@@ -23,6 +43,17 @@ const TRANSITIONS: Readonly<Record<RuntimeRunState, readonly RuntimeRunState[]>>
   running: ["result_ready", "failed", "cancelled"],
   result_ready: ["succeeded", "failed", "cancelled"],
   succeeded: [], failed: [], cancelled: [],
+};
+const INVOCATION_TERMINAL = new Set<CapabilityInvocationState>([
+  "succeeded", "rejected", "failed", "cancelled",
+]);
+const INVOCATION_TRANSITIONS: Readonly<
+  Record<CapabilityInvocationState, readonly CapabilityInvocationState[]>
+> = {
+  requested: ["offered", "rejected", "failed", "cancelled"],
+  offered: ["waiting", "succeeded", "rejected", "failed", "cancelled"],
+  waiting: ["succeeded", "rejected", "failed", "cancelled"],
+  succeeded: [], rejected: [], failed: [], cancelled: [],
 };
 
 function clone<T>(value: T): T { return structuredClone(value); }
@@ -124,7 +155,19 @@ function runRecord(row: RunRow): RuntimeRunRecord {
   });
 }
 
-export class SqliteAgentRuntimeStateStore implements AgentRuntimeStateStore {
+function invocationRecord(row: InvocationRow): CapabilityInvocationRecord {
+  return clone(JSON.parse(row.record_json) as CapabilityInvocationRecord);
+}
+
+function serializeInvocation(record: CapabilityInvocationRecord): string {
+  validateCapabilityInvocationRequest(record.request);
+  if (record.candidate !== null) validateCapabilityCandidate(record.candidate);
+  if (record.result !== null) validateCapabilityInvocationResult(record.result);
+  return JSON.stringify(record);
+}
+
+export class SqliteAgentRuntimeStateStore
+  implements AgentRuntimeStateStore, AgentCapabilityInvocationStore {
   private readonly session: SqliteSession;
   private closed = false;
 
@@ -224,9 +267,241 @@ export class SqliteAgentRuntimeStateStore implements AgentRuntimeStateStore {
     return this.read(() => (this.session.prepare("SELECT * FROM agent_runtime_runs WHERE tenant_id = ? AND state NOT IN ('succeeded', 'failed', 'cancelled') AND (owner IS NULL OR lease_expires_at <= ?) ORDER BY updated_at ASC, handoff_id ASC LIMIT ?").all(tenantId, normalizedNow, limit) as RunRow[]).map(runRecord));
   }
 
+  async createInvocationIfAbsent(
+    input: Parameters<AgentCapabilityInvocationStore["createInvocationIfAbsent"]>[0],
+  ): Promise<{
+    readonly created: boolean;
+    readonly record: CapabilityInvocationRecord;
+  }> {
+    const request = validateCapabilityInvocationRequest(input.request);
+    if (!/^sha256:[a-f0-9]{64}$/.test(input.request_digest)) {
+      throw new TypeError("request_digest is invalid");
+    }
+    const now = timestamp(input.now, "now");
+    return this.write(() => {
+      const existing = this.getInvocationRow(
+        input.tenant_id,
+        request.original_handoff_id,
+        request.invocation_id,
+      );
+      if (existing !== undefined) {
+        if (existing.request_digest !== input.request_digest) {
+          throw new Error("Capability invocation idempotency conflict");
+        }
+        return { created: false, record: invocationRecord(existing) };
+      }
+      const record: CapabilityInvocationRecord = {
+        tenant_id: input.tenant_id,
+        original_handoff_id: request.original_handoff_id,
+        invocation_id: request.invocation_id,
+        state: "requested",
+        request_digest: input.request_digest,
+        request,
+        candidate: null,
+        auxiliary_handoff_id: null,
+        result: null,
+        attempt: 0,
+        owner: null,
+        fencing_token: 0,
+        lease_expires_at: null,
+        created_at: now,
+        updated_at: now,
+      };
+      this.session.prepare(`
+        INSERT INTO agent_capability_invocations (
+          tenant_id, original_handoff_id, invocation_id, state,
+          request_digest, owner, fencing_token, lease_expires_at,
+          updated_at, record_json
+        ) VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)
+      `).run(
+        record.tenant_id,
+        record.original_handoff_id,
+        record.invocation_id,
+        record.state,
+        record.request_digest,
+        record.updated_at,
+        serializeInvocation(record),
+      );
+      return { created: true, record: clone(record) };
+    });
+  }
+
+  async claimInvocation(
+    input: Parameters<AgentCapabilityInvocationStore["claimInvocation"]>[0],
+  ): Promise<CapabilityInvocationRecord | null> {
+    const now = timestamp(input.now, "now");
+    const expiresAt = leaseExpiry(now, input.lease_seconds);
+    return this.write(() => {
+      const row = this.getInvocationRow(
+        input.tenant_id,
+        input.original_handoff_id,
+        input.invocation_id,
+      );
+      if (
+        row === undefined ||
+        INVOCATION_TERMINAL.has(row.state) ||
+        !input.allowed_states.includes(row.state) ||
+        (row.lease_expires_at !== null && row.lease_expires_at > now)
+      ) return null;
+      const current = invocationRecord(row);
+      const claimed: CapabilityInvocationRecord = {
+        ...current,
+        owner: input.owner,
+        fencing_token: current.fencing_token + 1,
+        lease_expires_at: expiresAt,
+        attempt: current.attempt + 1,
+        updated_at: now,
+      };
+      const changed = this.session.prepare(`
+        UPDATE agent_capability_invocations
+        SET owner = ?, fencing_token = ?, lease_expires_at = ?,
+            updated_at = ?, record_json = ?
+        WHERE tenant_id = ? AND original_handoff_id = ? AND invocation_id = ?
+          AND fencing_token = ?
+      `).run(
+        claimed.owner,
+        claimed.fencing_token,
+        claimed.lease_expires_at,
+        claimed.updated_at,
+        serializeInvocation(claimed),
+        claimed.tenant_id,
+        claimed.original_handoff_id,
+        claimed.invocation_id,
+        current.fencing_token,
+      ).changes;
+      return changed === 1 ? clone(claimed) : null;
+    });
+  }
+
+  async transitionInvocation(
+    input: Parameters<AgentCapabilityInvocationStore["transitionInvocation"]>[0],
+  ): Promise<boolean> {
+    const now = timestamp(input.now, "now");
+    return this.write(() => {
+      const row = this.getInvocationRow(
+        input.tenant_id,
+        input.original_handoff_id,
+        input.invocation_id,
+      );
+      if (
+        row === undefined ||
+        row.owner !== input.owner ||
+        row.fencing_token !== input.fencing_token ||
+        row.lease_expires_at === null ||
+        row.lease_expires_at <= now ||
+        row.state !== input.expected_state ||
+        !INVOCATION_TRANSITIONS[input.expected_state].includes(input.next_state)
+      ) return false;
+      const current = invocationRecord(row);
+      let boundCandidate = current.candidate;
+      let auxiliaryHandoffId = current.auxiliary_handoff_id;
+      if (input.next_state === "offered") {
+        if (
+          input.candidate === undefined ||
+          input.auxiliary_handoff_id === undefined ||
+          input.result !== undefined
+        ) return false;
+        boundCandidate = validateCapabilityCandidate(input.candidate);
+        auxiliaryHandoffId = input.auxiliary_handoff_id;
+      } else if (
+        input.candidate !== undefined ||
+        input.auxiliary_handoff_id !== undefined
+      ) return false;
+      let result = current.result;
+      if (INVOCATION_TERMINAL.has(input.next_state)) {
+        if (input.next_state === "cancelled") {
+          if (input.result !== undefined) return false;
+        } else {
+          if (input.result === undefined) return false;
+          result = validateCapabilityInvocationResult(input.result);
+          if (
+            result.invocation_id !== current.invocation_id ||
+            result.outcome !== input.next_state ||
+            result.auxiliary_handoff_id !== auxiliaryHandoffId
+          ) return false;
+        }
+      } else if (input.result !== undefined) return false;
+      if (
+        input.next_state === "waiting" &&
+        (boundCandidate === null || auxiliaryHandoffId === null)
+      ) return false;
+      const next: CapabilityInvocationRecord = {
+        ...current,
+        state: input.next_state,
+        candidate: boundCandidate,
+        auxiliary_handoff_id: auxiliaryHandoffId,
+        result,
+        updated_at: now,
+      };
+      return this.session.prepare(`
+        UPDATE agent_capability_invocations
+        SET state = ?, updated_at = ?, record_json = ?
+        WHERE tenant_id = ? AND original_handoff_id = ? AND invocation_id = ?
+          AND owner = ? AND fencing_token = ? AND state = ?
+          AND lease_expires_at > ?
+      `).run(
+        next.state,
+        next.updated_at,
+        serializeInvocation(next),
+        next.tenant_id,
+        next.original_handoff_id,
+        next.invocation_id,
+        input.owner,
+        input.fencing_token,
+        input.expected_state,
+        now,
+      ).changes === 1;
+    });
+  }
+
+  async getInvocation(
+    tenantId: string,
+    originalHandoffId: string,
+    invocationId: string,
+  ): Promise<CapabilityInvocationRecord | null> {
+    return this.read(() => {
+      const row = this.getInvocationRow(
+        tenantId,
+        originalHandoffId,
+        invocationId,
+      );
+      return row === undefined ? null : invocationRecord(row);
+    });
+  }
+
+  async listRecoverableInvocations(
+    tenantId: string,
+    now: string,
+    limit: number,
+  ): Promise<readonly CapabilityInvocationRecord[]> {
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > 1_000) {
+      throw new RangeError("limit must be between 0 and 1000");
+    }
+    const normalizedNow = timestamp(now, "now");
+    return this.read(() => (this.session.prepare(`
+      SELECT * FROM agent_capability_invocations
+      WHERE tenant_id = ?
+        AND state NOT IN ('succeeded','rejected','failed','cancelled')
+        AND (owner IS NULL OR lease_expires_at <= ?)
+      ORDER BY updated_at ASC, invocation_id ASC
+      LIMIT ?
+    `).all(tenantId, normalizedNow, limit) as unknown as InvocationRow[])
+      .map(invocationRecord));
+  }
+
   async close(): Promise<void> { if (!this.closed) { this.closed = true; this.session.close(); } }
 
   private getRunRow(tenantId: string, handoffId: string): RunRow | undefined { return this.session.prepare("SELECT * FROM agent_runtime_runs WHERE tenant_id = ? AND handoff_id = ?").get(tenantId, handoffId) as RunRow | undefined; }
+  private getInvocationRow(
+    tenantId: string,
+    originalHandoffId: string,
+    invocationId: string,
+  ): InvocationRow | undefined {
+    return this.session.prepare(`
+      SELECT * FROM agent_capability_invocations
+      WHERE tenant_id = ? AND original_handoff_id = ? AND invocation_id = ?
+    `).get(tenantId, originalHandoffId, invocationId) as InvocationRow | undefined;
+  }
   private read<T>(operation: () => T): T { this.ensureOpen(); return operation(); }
   private write<T>(operation: () => T): T { this.ensureOpen(); return this.session.transaction(operation, "IMMEDIATE"); }
   private ensureOpen(): void { if (this.closed) throw new Error("Runtime state store is closed"); }

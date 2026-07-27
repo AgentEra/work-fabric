@@ -1,9 +1,17 @@
 import type {
+  AgentCapabilityInvocationStore,
   AgentRuntimeStateStore,
+  CapabilityInvocationRecord,
+  CapabilityInvocationState,
   RuntimeCommandRecord,
   RuntimeDeliveryRecord,
   RuntimeRunRecord,
   RuntimeRunState,
+} from "@work-fabric/agent-runtime-spi";
+import {
+  validateCapabilityCandidate,
+  validateCapabilityInvocationRequest,
+  validateCapabilityInvocationResult,
 } from "@work-fabric/agent-runtime-spi";
 
 const terminalStates = new Set<RuntimeRunState>(["succeeded", "failed", "cancelled"]);
@@ -16,6 +24,17 @@ const allowedTransitions: Readonly<Record<RuntimeRunState, readonly RuntimeRunSt
   failed: [],
   cancelled: [],
 };
+const terminalInvocationStates = new Set<CapabilityInvocationState>([
+  "succeeded", "rejected", "failed", "cancelled",
+]);
+const invocationTransitions: Readonly<
+  Record<CapabilityInvocationState, readonly CapabilityInvocationState[]>
+> = {
+  requested: ["offered", "rejected", "failed", "cancelled"],
+  offered: ["waiting", "succeeded", "rejected", "failed", "cancelled"],
+  waiting: ["succeeded", "rejected", "failed", "cancelled"],
+  succeeded: [], rejected: [], failed: [], cancelled: [],
+};
 
 const deliveryKey = (tenant: string, delivery: string) =>
   JSON.stringify([tenant, delivery]);
@@ -26,6 +45,8 @@ const commandKey = (
   handoff: string,
   idempotencyKey: string,
 ) => JSON.stringify([tenant, handoff, idempotencyKey]);
+const invocationKey = (tenant: string, handoff: string, invocation: string) =>
+  JSON.stringify([tenant, handoff, invocation]);
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -39,10 +60,12 @@ function hasExpired(leaseExpiresAt: string | null, now: string): boolean {
   return leaseExpiresAt === null || Date.parse(leaseExpiresAt) <= Date.parse(now);
 }
 
-export class MemoryAgentRuntimeStateStore implements AgentRuntimeStateStore {
+export class MemoryAgentRuntimeStateStore
+  implements AgentRuntimeStateStore, AgentCapabilityInvocationStore {
   private readonly deliveries = new Map<string, RuntimeDeliveryRecord>();
   private readonly runs = new Map<string, RuntimeRunRecord>();
   private readonly commands = new Map<string, RuntimeCommandRecord>();
+  private readonly invocations = new Map<string, CapabilityInvocationRecord>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private closed = false;
 
@@ -206,12 +229,196 @@ export class MemoryAgentRuntimeStateStore implements AgentRuntimeStateStore {
       .map((run) => clone(run)));
   }
 
+  async createInvocationIfAbsent(
+    input: Parameters<AgentCapabilityInvocationStore["createInvocationIfAbsent"]>[0],
+  ): Promise<{
+    readonly created: boolean;
+    readonly record: CapabilityInvocationRecord;
+  }> {
+    const request = validateCapabilityInvocationRequest(input.request);
+    if (!/^sha256:[a-f0-9]{64}$/.test(input.request_digest)) {
+      throw new TypeError("request_digest is invalid");
+    }
+    return this.enqueue(() => {
+      const key = invocationKey(
+        input.tenant_id,
+        request.original_handoff_id,
+        request.invocation_id,
+      );
+      const existing = this.invocations.get(key);
+      if (existing !== undefined) {
+        if (existing.request_digest !== input.request_digest) {
+          throw new Error("Capability invocation idempotency conflict");
+        }
+        return { created: false, record: clone(existing) };
+      }
+      const record: CapabilityInvocationRecord = {
+        tenant_id: input.tenant_id,
+        original_handoff_id: request.original_handoff_id,
+        invocation_id: request.invocation_id,
+        state: "requested",
+        request_digest: input.request_digest,
+        request,
+        candidate: null,
+        auxiliary_handoff_id: null,
+        result: null,
+        attempt: 0,
+        owner: null,
+        fencing_token: 0,
+        lease_expires_at: null,
+        created_at: input.now,
+        updated_at: input.now,
+      };
+      this.invocations.set(key, clone(record));
+      return { created: true, record: clone(record) };
+    });
+  }
+
+  async claimInvocation(
+    input: Parameters<AgentCapabilityInvocationStore["claimInvocation"]>[0],
+  ): Promise<CapabilityInvocationRecord | null> {
+    const candidate = clone(input);
+    return this.enqueue(() => {
+      const key = invocationKey(
+        candidate.tenant_id,
+        candidate.original_handoff_id,
+        candidate.invocation_id,
+      );
+      const current = this.invocations.get(key);
+      if (
+        current === undefined ||
+        terminalInvocationStates.has(current.state) ||
+        !candidate.allowed_states.includes(current.state) ||
+        !hasExpired(current.lease_expires_at, candidate.now)
+      ) {
+        return null;
+      }
+      const claimed: CapabilityInvocationRecord = {
+        ...current,
+        owner: candidate.owner,
+        fencing_token: current.fencing_token + 1,
+        lease_expires_at: addLeaseSeconds(
+          candidate.now,
+          candidate.lease_seconds,
+        ),
+        attempt: current.attempt + 1,
+        updated_at: candidate.now,
+      };
+      this.invocations.set(key, clone(claimed));
+      return clone(claimed);
+    });
+  }
+
+  async transitionInvocation(
+    input: Parameters<AgentCapabilityInvocationStore["transitionInvocation"]>[0],
+  ): Promise<boolean> {
+    const candidateInput = clone(input);
+    return this.enqueue(() => {
+      const key = invocationKey(
+        candidateInput.tenant_id,
+        candidateInput.original_handoff_id,
+        candidateInput.invocation_id,
+      );
+      const current = this.invocations.get(key);
+      if (
+        current === undefined ||
+        current.owner !== candidateInput.owner ||
+        current.fencing_token !== candidateInput.fencing_token ||
+        hasExpired(current.lease_expires_at, candidateInput.now) ||
+        current.state !== candidateInput.expected_state ||
+        !invocationTransitions[candidateInput.expected_state].includes(
+          candidateInput.next_state,
+        )
+      ) {
+        return false;
+      }
+      let boundCandidate = current.candidate;
+      let auxiliaryHandoffId = current.auxiliary_handoff_id;
+      if (candidateInput.next_state === "offered") {
+        if (
+          candidateInput.candidate === undefined ||
+          candidateInput.auxiliary_handoff_id === undefined ||
+          candidateInput.result !== undefined
+        ) return false;
+        boundCandidate = validateCapabilityCandidate(candidateInput.candidate);
+        auxiliaryHandoffId = candidateInput.auxiliary_handoff_id;
+      } else if (
+        candidateInput.candidate !== undefined ||
+        candidateInput.auxiliary_handoff_id !== undefined
+      ) return false;
+      let result = current.result;
+      if (terminalInvocationStates.has(candidateInput.next_state)) {
+        if (candidateInput.next_state === "cancelled") {
+          if (candidateInput.result !== undefined) return false;
+        } else {
+          if (candidateInput.result === undefined) return false;
+          result = validateCapabilityInvocationResult(candidateInput.result);
+          if (
+            result.invocation_id !== current.invocation_id ||
+            result.outcome !== candidateInput.next_state ||
+            result.auxiliary_handoff_id !== auxiliaryHandoffId
+          ) return false;
+        }
+      } else if (candidateInput.result !== undefined) return false;
+      if (
+        candidateInput.next_state === "waiting" &&
+        (boundCandidate === null || auxiliaryHandoffId === null)
+      ) return false;
+      const next: CapabilityInvocationRecord = {
+        ...current,
+        state: candidateInput.next_state,
+        candidate: boundCandidate,
+        auxiliary_handoff_id: auxiliaryHandoffId,
+        result,
+        updated_at: candidateInput.now,
+      };
+      this.invocations.set(key, clone(next));
+      return true;
+    });
+  }
+
+  async getInvocation(
+    tenantId: string,
+    originalHandoffId: string,
+    invocationId: string,
+  ): Promise<CapabilityInvocationRecord | null> {
+    return this.enqueue(() => {
+      const record = this.invocations.get(
+        invocationKey(tenantId, originalHandoffId, invocationId),
+      );
+      return record === undefined ? null : clone(record);
+    });
+  }
+
+  async listRecoverableInvocations(
+    tenantId: string,
+    now: string,
+    limit: number,
+  ): Promise<readonly CapabilityInvocationRecord[]> {
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > 1_000) {
+      throw new RangeError("limit must be between 0 and 1000");
+    }
+    return this.enqueue(() => [...this.invocations.values()]
+      .filter((record) =>
+        record.tenant_id === tenantId &&
+        !terminalInvocationStates.has(record.state) &&
+        hasExpired(record.lease_expires_at, now),
+      )
+      .sort((left, right) =>
+        left.updated_at.localeCompare(right.updated_at) ||
+        left.invocation_id.localeCompare(right.invocation_id),
+      )
+      .slice(0, limit)
+      .map(clone));
+  }
+
   async close(): Promise<void> {
     const result = this.mutationQueue.then(() => {
       this.closed = true;
       this.deliveries.clear();
       this.runs.clear();
       this.commands.clear();
+      this.invocations.clear();
     });
     this.mutationQueue = result.then(() => undefined, () => undefined);
     return result;
