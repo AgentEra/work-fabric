@@ -35,6 +35,31 @@ const event: ProtocolEvent = {
   },
 };
 
+const agentResultEvent: ProtocolEvent = {
+  ...event,
+  id: "event-agent-result",
+  type: "workfabric.handoff.result_returned.v1",
+  wfsequence: 5,
+  data: {
+    resource_version: 5,
+    snapshot: {
+      handoff_id: "handoff-1",
+      resource_version: 5,
+      lifecycle_state: "result_returned",
+      result: {
+        summary: [{
+          kind: "text",
+          media_type: "text/plain",
+          text: "已整理需求目标、缺失信息和验收条件。",
+        }],
+        artifacts: [],
+        evidence: [],
+        extensions: {},
+      },
+    },
+  },
+};
+
 function destination(
   id: string,
   receiveId: string,
@@ -139,5 +164,82 @@ describe("FeishuSignalAdapter", () => {
       },
     })).resolves.toMatchObject({ kind: "permanent_failure" });
     expect(messages.inputs).toHaveLength(2);
+  });
+
+  it("renders only the Agent-owned Result summary in text and card modes", async () => {
+    const messages = new ControlledMessages();
+    const adapter = new FeishuSignalAdapter({
+      messages,
+      renderer: new FeishuEventRenderer({
+        action_codec: new FeishuActionReferenceCodec({
+          encryption_key: new Uint8Array(32).fill(7),
+        }),
+        clock: { now: () => "2026-07-16T00:00:00Z" },
+        max_text_bytes: 150_000,
+        max_card_bytes: 30_000,
+      }),
+    });
+
+    await expect(adapter.deliver(
+      agentResultEvent,
+      destination("agent-text", "ou-accepted", "text"),
+    )).resolves.toEqual({ kind: "accepted" });
+    await expect(adapter.deliver(
+      agentResultEvent,
+      destination("agent-card", "ou-accepted", "card"),
+    )).resolves.toEqual({ kind: "accepted" });
+
+    expect(messages.inputs).toHaveLength(2);
+    for (const input of messages.inputs) {
+      expect(input.content).toContain(
+        "已整理需求目标、缺失信息和验收条件。",
+      );
+      expect(input.content).not.toMatch(
+        /handoff-1|result_returned|accepted|State:/,
+      );
+    }
+  });
+
+  it("does not synthesize a reply when a Result has no text summary", async () => {
+    const messages = new ControlledMessages();
+    const adapter = new FeishuSignalAdapter({
+      messages,
+      renderer: new FeishuEventRenderer({
+        action_codec: new FeishuActionReferenceCodec({
+          encryption_key: new Uint8Array(32).fill(7),
+        }),
+        clock: { now: () => "2026-07-16T00:00:00Z" },
+        max_text_bytes: 150_000,
+        max_card_bytes: 30_000,
+      }),
+    });
+    const withoutText = {
+      ...agentResultEvent,
+      data: {
+        ...agentResultEvent.data,
+        snapshot: {
+          ...(agentResultEvent.data.snapshot as Record<string, unknown>),
+          result: {
+            summary: [{
+              kind: "data",
+              schema_ref: "urn:work-fabric:test:result",
+              data: { completed: true },
+            }],
+            artifacts: [],
+            evidence: [],
+            extensions: {},
+          },
+        },
+      },
+    };
+
+    await expect(adapter.deliver(
+      withoutText,
+      destination("agent-no-text", "ou-accepted", "text"),
+    )).resolves.toEqual({
+      kind: "permanent_failure",
+      detail: "invalid_feishu_destination",
+    });
+    expect(messages.inputs).toHaveLength(0);
   });
 });

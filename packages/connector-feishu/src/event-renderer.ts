@@ -106,6 +106,40 @@ function encodedSize(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
+function object(value: unknown, label: string): Record<string, unknown> {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) throw new TypeError(`${label} is invalid`);
+  return value as Record<string, unknown>;
+}
+
+function agentResultText(event: ProtocolEvent): string {
+  const snapshot = object(event.data.snapshot, "result snapshot");
+  const result = object(snapshot.result, "result snapshot result");
+  if (!Array.isArray(result.summary)) {
+    throw new TypeError("result summary is invalid");
+  }
+  const texts: string[] = [];
+  for (const [index, value] of result.summary.entries()) {
+    const part = object(value, `result summary ${index}`);
+    if (part.kind !== "text") continue;
+    if (
+      typeof part.media_type !== "string" ||
+      !/^text\/[^/\s]+$/.test(part.media_type) ||
+      typeof part.text !== "string" ||
+      part.text.length === 0
+    ) throw new TypeError(`result summary ${index} is invalid`);
+    texts.push(part.text);
+  }
+  if (texts.length === 0) {
+    throw new TypeError("result summary has no text content");
+  }
+  return texts.join("\n");
+}
+
 export class FeishuEventRenderer {
   constructor(private readonly options: FeishuEventRendererOptions) {
     if (
@@ -120,6 +154,30 @@ export class FeishuEventRenderer {
     event: ProtocolEvent,
     destination: FeishuDestinationConfiguration,
   ): FeishuRenderedMessage {
+    if (event.type === "workfabric.handoff.result_returned.v1") {
+      const reply = agentResultText(event);
+      if (destination.render_mode === "text") {
+        const content = JSON.stringify({ text: reply });
+        if (encodedSize(content) > this.options.max_text_bytes) {
+          throw new RangeError("Feishu text exceeds its configured limit");
+        }
+        return { msg_type: "text", content };
+      }
+      const content = JSON.stringify({
+        schema: "2.0",
+        config: { update_multi: true },
+        body: {
+          elements: [{
+            tag: "div",
+            text: { tag: "plain_text", content: reply },
+          }],
+        },
+      });
+      if (encodedSize(content) > this.options.max_card_bytes) {
+        throw new RangeError("Feishu card exceeds its configured limit");
+      }
+      return { msg_type: "interactive", content };
+    }
     const handoffId = bounded(event.wfhandoff ?? event.subject, "handoff_id");
     const change = event.data.change as
       | { readonly [key: string]: unknown }
