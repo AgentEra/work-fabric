@@ -145,8 +145,9 @@ git commit -m "fix(agent): normalize optional handoff draft output"
 - Create: `packages/channel-spi/src/handoff-snapshot-source.ts`
 - Modify: `packages/channel-spi/src/index.ts`
 - Modify: `packages/channel-spi/test/contracts.test.ts`
+- Create: `packages/service-node/src/channel-handoff-snapshot-source.ts`
 - Modify: `packages/service-node/src/compose.ts`
-- Modify: `packages/service-node/test/compose.test.ts`
+- Create: `packages/service-node/test/channel-handoff-snapshot-source.test.ts`
 
 **Interfaces:**
 - Consumes: `HandoffReadModelStore.getHandoff(handoffId)`.

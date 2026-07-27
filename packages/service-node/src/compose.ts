@@ -119,7 +119,10 @@ import type {
 import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 import type { ConnectorIngressStore } from "@work-fabric/connector-spi";
 import type { ConnectorCommandExecution, ConnectorCommandResult, ConnectorCommandSink } from "@work-fabric/connector-spi";
-import type { ChannelRouteStore } from "@work-fabric/channel-spi";
+import type {
+  ChannelHandoffSnapshotSource,
+  ChannelRouteStore,
+} from "@work-fabric/channel-spi";
 import type { ConnectorDiscrepancyStore } from "@work-fabric/connector-runtime";
 import {
   CollaborationProjector,
@@ -159,6 +162,7 @@ import { FeishuOpenApiClient, FeishuTenantAccessTokenProvider, type FeishuTenant
 import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 
 import { NodeConfigurationError, type NodeServiceConfig } from "./config.js";
+import { StoreBackedChannelHandoffSnapshotSource } from "./channel-handoff-snapshot-source.js";
 import { assertFeishuPluginRole } from "./feishu-plugin-composition.js";
 
 const defaultClock: Clock = { now: () => new Date().toISOString() };
@@ -794,6 +798,13 @@ export async function composeNodeService(
   const pluginServices = new Map<string, unknown>([
     ["workfabric.tenant_id", config.tenant_id],
     ["channel.routes", channelRoutes],
+    [
+      "channel.handoff_snapshot_source",
+      new StoreBackedChannelHandoffSnapshotSource(
+        config.tenant_id,
+        storage.handoffs,
+      ) satisfies ChannelHandoffSnapshotSource,
+    ],
     ["exchange.subscriptions", storage.subscriptions],
     ["connector.ingress", storage.connectorIngress],
     ["connector.command_sink", connectorCommandSink],

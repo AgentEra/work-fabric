@@ -26,6 +26,7 @@
     "@work-fabric/admission-runtime": "0.1.0",
     "@work-fabric/cluster-runtime": "0.1.0",
     "@work-fabric/cluster-spi": "0.1.0",
+    "@work-fabric/channel-spi": "0.1.0",
     "@work-fabric/configuration-runtime": "0.1.0",
     "@work-fabric/configuration-spi": "0.1.0",
     "@work-fabric/connector-feishu": "0.1.0",
