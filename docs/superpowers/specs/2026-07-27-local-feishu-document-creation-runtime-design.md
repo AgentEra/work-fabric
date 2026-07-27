@@ -146,8 +146,6 @@ interface RuntimeCapabilitySummary {
   readonly version: string;
   readonly name: string;
   readonly description: string;
-  readonly risk: "low" | "medium" | "high" | "destructive";
-  readonly confirmation: "none" | "explicit";
 }
 ```
 
