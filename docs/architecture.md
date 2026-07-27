@@ -55,6 +55,30 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 9. **最小授权**：交接携带与当前工作绑定的授权范围，不向 Agent 或 Adapter 发放租户级长期权限。
 10. **自动化来自端点可替换性**：人类端点可以逐步替换为 Agent 端点，而协议、治理和交接链保持稳定。
 11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、目标解析协议和可靠派发；目标选择与执行计划由外部人、规则或 Agent Brain 决定。
+12. **模块职责闭环**：每个模块必须完整拥有并完成自身职责，只通过稳定协议或 SPI 与其他模块交换事实；不得跨层代偿另一个模块的业务语义、决策或执行。
+13. **依赖面向契约**：Core、Runtime、Agent、Connector 和 Channel 模块不得依赖彼此的具体存储、进程或供应商实现。组合层可以把实现适配到窄接口，但不能把具体实现泄漏到消费模块。
+
+### 2.1 职责闭环与依赖方向
+
+| 模块 | 必须在本模块闭环的职责 | 只向外交换 |
+|---|---|---|
+| Exchange Core / Fabric Runtime | 权威交接状态、责任迁移、事件与可靠投递 | WFPP 事实、Receipt、Delivery |
+| Agent / Agent Runtime | 业务语义答复、推理、模型与工具执行、Agent 自身失败语义 | Status、Result、Artifact、Evidence |
+| Connector | 外部系统事件与 WFPP 操作的双向映射、幂等和对账 | 归一化命令与外部系统回执 |
+| Channel Adapter | 目标渠道格式、寻址、投递和渠道错误分类 | 已有内容的传输结果 |
+| Console / Query | 状态呈现和只读观察 | 公共查询结果 |
+
+允许的依赖方向是“消费稳定契约并注入实现”。禁止的依赖包括：
+
+- Fabric 或 Channel Adapter 在 Agent 失败或字段缺失时自行创作业务答复；
+- Channel Adapter 根据 `accepted`、`status_reported` 等生命周期事实推断业务语义；
+- Agent 绕过 Handoff Result 直接调用某个具体消息渠道完成协作回复；
+- Plugin 直接读取其他模块的数据库表、私有状态或进程内对象；
+- 为方便单一集成而把供应商字段、模型结构或存储技术加入稳定 Core。
+
+必要的跨模块读取必须抽象为最小 SPI，由组合层适配实现，并保持来源模块
+对其数据和语义的所有权。模块可以传输、校验和呈现另一模块已经产生的
+事实，但不能替它生产这些事实。
 
 ## 3. 系统上下文
 

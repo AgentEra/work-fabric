@@ -34,6 +34,13 @@ manufacture that content.
 This keeps the Fabric kernel independent of Agent roles and keeps the Agent
 independent of Feishu.
 
+The rule is project-wide rather than Feishu-specific: every module must close
+its own responsibility and exchange facts only through a stable protocol or
+SPI. A module may validate, transport, or present a fact owned by another
+module, but it may not manufacture that module's business semantics, decision,
+or execution. Concrete storage, Runtime, provider, and channel implementations
+must remain behind composition-time adapters.
+
 ## Result contract
 
 The assistant output contract distinguishes required semantic fields from
