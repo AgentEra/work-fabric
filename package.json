@@ -18,6 +18,8 @@
     "service:start": "tsx packages/service-node/src/main.ts",
     "agent-runtime:provision": "tsx examples/agently-agent-runtime/src/provision.ts",
     "agent-runtime:start": "tsx examples/agently-agent-runtime/src/main.ts",
+    "feishu-provider:provision": "tsx examples/feishu-capability-provider/src/provision.ts",
+    "feishu-provider:start": "tsx examples/feishu-capability-provider/src/main.ts",
     "agent-runtime:test-python": "uv run --project runtimes/agently-worker pytest -q",
     "verify:agent-runtime": "npm run typecheck && vitest run packages/agent-runtime-spi/test packages/adapter-agent-runtime-memory/test packages/adapter-agent-runtime-sqlite/test packages/adapter-authority-agent-runtime/test packages/agent-runtime-host/test packages/adapter-agent-runtime-agently/test examples/agently-agent-runtime/test && uv run --project runtimes/agently-worker pytest -q && npm run conformance",
     "console:dev": "npm --workspace @work-fabric/console-web run dev",
