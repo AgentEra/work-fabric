@@ -68,8 +68,8 @@ function descriptor(
     },
     availability: "available",
     extensions: {
-      provider_family: "feishu",
-      declaration_source: "runtime",
+      "workfabric.dev/provider_family": "feishu",
+      "workfabric.dev/declaration_source": "runtime",
     },
   };
 }

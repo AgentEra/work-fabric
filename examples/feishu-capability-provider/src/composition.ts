@@ -19,6 +19,7 @@ import type {
   CitizenJsonObject,
   CitizenRuntimeContext,
 } from "@work-fabric/network-citizen-spi";
+import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 import {
   FeishuCapabilityCitizenRuntime,
   FeishuCapabilityExecutor,
@@ -182,7 +183,10 @@ function capabilityDescriptor(
         ? []
         : [declaration.output_schema.uri],
     interaction_modes: ["asynchronous"],
-    constraints: { selected_citizen_id: citizenId },
+    constraints: {
+      selected_citizen_id: citizenId,
+      contract_digest: canonicalCitizenDigest(declaration),
+    },
     extensions: {},
   };
 }

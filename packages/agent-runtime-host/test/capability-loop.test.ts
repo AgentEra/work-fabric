@@ -152,6 +152,88 @@ describe("runCapabilityContinuationLoop", () => {
     });
   });
 
+  it("normalizes turn-local progress into one monotonic Handoff stream", async () => {
+    const driver = turnDriver([
+      {
+        kind: "capability_request",
+        request: {
+          invocation_id: "invocation-1",
+          capability_id: "feishu.document.create",
+          version_constraint: "^1.0.0",
+          input: { title: "客户项目需求" },
+          reason: "为团队创建协作文档",
+        },
+      },
+      { kind: "final", response: finalResponse },
+    ]);
+    driver.executeTurn
+      .mockImplementationOnce(async (
+        _task,
+        _capabilities,
+        _continuation,
+        progress,
+      ) => {
+        await progress({
+          sequence: 1,
+          progress: 0.25,
+          message: "first turn",
+          observed_at: "2026-07-27T10:00:01.000Z",
+        });
+        return {
+          kind: "capability_request",
+          request: {
+            invocation_id: "invocation-1",
+            capability_id: "feishu.document.create",
+            version_constraint: "^1.0.0",
+            input: { title: "客户项目需求" },
+            reason: "为团队创建协作文档",
+          },
+        };
+      })
+      .mockImplementationOnce(async (
+        _task,
+        _capabilities,
+        _continuation,
+        progress,
+      ) => {
+        await progress({
+          sequence: 1,
+          progress: 0.75,
+          message: "second turn",
+          observed_at: "2026-07-27T10:00:02.000Z",
+        });
+        return { kind: "final", response: finalResponse };
+      });
+    const published: Array<{
+      sequence: number;
+      message: string;
+    }> = [];
+
+    await runCapabilityContinuationLoop({
+      task,
+      driver,
+      disclosure: disclosurePort(),
+      invocations: invocationPort(),
+      limits: {
+        max_invocations_per_handoff: 4,
+        allowed_namespaces: ["feishu."],
+      },
+      progress: async (update) => {
+        published.push({
+          sequence: update.sequence,
+          message: update.message,
+        });
+      },
+      signal: new AbortController().signal,
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
+
+    expect(published).toEqual([
+      { sequence: 1, message: "first turn" },
+      { sequence: 2, message: "second turn" },
+    ]);
+  });
+
   it("rejects a fifth sequential capability invocation", async () => {
     const driver = turnDriver([
       ...Array.from({ length: 5 }, (_, index): RuntimeDriverTurn => ({

@@ -13,7 +13,11 @@ MAX_JSON_NODES = 10_000
 MAX_JSON_STRING_BYTES = 131_072
 MAX_JSON_KEY_LENGTH = 256
 MAX_STDOUT_LINE_BYTES = 262_144
-SECRET_FIELD = re.compile(r"(?:api[_-]?key|secret|token|password|credential)", re.IGNORECASE)
+SECRET_FIELD = re.compile(
+    r"(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|"
+    r"client[_-]?secret|private[_-]?key|api[_-]?key)",
+    re.IGNORECASE,
+)
 CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 

@@ -289,4 +289,18 @@ describe("HandoffCapabilityInvocationPort", () => {
         .digest("hex")}`,
     );
   });
+
+  it("bounds the operational claim lease independently from the business deadline", async () => {
+    const deps = dependencies();
+    const claim = vi.spyOn(deps.store, "claimInvocation");
+
+    await deps.port.invoke({
+      ...request,
+      deadline: "2026-08-27T12:00:00.000Z",
+    }, new AbortController().signal);
+
+    expect(claim).toHaveBeenCalledWith(expect.objectContaining({
+      lease_seconds: 86_400,
+    }));
+  });
 });

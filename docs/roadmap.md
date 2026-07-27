@@ -53,8 +53,11 @@ Capability Provider Gateway/Host -> typed result -> Agent invocation state.
 It verifies exact Citizen/Contract target constraints, initiator-scoped
 resolution/read authority, WFPP-compliant binding evidence, restart-safe state
 boundaries and the absence of credentials or vendor responses. The real Agently
-worker and Feishu Channel roundtrip remain independently tested adapters; this
-composite gate avoids coupling either vendor implementation into the Fabric.
+worker and Feishu Channel also participate in a separate full-stack gate:
+one long-connection mention -> original Handoff -> two Agent turns -> one
+Provider document creation -> one Agent-authored semantic channel reply. Feishu
+OpenAPI and the model network are replaced only at their external HTTP
+boundaries, so no vendor implementation is coupled into the Fabric.
 
 ## Phase 10 completion boundary
 

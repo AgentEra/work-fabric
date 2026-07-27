@@ -269,6 +269,9 @@ npx vitest run \
   packages/provider-feishu/test \
   packages/governance-confirmation/test \
   examples/feishu-capability-provider/test
+npx vitest run \
+  examples/feishu-capability-provider/test/local-stack.e2e.test.ts \
+  --testTimeout=30000
 npm run typecheck
 ```
 
@@ -276,5 +279,8 @@ npm run typecheck
 执行、类型化续写输入、原 Handoff 责任不转移和凭据不泄漏。其中
 `feishu-capability-provider.e2e.test.ts` 使用 SQLite、真实公共 HTTP/SSE、
 TypeScript SDK、Citizen session、Gateway 和 Host 完成整条参考闭环；飞书
-OpenAPI 只在 Provider 边界替换为测试 backend。真实飞书 smoke test 应使用
-专用测试文件夹，只删除本次测试创建的文档。
+OpenAPI 只在 Provider 边界替换为测试 backend。
+`local-stack.e2e.test.ts` 进一步启动真实 Agently Python Worker 与飞书长连接
+Channel，验证一次 `@机器人` 消息恰好创建一个文档，第二轮 Agent 只返回一条
+含文档 URL 的语义回复，并拒绝把 Handoff 状态码当作聊天内容。真实飞书
+smoke test 应使用专用测试文件夹，只删除本次测试创建的文档。

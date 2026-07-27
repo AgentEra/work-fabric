@@ -270,8 +270,13 @@ export class HandoffCapabilityInvocationPort
       owner: this.dependencies.owner_id,
       now,
       lease_seconds: Math.max(
-        this.leaseSeconds,
-        Math.ceil((Date.parse(request.deadline) - Date.parse(now)) / 1_000) + 1,
+        1,
+        Math.min(
+          this.leaseSeconds,
+          Math.ceil(
+            (Date.parse(request.deadline) - Date.parse(now)) / 1_000,
+          ) + 1,
+        ),
       ),
       allowed_states: ["requested", "offered", "waiting"],
     });

@@ -52,6 +52,37 @@ def test_v3_request_accepts_only_summaries_and_a_normalized_continuation() -> No
     with pytest.raises(ProtocolError, match="unknown|secret"):
         parse_request(value)
 
+
+def test_v3_continuation_allows_typed_resource_tokens_but_rejects_credentials() -> None:
+    value = valid_request_v3()
+    value["continuation"] = {
+        "request": {
+            "invocation_id": "invocation-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "1.0.0",
+            "input": {"title": "项目需求"},
+            "reason": "创建团队文档",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "invocation-1",
+            "auxiliary_handoff_id": "handoff-capability-1",
+            "candidate": {
+                "citizen_id": "citizen-feishu",
+                "endpoint_id": "endpoint-feishu",
+                "capability_id": "feishu.document.create",
+                "capability_version": "1.0.0",
+                "contract_digest": "sha256:" + "a" * 64,
+            },
+            "data": {"document_token": "doc-1"},
+            "artifacts": [{"uri": "feishu://docx/doc-1"}],
+        },
+    }
+    assert parse_request(value).continuation is not None
+    value["continuation"]["result"]["data"]["access_token"] = "forbidden"
+    with pytest.raises(ProtocolError, match="secret"):
+        parse_request(value)
+
     value = valid_request_v3()
     value["available_capabilities"][0]["folder_token"] = "forbidden"
     with pytest.raises(ProtocolError, match="unknown|secret"):

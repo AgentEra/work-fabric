@@ -11,6 +11,7 @@ export interface FakeOpenAiCompatibleServer {
 
 export interface FakeOpenAiCompatibleServerOptions {
   readonly structuredOutput: Record<string, unknown>;
+  readonly structuredOutputs?: readonly Record<string, unknown>[];
   readonly delayMs?: number;
 }
 
@@ -63,6 +64,9 @@ export async function startFakeOpenAiCompatibleServer(
       if (!response.writableEnded) abortedResponses += 1;
     });
     if (options.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
+    const output = options.structuredOutputs?.[
+      Math.min(requests.length - 1, options.structuredOutputs.length - 1)
+    ] ?? options.structuredOutput;
     const event = JSON.stringify({
       id: "chatcmpl-work-fabric-test",
       object: "chat.completion",
@@ -70,7 +74,7 @@ export async function startFakeOpenAiCompatibleServer(
       model: "fake-work-fabric-model",
       choices: [{
         index: 0,
-        delta: { role: "assistant", content: JSON.stringify(options.structuredOutput) },
+        delta: { role: "assistant", content: JSON.stringify(output) },
         finish_reason: null,
       }],
     });

@@ -70,6 +70,7 @@ export async function runCapabilityContinuationLoop(
   validateLimits(input.limits);
   const now = input.now ?? (() => new Date().toISOString());
   const invocationIds = new Set<string>();
+  let progressSequence = 0;
   let continuation = null;
   const availableCapabilities = validateRuntimeCapabilitySummaries(
     await input.disclosure.list(
@@ -85,11 +86,29 @@ export async function runCapabilityContinuationLoop(
         input.task.handoff_id,
       );
     }
+    let turnProgressSequence = 0;
+    const publishProgress = async (update: RuntimeProgress): Promise<void> => {
+      if (
+        !Number.isSafeInteger(update.sequence) ||
+        update.sequence <= turnProgressSequence
+      ) {
+        throw new AgentRuntimeHostError(
+          "invalid_turn_progress_sequence",
+          input.task.handoff_id,
+        );
+      }
+      turnProgressSequence = update.sequence;
+      progressSequence += 1;
+      await input.progress({
+        ...update,
+        sequence: progressSequence,
+      });
+    };
     const turn = validateRuntimeDriverTurn(await input.driver.executeTurn(
       input.task,
       availableCapabilities,
       continuation,
-      input.progress,
+      publishProgress,
       input.signal,
     ));
     if (turn.kind === "final") return turn.response;
