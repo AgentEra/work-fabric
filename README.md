@@ -242,6 +242,37 @@ Memory 和 SQLite 已进入 `service-node` 组合层，统一 HTTP 与 TypeScrip
 的一个来源，不是动态能力事实库。完整规则、API 和 SDK 示例见
 [Network Citizen 架构与接入](docs/architecture/network-citizens.md)。
 
+## Agent 能力调用与 Feishu Provider
+
+阶段 11 已把 Agent 的能力请求接入同一条 Handoff 网络，而没有把工具调用
+塞进 Fabric Core。能力感知 Agent 从 Citizen Catalog 渐进发现声明并读取
+完整 Contract；独立 Authority Provider 下发更窄授权后，
+`@work-fabric/agent-capability-runtime` 创建并显式解析一个辅助 Handoff。
+原始 Handoff 的责任仍在 Agent，只有辅助 Handoff 由能力 Provider 接受。
+
+```text
+Daily Assistant（decision-body）
+  -> Catalog + Contract + Authority
+  -> auxiliary Capability Handoff
+  -> Feishu Provider（capability-provider）
+  -> typed facts / stable error
+  -> Agent continuation
+  -> Agent-authored original Result
+  -> Feishu Channel
+```
+
+`@work-fabric/capability-provider-runtime` 把通用 Capability Executor 接到
+Handoff Host；`@work-fabric/provider-feishu` 独立拥有飞书消息和简单文档
+CRUD/追加、OpenAPI、幂等、资源所有权与稳定错误；文档上下文作为另一个
+`context-provider` 注册。删除只允许同租户 Provider 自己创建的文档，并通过
+`@work-fabric/governance-confirmation` 消费绑定人、文档、输入摘要和过期时间
+的单次确认凭证。
+
+Provider 只返回类型化事实，不写用户文案；助理 Agent 独占最终语义回复；
+Channel 只运输 canonical Result。Agent 看不到飞书密钥和原始厂商响应，
+Core、Host 与 Catalog 均不依赖飞书实现。完整边界与接入说明见
+[飞书能力 Provider 指南](docs/guides/feishu-capability-provider.md)。
+
 ## Feishu Connector
 
 阶段 4B 已提供第一个具体协作系统连接器，同时把可复用的 Connector 边界从飞书实现中拆出：
@@ -301,7 +332,7 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 
 ## 当前状态
 
-项目已经完成阶段 1–10：从 WFPP/Exchange Core、生产持久化、HTTP/SDK、Endpoint/Agent、Connector/飞书、查询运维 Console、集群与 Federation，到配置、Admission 和 Network Citizen 动态目录基础。Human、Agent、Connector、Console 和开放服务共享同一个公共协议与权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
+项目已经完成阶段 1–11：从 WFPP/Exchange Core、生产持久化、HTTP/SDK、Endpoint/Agent、Connector/飞书、查询运维 Console、集群与 Federation，到配置、Admission、Network Citizen 动态目录和 Agent 到独立 Capability Provider 的辅助 Handoff 闭环。Human、Agent、Connector、Console 和开放服务共享同一个公共协议与权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
 
 当前阶段路线：
 
@@ -321,6 +352,7 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 | 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
 | 9 | Collaboration Admission 与稳定参与方表示 | 已完成 |
 | 10 | Network Citizen 动态目录、租约、HTTP/SDK 与 Runtime 基础 | 已完成 |
+| 11 | Agent 能力调用与 Feishu Capability/Context Provider | 已完成 |
 
 阶段严格按顺序推进。Console 没有进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都通过标准 API 提交恢复意图。
 
@@ -343,6 +375,8 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 - Network Citizen Directory 保存按责任分类的模块注册、单活 session、动态声明和 schema digest 绑定；Actor type 与 Citizen kind 正交，声明不授予调用 Authority。
 - Network Citizen 的配置只 Provision 信任与安全上限；当前能力以 Runtime session 为真，并通过 registration version、fencing token 和 declaration CAS 防止旧实例覆盖新实例。
 - Network Citizen 渐进披露按列表、描述、声明摘要和完整 Contract 分别授权；数据库、Broker、transport、SDK、YAML 和缓存等基础设施本身不注册为 Citizen。
+- Agent 能力调用以辅助 Handoff 表达并持久恢复；原 Handoff 不 Transfer，Provider 只返回类型化事实，最终用户文案只由原 Agent 产生。
+- Feishu Capability/Context Provider 分别注册独立 Citizen；OpenAPI、凭据、幂等、文档所有权、revision 和确认消费均封装在各自模块，不进入 Core、Agent Host 或 Channel。
 - Agent Gateway 只依赖公开 TypeScript SDK，处理 Session 续租、Inbox Partition 刷新、SSE 汇聚和有界背压；Agent Runtime、Resolver、模型、工具与执行回调都在包外。
 - Endpoint Inbox 是可重建的路由投影，不复制 Context、Prompt、结果正文、凭据或外部执行状态；Delivery Ack 与 Handoff Accept 保持独立。
 - Connector ingress 是有界、可保留清理的操作缓冲，不是新的业务真相库；Webhook/长连接只 durable accept，映射 worker 才通过公开 SDK 提交命令。
@@ -367,7 +401,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-阶段 1–10 的当前架构闭环已经完成。下一子项目是在 Agent Runtime 增加技术中立的 `CapabilityInvocationPort`，再以独立 Feishu Capability Provider 实现消息与文档能力；具体厂商调用不会进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Connector 或 A2A/MCP Binding 也可以独立扩展，但不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+阶段 1–11 的当前架构闭环已经完成，包括技术中立的 Agent `CapabilityInvocationPort` 和独立 Feishu Capability/Context Provider；具体厂商调用仍未进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Connector 或 A2A/MCP Binding 可以独立扩展，但不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 
@@ -382,6 +416,8 @@ npm run verify:exchange
 - [TypeScript SDK](packages/sdk-typescript/README.md)
 - [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)
 - [Network Citizen 架构与接入](docs/architecture/network-citizens.md)
+- [飞书 Capability / Context Provider](docs/guides/feishu-capability-provider.md)
+- [Agently Daily Assistant Runtime](docs/guides/agently-agent-runtime.md)
 - [Operations、审计与恢复](docs/operations.md)
 - [SQLite 本地部署](docs/sqlite-deployment.md)
 - [Read-mostly Console](docs/console.md)

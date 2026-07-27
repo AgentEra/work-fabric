@@ -440,6 +440,23 @@ ContextItem 可以是：
 
 知识检索、向量搜索和摘要模型可以作为外部服务接入，Context Exchange 不绑定具体实现。
 
+### 9.1 Agent 与 Capability Provider 的辅助交接
+
+Agent 的结构化能力请求仍使用 Handoff，不成为 Host 内部工具调用。Agent
+Runtime 通过 Catalog 渐进发现、完整 Contract、Schema digest 和独立
+Authority 后，创建 `external_resolution` 的辅助 Handoff，并显式绑定所选
+Provider Endpoint。原始 Handoff 的 responsible Actor 不改变。
+
+Provider 通过普通 Endpoint Delivery/Ack/Accept 接收辅助 Handoff，在自己的
+边界执行外部操作并返回类型化事实。Agent 对这些事实继续推理，最终由 Agent
+为原始 Handoff 生成面向人的 Result。Provider 不写对话文案，Channel 不解释
+Provider 状态，Fabric Core 不执行厂商操作。调用状态、Provider 状态、Agent
+Runtime 状态分别持久化，可独立重试和恢复。
+
+首个 Feishu 实现把动作和文档 Context 注册为两个 Citizen；飞书凭据、OpenAPI、
+幂等、文档所有权和 revision 完全封装在 Provider，删除确认由独立 Governance
+模块负责。该实现验证模块可以新增而无需修改 Exchange Core。
+
 ## 10. Identity、Delegation 与 Trust
 
 - 所有写操作关联 Principal、Actor 和 Endpoint。
@@ -830,5 +847,6 @@ flowchart LR
 | 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
 | 9 | Collaboration Admission、稳定参与方绑定与短时表示 | 已完成 |
 | 10 | Network Citizen 动态目录、租约、渐进披露与 Runtime 基础 | 已完成 |
+| 11 | Agent 能力调用与 Feishu Capability/Context Provider | 已完成 |
 
-阶段 1–10 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 建立模块公民分类、动态声明、租约目录和渐进披露基础。下一子项目增加 Agent `CapabilityInvocationPort` 和独立 Provider，具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–11 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 建立模块公民分类、动态声明、租约目录和渐进披露基础；11 通过辅助 Handoff 完成 Agent 到独立 Capability Provider 的类型化调用闭环。具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。

@@ -1,6 +1,6 @@
 # Work Fabric Network Citizens and Feishu Capability Provider Design
 
-**Status:** Design complete, awaiting written-spec review
+**Status:** Implemented and verified
 **Date:** 2026-07-27
 
 ## 1. Purpose

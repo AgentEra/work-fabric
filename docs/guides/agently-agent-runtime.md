@@ -134,3 +134,23 @@ Submit one `information.synthesis` Handoff, confirm Status and Result, then remo
 | Unexpected workspace files | Workspace paths are isolated by tenant and Handoff. Remove only the affected Runtime workspace after preserving required evidence. |
 
 The future Memory Provider is deliberately not implemented here. It must remain separate from Runtime State: Runtime State stores Delivery idempotency, runs and result recovery, while a future memory system needs its own authorization, retention and provenance design.
+
+## Capability invocation
+
+The capability-aware protocol is opt-in. With
+`service.capability_invocation.enabled: true`, the composition root must inject
+an `InvocationAuthorityProvider`, immutable Schema registry/validator and
+auxiliary-Handoff waiter, and the Driver must implement `executeTurn`.
+One-shot protocol-v1 Drivers keep their existing path.
+
+The Host permits only configured namespaces and at most four sequential
+invocations. Each call discovers a current Citizen declaration, freezes the
+Citizen/Endpoint/version/Contract digest, creates a standard auxiliary Handoff
+and persists its lifecycle. The Daily Assistant remains responsible for the
+original Handoff while waiting and alone authors the final response. Provider
+facts and errors are untrusted continuation data, not instructions.
+
+For Feishu message/document operations, use the independent Provider described
+in [飞书 Capability / Context Provider](feishu-capability-provider.md). The
+Agent Runtime must never receive Feishu credentials or import the Feishu
+OpenAPI backend.

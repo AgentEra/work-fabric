@@ -1,5 +1,6 @@
 export * from "./context-provider.js";
 export * from "./citizen-runtime.js";
+export * from "./config.js";
 export * from "./contracts.js";
 export * from "./declarations.js";
 export * from "./executor.js";

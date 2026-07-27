@@ -274,8 +274,34 @@ Citizen Catalog 回答“网络里当前有哪些实体和声明”；Handoff �
 移交”；Capability invocation 回答“已获授权的 Provider 如何接收一个具体
 执行请求”。三者不能合并成内部自动化引擎。
 
-基础阶段已经完成 Catalog、租约、渐进披露、HTTP/SDK 和 Runtime 基类。下一
-子项目是在 Agent Runtime 增加技术中立的 `CapabilityInvocationPort`，把
-Agent 产生的结构化调用意图转换成辅助 Capability Handoff。具体 Feishu
-OpenAPI 调用仍由独立 Feishu Capability Provider 完成，不进入 Core、Agent
-Host 或 Channel。
+Catalog、租约、渐进披露、HTTP/SDK、Runtime 基类和技术中立的
+`CapabilityInvocationPort` 均已完成。Agent 产生的结构化调用意图会转换为
+标准辅助 Capability Handoff；所选 Citizen、Endpoint、版本、Contract
+digest 和 Schema digest 对本次调用冻结。原始 Agent 不 Transfer 自己的
+Handoff，只等待辅助 Handoff 的类型化终态后继续推理。
+
+首个实现是独立 Feishu Capability Provider，动态声明
+`feishu.message.send` 与 `feishu.document.create/read/update/append/delete`。
+同一部署把 `feishu.document.context` 作为另一个 `context-provider` 发布。
+Provider 内部拥有 OpenAPI、幂等执行、资源所有权、revision 校验与错误映射；
+Agent、Core 和 Channel 看不到密钥或厂商响应。删除需由独立 Governance
+确认服务提供并原子消费单次 proof。
+
+`capability-provider` 返回事实，不生成对话答复；`decision-body` 解释事实并
+独占最终文案；`channel` 只投递 canonical Result。一个进程可以共同托管这些
+Runtime，但不会合并 Citizen 身份、Authority、状态或职责。
+
+## 9. 新模块接入清单
+
+每个进入网络的新模块必须在设计、实现和运维文档中明确：
+
+1. 唯一 Citizen kind，以及与 Actor type 分离的 Principal/Actor/Endpoint。
+2. Runtime 动态声明、版本、Schema URI/digest、风险和确认要求。
+3. 发现、完整 Contract、调用、资源和副作用分别需要的 Authority。
+4. 接受哪类 Handoff、何时承担责任、如何产生类型化终态。
+5. 模块自己拥有的状态、幂等键、租约、fencing 与重启恢复。
+6. 密钥边界，以及日志、事件、Result、Console 中禁止出现的数据。
+7. 健康、draining、关闭、外部限流和 outcome-unknown 行为。
+8. 结构化事件、审计引用和低基数可观测性，不记录业务内容或凭据。
+9. 对应 conformance、失败路径、跨模块 E2E 和真实服务的 opt-in smoke test。
+10. 模块内部闭环的职责，以及明确不承担的决策、语义或执行职责。

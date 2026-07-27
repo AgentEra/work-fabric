@@ -20,6 +20,32 @@ and repository verification are implemented.
 | 8 | Provider-backed configuration and collaboration-channel plugin runtime | Complete |
 | 9 | Source-neutral Collaboration Admission and participant representation | Complete |
 | 10 | Network Citizen catalog, leased declarations and runtime foundation | Complete |
+| 11 | Agent capability invocation and Feishu Capability/Context Provider | Complete |
+
+## Phase 11 completion boundary
+
+Phase 11 adds a technology-neutral, persisted Agent capability-invocation
+loop. A capability-aware Driver may request at most four sequential calls.
+The Runtime discovers a dynamically registered Citizen, freezes the complete
+Contract and schema digests, obtains a down-scoped grant, creates an auxiliary
+Handoff using standard `external_resolution`, waits through the public query
+surface, validates the typed Provider Result, and returns inert facts to the
+next Agent turn. Protocol v1 one-shot Drivers remain unchanged.
+
+The reference Feishu deployment contributes two independent Citizens:
+`capability-provider` for one-target text send and bounded simple Docx
+create/read/update/append/delete, and `context-provider` for authorized bounded
+document context. OpenAPI access, credentials, retries, stable error mapping,
+idempotency, document ownership, revisions and Memory/SQLite state close
+inside the Provider. Destructive delete additionally consumes a durable,
+single-use confirmation proof bound to tenant, Human Actor, operation,
+document and normalized input.
+
+The Provider returns typed facts only. The original Agent keeps responsibility
+for the original Handoff and alone authors the final user-facing Result; the
+Channel only transports that Result. No transfer, target ranking, workflow
+automation, model/tool execution, vendor credential, or Feishu SDK enters
+Exchange Core, Catalog or Agent Host.
 
 ## Phase 10 completion boundary
 
@@ -51,9 +77,8 @@ must close its own responsibility and exchange only protocol facts through
 stable Contracts or narrow SPIs. See
 [Network Citizen architecture and integration](architecture/network-citizens.md).
 
-The next subproject adds an Agent-side technology-neutral
-`CapabilityInvocationPort`; vendor operations remain in independent Capability
-Providers and do not enter Core or Agent Host.
+The Agent-side technology-neutral `CapabilityInvocationPort` and first
+independent Feishu Capability/Context Provider are complete in Phase 11.
 
 ## Phase 9 completion boundary
 

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 
 import { MemoryAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-memory";
 import {
@@ -31,7 +32,7 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
       endpoint_id: "endpoint-feishu-actions",
       capability_id: declaration.declaration_id,
       capability_version: declaration.version,
-      contract_digest: `sha256:${"a".repeat(64)}` as const,
+      contract_digest: canonicalCitizenDigest(declaration),
     };
     const contract: BoundCapabilityContract = {
       candidate,
@@ -101,6 +102,7 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
           extensions: {
             "workfabric.dev/capability_authority": {
               original_handoff_id: request.original_handoff_id,
+              invocation_id: request.invocation_id,
               initiating_actor_id: "human-1",
               capability_version: candidate.capability_version,
               contract_digest: candidate.contract_digest,

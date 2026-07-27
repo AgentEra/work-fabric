@@ -1,10 +1,23 @@
 import { describe, expect, it, vi } from "vitest";
+import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 
 import type { RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
 
 import { CapabilityProviderDriver } from "../src/index.js";
 
-const digest = `sha256:${"a".repeat(64)}` as const;
+const declaration = {
+  declaration_id: "feishu.message.send",
+  declaration_kind: "capability" as const,
+  version: "1.0.0",
+  name: "Send message",
+  description: "Send one message.",
+  interaction_modes: ["asynchronous" as const],
+  risk: "medium" as const,
+  confirmation: "none" as const,
+  constraints: {},
+  extensions: {},
+};
+const digest = canonicalCitizenDigest(declaration);
 
 function task(): RuntimeTaskPackage {
   return {
@@ -38,6 +51,7 @@ function task(): RuntimeTaskPackage {
       extensions: {
         "workfabric.dev/capability_authority": {
           original_handoff_id: "handoff-original",
+          invocation_id: "invocation-1",
           initiating_actor_id: "human-1",
           capability_version: "1.0.0",
           contract_digest: digest,
@@ -66,7 +80,7 @@ describe("CapabilityProviderDriver", () => {
       citizen_id: "feishu-actions",
       endpoint_id: "endpoint-feishu-actions",
       capabilities: ["feishu.message.send"],
-      executor: { describeCapabilities: () => [], execute },
+      executor: { describeCapabilities: () => [declaration], execute },
     });
 
     const result = await driver.execute(
@@ -76,7 +90,7 @@ describe("CapabilityProviderDriver", () => {
     );
 
     expect(execute).toHaveBeenCalledWith({
-      invocation_id: "handoff-aux",
+      invocation_id: "invocation-1",
       capability_id: "feishu.message.send",
       capability_version: "1.0.0",
       contract_digest: digest,
@@ -110,7 +124,7 @@ describe("CapabilityProviderDriver", () => {
       citizen_id: "feishu-actions",
       endpoint_id: "endpoint-feishu-actions",
       capabilities: ["feishu.message.send"],
-      executor: { describeCapabilities: () => [], execute },
+      executor: { describeCapabilities: () => [declaration], execute },
     });
     const valid = task();
     const invalid = {
@@ -126,6 +140,39 @@ describe("CapabilityProviderDriver", () => {
       async () => undefined,
       new AbortController().signal,
     )).rejects.toThrow(/authority/i);
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("rejects a stale or changed Contract before executing", async () => {
+    const execute = vi.fn();
+    const driver = new CapabilityProviderDriver({
+      citizen_id: "feishu-actions",
+      endpoint_id: "endpoint-feishu-actions",
+      capabilities: ["feishu.message.send"],
+      executor: { describeCapabilities: () => [declaration], execute },
+    });
+    const valid = task();
+    const scope = valid.authority_scope as {
+      extensions: Record<string, Record<string, unknown>>;
+    };
+    const changed = {
+      ...valid,
+      authority_scope: {
+        ...valid.authority_scope,
+        extensions: {
+          "workfabric.dev/capability_authority": {
+            ...scope.extensions["workfabric.dev/capability_authority"],
+            contract_digest: `sha256:${"f".repeat(64)}`,
+          },
+        },
+      },
+    };
+
+    await expect(driver.execute(
+      changed,
+      async () => undefined,
+      new AbortController().signal,
+    )).rejects.toThrow(/Contract/i);
     expect(execute).not.toHaveBeenCalled();
   });
 });

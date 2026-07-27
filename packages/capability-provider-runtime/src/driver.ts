@@ -10,6 +10,7 @@ import type {
   CapabilityExecutor,
   CitizenJsonObject,
 } from "@work-fabric/network-citizen-spi";
+import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 
 export interface CapabilityProviderDriverOptions {
   readonly citizen_id: string;
@@ -50,6 +51,7 @@ function requestInput(task: RuntimeTaskPackage): CitizenJsonObject {
 function authority(task: RuntimeTaskPackage): {
   readonly capability_version: string;
   readonly contract_digest: `sha256:${string}`;
+  readonly invocation_id: string;
   readonly evidence: CitizenJsonObject;
 } {
   const scope = object(task.authority_scope, "capability Authority");
@@ -70,6 +72,10 @@ function authority(task: RuntimeTaskPackage): {
     throw new TypeError("capability Authority contract digest is invalid");
   }
   return {
+    invocation_id: nonEmpty(
+      evidence.invocation_id,
+      "capability Authority invocation",
+    ),
     capability_version: version,
     contract_digest: digest as `sha256:${string}`,
     evidence: evidence as CitizenJsonObject,
@@ -100,8 +106,16 @@ export class CapabilityProviderDriver implements AgentRuntimeDriver {
       !this.options.capabilities.includes(task.capability_id)
     ) throw new TypeError("capability is not provided by this runtime");
     const bound = authority(task);
+    const declaration = this.options.executor.describeCapabilities().find(
+      (item) => item.declaration_id === task.capability_id,
+    );
+    if (
+      declaration === undefined ||
+      declaration.version !== bound.capability_version ||
+      canonicalCitizenDigest(declaration) !== bound.contract_digest
+    ) throw new TypeError("capability bound Contract is unavailable");
     const request: CapabilityExecutionRequest = {
-      invocation_id: task.handoff_id,
+      invocation_id: bound.invocation_id,
       capability_id: task.capability_id,
       capability_version: bound.capability_version,
       contract_digest: bound.contract_digest,
