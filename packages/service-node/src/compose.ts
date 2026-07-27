@@ -43,6 +43,8 @@ import type {
 } from "@work-fabric/admission-spi";
 
 import { MemoryContextRepository } from "@work-fabric/adapter-context-memory";
+import { MemoryNetworkCitizenStore } from "@work-fabric/adapter-network-citizen-memory";
+import { SqliteNetworkCitizenStore } from "@work-fabric/adapter-network-citizen-sqlite";
 import {
   MemoryEndpointDirectoryStore,
   MemoryEndpointInboxStore,
@@ -94,6 +96,8 @@ import {
   DirectoryTargetEligibilityVerifier,
   EndpointDirectoryService,
 } from "@work-fabric/endpoint-directory";
+import { NetworkCitizenDirectoryService } from "@work-fabric/network-citizen-directory";
+import type { NetworkCitizenStore } from "@work-fabric/network-citizen-spi";
 import {
   ClaimLeaseExpiryRunner,
   CursorPullService,
@@ -199,6 +203,12 @@ export interface NodeServiceCompositionOptions {
   readonly postgres_storage?: NodeStorageComposition;
   /** Deployment-owned generator; useful for deterministic integration profiles. */
   readonly ids?: IdGenerator;
+  /**
+   * Deployment-owned Citizen persistence adapter. Memory and SQLite profiles
+   * have native defaults; external storage profiles inject this port to expose
+   * the Citizen catalog without coupling service-node to a vendor database.
+   */
+  readonly network_citizen_store?: NetworkCitizenStore;
   /** Deployment-owned clock; useful for deterministic integration profiles. */
   readonly clock?: Clock;
   readonly cluster_worker?: NodeClusterWorkerDependencies;
@@ -686,6 +696,14 @@ export async function composeNodeService(
       };
   const ownedSqlite = config.storage_profile === "sqlite-local" ? storage.sqlite : null;
   try {
+  const networkCitizenStore = options.network_citizen_store
+    ?? (config.storage_profile === "memory-demo"
+      ? new MemoryNetworkCitizenStore()
+      : config.storage_profile === "sqlite-local" && storage.sqlite !== null
+        ? new SqliteNetworkCitizenStore({
+            database: storage.sqlite.database,
+          })
+        : undefined);
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
   if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
     throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
@@ -1065,6 +1083,24 @@ export async function composeNodeService(
       max_page_limit: 100,
     },
   });
+  const networkCitizenDirectory = networkCitizenStore === undefined
+    ? undefined
+    : new NetworkCitizenDirectoryService({
+        store: networkCitizenStore,
+        clock,
+        ids: {
+          sessionId: () => `citizen_session_${randomUUID()}`,
+        },
+        limits: {
+          min_lease_seconds: 30,
+          default_lease_seconds: 60,
+          max_lease_seconds: 3_600,
+          renew_ahead_seconds: 10,
+          max_declarations: 100,
+          default_page_limit: 25,
+          max_page_limit: 100,
+        },
+      });
   const endpointInbox = new EndpointInboxQueryService({
     directory: storage.endpointDirectory,
     inbox: storage.endpointInbox,
@@ -1097,6 +1133,9 @@ export async function composeNodeService(
     recovery,
     endpoint_directory: endpointDirectory,
     endpoint_inbox: endpointInbox,
+    ...(networkCitizenDirectory === undefined
+      ? {}
+      : { citizen_directory: networkCitizenDirectory }),
     delivery,
     feishu_webhook: {
       ingress: storage.connectorIngress,
