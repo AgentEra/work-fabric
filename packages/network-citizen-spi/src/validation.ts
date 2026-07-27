@@ -5,6 +5,7 @@ import {
   type CitizenDeclaration,
   type CitizenDeclarationKind,
   type CitizenIdentity,
+  type CitizenProvisioning,
   type CitizenRisk,
   type CitizenSchemaReference,
   type NetworkCitizenDescriptor,
@@ -238,4 +239,65 @@ export function validateCitizenDeclarations(
   const ids = declarations.map((item) => item.declaration_id);
   if (new Set(ids).size !== ids.length) invalid("declarations", "must contain unique declaration_id values");
   return Object.freeze(declarations);
+}
+
+export function validateCitizenProvisioning(
+  value: unknown,
+): CitizenProvisioning {
+  const source = object(value, "provisioning", [
+    "citizen_id",
+    "citizen_kind",
+    "principal_id",
+    "allowed_actor",
+    "allowed_endpoint_id",
+    "allowed_declaration_namespaces",
+    "maximum_risk",
+    "administrative_state",
+    "registration_version",
+  ]);
+  const allowedActor = source.allowed_actor === undefined
+    ? undefined
+    : actor(source.allowed_actor, "provisioning.allowed_actor");
+  const allowedEndpointId = source.allowed_endpoint_id === undefined
+    ? undefined
+    : string(
+        source.allowed_endpoint_id,
+        "provisioning.allowed_endpoint_id",
+        OPAQUE_ID,
+      );
+  if (allowedEndpointId !== undefined && allowedActor === undefined) {
+    invalid("provisioning.allowed_endpoint_id", "requires allowed_actor");
+  }
+  if (
+    !Number.isSafeInteger(source.registration_version) ||
+    (source.registration_version as number) <= 0
+  ) {
+    invalid("provisioning.registration_version", "is invalid");
+  }
+  return Object.freeze({
+    citizen_id: string(source.citizen_id, "provisioning.citizen_id", CITIZEN_ID, 128),
+    citizen_kind: assertNetworkCitizenKind(source.citizen_kind),
+    principal_id: string(source.principal_id, "provisioning.principal_id", OPAQUE_ID),
+    ...(allowedActor === undefined ? {} : { allowed_actor: allowedActor }),
+    ...(allowedEndpointId === undefined
+      ? {}
+      : { allowed_endpoint_id: allowedEndpointId }),
+    allowed_declaration_namespaces: uniqueStrings(
+      source.allowed_declaration_namespaces,
+      "provisioning.allowed_declaration_namespaces",
+      (item, path) => string(item, path, /^[a-z][a-z0-9_]*$/, 64),
+      64,
+    ),
+    maximum_risk: oneOf(
+      source.maximum_risk,
+      "provisioning.maximum_risk",
+      ["low", "medium", "high", "destructive"] as const,
+    ),
+    administrative_state: oneOf(
+      source.administrative_state,
+      "provisioning.administrative_state",
+      ["enabled", "disabled"] as const,
+    ),
+    registration_version: source.registration_version as number,
+  });
 }

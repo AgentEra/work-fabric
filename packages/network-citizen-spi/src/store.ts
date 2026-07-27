@@ -120,6 +120,11 @@ export interface CitizenDiscoveryPage {
   readonly next_cursor?: string;
 }
 
+export interface CitizenSchemaDigestBinding {
+  readonly uri: string;
+  readonly digest: `sha256:${string}`;
+}
+
 export type CitizenStoreErrorCode =
   | "registration_version_conflict"
   | "immutable_binding"
@@ -150,6 +155,7 @@ export interface NetworkCitizenStore {
   closeSession(input: CloseCitizenSession): Promise<StoredCitizenSession>;
   getSession(tenantId: string, citizenId: string, sessionId: string): Promise<StoredCitizenSession | null>;
   getSessionByClientId(tenantId: string, citizenId: string, clientSessionId: string): Promise<StoredCitizenSession | null>;
+  bindSchemaDigests(tenantId: string, bindings: readonly CitizenSchemaDigestBinding[]): Promise<void>;
   getProjectedCitizen(tenantId: string, citizenId: string, now: string): Promise<ProjectedCitizen | null>;
   discover(input: CitizenDiscoveryQuery): Promise<CitizenDiscoveryPage>;
 }
