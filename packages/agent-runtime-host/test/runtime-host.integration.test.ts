@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { MemoryAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-memory";
-import type { AgentRuntimeDriver, RuntimeDriverResult } from "@work-fabric/agent-runtime-spi";
+import type {
+  AgentRuntimeDriver,
+  CapabilityAwareAgentRuntimeDriver,
+  CapabilityInvocationPort,
+  RuntimeDriverResult,
+  RuntimeTaskPackage,
+} from "@work-fabric/agent-runtime-spi";
 import type { IncomingHandoff } from "@work-fabric/agent-gateway";
 import type { HandoffReadModel, OperationResult, ProtocolEvent } from "@work-fabric/sdk-typescript";
 
@@ -34,6 +40,154 @@ const config: AgentRuntimeHostConfig = {
 };
 
 describe("AgentRuntimeHost", () => {
+  it("keeps the original Handoff responsibility while an Agent uses an injected capability port", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    const legacyExecute = vi.fn(async () => result());
+    const invoke = vi.fn(async (request) => ({
+      outcome: "succeeded" as const,
+      invocation_id: request.invocation_id,
+      auxiliary_handoff_id: "handoff-auxiliary-1",
+      candidate: {
+        citizen_id: "citizen-feishu",
+        endpoint_id: "endpoint-feishu",
+        capability_id: request.capability_id,
+        capability_version: "1.0.0",
+        contract_digest:
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" as const,
+      },
+      data: { document_id: "doc-1" },
+      artifacts: [],
+    }));
+    const invocations: CapabilityInvocationPort = {
+      discover: async () => [],
+      invoke,
+    };
+    let turn = 0;
+    const turnDriver: CapabilityAwareAgentRuntimeDriver = {
+      executeTurn: vi.fn(async () => {
+        turn += 1;
+        return turn === 1
+          ? {
+              kind: "capability_request" as const,
+              request: {
+                invocation_id: "invocation-1",
+                capability_id: "feishu.document.create",
+                version_constraint: "1.0.0",
+                input: { title: "项目需求" },
+                reason: "创建团队文档",
+              },
+            }
+          : { kind: "final" as const, response: {
+              summary: [{
+                kind: "text",
+                media_type: "text/plain",
+                text: "已创建《项目需求》文档。",
+              }],
+              artifacts: [],
+              evidence: [],
+              extensions: {},
+            } };
+      }),
+    };
+    const returnResult = vi.fn(async (_payload: unknown) => operation(4));
+    const handoffs = {
+      accept: vi.fn(async () => operation(2)),
+      decline: vi.fn(async () => operation(2)),
+      reportStatus: vi.fn(async () => operation(3)),
+      returnResult,
+    };
+    const loadedTask: RuntimeTaskPackage = {
+      tenant_id: "tenant-1",
+      handoff_id: "handoff-1",
+      thread_id: "thread-1",
+      stream_version: 1,
+      role: {
+        role_id: "daily-assistant",
+        version: 1,
+        display_name: "团队共享日常助理",
+        description: "协助团队处理日常工作",
+        capability_ids: ["collaboration.assistance"],
+      },
+      capability_id: "collaboration.assistance",
+      intent: [],
+      context_reference: null,
+      authority_scope: {},
+      acceptance_criteria: [],
+      priority: "normal",
+      accept_by: "2026-07-26T01:00:00.000Z",
+      result_due_at: "2026-07-26T02:00:00.000Z",
+      workspace_path: "/tmp/runtime-workspaces/handoff-1",
+    };
+    const host = new AgentRuntimeHost({
+      config,
+      session: {
+        handoffs: handoffs as never,
+        incoming: async function* () {},
+        close: async () => undefined,
+        session_id: "session-1",
+        closed: Promise.resolve({ reason: "closed" as const }),
+      },
+      state,
+      driver: {
+        manifest: {
+          driver_type: "legacy-test",
+          protocol_version: "1",
+          capability_ids: ["information.synthesis"],
+        },
+        execute: legacyExecute,
+      },
+      turn_driver: turnDriver,
+      capability_invocations: invocations,
+      capability_limits: {
+        max_invocations_per_handoff: 4,
+        allowed_namespaces: ["feishu."],
+      },
+      packageLoader: {
+        load: vi.fn(async () => ({
+          snapshot: snapshot(),
+          events: [event()],
+          task: loadedTask,
+        })),
+      },
+      policy: { decide: () => ({ kind: "accept" as const }) },
+      queries: { getHandoff: vi.fn(async () => snapshot()) },
+      now,
+    });
+    const incoming: IncomingHandoff = {
+      partition_id: "handoff:handoff-1",
+      delivery: {
+        delivery_id: "delivery-capability",
+        subscription_id: "subscription-1",
+        attempt: 1,
+        events: [event()],
+        next_cursor: "cursor-1",
+        delivered_at: now(),
+        visibility_expires_at: "2026-07-26T00:01:00.000Z",
+      },
+      handoff: snapshot(),
+      acknowledgeSignal: vi.fn(async () => ({
+        kind: "acknowledged",
+        cursor: "cursor-1",
+      } as const)),
+    };
+
+    await host.handle(incoming);
+
+    expect(legacyExecute).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(returnResult.mock.calls[0]?.[0]).toMatchObject({
+      handoff_id: "handoff-1",
+      result: {
+        summary: [{
+          text: "已创建《项目需求》文档。",
+        }],
+      },
+    });
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe(
+      "succeeded",
+    );
+  });
+
   it("persists Delivery before acknowledging and accepts before execution", async () => {
     const order: string[] = [];
     const state = new MemoryAgentRuntimeStateStore();

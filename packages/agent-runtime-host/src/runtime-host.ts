@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 
 import type {
+  CapabilityAwareAgentRuntimeDriver,
+  CapabilityInvocationPort,
   AgentRuntimeDriver,
   AgentRuntimeStateStore,
   RuntimeDriverResult,
@@ -12,6 +14,10 @@ import type { AgentEndpointSession, IncomingHandoff } from "@work-fabric/agent-g
 import type { HandoffReadModel, OperationResult, ProtocolEvent } from "@work-fabric/sdk-typescript";
 
 import { type AcceptanceDecision } from "./acceptance-policy.js";
+import {
+  runCapabilityContinuationLoop,
+  type CapabilityLoopLimits,
+} from "./capability-loop.js";
 import { AgentRuntimeHostError, invalid } from "./errors.js";
 import { HandoffPackageLoader, type RuntimeHandoffQueries } from "./handoff-package-loader.js";
 import { runtimeCommandKey, type RuntimeCommand } from "./idempotency.js";
@@ -46,6 +52,9 @@ export interface AgentRuntimeHostDependencies {
   readonly startSession?: () => Promise<AgentEndpointSession>;
   readonly state: AgentRuntimeStateStore;
   readonly driver: AgentRuntimeDriver;
+  readonly turn_driver?: CapabilityAwareAgentRuntimeDriver;
+  readonly capability_invocations?: CapabilityInvocationPort;
+  readonly capability_limits?: CapabilityLoopLimits;
   readonly packageLoader: Pick<HandoffPackageLoader, "load">;
   readonly policy: RuntimeAcceptancePolicy;
   readonly queries: Pick<RuntimeHandoffQueries, "getHandoff">;
@@ -131,6 +140,14 @@ export class AgentRuntimeHost {
   constructor(private readonly dependencies: AgentRuntimeHostDependencies) {
     this.validateConfig(dependencies.config);
     if (dependencies.session === undefined && dependencies.startSession === undefined) invalid("invalid_runtime_host", "session");
+    const capabilityParts = [
+      dependencies.turn_driver,
+      dependencies.capability_invocations,
+      dependencies.capability_limits,
+    ].filter((part) => part !== undefined).length;
+    if (capabilityParts !== 0 && capabilityParts !== 3) {
+      invalid("invalid_runtime_host", "capability_dependencies");
+    }
     this.session = dependencies.session ?? null;
     this.now = dependencies.now ?? (() => new Date().toISOString());
     this.closeGraceMs = dependencies.close_grace_ms ?? 10_000;
@@ -430,7 +447,27 @@ export class AgentRuntimeHost {
         if (!checkpointed) throw new AgentRuntimeHostError("run_fenced", handoffId);
         lastProgress = update.sequence;
       });
-      const result = await this.dependencies.driver.execute(loaded.task, (update) => coalescer!.push({ ...update, sequence: update.sequence + progressOffset }), combined);
+      const publishProgress = (update: RuntimeProgress) =>
+        coalescer!.push({
+          ...update,
+          sequence: update.sequence + progressOffset,
+        });
+      const result =
+        this.dependencies.turn_driver === undefined
+          ? await this.dependencies.driver.execute(
+              loaded.task,
+              publishProgress,
+              combined,
+            )
+          : await runCapabilityContinuationLoop({
+              task: loaded.task,
+              driver: this.dependencies.turn_driver,
+              invocations: this.dependencies.capability_invocations!,
+              limits: this.dependencies.capability_limits!,
+              progress: publishProgress,
+              signal: combined,
+              now: this.now,
+            });
       await coalescer.flush();
       // Validate before making the durable result-ready transition.
       resultPayload(handoffId, result);

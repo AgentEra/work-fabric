@@ -1,4 +1,5 @@
 export * from "./acceptance-policy.js";
+export * from "./capability-loop.js";
 export * from "./config.js";
 export * from "./configuration-loader.js";
 export * from "./errors.js";
