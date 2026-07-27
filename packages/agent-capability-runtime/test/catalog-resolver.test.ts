@@ -137,6 +137,67 @@ describe("CatalogCapabilityResolver", () => {
     })).rejects.toBe(denied);
   });
 
+  it("loads only the exact declaration digest frozen by discovery", async () => {
+    const resolver = new CatalogCapabilityResolver({
+      async list() {
+        return { items: [] };
+      },
+      async getDeclaration(citizenId: string) {
+        return {
+          citizen_id: citizenId,
+          citizen_kind: "capability-provider",
+          availability: "available",
+          declaration: {
+            ...declaration,
+            input_schema: {
+              uri: "https://work-fabric.example/schemas/create-input.json",
+              digest:
+                "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const,
+            },
+          },
+          declaration_version: 4,
+          fencing_token: 8,
+        };
+      },
+    });
+    const boundDeclaration = {
+      ...declaration,
+      input_schema: {
+        uri: "https://work-fabric.example/schemas/create-input.json",
+        digest:
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const,
+      },
+    };
+    const bound = await resolver.getBoundContract({
+      citizen_id: "provider-a",
+      endpoint_id: "endpoint-a",
+      capability_id: declaration.declaration_id,
+      capability_version: declaration.version,
+      contract_digest: canonicalCitizenDigest(boundDeclaration),
+    });
+
+    expect(bound).toEqual({
+      candidate: {
+        citizen_id: "provider-a",
+        endpoint_id: "endpoint-a",
+        capability_id: declaration.declaration_id,
+        capability_version: declaration.version,
+        contract_digest: canonicalCitizenDigest(boundDeclaration),
+      },
+      input_schema: boundDeclaration.input_schema,
+      confirmation: "none",
+      risk: "medium",
+    });
+    await expect(resolver.getBoundContract({
+      citizen_id: "provider-a",
+      endpoint_id: "endpoint-a",
+      capability_id: declaration.declaration_id,
+      capability_version: declaration.version,
+      contract_digest:
+        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    })).rejects.toThrow(/binding changed/i);
+  });
+
   it.each(["latest", "^1", "1.2", ""])(
     "rejects unsupported version constraint %j",
     async (versionConstraint) => {

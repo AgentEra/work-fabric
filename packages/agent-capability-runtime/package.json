@@ -11,5 +11,8 @@
     "@work-fabric/agent-runtime-spi": "0.1.0",
     "@work-fabric/network-citizen-spi": "0.1.0",
     "@work-fabric/sdk-typescript": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/adapter-agent-runtime-memory": "0.1.0"
   }
 }

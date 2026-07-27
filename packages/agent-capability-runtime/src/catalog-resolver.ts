@@ -5,7 +5,10 @@ import {
 } from "@work-fabric/agent-runtime-spi";
 import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 
-import type { CapabilityCatalogClient } from "./contracts.js";
+import type {
+  BoundCapabilityContract,
+  CapabilityCatalogClient,
+} from "./contracts.js";
 
 const CAPABILITY_ID = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -106,5 +109,39 @@ export class CatalogCapabilityResolver {
       }));
     }
     return Object.freeze(candidates);
+  }
+
+  async getBoundContract(
+    candidate: CapabilityCandidate,
+    signal?: AbortSignal,
+  ): Promise<Readonly<BoundCapabilityContract>> {
+    const normalized = validateCapabilityCandidate(candidate);
+    const contract = await this.catalog.getDeclaration(
+      normalized.citizen_id,
+      normalized.capability_id,
+      options(signal),
+    );
+    const declaration = contract.declaration;
+    if (
+      contract.citizen_id !== normalized.citizen_id ||
+      contract.citizen_kind !== "capability-provider" ||
+      declaration.declaration_kind !== "capability" ||
+      declaration.declaration_id !== normalized.capability_id ||
+      declaration.version !== normalized.capability_version ||
+      canonicalCitizenDigest(declaration) !== normalized.contract_digest
+    ) {
+      throw new Error("Capability contract binding changed");
+    }
+    return Object.freeze({
+      candidate: normalized,
+      ...(declaration.input_schema === undefined
+        ? {}
+        : { input_schema: Object.freeze({ ...declaration.input_schema }) }),
+      ...(declaration.output_schema === undefined
+        ? {}
+        : { output_schema: Object.freeze({ ...declaration.output_schema }) }),
+      confirmation: declaration.confirmation,
+      risk: declaration.risk,
+    });
   }
 }
