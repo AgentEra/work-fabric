@@ -9,6 +9,7 @@ from work_fabric_agently_runtime.assistant import (
     configure_agently,
     role_prompt,
     task_prompt_input,
+    validate_assistant_output,
 )
 from work_fabric_agently_runtime.protocol import parse_request
 
@@ -83,6 +84,43 @@ async def test_rejects_invalid_handoff_draft_from_the_model() -> None:
     agent.async_start = invalid_start  # type: ignore[method-assign]
     with pytest.raises(AssistantOutputError, match="capability"):
         await execute_with_agent(request, agent)
+
+
+def test_defaults_omitted_handoff_draft_fields_when_no_draft_is_required() -> None:
+    output = validate_assistant_output({
+        "request_summary": "整理后的请求",
+        "response": "请补充短信服务商和验证码有效期",
+        "missing_information": ["短信服务商", "验证码有效期"],
+        "handoff_draft_required": False,
+        "handoff_draft_reason": "信息尚不完整",
+    })
+
+    assert output["handoff_draft_capability"] == ""
+    assert output["handoff_draft_intent"] == ""
+    assert output["handoff_draft_acceptance_criteria"] == []
+
+
+def test_requires_handoff_draft_fields_when_a_draft_is_required() -> None:
+    with pytest.raises(AssistantOutputError, match="unknown or missing fields"):
+        validate_assistant_output({
+            "request_summary": "整理后的请求",
+            "response": "需求已具备交接条件",
+            "missing_information": [],
+            "handoff_draft_required": True,
+            "handoff_draft_reason": "可以交给需求分析角色",
+        })
+
+
+def test_rejects_unknown_fields_while_defaulting_optional_draft_fields() -> None:
+    with pytest.raises(AssistantOutputError, match="unknown or missing fields"):
+        validate_assistant_output({
+            "request_summary": "整理后的请求",
+            "response": "请补充信息",
+            "missing_information": [],
+            "handoff_draft_required": False,
+            "handoff_draft_reason": "信息不足",
+            "fabric_generated_reply": "must not be accepted",
+        })
 
 
 def test_real_agently_timeout_is_a_provider_transport_setting_not_request_body() -> None:

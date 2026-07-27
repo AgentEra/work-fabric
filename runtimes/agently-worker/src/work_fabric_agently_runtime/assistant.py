@@ -60,17 +60,24 @@ def task_prompt_input(task: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
 
 
 def validate_assistant_output(value: object) -> dict[str, JsonValue]:
-    if not isinstance(value, dict) or set(value) != set(ASSISTANT_OUTPUT_SCHEMA):
+    if not isinstance(value, dict):
+        raise AssistantOutputError("assistant output has unknown or missing fields")
+    normalized = dict(value)
+    if normalized.get("handoff_draft_required") is False:
+        normalized.setdefault("handoff_draft_capability", "")
+        normalized.setdefault("handoff_draft_intent", "")
+        normalized.setdefault("handoff_draft_acceptance_criteria", [])
+    if set(normalized) != set(ASSISTANT_OUTPUT_SCHEMA):
         raise AssistantOutputError("assistant output has unknown or missing fields")
     output: dict[str, JsonValue] = {
-        "request_summary": _non_empty_string(value["request_summary"], "request_summary"),
-        "response": _non_empty_string(value["response"], "response"),
-        "handoff_draft_required": value["handoff_draft_required"],
-        "handoff_draft_reason": _non_empty_string(value["handoff_draft_reason"], "handoff_draft_reason"),
-        "handoff_draft_capability": value["handoff_draft_capability"],
-        "handoff_draft_intent": value["handoff_draft_intent"],
-        "missing_information": value["missing_information"],
-        "handoff_draft_acceptance_criteria": value["handoff_draft_acceptance_criteria"],
+        "request_summary": _non_empty_string(normalized["request_summary"], "request_summary"),
+        "response": _non_empty_string(normalized["response"], "response"),
+        "handoff_draft_required": normalized["handoff_draft_required"],
+        "handoff_draft_reason": _non_empty_string(normalized["handoff_draft_reason"], "handoff_draft_reason"),
+        "handoff_draft_capability": normalized["handoff_draft_capability"],
+        "handoff_draft_intent": normalized["handoff_draft_intent"],
+        "missing_information": normalized["missing_information"],
+        "handoff_draft_acceptance_criteria": normalized["handoff_draft_acceptance_criteria"],
     }
     if not isinstance(output["handoff_draft_required"], bool):
         raise AssistantOutputError("assistant output handoff_draft_required is invalid")
