@@ -48,8 +48,10 @@ Phase 8 adds a source-neutral immutable Configuration Provider, a strict YAML
 adapter, declared environment secret resolution, trusted multi-instance plugin
 lifecycle, durable channel routes for Memory/SQLite/PostgreSQL, and the built-in
 Feishu collaboration-channel plugin. One explicit `@bot` message becomes one
-Intake Handoff through the public TypeScript SDK, and canonical Handoff events
-return to the original conversation through Subscription and Signal delivery.
+Intake Handoff through the public TypeScript SDK, and the canonical
+Agent-authored Result returns to the original conversation through Subscription
+and Signal delivery. Other lifecycle and Status events remain observable
+Fabric facts and do not become assistant chat replies.
 
 The local Node long-connection transport is complete: an `api` or `all` service
 can connect outbound to an enterprise custom-app bot with the official SDK and

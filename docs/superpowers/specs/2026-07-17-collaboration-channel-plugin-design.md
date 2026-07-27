@@ -399,9 +399,11 @@ It never contains credentials, message bodies, Context content or Agent state.
 Memory, SQLite and PostgreSQL adapters implement the same conformance profile.
 
 Each Intake Handoff gets a deterministic durable Subscription owned by the
-mapped initiator Actor/Endpoint and filtered to that Handoff. The destination
-contains only the channel plugin instance ID and route mode. Existing audience
-authorization therefore remains authoritative.
+mapped initiator Actor/Endpoint and filtered to that Handoff's
+`workfabric.handoff.result_returned.v1` event. The destination contains only the
+channel plugin instance ID and route mode. Existing audience authorization
+therefore remains authoritative. The 2026-07-27 Agent-owned reply design
+supersedes the original all-event conversation notification behavior.
 
 `ChannelSignalRouter` selects an already-created plugin instance. It does not
 inspect event content to choose a channel. The Feishu adapter resolves the
@@ -490,7 +492,8 @@ Implementation follows test-first red/green cycles. Acceptance requires:
 10. the Handoff initiator, target, intent, reference and context are correct.
 11. a crash between Offer, route write, Subscription upsert and ingress complete
     replays without duplicate Handoffs or routes.
-12. Agent Accept, Status, Result and Verify events route to the original chat.
+12. Only the Agent-authored Result routes to the original chat; Accept, Status
+    and Verify remain observable Fabric events.
 13. static channel Subscriptions honor filters and participant visibility.
 14. Feishu 429, transport failure, credential rejection and dead-letter paths.
 15. two Feishu instances never share credentials, tokens, identities or routes.

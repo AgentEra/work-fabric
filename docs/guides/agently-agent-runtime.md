@@ -95,7 +95,7 @@ Provisioning creates `actor-intake-agent` / `endpoint-intake-agent` and its SSE 
 2. **HTTP/SQLite/PostgreSQL** for Endpoint registration, active Session, lease, heartbeat, fencing token, Delivery/Ack cursor, Status, and Result payload.
 3. **Result** `workfabric.agent/assistant_output`; a proposed downstream Handoff is Result data, not a child Handoff.
 
-To send a request from Feishu, mention the configured bot in an enabled group chat (for example, `@Work Fabric create a requirement`). Admission must accept the external identity, then the collaboration-channel configuration creates the explicitly targeted Intake Handoff. Expect one Delivery Ack, explicit Accept, Status and Result rendered by the configured Feishu outbound route.
+To send a request from Feishu, mention the configured bot in an enabled group chat (for example, `@Work Fabric create a requirement`). Admission must accept the external identity, then the collaboration-channel configuration creates the explicitly targeted Intake Handoff. Expect one Delivery Ack, explicit Accept and queryable Status events. The original conversation receives only the Agent-authored text from the canonical Result; it does not receive Offered, Accepted or Status cards. Static operational subscriptions remain independently configurable.
 
 ## Verification and smoke test
 
