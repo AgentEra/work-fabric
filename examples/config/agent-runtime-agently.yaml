@@ -27,6 +27,11 @@ service:
     provider: sqlite
     location: ./var/daily-assistant-runtime.db
     busy_timeout_ms: 5000
+  capability_invocation:
+    enabled: false
+    max_invocations_per_handoff: 4
+    allowed_namespaces:
+      - feishu.
 
 role:
   role_id: daily-assistant

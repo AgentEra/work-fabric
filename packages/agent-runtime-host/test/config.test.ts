@@ -24,6 +24,11 @@ const base = {
     },
     concurrency: { max_active_runs: 2, queue_capacity: 32 },
     state: { provider: "sqlite", location: "./var/runtime.db", busy_timeout_ms: 5_000 },
+    capability_invocation: {
+      enabled: false,
+      max_invocations_per_handoff: 4,
+      allowed_namespaces: ["feishu."],
+    },
   },
   role: {
     role_id: "daily-assistant", version: 1, display_name: "Daily Assistant",

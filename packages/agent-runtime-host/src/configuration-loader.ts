@@ -66,8 +66,25 @@ function capabilityList(value: unknown, path: string): readonly string[] {
   return items;
 }
 
+function namespaceList(value: unknown, path: string): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 64) {
+    invalid("invalid_namespaces", path);
+  }
+  const items = value.map((item, index) => {
+    const namespace = string(item, `${path}.${index}`, 128);
+    if (
+      !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*\.$/.test(namespace)
+    ) {
+      invalid("invalid_namespace", `${path}.${index}`);
+    }
+    return namespace;
+  });
+  if (new Set(items).size !== items.length) invalid("invalid_namespaces", path);
+  return items;
+}
+
 function validateService(value: unknown, path: string): AgentRuntimeServiceConfiguration {
-  const root = object(value, path); exact(root, ["runtime_id", "development_mode", "work_fabric", "acceptance", "concurrency", "state"], path);
+  const root = object(value, path); exact(root, ["runtime_id", "development_mode", "work_fabric", "acceptance", "concurrency", "state", "capability_invocation"], path);
   const workFabric = object(root.work_fabric, `${path}.work_fabric`);
   exact(workFabric, ["base_url", "tenant_id", "exchange_id", "actor_id", "endpoint_id", "subscription_id", "access_token"], `${path}.work_fabric`);
   const acceptance = object(root.acceptance, `${path}.acceptance`);
@@ -81,6 +98,18 @@ function validateService(value: unknown, path: string): AgentRuntimeServiceConfi
   const state = object(root.state, `${path}.state`);
   exact(state, ["provider", "location", "busy_timeout_ms"], `${path}.state`);
   if (state.provider !== "sqlite") invalid("invalid_state_provider", `${path}.state.provider`);
+  const capabilityInvocation = object(
+    root.capability_invocation,
+    `${path}.capability_invocation`,
+  );
+  exact(
+    capabilityInvocation,
+    ["enabled", "max_invocations_per_handoff", "allowed_namespaces"],
+    `${path}.capability_invocation`,
+  );
+  if (typeof capabilityInvocation.enabled !== "boolean") {
+    invalid("invalid_boolean", `${path}.capability_invocation.enabled`);
+  }
   return {
     runtime_id: string(root.runtime_id, `${path}.runtime_id`, 128),
     development_mode: root.development_mode === true,
@@ -90,6 +119,18 @@ function validateService(value: unknown, path: string): AgentRuntimeServiceConfi
     acceptance: { mode: "accept_all_targeted", require_explicit_target: true, reject_expired_handoffs: true, require_authority_scope: true, allowed_capability_ids: capabilityList(acceptance.allowed_capability_ids, `${path}.acceptance.allowed_capability_ids`) },
     concurrency: { max_active_runs: positive(concurrency.max_active_runs, `${path}.concurrency.max_active_runs`, 128), queue_capacity: positive(concurrency.queue_capacity, `${path}.concurrency.queue_capacity`, 100_000) },
     state: { provider: "sqlite", location: string(state.location, `${path}.state.location`), busy_timeout_ms: positive(state.busy_timeout_ms, `${path}.state.busy_timeout_ms`, 60_000) },
+    capability_invocation: {
+      enabled: capabilityInvocation.enabled,
+      max_invocations_per_handoff: positive(
+        capabilityInvocation.max_invocations_per_handoff,
+        `${path}.capability_invocation.max_invocations_per_handoff`,
+        4,
+      ),
+      allowed_namespaces: namespaceList(
+        capabilityInvocation.allowed_namespaces,
+        `${path}.capability_invocation.allowed_namespaces`,
+      ),
+    },
   };
 }
 

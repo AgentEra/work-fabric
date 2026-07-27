@@ -3,6 +3,13 @@ import { dirname, isAbsolute, join, parse, relative, resolve, sep } from "node:p
 
 import { AgentlyRuntimeDriverFactory, validateAgentlyRuntimeDriverConfig } from "@work-fabric/adapter-agent-runtime-agently";
 import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-sqlite";
+import {
+  CatalogCapabilityResolver,
+  HandoffCapabilityInvocationPort,
+  type AuxiliaryHandoffWaiter,
+  type InvocationAuthorityProvider,
+  type InvocationSchemaValidator,
+} from "@work-fabric/agent-capability-runtime";
 import { AgentGateway, type AgentGatewayConfig } from "@work-fabric/agent-gateway";
 import {
   DeterministicAcceptancePolicy,
@@ -11,7 +18,12 @@ import {
   loadAgentRuntimeConfiguration,
   type LoadedAgentRuntimeConfiguration,
 } from "@work-fabric/agent-runtime-host";
-import type { AgentRuntimeDriver, AgentRuntimeStateStore } from "@work-fabric/agent-runtime-spi";
+import {
+  isCapabilityAwareAgentRuntimeDriver,
+  type AgentCapabilityInvocationStore,
+  type AgentRuntimeDriver,
+  type AgentRuntimeStateStore,
+} from "@work-fabric/agent-runtime-spi";
 import { BearerTokenProvider, WorkFabricClient } from "@work-fabric/sdk-typescript";
 
 import { dailyAssistantGatewayConfig } from "./subscription.js";
@@ -29,7 +41,12 @@ export async function composeAgentRuntime(
   dependencies: {
     readonly fetch?: typeof globalThis.fetch;
     readonly driver: AgentRuntimeDriver;
-    readonly state: AgentRuntimeStateStore;
+    readonly state: AgentRuntimeStateStore & AgentCapabilityInvocationStore;
+    readonly capability?: {
+      readonly authority: InvocationAuthorityProvider;
+      readonly schemas: InvocationSchemaValidator;
+      readonly waiter: AuxiliaryHandoffWaiter;
+    };
   },
 ): Promise<RuntimeComposition> {
   const client = new WorkFabricClient({
@@ -45,6 +62,47 @@ export async function composeAgentRuntime(
     subscriptionId: loaded.service.work_fabric.subscription_id, queueCapacity: loaded.service.concurrency.queue_capacity,
   });
   const gateway = new AgentGateway(client, gatewayConfig);
+  let capabilityHostDependencies = {};
+  if (loaded.service.capability_invocation.enabled) {
+    if (
+      dependencies.capability === undefined ||
+      !isCapabilityAwareAgentRuntimeDriver(dependencies.driver)
+    ) {
+      throw new TypeError(
+        "Capability invocation dependencies and a capability-aware Driver are required",
+      );
+    }
+    const invocations = new HandoffCapabilityInvocationPort({
+      tenant_id: loaded.service.work_fabric.tenant_id,
+      owner_id: `${loaded.service.runtime_id}:capability-invocations`,
+      verifier: {
+        actor_id: loaded.participant.actor_id,
+        actor_type: "agent",
+      },
+      resolver: new CatalogCapabilityResolver(client.citizens),
+      schemas: dependencies.capability.schemas,
+      authority: dependencies.capability.authority,
+      handoffs: {
+        offer: (payload, options) => client.handoffs.offer(payload, options),
+        resolveTarget: (payload, options) =>
+          client.handoffs.resolveTarget(payload, options),
+        getHandoff: (handoffId, options) =>
+          client.queries.getHandoff(handoffId, options),
+      },
+      waiter: dependencies.capability.waiter,
+      state: dependencies.state,
+    });
+    capabilityHostDependencies = {
+      turn_driver: dependencies.driver,
+      capability_invocations: invocations,
+      capability_limits: {
+        max_invocations_per_handoff:
+          loaded.service.capability_invocation.max_invocations_per_handoff,
+        allowed_namespaces:
+          loaded.service.capability_invocation.allowed_namespaces,
+      },
+    };
+  }
   const host = composeAgentRuntimeHost({
     config: {
       runtime_id: loaded.service.runtime_id, tenant_id: loaded.service.work_fabric.tenant_id,
@@ -59,6 +117,7 @@ export async function composeAgentRuntime(
       actor_id: loaded.participant.actor_id, endpoint_id: loaded.participant.endpoint_id,
       allowed_capability_ids: loaded.service.acceptance.allowed_capability_ids,
     }),
+    ...capabilityHostDependencies,
   });
   return Object.freeze({
     runtimeId: loaded.service.runtime_id, role: loaded.role,
@@ -69,7 +128,7 @@ export async function composeAgentRuntime(
 
 export function createRuntimeStateStore(
   state: LoadedAgentRuntimeConfiguration["service"]["state"],
-): AgentRuntimeStateStore {
+): AgentRuntimeStateStore & AgentCapabilityInvocationStore {
   return new SqliteAgentRuntimeStateStore({ location: state.location, busy_timeout_ms: state.busy_timeout_ms });
 }
 

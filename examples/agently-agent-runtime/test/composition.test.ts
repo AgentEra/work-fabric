@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { MemoryAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-memory";
 import { loadAgentRuntimeConfiguration, type LoadedAgentRuntimeConfiguration } from "@work-fabric/agent-runtime-host";
 import type { AgentRuntimeDriver } from "@work-fabric/agent-runtime-spi";
+import type {
+  AuxiliaryHandoffWaiter,
+  InvocationAuthorityProvider,
+  InvocationSchemaValidator,
+} from "@work-fabric/agent-capability-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 import { composeAgentRuntime, ensureTrustedWorkspaceRoot, startComposedRuntime } from "../src/main.js";
@@ -20,6 +25,11 @@ const fixture = {
     acceptance: { mode: "accept_all_targeted", require_explicit_target: true, reject_expired_handoffs: true, require_authority_scope: true, allowed_capability_ids: ["collaboration.request.intake", "information.synthesis", "collaboration.handoff.draft"] },
     concurrency: { max_active_runs: 2, queue_capacity: 32 },
     state: { provider: "sqlite", location: "./var/daily-assistant-runtime.db", busy_timeout_ms: 5_000 },
+    capability_invocation: {
+      enabled: false,
+      max_invocations_per_handoff: 4,
+      allowed_namespaces: ["feishu."],
+    },
   },
   role: { role_id: "daily-assistant", version: 1, display_name: "Daily Assistant", description: "Tenant shared assistant" },
   participant: { actor_id: "actor-intake-agent", actor_type: "agent", endpoint_id: "endpoint-intake-agent" },
@@ -62,6 +72,90 @@ describe("Daily Assistant Runtime composition", () => {
     const loaded = await loadedFixture();
     expect(loaded.service.work_fabric).not.toHaveProperty("database");
     expect(loaded.service.state.location).toBe("./var/daily-assistant-runtime.db");
+  });
+
+  it("loads only capability invocation safety ceilings, not live Provider declarations", async () => {
+    const loaded = await loadedFixture();
+
+    expect(loaded.service.capability_invocation).toEqual({
+      enabled: false,
+      max_invocations_per_handoff: 4,
+      allowed_namespaces: ["feishu."],
+    });
+    expect(loaded.service.capability_invocation).not.toHaveProperty(
+      "capabilities",
+    );
+    expect(JSON.stringify(loaded.service.capability_invocation)).not.toMatch(
+      /app_secret|feishu_app|provider_id/i,
+    );
+  });
+
+  it("requires explicit governance, schema and waiter ports when capability invocation is enabled", async () => {
+    const enabled = await loadAgentRuntimeConfiguration({
+      document: {
+        revision: "test",
+        value: {
+          ...structuredClone(fixture),
+          service: {
+            ...structuredClone(fixture.service),
+            capability_invocation: {
+              ...structuredClone(fixture.service.capability_invocation),
+              enabled: true,
+            },
+          },
+        },
+      },
+      environment: {
+        INTAKE_AGENT_ACCESS_TOKEN: "runtime-token",
+        AGENTLY_MODEL_API_KEY: "model-token",
+      },
+    });
+    const state = new MemoryAgentRuntimeStateStore();
+    const turnDriver = {
+      ...fakeDriver,
+      async executeTurn() {
+        return { kind: "final" as const, response: {
+          summary: [{ kind: "text", text: "done" }],
+          artifacts: [],
+          evidence: [],
+          extensions: {},
+        } };
+      },
+    };
+
+    await expect(composeAgentRuntime(enabled, {
+      driver: turnDriver,
+      state,
+    })).rejects.toThrow(/capability invocation dependencies/i);
+
+    const authority: InvocationAuthorityProvider = {
+      async authorize() {
+        return {
+          delegation_id: "delegation-test",
+          scopes: ["capability:invoke"],
+          resource_refs: ["urn:test"],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: false,
+        };
+      },
+    };
+    const schemas: InvocationSchemaValidator = {
+      async validateInput() {},
+      async validateOutput(_contract, data, artifacts) {
+        return { data, artifacts };
+      },
+    };
+    const waiter: AuxiliaryHandoffWaiter = {
+      async wait() {
+        return { outcome: "succeeded", data: {}, artifacts: [] };
+      },
+    };
+    const composition = await composeAgentRuntime(enabled, {
+      driver: turnDriver,
+      state,
+      capability: { authority, schemas, waiter },
+    });
+    await composition.host.close();
   });
 
   it("uses the configured acceptance capability subset", async () => {

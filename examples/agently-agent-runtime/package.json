@@ -5,5 +5,8 @@
   "scripts": {
     "start": "tsx src/main.ts",
     "provision": "tsx src/provision.ts"
+  },
+  "dependencies": {
+    "@work-fabric/agent-capability-runtime": "0.1.0"
   }
 }
