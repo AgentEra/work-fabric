@@ -57,6 +57,8 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、受限候选池、机械认领、目标解析协议和可靠派发；复杂的排名、推荐、成本/负载决策与执行计划由外部人、规则或 Agent Brain 决定。
 12. **模块职责闭环**：每个模块必须完整拥有并完成自身职责，只通过稳定协议或 SPI 与其他模块交换事实；不得跨层代偿另一个模块的业务语义、决策或执行。
 13. **依赖面向契约**：Core、Runtime、Agent、Connector 和 Channel 模块不得依赖彼此的具体存储、进程或供应商实现。组合层可以把实现适配到窄接口，但不能把具体实现泄漏到消费模块。
+14. **动态能力是运行事实**：配置只 Provision 可信身份与安全上限；模块通过带租约和 fencing 的 Network Citizen Session 声明当前能力。声明能力不授予调用 Authority。
+15. **责任分类与 Actor 正交**：Actor type 表达谁参与，Citizen kind 表达模块对外闭环的责任。一个 Citizen 注册只有一个 kind，一个进程可以托管多个独立注册。
 
 ### 2.1 职责闭环与依赖方向
 
@@ -100,6 +102,7 @@ flowchart TB
         end
         AgentGateway["Agent Gateway<br/>Session / Inbox / SSE"]
         Directory["Endpoint Directory<br/>Facts / Lease / Discovery"]
+        CitizenCatalog["Network Citizen Catalog<br/>Kind / Declarations / Lease"]
         Protocol["Unified Participation Protocol"]
         Exchange["Collaboration & Handoff Exchange"]
         Signal["Signal / Subscription / Notification"]
@@ -117,7 +120,9 @@ flowchart TB
     Protocol --> HumanAdapter
     AgentGateway <--> Protocol
     AgentGateway <--> Directory
+    AgentGateway <--> CitizenCatalog
     Directory <--> Protocol
+    CitizenCatalog <--> Protocol
     Protocol --> Connector
     Protocol <--> Exchange
     Exchange <--> Signal
@@ -137,6 +142,20 @@ Agent Endpoint 声明身份、能力、协议版本、可用性和回调方式�
 `@work-fabric/agent-runtime-host` is one external Runtime Host implementation. Its Role Profile and Capability declarations are Runtime extension points; they do not make Exchange Core a model, tool, memory, scheduling, or execution engine.
 
 Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具备独立身份、交接状态和回调能力时作为独立 Endpoint。无论采用哪种模式，代码执行过程都不进入 Work Fabric。
+
+### Network Citizens
+
+Network Citizen 是所有网络接入模块的统一责任分类与动态声明面。六类 Citizen
+分别是 `decision-body`、`capability-provider`、`channel`、
+`context-provider`、`governance-provider` 和 `observer`。它与 Human、
+Agent、System 的 Actor type 正交；数据库、缓存、Broker、transport、SDK、
+YAML 和进程内队列等基础设施不是 Citizen。
+
+管理员 Provision 身份绑定、声明 namespace、最大风险和启停状态，外部
+Runtime 再通过单活 fenced Session 提交当前 descriptor 与 declarations。
+Catalog 依次披露列表、描述、声明摘要和完整 Contract，每层单独授权。能力
+声明是发现事实，不是调用授权，也不会触发自动选择或执行。完整规范与接入
+示例见 [Network Citizen 架构与接入](architecture/network-citizens.md)。
 
 ### Legacy & AI-native Systems
 
@@ -810,5 +829,6 @@ flowchart LR
 | 7 | 跨 Exchange Federation Profile | 已完成 |
 | 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
 | 9 | Collaboration Admission、稳定参与方绑定与短时表示 | 已完成 |
+| 10 | Network Citizen 动态目录、租约、渐进披露与 Runtime 基础 | 已完成 |
 
-阶段 1–9 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–10 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 建立模块公民分类、动态声明、租约目录和渐进披露基础。下一子项目增加 Agent `CapabilityInvocationPort` 和独立 Provider，具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。

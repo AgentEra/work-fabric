@@ -33,6 +33,14 @@ Exchange Core Phase 1 是 transport-free 的协议参考实现。它只验证身
 
 Phase 4A 已实现 Endpoint Participation Binding：管理员 Provision 注册事实，外部 Runtime 通过带 fencing 的 Session/Heartbeat 声明在线能力；参与方按 Identity、Capability Summary 和 Capability Contract 渐进披露；Resolver 可以读取未排序 Discovery 事实并显式提交 Target Resolution，或由 Endpoint 在显式 `eligible_pool_claim` 模式下查询受限候选池并执行原子 Claim。Endpoint Inbox 从 committed Handoff Event 重建分区路由，Agent Gateway 再通过公共 SDK 接入候选查询和 Durable SSE。该 Binding 不包含候选排名、自动 Claim、自动 Ack、自动 Accept 或工作执行。运行说明见[Endpoint 与外部 Agent Runtime 接入](../docs/endpoint-agent-boundary.md)。
 
+Phase 10 已实现 Network Citizen Participation Binding：模块按
+`decision-body`、`capability-provider`、`channel`、`context-provider`、
+`governance-provider` 或 `observer` 声明单一责任类型，并通过带 fencing 的
+租约 Session 动态发布 declarations。Actor type 与 Citizen kind 正交；
+Provisioning 只建立身份和安全上限，声明不授予调用 Authority。Catalog 将
+列表、描述、声明摘要和完整 Contract 分层授权披露，不排名、选择或执行。
+运行说明见 [Network Citizen 架构与接入](../docs/architecture/network-citizens.md)。
+
 Phase 7 已实现独立 Federation Profile：显式 Source/Target Exchange 使用 Ed25519 签名 Offer/Receipt、严格受众与 TTL、canonical digest、重放缓存和幂等 Bridge 对接本地公共 API/SDK。每个 Exchange 只对本地 Handoff 权威；Federation 不发现或选择 Peer，不复制状态，也不执行参与方工作。运行与信任说明见[跨 Exchange Federation](../docs/federation.md)。
 
 ## Schema 索引
@@ -72,6 +80,18 @@ Phase 7 已实现独立 Federation Profile：显式 Source/Target Exchange 使�
 - `urn:work-fabric:schema:v1:endpoint-inbox-partition-page`
 - `urn:work-fabric:schema:v1:endpoint-claimable-handoff`
 - `urn:work-fabric:schema:v1:endpoint-claimable-handoff-page`
+
+### Network Citizen 与动态声明
+
+- `urn:work-fabric:schema:v1:citizen-declaration`
+- `urn:work-fabric:schema:v1:citizen-descriptor`
+- `urn:work-fabric:schema:v1:citizen-provisioning`
+- `urn:work-fabric:schema:v1:citizen-session-open`
+- `urn:work-fabric:schema:v1:citizen-heartbeat`
+- `urn:work-fabric:schema:v1:citizen-declaration-replace`
+- `urn:work-fabric:schema:v1:citizen-session-close`
+- `urn:work-fabric:schema:v1:citizen-discovery-page`
+- `urn:work-fabric:schema:v1:citizen-declaration-page`
 
 ### Handoff、状态、结果与回执
 

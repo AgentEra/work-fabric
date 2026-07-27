@@ -222,6 +222,26 @@ Gateway 只处理连接机械：它不比较候选、不安排任务、不调用
 
 本地评估可使用 Memory Endpoint Adapter；持久部署可使用 PostgreSQL Endpoint Directory/Inbox Adapter，公共 SPI、HTTP 和 SDK 不绑定数据库。完整接入顺序、配置上限、错误模型和外部 Runtime 示例见 [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)。
 
+## Network Citizen 与动态能力目录
+
+Network Citizen 把接入协作网络的模块按其对外责任分为
+`decision-body`、`capability-provider`、`channel`、`context-provider`、
+`governance-provider` 和 `observer`。Citizen kind 与 `human | agent |
+system` Actor type 正交；一个进程可以托管多个 Citizen，但一个注册只有一个
+kind，因而可以独立授权、租约、启停、扩缩和审计。
+
+管理员只 Provision 身份绑定、声明 namespace、最大风险等安全上限；外部
+Runtime 通过单活 fenced Session 动态声明当前能力与可用性。其他参与方按
+Citizen 列表、Citizen 描述、声明摘要、完整 Contract 四层分别授权并渐进
+发现。声明能力不授予执行 Authority，Directory 也不评分、不推荐、不选择
+目标、不自动 Claim/Accept。
+
+Memory 和 SQLite 已进入 `service-node` 组合层，统一 HTTP 与 TypeScript SDK
+已覆盖 Provision、Session、Heartbeat、声明 CAS、Discovery 和 Close；
+外部存储继续通过 `NetworkCitizenStore` 注入。YAML 只是启动配置和安全上限
+的一个来源，不是动态能力事实库。完整规则、API 和 SDK 示例见
+[Network Citizen 架构与接入](docs/architecture/network-citizens.md)。
+
 ## Feishu Connector
 
 阶段 4B 已提供第一个具体协作系统连接器，同时把可复用的 Connector 边界从飞书实现中拆出：
@@ -281,7 +301,7 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 
 ## 当前状态
 
-项目已经完成阶段 1–7：从 WFPP/Exchange Core、生产持久化、HTTP/SDK、Endpoint/Agent、Connector/飞书、查询运维 Console、集群分区所有权和可选 NATS Wakeup，到跨 Exchange 签名交接 Profile。Human、Agent、Connector、Console 和开放服务共享同一个公共协议与权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
+项目已经完成阶段 1–10：从 WFPP/Exchange Core、生产持久化、HTTP/SDK、Endpoint/Agent、Connector/飞书、查询运维 Console、集群与 Federation，到配置、Admission 和 Network Citizen 动态目录基础。Human、Agent、Connector、Console 和开放服务共享同一个公共协议与权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
 
 当前阶段路线：
 
@@ -298,6 +318,9 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 | 6A | 集群分区所有权与数据库恢复 | 已完成 |
 | 6B | Broker-backed Signal/Wakeup 加速 | 已完成 |
 | 7 | 跨 Exchange Federation Profile | 已完成 |
+| 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
+| 9 | Collaboration Admission 与稳定参与方表示 | 已完成 |
+| 10 | Network Citizen 动态目录、租约、HTTP/SDK 与 Runtime 基础 | 已完成 |
 
 阶段严格按顺序推进。Console 没有进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都通过标准 API 提交恢复意图。
 
@@ -317,6 +340,9 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 - Pull 与 SSE 是同一个 Durable Subscription 的两种呈现，复用交付位置、Pending Delivery、Ack、重放和至少一次语义；WebSocket 未进入 3B。
 - TypeScript SDK 只封装公共 HTTP Contract；Human、Agent、Connector 与 Operations 调用共享认证、表示和 Authority 链，不创建第二套状态、Admin 旁路或自动执行层。
 - Endpoint Directory 保存注册、Capability、Binding、租约和 availability 事实；Discovery 只返回确定分页的事实，不包含 score、rank、recommendation 或 selected target。
+- Network Citizen Directory 保存按责任分类的模块注册、单活 session、动态声明和 schema digest 绑定；Actor type 与 Citizen kind 正交，声明不授予调用 Authority。
+- Network Citizen 的配置只 Provision 信任与安全上限；当前能力以 Runtime session 为真，并通过 registration version、fencing token 和 declaration CAS 防止旧实例覆盖新实例。
+- Network Citizen 渐进披露按列表、描述、声明摘要和完整 Contract 分别授权；数据库、Broker、transport、SDK、YAML 和缓存等基础设施本身不注册为 Citizen。
 - Agent Gateway 只依赖公开 TypeScript SDK，处理 Session 续租、Inbox Partition 刷新、SSE 汇聚和有界背压；Agent Runtime、Resolver、模型、工具与执行回调都在包外。
 - Endpoint Inbox 是可重建的路由投影，不复制 Context、Prompt、结果正文、凭据或外部执行状态；Delivery Ack 与 Handoff Accept 保持独立。
 - Connector ingress 是有界、可保留清理的操作缓冲，不是新的业务真相库；Webhook/长连接只 durable accept，映射 worker 才通过公开 SDK 提交命令。
@@ -341,7 +367,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-阶段 1–7 的当前架构闭环已经完成。后续可以按部署需要独立增加 HTTP Federation Binding、生产 Replay Store、更多 Connector 或 A2A/MCP Binding，但它们不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+阶段 1–10 的当前架构闭环已经完成。下一子项目是在 Agent Runtime 增加技术中立的 `CapabilityInvocationPort`，再以独立 Feishu Capability Provider 实现消息与文档能力；具体厂商调用不会进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Connector 或 A2A/MCP Binding 也可以独立扩展，但不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 
@@ -355,6 +381,7 @@ npm run verify:exchange
 - [HTTP Service Binding 设计](docs/superpowers/specs/2026-07-15-http-service-binding-design.md)
 - [TypeScript SDK](packages/sdk-typescript/README.md)
 - [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)
+- [Network Citizen 架构与接入](docs/architecture/network-citizens.md)
 - [Operations、审计与恢复](docs/operations.md)
 - [SQLite 本地部署](docs/sqlite-deployment.md)
 - [Read-mostly Console](docs/console.md)

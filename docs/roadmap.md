@@ -19,6 +19,41 @@ and repository verification are implemented.
 | 7 | Cross-Exchange federation profile | Complete |
 | 8 | Provider-backed configuration and collaboration-channel plugin runtime | Complete |
 | 9 | Source-neutral Collaboration Admission and participant representation | Complete |
+| 10 | Network Citizen catalog, leased declarations and runtime foundation | Complete |
+
+## Phase 10 completion boundary
+
+Phase 10 adds the technology-neutral Network Citizen model for modules that
+enter the collaboration network. Actor type (`human`, `agent`, `system`) and
+Citizen kind are orthogonal. Every Citizen registration has exactly one kind:
+`decision-body`, `capability-provider`, `channel`, `context-provider`,
+`governance-provider` or `observer`; one process may host several independently
+authorized registrations.
+
+Configuration provisions trusted identity bindings, declaration namespaces,
+risk ceilings and administrative state. A leased, single-active Runtime session
+is the source of current descriptor, declarations and availability. Registration
+revision, monotonic fencing, heartbeat sequence, declaration CAS and immutable
+Schema URI/digest binding reject stale writers and silent contract drift.
+
+The Directory exposes separately authorized Citizen list, descriptor,
+declaration summary and full Contract levels. Memory and SQLite Stores share
+the same SPI; SQLite restart recovery is verified through the real service-node
+HTTP surface. External storage profiles inject `NetworkCitizenStore` rather
+than coupling the module name or contract to PostgreSQL. The unified TypeScript
+SDK exposes the same administration, session and discovery resources, and the
+optional leased Runtime base owns heartbeat and declaration lifecycle only.
+
+Phase 10 does not make databases, YAML, HTTP, SDKs, Brokers or caches into
+Citizens. A declaration is not invocation Authority. Catalog discovery does
+not rank, recommend, select, Claim, Accept, reason or execute work. Each module
+must close its own responsibility and exchange only protocol facts through
+stable Contracts or narrow SPIs. See
+[Network Citizen architecture and integration](architecture/network-citizens.md).
+
+The next subproject adds an Agent-side technology-neutral
+`CapabilityInvocationPort`; vendor operations remain in independent Capability
+Providers and do not enter Core or Agent Host.
 
 ## Phase 9 completion boundary
 
