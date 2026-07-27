@@ -34,7 +34,10 @@ describe("FeishuIntakeReceiptHandler", () => {
     expect(active).toHaveLength(1);
     expect(active[0]).toMatchObject({
       owner: { actor_id: "actor-human", actor_type: "agent" }, endpoint_id: "endpoint-human",
-      filter: { handoff_ids: ["handoff-1"] },
+      filter: {
+        event_types: ["workfabric.handoff.result_returned.v1"],
+        handoff_ids: ["handoff-1"],
+      },
       destination: { binding: "collaboration-channel", configuration: { plugin_instance_id: "feishu-primary", route_mode: "handoff" } },
     });
     expect(ready).toEqual(["handoff-1"]);

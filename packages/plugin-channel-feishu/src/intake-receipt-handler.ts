@@ -35,7 +35,7 @@ export class FeishuIntakeReceiptHandler implements ConnectorAcceptedReceiptHandl
         tenant_id: input.tenant_id,
         owner: { actor_id: input.command.identity.actor_id, actor_type: input.command.identity.actor_type },
         endpoint_id: input.command.identity.endpoint_id,
-        filter: { event_types: [], actor_ids: [], endpoint_ids: [], thread_ids: [], handoff_ids: [resource.resource_id], work_reference_uris: [], capability_ids: [], lifecycle_states: [] },
+        filter: { event_types: ["workfabric.handoff.result_returned.v1"], actor_ids: [], endpoint_ids: [], thread_ids: [], handoff_ids: [resource.resource_id], work_reference_uris: [], capability_ids: [], lifecycle_states: [] },
         destination: { destination_id: `handoff:${resource.resource_id}`, binding: "collaboration-channel", configuration: { plugin_instance_id: this.options.plugin_instance_id, route_mode: "handoff" } },
         delivery_mode: "webhook", state: "active", max_attempts: this.options.max_delivery_attempts,
         created_at: input.claim.accepted_at, updated_at: input.claim.accepted_at,

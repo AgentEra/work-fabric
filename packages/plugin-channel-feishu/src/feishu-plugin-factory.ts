@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
 import type { CollaborationAdmissionService } from "@work-fabric/admission-spi";
-import type { ChannelRouteStore } from "@work-fabric/channel-spi";
+import type {
+  ChannelHandoffSnapshotSource,
+  ChannelRouteStore,
+} from "@work-fabric/channel-spi";
 import {
   FeishuActionReferenceCodec,
   FeishuEventMapper,
@@ -212,6 +215,9 @@ export class FeishuPluginFactory implements PluginFactory {
     if (config.connector_id !== instance.instance_id) throw new TypeError("connector_id must equal plugin instance_id");
     const tenantId = context.service.get<string>("workfabric.tenant_id");
     const routes = context.service.get<ChannelRouteStore>("channel.routes");
+    const handoffSnapshots = context.service.get<ChannelHandoffSnapshotSource>(
+      "channel.handoff_snapshot_source",
+    );
     const subscriptions = context.service.get<SubscriptionStore>("exchange.subscriptions");
     const ingress = context.service.get<ConnectorIngressStore>("connector.ingress");
     const commandSink = context.service.get<ConnectorCommandSink>("connector.command_sink");
@@ -265,7 +271,7 @@ export class FeishuPluginFactory implements PluginFactory {
       ?? new FeishuTenantAccessTokenProvider({ credential_provider: { async loadAppCredentials(reference) { if (reference !== credentialRef) throw new TypeError("credential scope mismatch"); return { app_id: config.credentials.app_id, app_secret: config.credentials.app_secret }; } }, fetch, base_url: "https://open.feishu.cn", clock, expiry_skew_seconds: 60, request_timeout_ms: 10_000, max_cache_entries: 1 });
     const messages = new FeishuOpenApiClient({ token_provider: tokenProvider, fetch, base_url: "https://open.feishu.cn", request_timeout_ms: 10_000, max_response_bytes: 64_000 });
     const delegate = new FeishuSignalAdapter({ messages, renderer: new FeishuEventRenderer({ action_codec: actionCodec, clock, max_text_bytes: 100_000, max_card_bytes: 25_000 }) });
-    const routeAdapter = new FeishuRouteAwareSignalAdapter({ tenant_id: tenantId, plugin_instance_id: instance.instance_id, connector_id: config.connector_id, external_tenant_id: config.external_tenant_id, credential_ref: credentialRef, render_mode: config.outbound.default_render_mode, actor_id: config.inbound.intake_target.actor_id, endpoint_id: config.inbound.intake_target.endpoint_id, routes, static_channels: config.outbound.channels satisfies Readonly<Record<string, FeishuStaticChannelConfig>>, delegate });
+    const routeAdapter = new FeishuRouteAwareSignalAdapter({ tenant_id: tenantId, plugin_instance_id: instance.instance_id, connector_id: config.connector_id, external_tenant_id: config.external_tenant_id, credential_ref: credentialRef, render_mode: config.outbound.default_render_mode, actor_id: config.inbound.intake_target.actor_id, endpoint_id: config.inbound.intake_target.endpoint_id, routes, handoff_snapshots: handoffSnapshots, static_channels: config.outbound.channels satisfies Readonly<Record<string, FeishuStaticChannelConfig>>, delegate });
     return new FeishuPluginInstance(instance.instance_id, tenantId, config, worker, routeAdapter, signals, webhooks, subscriptions, clock, longConnection, longConnectionSource);
   }
 }

@@ -73,6 +73,15 @@ const longConnectionBody: JsonObject = {
   },
 };
 
+const channelSnapshotSource = () => ({
+  manifest: {
+    profile: "channel.handoff-snapshot-source.v1",
+    adapter: "fake",
+    capabilities: {},
+  },
+  async get() { return { kind: "not_found" as const }; },
+});
+
 function participantClaim(ingressId = "ingress-admission-1"): ConnectorIngressClaim {
   return {
     ingress_id: ingressId,
@@ -138,6 +147,7 @@ function createLongConnectionFixture(options: {
   const services = new Map<string, unknown>([
     ["workfabric.tenant_id", "tenant-1"],
     ["channel.routes", new MemoryChannelRouteStore()],
+    ["channel.handoff_snapshot_source", channelSnapshotSource()],
     ["exchange.subscriptions", new MemorySubscriptionStore()],
     ["connector.ingress", ingress],
     ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -476,6 +486,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", subscriptions],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -658,6 +669,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", subscriptions],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -695,6 +707,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", new MemorySubscriptionStore()],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -781,6 +794,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", new MemorySubscriptionStore()],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -808,6 +822,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", subscriptions],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
