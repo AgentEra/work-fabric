@@ -37,8 +37,17 @@ def valid_request() -> dict[str, Any]:
     }
 
 
-def valid_request_v2() -> dict[str, Any]:
+def valid_request_v3() -> dict[str, Any]:
     value = valid_request()
-    value["protocol"] = "workfabric.agent-runtime/2"
+    value["protocol"] = "workfabric.agent-runtime/3"
+    value["available_capabilities"] = [
+        {
+            "citizen_id": "citizen-feishu",
+            "capability_id": "feishu.document.create",
+            "version": "1.0.0",
+            "name": "Create document",
+            "description": "Create one simple Docx document.",
+        }
+    ]
     value["continuation"] = None
     return value

@@ -14,7 +14,10 @@ process.stdin.on("end", () => {
   const complete = () => emit(record("completed", { result: { summary: [{ kind: "text", text: "done" }], artifacts: [], evidence: [], extensions: {} } }));
   switch (request.task.handoff_id) {
     case "turn-capability":
-      if (request.protocol !== "workfabric.agent-runtime/2") throw new Error("expected v2");
+      if (request.protocol !== "workfabric.agent-runtime/3") throw new Error("expected v3");
+      if (request.available_capabilities?.[0]?.capability_id !== "feishu.document.create") {
+        throw new Error("expected advertised capability");
+      }
       if (request.continuation === null) {
         emit(record("capability_request", {
           request: {

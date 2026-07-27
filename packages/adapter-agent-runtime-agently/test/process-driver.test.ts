@@ -33,7 +33,7 @@ async function runFixture(scenario: string, options: { readonly timeout?: number
 }
 
 describe("AgentlyProcessDriver", () => {
-  it("executes v2 capability and final turns without changing the v1 driver path", async () => {
+  it("executes v3 capability and final turns without changing the v1 driver path", async () => {
     const config = validateAgentlyRuntimeDriverConfig({
       python: {
         executable: worker,
@@ -55,7 +55,13 @@ describe("AgentlyProcessDriver", () => {
 
     const requested = await capabilityDriver.executeTurn(
       task("turn-capability"),
-      [],
+      [{
+        citizen_id: "citizen-feishu",
+        capability_id: "feishu.document.create",
+        version: "1.0.0",
+        name: "Create document",
+        description: "Create one simple Docx document.",
+      }],
       null,
       async () => undefined,
       signal,
@@ -75,7 +81,13 @@ describe("AgentlyProcessDriver", () => {
     }
     const completed = await capabilityDriver.executeTurn(
       task("turn-capability"),
-      [],
+      [{
+        citizen_id: "citizen-feishu",
+        capability_id: "feishu.document.create",
+        version: "1.0.0",
+        name: "Create document",
+        description: "Create one simple Docx document.",
+      }],
       {
         request: requested.request,
         result: {

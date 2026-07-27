@@ -17,13 +17,14 @@ from work_fabric_agently_runtime.protocol import (
     write_record,
 )
 
-from .conftest import valid_request, valid_request_v2
+from .conftest import valid_request, valid_request_v3
 
 
-def test_v2_request_accepts_only_a_normalized_capability_continuation() -> None:
-    value = valid_request_v2()
+def test_v3_request_accepts_only_summaries_and_a_normalized_continuation() -> None:
+    value = valid_request_v3()
     parsed = parse_request(value)
-    assert parsed.protocol == "workfabric.agent-runtime/2"
+    assert parsed.protocol == "workfabric.agent-runtime/3"
+    assert parsed.available_capabilities[0]["capability_id"] == "feishu.document.create"
     assert parsed.continuation is None
 
     value["continuation"] = {
@@ -51,8 +52,18 @@ def test_v2_request_accepts_only_a_normalized_capability_continuation() -> None:
     with pytest.raises(ProtocolError, match="unknown|secret"):
         parse_request(value)
 
+    value = valid_request_v3()
+    value["available_capabilities"][0]["folder_token"] = "forbidden"
+    with pytest.raises(ProtocolError, match="unknown|secret"):
+        parse_request(value)
 
-def test_v2_terminal_records_are_strict_final_or_capability_request() -> None:
+    value = valid_request_v3()
+    value["available_capabilities"] = value["available_capabilities"] * 33
+    with pytest.raises(ProtocolError, match="bound"):
+        parse_request(value)
+
+
+def test_v3_terminal_records_are_strict_final_or_capability_request() -> None:
     final = final_record(
         "command-2",
         {
@@ -62,7 +73,7 @@ def test_v2_terminal_records_are_strict_final_or_capability_request() -> None:
             "extensions": {},
         },
     )
-    assert final.protocol == "workfabric.agent-runtime/2"
+    assert final.protocol == "workfabric.agent-runtime/3"
     assert final.type == "final"
     requested = capability_request_record(
         "command-2",
@@ -74,7 +85,7 @@ def test_v2_terminal_records_are_strict_final_or_capability_request() -> None:
             "reason": "创建团队文档",
         },
     )
-    assert requested.protocol == "workfabric.agent-runtime/2"
+    assert requested.protocol == "workfabric.agent-runtime/3"
     assert requested.type == "capability_request"
 
 

@@ -11,7 +11,7 @@ import pytest
 from work_fabric_agently_runtime.protocol import parse_request
 from work_fabric_agently_runtime.runner import run
 
-from .conftest import valid_request, valid_request_v2
+from .conftest import valid_request, valid_request_v3
 
 
 @pytest.mark.asyncio
@@ -56,7 +56,7 @@ async def test_runner_emits_exactly_one_v2_turn_terminal(
         return turn
 
     result = await run(
-        parse_request(valid_request_v2()),
+        parse_request(valid_request_v3()),
         execute=fake_execute,
         stdout=stdout,
         stderr=stderr,
@@ -65,9 +65,9 @@ async def test_runner_emits_exactly_one_v2_turn_terminal(
     assert result == 0
     records = [json.loads(line) for line in stdout.getvalue().splitlines()]
     assert [record["protocol"] for record in records] == [
-        "workfabric.agent-runtime/2",
-        "workfabric.agent-runtime/2",
-        "workfabric.agent-runtime/2",
+        "workfabric.agent-runtime/3",
+        "workfabric.agent-runtime/3",
+        "workfabric.agent-runtime/3",
     ]
     assert records[-1]["type"] == terminal_type
 

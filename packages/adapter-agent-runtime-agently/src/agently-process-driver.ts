@@ -20,13 +20,13 @@ import { NdjsonReader } from "./ndjson-reader.js";
 import {
   AGENTLY_WORKER_PROTOCOL,
   AGENTLY_WORKER_TURN_PROTOCOL,
-  normalizeAgentlyWorkerRequestV2,
+  normalizeAgentlyWorkerRequestV3,
   parseAgentlyWorkerRecord,
   parseAgentlyWorkerTurnRecord,
   type AgentlyWorkerRecordV1,
   type AgentlyWorkerRequestV1,
-  type AgentlyWorkerRequestV2,
-  type AgentlyWorkerTurnRecordV2,
+  type AgentlyWorkerRequestV3,
+  type AgentlyWorkerTurnRecordV3,
 } from "./protocol.js";
 
 export const MAX_STDIN_BYTES = 1_048_576;
@@ -79,13 +79,15 @@ function requestFor(task: RuntimeTaskPackage, config: AgentlyRuntimeDriverConfig
 
 function turnRequestFor(
   task: RuntimeTaskPackage,
+  availableCapabilities: readonly RuntimeCapabilitySummary[],
   continuation: RuntimeCapabilityContinuation | null,
   config: AgentlyRuntimeDriverConfig,
-): AgentlyWorkerRequestV2 {
-  return normalizeAgentlyWorkerRequestV2({
+): AgentlyWorkerRequestV3 {
+  return normalizeAgentlyWorkerRequestV3({
     protocol: AGENTLY_WORKER_TURN_PROTOCOL,
     command_id: randomUUID(),
     task,
+    available_capabilities: availableCapabilities,
     continuation,
     provider: {
       type: "OpenAICompatible",
@@ -108,7 +110,7 @@ type WorkerProgressRecord = {
   readonly observed_at: string;
 };
 
-type WorkerRecord = AgentlyWorkerRecordV1 | AgentlyWorkerTurnRecordV2;
+type WorkerRecord = AgentlyWorkerRecordV1 | AgentlyWorkerTurnRecordV3;
 
 export class AgentlyProcessDriver
   implements AgentRuntimeDriver, CapabilityAwareAgentRuntimeDriver {
@@ -163,6 +165,9 @@ export class AgentlyProcessDriver
     optionalSignal?: AbortSignal,
   ): Promise<RuntimeDriverTurn> {
     const modern = Array.isArray(availableCapabilitiesOrContinuation);
+    const availableCapabilities = (
+      modern ? availableCapabilitiesOrContinuation : []
+    ) as readonly RuntimeCapabilitySummary[];
     const continuation = (
       modern
         ? continuationOrProgress
@@ -174,7 +179,12 @@ export class AgentlyProcessDriver
     const signal = (
       modern ? optionalSignal : progressOrSignal
     ) as AbortSignal;
-    const request = turnRequestFor(task, continuation, this.config);
+    const request = turnRequestFor(
+      task,
+      availableCapabilities,
+      continuation,
+      this.config,
+    );
     return this.executeWorker(
       request,
       progress,
@@ -189,7 +199,7 @@ export class AgentlyProcessDriver
   }
 
   private async executeWorker<T>(
-    request: AgentlyWorkerRequestV1 | AgentlyWorkerRequestV2,
+    request: AgentlyWorkerRequestV1 | AgentlyWorkerRequestV3,
     progress: (update: RuntimeProgress) => Promise<void>,
     signal: AbortSignal,
     parseRecord: (raw: unknown) => WorkerRecord,

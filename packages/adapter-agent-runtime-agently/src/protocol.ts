@@ -1,7 +1,9 @@
 import {
+  validateRuntimeCapabilitySummaries,
   validateRuntimeCapabilityContinuation,
   validateRuntimeDriverTurn,
   type RuntimeCapabilityContinuation,
+  type RuntimeCapabilitySummary,
   type RuntimeDriverResult,
   type RuntimeDriverTurn,
   type RuntimeJsonObject,
@@ -11,7 +13,7 @@ import {
 
 export const AGENTLY_WORKER_PROTOCOL = "workfabric.agent-runtime/1" as const;
 export const AGENTLY_WORKER_TURN_PROTOCOL =
-  "workfabric.agent-runtime/2" as const;
+  "workfabric.agent-runtime/3" as const;
 export const MAX_JSON_DEPTH = 32;
 export const MAX_JSON_NODES = 10_000;
 export const MAX_JSON_STRING_BYTES = 131_072;
@@ -23,10 +25,11 @@ export interface AgentlyWorkerRequestV1 {
   readonly provider: { readonly type: "OpenAICompatible"; readonly base_url: string; readonly model: string };
 }
 
-export interface AgentlyWorkerRequestV2 {
+export interface AgentlyWorkerRequestV3 {
   readonly protocol: typeof AGENTLY_WORKER_TURN_PROTOCOL;
   readonly command_id: string;
   readonly task: RuntimeTaskPackage;
+  readonly available_capabilities: readonly RuntimeCapabilitySummary[];
   readonly continuation: RuntimeCapabilityContinuation | null;
   readonly provider: {
     readonly type: "OpenAICompatible";
@@ -40,7 +43,7 @@ export type AgentlyWorkerRecordV1 =
   | { readonly protocol: typeof AGENTLY_WORKER_PROTOCOL; readonly type: "completed"; readonly command_id: string; readonly result: RuntimeDriverResult }
   | { readonly protocol: typeof AGENTLY_WORKER_PROTOCOL; readonly type: "failed"; readonly command_id: string; readonly code: string; readonly message: string; readonly retryable: boolean };
 
-export type AgentlyWorkerTurnRecordV2 =
+export type AgentlyWorkerTurnRecordV3 =
   | {
       readonly protocol: typeof AGENTLY_WORKER_TURN_PROTOCOL;
       readonly type: "progress";
@@ -183,7 +186,7 @@ export function parseAgentlyWorkerRecord(value: unknown, expectedCommandId: stri
 export function parseAgentlyWorkerTurnRecord(
   value: unknown,
   expectedCommandId: string,
-): AgentlyWorkerTurnRecordV2 {
+): AgentlyWorkerTurnRecordV3 {
   const safe = json(value, {
     nodes: 0,
     stringBytes: 0,
@@ -309,14 +312,20 @@ export function parseAgentlyWorkerTurnRecord(
   throw new TypeError("worker turn record type is unsupported");
 }
 
-export function normalizeAgentlyWorkerRequestV2(
-  value: AgentlyWorkerRequestV2,
-): AgentlyWorkerRequestV2 {
-  return {
-    ...value,
+export function normalizeAgentlyWorkerRequestV3(
+  value: AgentlyWorkerRequestV3,
+): AgentlyWorkerRequestV3 {
+  return Object.freeze({
+    protocol: AGENTLY_WORKER_TURN_PROTOCOL,
+    command_id: value.command_id,
+    task: value.task,
+    available_capabilities: validateRuntimeCapabilitySummaries(
+      value.available_capabilities,
+    ),
     continuation:
       value.continuation === null
         ? null
         : validateRuntimeCapabilityContinuation(value.continuation),
-  };
+    provider: Object.freeze({ ...value.provider }),
+  });
 }

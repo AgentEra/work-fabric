@@ -79,7 +79,7 @@ async def run(
         raw_output = await execute(request)
         output = (
             raw_output
-            if request.protocol == "workfabric.agent-runtime/2"
+            if request.protocol == "workfabric.agent-runtime/3"
             else validate_assistant_output(raw_output)
         )
         if _contains_secret(output, secrets):
@@ -95,7 +95,7 @@ async def run(
                 request.protocol,
             ),
         )
-        if request.protocol == "workfabric.agent-runtime/2":
+        if request.protocol == "workfabric.agent-runtime/3":
             kind = output.get("kind")
             if kind == "final":
                 write_record(

@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   parseAgentlyWorkerRecord,
   parseAgentlyWorkerTurnRecord,
+  normalizeAgentlyWorkerRequestV3,
   type AgentlyWorkerRequestV1,
-  type AgentlyWorkerRequestV2,
+  type AgentlyWorkerRequestV3,
 } from "../src/index.js";
 
 const task = {
@@ -20,11 +21,18 @@ describe("Agently worker protocol", () => {
     expect(JSON.stringify(request)).not.toContain("api_key");
   });
 
-  it("defines a v2 continuation request containing only normalized capability facts", () => {
-    const request: AgentlyWorkerRequestV2 = {
-      protocol: "workfabric.agent-runtime/2",
+  it("defines a strict v3 request with bounded public capability summaries", () => {
+    const request: AgentlyWorkerRequestV3 = {
+      protocol: "workfabric.agent-runtime/3",
       command_id: "command-2",
       task,
+      available_capabilities: [{
+        citizen_id: "citizen-feishu",
+        capability_id: "feishu.document.create",
+        version: "1.0.0",
+        name: "Create document",
+        description: "Create one simple Docx document.",
+      }],
       continuation: {
         request: {
           invocation_id: "invocation-1",
@@ -55,12 +63,23 @@ describe("Agently worker protocol", () => {
         model: "test-model",
       },
     };
-    expect(JSON.stringify(request)).not.toMatch(/api_key|secret|token/i);
+    const normalized = normalizeAgentlyWorkerRequestV3(request);
+    expect(normalized.available_capabilities).toEqual(
+      request.available_capabilities,
+    );
+    expect(JSON.stringify(normalized)).not.toMatch(/api_key|secret|folder_token/i);
+    expect(() => normalizeAgentlyWorkerRequestV3({
+      ...request,
+      available_capabilities: [{
+        ...request.available_capabilities[0]!,
+        folder_token: "forbidden",
+      }],
+    } as unknown as AgentlyWorkerRequestV3)).toThrow(/fields/i);
   });
 
-  it("parses the strict v2 final and capability_request terminal union", () => {
+  it("parses the strict v3 final and capability_request terminal union", () => {
     expect(parseAgentlyWorkerTurnRecord({
-      protocol: "workfabric.agent-runtime/2",
+      protocol: "workfabric.agent-runtime/3",
       type: "final",
       command_id: "command-2",
       response: {
@@ -74,7 +93,7 @@ describe("Agently worker protocol", () => {
       turn: { kind: "final" },
     });
     expect(parseAgentlyWorkerTurnRecord({
-      protocol: "workfabric.agent-runtime/2",
+      protocol: "workfabric.agent-runtime/3",
       type: "capability_request",
       command_id: "command-2",
       request: {
@@ -85,7 +104,7 @@ describe("Agently worker protocol", () => {
         reason: "创建团队文档",
       },
     }, "command-2")).toEqual({
-      protocol: "workfabric.agent-runtime/2",
+      protocol: "workfabric.agent-runtime/3",
       type: "capability_request",
       command_id: "command-2",
       turn: {
@@ -102,10 +121,10 @@ describe("Agently worker protocol", () => {
   });
 
   it.each(["completed", "unknown"])(
-    "rejects v1 or unsupported type %s in the v2 protocol",
+    "rejects v1 or unsupported type %s in the v3 protocol",
     (type) => {
       expect(() => parseAgentlyWorkerTurnRecord({
-        protocol: "workfabric.agent-runtime/2",
+        protocol: "workfabric.agent-runtime/3",
         type,
         command_id: "command-2",
       }, "command-2")).toThrow();

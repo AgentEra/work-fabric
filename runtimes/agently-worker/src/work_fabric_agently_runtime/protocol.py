@@ -7,13 +7,15 @@ from dataclasses import dataclass
 from typing import Literal, Mapping, TextIO, TypeAlias
 
 PROTOCOL = "workfabric.agent-runtime/1"
-TURN_PROTOCOL = "workfabric.agent-runtime/2"
+TURN_PROTOCOL = "workfabric.agent-runtime/3"
 MAX_JSON_DEPTH = 32
 MAX_JSON_NODES = 10_000
 MAX_JSON_STRING_BYTES = 131_072
 MAX_JSON_KEY_LENGTH = 256
 MAX_STDOUT_LINE_BYTES = 262_144
 SECRET_FIELD = re.compile(r"(?:api[_-]?key|secret|token|password|credential)", re.IGNORECASE)
+CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
+SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -24,9 +26,10 @@ class ProtocolError(ValueError):
 
 @dataclass(frozen=True)
 class WorkerRequest:
-    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"]
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/3"]
     command_id: str
     task: Mapping[str, JsonValue]
+    available_capabilities: tuple[Mapping[str, JsonValue], ...]
     continuation: Mapping[str, JsonValue] | None
     provider_type: Literal["OpenAICompatible"]
     provider_base_url: str
@@ -35,7 +38,7 @@ class WorkerRequest:
 
 @dataclass(frozen=True)
 class WorkerRecord:
-    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"]
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/3"]
     type: Literal["progress", "completed", "final", "capability_request", "failed"]
     command_id: str
     payload: Mapping[str, JsonValue]
@@ -255,6 +258,61 @@ def _validate_continuation(value: object) -> dict[str, JsonValue]:
     return safe
 
 
+def _validate_available_capabilities(
+    value: object,
+) -> tuple[Mapping[str, JsonValue], ...]:
+    if not isinstance(value, list) or len(value) > 32:
+        _fail("available_capabilities exceeds its bound")
+    output: list[Mapping[str, JsonValue]] = []
+    identities: set[tuple[str, str, str]] = set()
+    for index, candidate in enumerate(value):
+        summary = _exact_object(
+            candidate,
+            ("citizen_id", "capability_id", "version", "name", "description"),
+            f"available_capabilities[{index}]",
+        )
+        citizen_id = _string(
+            summary["citizen_id"],
+            f"available_capabilities[{index}].citizen_id",
+            128,
+        )
+        capability_id = _string(
+            summary["capability_id"],
+            f"available_capabilities[{index}].capability_id",
+            128,
+        )
+        if not CAPABILITY_ID.fullmatch(capability_id):
+            _fail(f"available_capabilities[{index}].capability_id is invalid")
+        version = _string(
+            summary["version"],
+            f"available_capabilities[{index}].version",
+            64,
+        )
+        if not SEMVER.fullmatch(version):
+            _fail(f"available_capabilities[{index}].version is invalid")
+        safe = {
+            "citizen_id": citizen_id,
+            "capability_id": capability_id,
+            "version": version,
+            "name": _string(
+                summary["name"],
+                f"available_capabilities[{index}].name",
+                256,
+            ),
+            "description": _string(
+                summary["description"],
+                f"available_capabilities[{index}].description",
+                2_048,
+            ),
+        }
+        identity = (citizen_id, capability_id, version)
+        if identity in identities:
+            _fail("available_capabilities contains a duplicate")
+        identities.add(identity)
+        output.append(_json_object(safe, f"available_capabilities[{index}]"))
+    return tuple(output)
+
+
 def parse_request(value: object) -> WorkerRequest:
     safe = _json(value, _JsonBudget())
     if not isinstance(safe, dict):
@@ -263,7 +321,10 @@ def parse_request(value: object) -> WorkerRequest:
     fields = (
         ("protocol", "command_id", "task", "provider")
         if protocol == PROTOCOL
-        else ("protocol", "command_id", "task", "continuation", "provider")
+        else (
+            "protocol", "command_id", "task", "available_capabilities",
+            "continuation", "provider",
+        )
     )
     request = _exact_object(safe, fields, "request")
     if protocol not in (PROTOCOL, TURN_PROTOCOL):
@@ -277,6 +338,13 @@ def parse_request(value: object) -> WorkerRequest:
         protocol=protocol,
         command_id=command_id,
         task=task,
+        available_capabilities=(
+            ()
+            if protocol == PROTOCOL
+            else _validate_available_capabilities(
+                request["available_capabilities"]
+            )
+        ),
         continuation=(
             None
             if protocol == PROTOCOL or request["continuation"] is None
@@ -306,7 +374,7 @@ def progress_record(
     progress: float | None,
     message: str,
     observed_at: str,
-    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"] = PROTOCOL,
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/3"] = PROTOCOL,
 ) -> WorkerRecord:
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         _fail("progress sequence is invalid")
@@ -347,7 +415,7 @@ def failed_record(
     code: str,
     message: str,
     retryable: bool,
-    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"] = PROTOCOL,
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/3"] = PROTOCOL,
 ) -> WorkerRecord:
     if not isinstance(retryable, bool):
         _fail("failure retryable is invalid")
