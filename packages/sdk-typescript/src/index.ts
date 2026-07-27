@@ -1,5 +1,7 @@
 export { BearerTokenProvider } from "./authentication.js";
 export type * from "./authentication.js";
+export { CitizenClient } from "./citizen-client.js";
+export type * from "./citizen-client.js";
 export type * from "./config.js";
 export type * from "./command-client.js";
 export { ConnectorSdkCommandSink } from "./connector-command-sink.js";

@@ -17,11 +17,14 @@
     "@work-fabric/protocol-runtime": "0.1.0",
     "@work-fabric/operations-runtime": "0.1.0",
     "@work-fabric/operations-spi": "0.1.0",
+    "@work-fabric/network-citizen-directory": "0.1.0",
+    "@work-fabric/network-citizen-spi": "0.1.0",
     "fastify": "5.10.0"
   },
   "devDependencies": {
     "@work-fabric/adapter-connector-memory": "0.1.0",
     "@work-fabric/adapter-endpoint-memory": "0.1.0",
-    "@work-fabric/adapter-identity-local": "0.1.0"
+    "@work-fabric/adapter-identity-local": "0.1.0",
+    "@work-fabric/adapter-network-citizen-memory": "0.1.0"
   }
 }

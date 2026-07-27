@@ -59,6 +59,22 @@ export type {
   ResponsibilityView,
   TimelineEntry,
 } from "@work-fabric/operations-spi";
+export type {
+  CitizenAvailability,
+  CitizenCardPage,
+  CitizenDeclaration,
+  CitizenDeclarationContract,
+  CitizenDeclarationReplaceInput,
+  CitizenDeclarationSummary,
+  CitizenDeclarationSummaryPage,
+  CitizenHeartbeatInput,
+  CitizenProvisioning,
+  CitizenSessionCloseInput,
+  CitizenSessionOpenInput,
+  NetworkCitizenDescriptor,
+  NetworkCitizenKind,
+  PublicCitizenSession,
+} from "@work-fabric/network-citizen-spi";
 
 export interface SubscriptionDocument {
   readonly subscription_id: string;

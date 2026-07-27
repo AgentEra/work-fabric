@@ -42,6 +42,8 @@ import {
   type SemanticObservation,
   type SemanticTelemetryObserver,
 } from "@work-fabric/operations-spi";
+import type { NetworkCitizenDirectoryService } from "@work-fabric/network-citizen-directory";
+import { registerCitizenRoutes } from "../routes/citizen-routes.js";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -57,6 +59,7 @@ export interface InternalServerDependencies {
   readonly sse_connections?: SseConnectionManager;
   readonly endpoint_directory?: EndpointDirectoryService;
   readonly endpoint_inbox?: EndpointInboxQueryService;
+  readonly citizen_directory?: NetworkCitizenDirectoryService;
   readonly feishu_webhook?: FeishuWebhookDependencies;
   readonly collaboration?: CollaborationQueryService;
   readonly audit?: OperationAuditRecorder;
@@ -198,6 +201,18 @@ export function createInternalServer(
       registerEndpointRoutes(server, {
         directory: dependencies.endpoint_directory,
         inbox: dependencies.endpoint_inbox,
+        schemas: dependencies.schemas,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+      });
+    }
+    if (
+      dependencies.schemas !== undefined &&
+      dependencies.citizen_directory !== undefined
+    ) {
+      registerCitizenRoutes(server, {
+        directory: dependencies.citizen_directory,
         schemas: dependencies.schemas,
         identity: dependencies.identity,
         authority: dependencies.authority,
