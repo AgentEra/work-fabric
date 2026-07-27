@@ -30,9 +30,9 @@ export interface RuntimeHandoffLoadOptions {
 
 type JsonRecord = Record<string, unknown>;
 
-const STATE_FIELDS = ["handoff_id", "thread_id", "resource_version", "lifecycle_state", "initiator", "recipient", "verifier", "current_responsible_actor", "target_binding", "package", "result", "parent_handoff_id", "child_handoff_id", "created_at", "updated_at"] as const;
+const STATE_FIELDS = ["handoff_id", "thread_id", "resource_version", "lifecycle_state", "initiator", "recipient", "verifier", "current_responsible_actor", "target_binding", "active_claim", "claim_fencing_token", "package", "result", "parent_handoff_id", "child_handoff_id", "created_at", "updated_at"] as const;
 const PACKAGE_FIELDS = ["work_reference", "target", "intent", "context", "authority_scope", "acceptance_criteria", "verifier", "priority", "accept_by", "result_due_at"] as const;
-const LIFECYCLES = new Set(["target_resolution_pending", "target_unavailable", "offered", "accepted", "result_returned", "verified", "rework_requested", "closed", "declined", "expired", "cancelled", "transferred"]);
+const LIFECYCLES = new Set(["target_resolution_pending", "target_unavailable", "claimable", "claimed", "offered", "accepted", "result_returned", "verified", "rework_requested", "closed", "declined", "expired", "cancelled", "transferred"]);
 const EVENT_PAGE_LIMIT = 100;
 
 function record(value: unknown, path: string): JsonRecord {
@@ -83,11 +83,16 @@ function target(value: unknown, path: string): JsonRecord {
 
 function capabilityRequirement(value: unknown, path: string): void {
   const item = record(value, path);
-  const allowed = ["capability_id", "version_constraint", "input_media_types", "output_media_types", "constraints", "extensions"];
+  const allowed = ["capability_id", "version_constraint", "input_media_types", "output_media_types", "assignment_mode", "constraints", "extensions"];
   if (!Object.hasOwn(item, "capability_id") || Object.keys(item).some((key) => !allowed.includes(key))) invalid("invalid_snapshot", path);
   const capabilityId = id(item.capability_id, `${path}.capability_id`);
   if (!/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(capabilityId)) invalid("invalid_snapshot", `${path}.capability_id`);
   if (item.version_constraint !== undefined && (typeof item.version_constraint !== "string" || item.version_constraint.length === 0 || item.version_constraint.length > 256)) invalid("invalid_snapshot", `${path}.version_constraint`);
+  if (
+    item.assignment_mode !== undefined &&
+    item.assignment_mode !== "external_resolution" &&
+    item.assignment_mode !== "eligible_pool_claim"
+  ) invalid("invalid_snapshot", `${path}.assignment_mode`);
   for (const field of ["input_media_types", "output_media_types"] as const) {
     const media = item[field];
     if (media !== undefined && (!Array.isArray(media) || new Set(media).size !== media.length || media.some((entry) => typeof entry !== "string" || entry.length > 255 || !/^[^/\s]+\/[^/\s]+$/.test(entry)))) invalid("invalid_snapshot", `${path}.${field}`);
@@ -99,6 +104,39 @@ function capabilityRequirement(value: unknown, path: string): void {
 function actor(value: unknown, path: string): void {
   const item = record(value, path); exact(item, ["actor_id", "actor_type"], path); id(item.actor_id, `${path}.actor_id`);
   if (item.actor_type !== "human" && item.actor_type !== "agent" && item.actor_type !== "system") invalid("invalid_snapshot", `${path}.actor_type`);
+}
+
+function activeClaim(value: unknown, path: string, fencingToken: number): void {
+  if (value === null) return;
+  const item = record(value, path);
+  exact(item, [
+    "claim_id",
+    "actor",
+    "endpoint_id",
+    "fencing_token",
+    "heartbeat_sequence",
+    "accepted_lease_seconds",
+    "expires_at",
+    "renew_after",
+  ], path);
+  id(item.claim_id, `${path}.claim_id`);
+  actor(item.actor, `${path}.actor`);
+  id(item.endpoint_id, `${path}.endpoint_id`);
+  if (
+    !Number.isSafeInteger(item.fencing_token) ||
+    (item.fencing_token as number) < 1 ||
+    item.fencing_token !== fencingToken
+  ) invalid("invalid_snapshot", `${path}.fencing_token`);
+  if (
+    !Number.isSafeInteger(item.heartbeat_sequence) ||
+    (item.heartbeat_sequence as number) < 0
+  ) invalid("invalid_snapshot", `${path}.heartbeat_sequence`);
+  if (
+    !Number.isSafeInteger(item.accepted_lease_seconds) ||
+    (item.accepted_lease_seconds as number) < 1
+  ) invalid("invalid_snapshot", `${path}.accepted_lease_seconds`);
+  normalizeRfc3339(item.expires_at, `${path}.expires_at`, "invalid_snapshot");
+  normalizeRfc3339(item.renew_after, `${path}.renew_after`, "invalid_snapshot");
 }
 
 function context(value: unknown, path: string): RuntimeJsonObject | null {
@@ -153,6 +191,15 @@ export class HandoffPackageLoader {
     actor(state.initiator, "state.initiator"); actor(state.verifier, "state.verifier");
     if (state.recipient !== null) actor(state.recipient, "state.recipient");
     if (state.current_responsible_actor !== null) actor(state.current_responsible_actor, "state.current_responsible_actor");
+    if (
+      !Number.isSafeInteger(state.claim_fencing_token) ||
+      (state.claim_fencing_token as number) < 0
+    ) invalid("invalid_snapshot", "state.claim_fencing_token");
+    activeClaim(
+      state.active_claim,
+      "state.active_claim",
+      state.claim_fencing_token as number,
+    );
     if (state.target_binding !== null) {
       const binding = record(state.target_binding, "state.target_binding");
       exact(binding, ["target", "resolved_by", "resolver_endpoint_id", "delegation_id", "resolved_at", "evidence"], "state.target_binding");

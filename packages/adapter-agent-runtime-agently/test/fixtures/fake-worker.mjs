@@ -25,7 +25,11 @@ process.stdin.on("end", () => {
     case "silent-timeout": setInterval(() => {}, 1_000); break;
     case "non-zero-exit": complete(); process.exitCode = 9; break;
     case "print-env-keys": emit(record("completed", { result: { summary: [{ kind: "text", text: "env" }], artifacts: [], evidence: [], extensions: { "workfabric.dev/child_env_keys": Object.keys(process.env).sort() } } })); break;
-    case "ignore-term": process.on("SIGTERM", () => {}); setInterval(() => {}, 1_000); break;
+    case "ignore-term":
+      process.on("SIGTERM", () => {});
+      emit(record("progress", { sequence: 1, progress: null, message: "ready", observed_at: "2026-01-01T00:00:00.000Z" }));
+      setInterval(() => {}, 1_000);
+      break;
     case "delayed-invalid":
       emit(record("progress", { sequence: 1, progress: 0.1, message: "waiting", observed_at: "2026-01-01T00:00:00.000Z" }));
       setTimeout(() => { process.stdout.write("{invalid-json}\n"); }, 1_000);

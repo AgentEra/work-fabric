@@ -45,21 +45,63 @@ async function fixture() {
   const directory = new MemoryEndpointDirectoryStore();
   const inbox = new MemoryEndpointInboxStore();
   await directory.putRegistration({ registration, expected_version: null });
+  await directory.openSession({
+    tenant_id: "tenant_01",
+    endpoint_id: "endpoint_agent",
+    actor: registration.actor,
+    session_id: "session_01",
+    client_session_id: "client_01",
+    protocol_version: "1.0",
+    capabilities: [{
+      capability_id: "software.implementation",
+      version: "1.0.0",
+      name: "Implementation",
+      description: "Implements work",
+      input_media_types: ["application/json"],
+      output_media_types: ["application/json"],
+      input_schema_refs: [],
+      output_schema_refs: [],
+      interaction_modes: ["asynchronous"],
+      constraints: {},
+    }],
+    availability: "available",
+    accepted_lease_seconds: 60,
+    expires_at: "2026-07-15T00:01:00Z",
+    renew_after: "2026-07-15T00:00:50Z",
+    registration_version: 1,
+    request_digest: "sha256:session",
+    opened_at: "2026-07-15T00:00:00Z",
+  });
   await inbox.upsertRoutingFact({
     tenant_id: "tenant_01",
     partition_id: "handoff:h_01",
     handoff_id: "h_01",
     resource_version: 1,
     lifecycle_state: "offered",
+    capability_ids: [],
     last_event_id: "event_01",
     observed_position: 1,
     visible_actor_ids: ["actor_agent"],
     visible_endpoint_ids: [],
     active: true,
   });
+  await inbox.upsertRoutingFact({
+    tenant_id: "tenant_01",
+    partition_id: "handoff:h_claimable",
+    handoff_id: "h_claimable",
+    resource_version: 1,
+    lifecycle_state: "claimable",
+    capability_ids: ["software.implementation"],
+    last_event_id: "event_claimable",
+    observed_position: 2,
+    visible_actor_ids: [],
+    visible_endpoint_ids: [],
+    active: true,
+  });
   return new EndpointInboxQueryService({
     directory,
     inbox,
+    clock: { now: () => "2026-07-15T00:00:30Z" },
     defaultPageLimit: 20,
     maxPageLimit: 100,
   });
@@ -78,6 +120,21 @@ describe("EndpointInboxQueryService", () => {
         partition_id: "handoff:h_01",
         latest_position: 1,
         active_handoff_count: 1,
+      }],
+    });
+  });
+
+  it("lists only Claimable Handoffs matching the Endpoint's live capabilities", async () => {
+    const service = await fixture();
+
+    await expect(service.listClaimableHandoffs(
+      { tenant_id: "tenant_01", principal },
+      "endpoint_agent",
+      {},
+    )).resolves.toMatchObject({
+      items: [{
+        handoff_id: "h_claimable",
+        capability_ids: ["software.implementation"],
       }],
     });
   });

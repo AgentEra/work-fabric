@@ -42,6 +42,14 @@ function isCapabilityTarget(state: HandoffState): boolean {
   return "capability_requirement" in state.package.target;
 }
 
+function usesEligiblePoolClaim(
+  handoffPackage: HandoffState["package"],
+): boolean {
+  if (!("capability_requirement" in handoffPackage.target)) return false;
+  return handoffPackage.target.capability_requirement.assignment_mode ===
+    "eligible_pool_claim";
+}
+
 function isAuthorizedRecipient(
   state: HandoffState,
   actor: ActorRef,
@@ -119,9 +127,49 @@ function decideAccept(
 ): DomainDecision {
   const invalidState = isAllowedState(state, command.kind, [
     "offered",
+    "claimed",
     "rework_requested",
   ]);
   if (invalidState !== null) return invalidState;
+  if (state.lifecycle_state === "claimed") {
+    const claim = state.active_claim;
+    if (
+      !context.recipient_authorized ||
+      claim === null ||
+      !actorEquals(claim.actor, command.actor) ||
+      command.endpoint_id !== claim.endpoint_id ||
+      command.claim_id !== claim.claim_id ||
+      command.fencing_token !== claim.fencing_token
+    ) {
+      return reject("precondition_failed", "Claim fencing precondition failed");
+    }
+    if (
+      timestamp(context.now, "decision now") >=
+      timestamp(claim.expires_at, "claim expires_at")
+    ) {
+      return reject("expired", "Claim lease has expired");
+    }
+    if (state.package.context !== null && !context.context_available) {
+      return reject(
+        "context_unavailable",
+        "Referenced Handoff Context is unavailable",
+      );
+    }
+    return accept({
+      event_type: "workfabric.handoff.accepted.v1",
+      handoff_id: command.handoff_id,
+      recipient: command.actor,
+      binding: {
+        target: { endpoint_id: claim.endpoint_id },
+        resolved_by: command.actor,
+        resolver_endpoint_id: claim.endpoint_id,
+        delegation_id: null,
+        resolved_at: context.now,
+        evidence: [],
+      },
+      occurred_at: context.now,
+    });
+  }
   if (!isAuthorizedRecipient(state, command.actor, context)) {
     return rejectUnauthorized("accept Handoff responsibility");
   }
@@ -163,6 +211,8 @@ function decideExpire(
 ): DomainDecision {
   const invalidState = isAllowedState(state, command.kind, [
     "target_resolution_pending",
+    "claimable",
+    "claimed",
     "offered",
   ]);
   if (invalidState !== null) return invalidState;
@@ -189,6 +239,8 @@ function decideCancel(
 ): DomainDecision {
   const invalidState = isAllowedState(state, command.kind, [
     "target_resolution_pending",
+    "claimable",
+    "claimed",
     "offered",
     "accepted",
   ]);
@@ -267,6 +319,146 @@ function decideTargetUnavailable(
     reason_code: command.reason_code,
     reason: command.reason,
     evidence: command.evidence,
+    occurred_at: context.now,
+  });
+}
+
+function decideClaim(
+  state: HandoffState,
+  command: Extract<HandoffCommand, { readonly kind: "claim" }>,
+  context: HandoffDecisionContext,
+): DomainDecision {
+  const invalidState = isAllowedState(state, command.kind, ["claimable"]);
+  if (invalidState !== null) return invalidState;
+  if (!usesEligiblePoolClaim(state.package)) {
+    return reject("invalid_argument", "Handoff does not use eligible pool claim");
+  }
+  if (!context.recipient_authorized || !context.claimant_eligible) {
+    return rejectUnauthorized("claim the Handoff");
+  }
+  if (context.claim_lease === undefined) {
+    return reject("precondition_failed", "Claim lease is unavailable");
+  }
+  return accept({
+    event_type: "workfabric.handoff.claimed.v1",
+    handoff_id: command.handoff_id,
+    claim: {
+      claim_id: command.claim_id,
+      actor: command.actor,
+      endpoint_id: command.endpoint_id,
+      fencing_token: state.claim_fencing_token + 1,
+      heartbeat_sequence: 0,
+      ...context.claim_lease,
+    },
+    occurred_at: context.now,
+  });
+}
+
+function decideRenewClaim(
+  state: HandoffState,
+  command: Extract<HandoffCommand, { readonly kind: "renew_claim" }>,
+  context: HandoffDecisionContext,
+): DomainDecision {
+  const invalidState = isAllowedState(state, command.kind, ["claimed"]);
+  if (invalidState !== null) return invalidState;
+  const claim = state.active_claim;
+  if (
+    claim === null ||
+    !actorEquals(claim.actor, command.actor) ||
+    claim.endpoint_id !== command.endpoint_id ||
+    claim.claim_id !== command.claim_id ||
+    claim.fencing_token !== command.fencing_token
+  ) {
+    return reject("precondition_failed", "Claim fencing precondition failed");
+  }
+  if (command.heartbeat_sequence !== claim.heartbeat_sequence + 1) {
+    return reject("precondition_failed", "Claim heartbeat sequence is stale");
+  }
+  if (
+    timestamp(context.now, "decision now") >=
+    timestamp(claim.expires_at, "claim expires_at")
+  ) {
+    return reject("expired", "Claim lease has expired");
+  }
+  if (context.claim_lease === undefined) {
+    return reject("precondition_failed", "Claim lease is unavailable");
+  }
+  return accept({
+    event_type: "workfabric.handoff.claim_renewed.v1",
+    handoff_id: command.handoff_id,
+    claim: {
+      ...claim,
+      heartbeat_sequence: command.heartbeat_sequence,
+      ...context.claim_lease,
+    },
+    occurred_at: context.now,
+  });
+}
+
+function decideReleaseClaim(
+  state: HandoffState,
+  command: Extract<HandoffCommand, { readonly kind: "release_claim" }>,
+  context: HandoffDecisionContext,
+): DomainDecision {
+  const invalidState = isAllowedState(state, command.kind, ["claimed"]);
+  if (invalidState !== null) return invalidState;
+  const claim = state.active_claim;
+  if (
+    claim === null ||
+    !actorEquals(claim.actor, command.actor) ||
+    claim.endpoint_id !== command.endpoint_id ||
+    claim.claim_id !== command.claim_id ||
+    claim.fencing_token !== command.fencing_token ||
+    command.heartbeat_sequence !== claim.heartbeat_sequence + 1
+  ) {
+    return reject("precondition_failed", "Claim fencing precondition failed");
+  }
+  if (
+    timestamp(context.now, "decision now") >=
+    timestamp(claim.expires_at, "claim expires_at")
+  ) {
+    return reject("expired", "Claim lease has expired");
+  }
+  return accept({
+    event_type: "workfabric.handoff.claim_released.v1",
+    handoff_id: command.handoff_id,
+    claim_id: claim.claim_id,
+    actor: claim.actor,
+    endpoint_id: claim.endpoint_id,
+    fencing_token: claim.fencing_token,
+    heartbeat_sequence: command.heartbeat_sequence,
+    occurred_at: context.now,
+  });
+}
+
+function decideExpireClaim(
+  state: HandoffState,
+  command: Extract<HandoffCommand, { readonly kind: "expire_claim" }>,
+  context: HandoffDecisionContext,
+): DomainDecision {
+  const invalidState = isAllowedState(state, command.kind, ["claimed"]);
+  if (invalidState !== null) return invalidState;
+  const claim = state.active_claim;
+  if (
+    claim === null ||
+    claim.claim_id !== command.claim_id ||
+    claim.fencing_token !== command.fencing_token
+  ) {
+    return reject("precondition_failed", "Claim fencing precondition failed");
+  }
+  if (
+    timestamp(context.now, "decision now") <
+    timestamp(claim.expires_at, "claim expires_at")
+  ) {
+    return reject("precondition_failed", "Claim lease has not expired");
+  }
+  return accept({
+    event_type: "workfabric.handoff.claim_expired.v1",
+    handoff_id: command.handoff_id,
+    claim_id: claim.claim_id,
+    actor: claim.actor,
+    endpoint_id: claim.endpoint_id,
+    fencing_token: claim.fencing_token,
     occurred_at: context.now,
   });
 }
@@ -453,7 +645,9 @@ export function decideHandoff(
     return accept({
       event_type:
         "capability_requirement" in command.package.target
-          ? "workfabric.handoff.target_resolution_requested.v1"
+          ? usesEligiblePoolClaim(command.package)
+            ? "workfabric.handoff.claim_pool_opened.v1"
+            : "workfabric.handoff.target_resolution_requested.v1"
           : "workfabric.handoff.offered.v1",
       handoff_id: command.handoff_id,
       thread_id: command.thread_id,
@@ -476,6 +670,14 @@ export function decideHandoff(
       return decideResolveTarget(state, command, context);
     case "report_target_unavailable":
       return decideTargetUnavailable(state, command, context);
+    case "claim":
+      return decideClaim(state, command, context);
+    case "renew_claim":
+      return decideRenewClaim(state, command, context);
+    case "release_claim":
+      return decideReleaseClaim(state, command, context);
+    case "expire_claim":
+      return decideExpireClaim(state, command, context);
     case "accept":
       return decideAccept(state, command, context);
     case "decline":

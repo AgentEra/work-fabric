@@ -8,8 +8,12 @@ export const ENDPOINT_AUTHORITY_ACTIONS = [
   "workfabric.endpoint.session.heartbeat.v1",
   "workfabric.endpoint.session.close.v1",
   "workfabric.endpoint.read.v1",
+  "workfabric.endpoint.identity.discover.v1",
+  "workfabric.endpoint.capability-summary.discover.v1",
   "workfabric.endpoint.discover.v1",
+  "workfabric.endpoint.capability.read.v1",
   "workfabric.endpoint.inbox.read.v1",
+  "workfabric.endpoint.claim-pool.read.v1",
 ] as const;
 
 export type EndpointAuthorityAction =
@@ -124,6 +128,47 @@ export interface EndpointDescriptor {
   };
   readonly limits: EndpointLimits;
   readonly extensions?: JsonObject;
+}
+
+export interface EndpointIdentityCard {
+  readonly endpoint_id: string;
+  readonly actor: EndpointActorRef;
+  readonly endpoint_type: string;
+  readonly display_name: string;
+  readonly protocol_versions: readonly string[];
+  readonly availability: EndpointAvailability;
+  readonly lease: {
+    readonly expires_at: string;
+    readonly renew_after: string;
+  };
+}
+
+export interface CapabilitySummary {
+  readonly capability_id: string;
+  readonly version: string;
+  readonly name: string;
+  readonly description: string;
+}
+
+export interface EndpointCapabilityCard extends EndpointIdentityCard {
+  readonly capabilities: readonly CapabilitySummary[];
+}
+
+export interface EndpointIdentityPage {
+  readonly items: readonly EndpointIdentityCard[];
+  readonly next_cursor?: string;
+}
+
+export interface EndpointCapabilityPage {
+  readonly items: readonly EndpointCapabilityCard[];
+  readonly next_cursor?: string;
+}
+
+export interface EndpointCapabilityContract {
+  readonly endpoint_id: string;
+  readonly actor: EndpointActorRef;
+  readonly availability: EndpointAvailability;
+  readonly capability: CapabilityDescriptor;
 }
 
 export interface EndpointSession {

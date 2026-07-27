@@ -91,6 +91,6 @@ describe("runRepositoryConformance", () => {
     expect(result.results.every((entry) => entry.passed)).toBe(true);
     expect(result.coverage.missing_positive).toEqual([]);
     expect(result.coverage.missing_negative).toEqual([]);
-    expect(result.exchange_behavior_count).toBe(15);
+    expect(result.exchange_behavior_count).toBe(16);
   });
 });

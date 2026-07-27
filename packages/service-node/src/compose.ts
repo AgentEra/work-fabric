@@ -90,8 +90,12 @@ import {
   type Clock,
   type IdGenerator,
 } from "@work-fabric/exchange-core";
-import { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import {
+  DirectoryTargetEligibilityVerifier,
+  EndpointDirectoryService,
+} from "@work-fabric/endpoint-directory";
+import {
+  ClaimLeaseExpiryRunner,
   CursorPullService,
   DefaultSubscriptionDeliveryPolicy,
   EndpointInboxProjector,
@@ -112,7 +116,6 @@ import type {
   ProjectionCheckpointStore,
   ProjectionFailureStore,
   SubscriptionStore,
-  TargetEligibilityVerifier,
   OutboxStore,
   WorkerLeaseStore,
 } from "@work-fabric/exchange-spi";
@@ -168,19 +171,6 @@ import { assertFeishuPluginRole } from "./feishu-plugin-composition.js";
 const defaultClock: Clock = { now: () => new Date().toISOString() };
 const defaultIds: IdGenerator = {
   nextId(kind) { return `${kind}_${randomUUID()}`; },
-};
-
-const explicitTargetEligibility: TargetEligibilityVerifier = {
-  manifest: {
-    profile: "exchange.target-eligibility.v1",
-    adapter: "explicit-target-boundary",
-    capabilities: {
-      explicit_target_only: true,
-      no_candidate_selection: true,
-      fail_closed: true,
-    },
-  },
-  async verify() { return { kind: "eligible" }; },
 };
 
 export interface NodeStorageComposition {
@@ -370,6 +360,24 @@ function operationsCursor(secret: string) {
 
 function handoffPartitionId(tenantId: string, handoffId: string): string {
   return `partition:${createHash("sha256").update(canonicalJson({ tenant_id: tenantId, root_handoff_id: handoffId }), "utf8").digest("hex")}`;
+}
+
+export function claimExpiryIdempotencyKey(
+  tenantId: string,
+  handoffId: string,
+  claimId: string,
+  fencingToken: number,
+): string {
+  const digest = createHash("sha256")
+    .update(tenantId)
+    .update("\u0000")
+    .update(handoffId)
+    .update("\u0000")
+    .update(claimId)
+    .update("\u0000")
+    .update(String(fencingToken))
+    .digest("base64url");
+  return `claim-expiry_${digest}`;
 }
 
 class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
@@ -705,18 +713,71 @@ export async function composeNodeService(
     schemas,
     "protocol/spec/interaction-payloads.json",
   );
-  const localIdentity = new LocalIdentityProvider(config.identities);
+  const claimExpiryToken = randomUUID();
+  const claimExpiryPrincipalId = "workfabric-claim-expiry";
+  const claimExpiryActorId = "workfabric-claim-expiry";
+  const claimExpiryEndpointId = "workfabric-claim-expiry";
+  const claimExpiryEvidence = { claim_expiry_token: claimExpiryToken };
+  const localIdentity = new LocalIdentityProvider([
+    ...config.identities,
+    {
+      authentication_evidence: claimExpiryEvidence,
+      principal: {
+        principal_id: claimExpiryPrincipalId,
+        tenant_id: config.tenant_id,
+        actor_claims: [{
+          actor_id: claimExpiryActorId,
+          actor_type: "system",
+          endpoint_ids: [claimExpiryEndpointId],
+        }],
+        attributes: {},
+      },
+    },
+  ]);
   const runtimeAuthority = new AgentRuntimeAuthorityPolicy(
     Object.values(options.agent_runtime_authority?.grants ?? {}),
     storage.handoffs,
   );
   const localAuthority = new LocalAuthorityPolicy(config.authority_rules);
+  const claimExpiryAuthority = {
+    manifest: {
+      profile: "exchange.authority.v1",
+      adapter: "claim-expiry-mechanical",
+      capabilities: {
+        explicit_decision: true,
+        default_deny: true,
+        resource_scoping: true,
+      },
+    },
+    async authorize(request: {
+      readonly principal: { readonly principal_id: string; readonly tenant_id: string };
+      readonly actor_id: string;
+      readonly actor_type: "human" | "agent" | "system";
+      readonly endpoint_id: string;
+      readonly delegation_id: string | null;
+      readonly action: string;
+      readonly resource_id: string | null;
+    }) {
+      return request.principal.tenant_id === config.tenant_id
+        && request.principal.principal_id === claimExpiryPrincipalId
+        && request.actor_id === claimExpiryActorId
+        && request.actor_type === "system"
+        && request.endpoint_id === claimExpiryEndpointId
+        && request.delegation_id === null
+        && request.action === "workfabric.handoff.expire_claim.v1"
+        && typeof request.resource_id === "string"
+        && request.resource_id.length > 0
+        ? { kind: "allow" as const }
+        : { kind: "deny" as const, reason: "Not a mechanical Claim expiry request" };
+    },
+  };
   const identity = admissionComposition === undefined
     ? localIdentity
     : new CompositeIdentityProvider([admissionComposition.identity, localIdentity]);
   const authority = new CompositeAuthorityPolicy([
     ...(admissionComposition === undefined ? [] : [admissionComposition.authority]),
     runtimeAuthority,
+    claimExpiryAuthority,
     localAuthority,
   ]);
   const application = new ExchangeApplication({
@@ -727,7 +788,10 @@ export async function composeNodeService(
     validator,
     clock,
     ids: options.ids ?? defaultIds,
-    target_eligibility: explicitTargetEligibility,
+    target_eligibility: new DirectoryTargetEligibilityVerifier({
+      store: storage.endpointDirectory,
+      clock,
+    }),
   });
   const handoffProjector = new HandoffProjector(
     storage.persistence,
@@ -764,7 +828,7 @@ export async function composeNodeService(
     schemas,
   );
   let localPump: LocalMechanicalPump | undefined;
-  if (config.cluster === undefined && config.storage_profile !== "postgres") {
+  if (config.cluster === undefined) {
     localPump = new LocalMechanicalPump({
       poll_interval_ms: 100,
       max_work_keys: 10_000,
@@ -787,14 +851,68 @@ export async function composeNodeService(
         result.resource?.resource_type === "handoff" &&
         typeof resourceId === "string"
       ) {
-        const partitionId = handoffPartitionId(config.tenant_id, resourceId);
-        await handoffProjector.runPartition(partitionId, 10_000);
-        await endpointInboxProjector.runPartition(partitionId, 10_000);
-        localPump.wake(partitionId);
+        try {
+          const firstRecord = (
+            await storage.persistence.readStream(resourceId)
+          )[0];
+          if (firstRecord !== undefined) {
+            const partitionId = firstRecord.partition_id;
+            await handoffProjector.runPartition(partitionId, 10_000);
+            await endpointInboxProjector.runPartition(partitionId, 10_000);
+            localPump.wake(partitionId);
+          }
+        } catch {
+          // The authoritative command is already committed. Local projection
+          // acceleration is best-effort and the durable journal remains the
+          // recovery source.
+        }
       }
       return result;
     },
   };
+  const claimExpiryRunner = new ClaimLeaseExpiryRunner({
+    tenant_id: config.tenant_id,
+    inbox: storage.endpointInbox,
+    clock,
+    poll_interval_ms: 1_000,
+    page_limit: 100,
+    max_pages_per_run: 10,
+    async expire(claim) {
+      const result = await applicationWithLocalWake.handle(
+        {
+          spec_version: "1.0",
+          message_id: `message_${randomUUID()}`,
+          message_type: "workfabric.handoff.expire_claim.v1",
+          sent_at: clock.now(),
+          tenant_id: config.tenant_id,
+          exchange_id: config.exchange_id,
+          actor_id: claimExpiryActorId,
+          endpoint_id: claimExpiryEndpointId,
+          idempotency_key: claimExpiryIdempotencyKey(
+            config.tenant_id,
+            claim.handoff_id,
+            claim.claim_id,
+            claim.fencing_token,
+          ),
+          expected_version: claim.resource_version,
+          payload: {
+            handoff_id: claim.handoff_id,
+            claim_id: claim.claim_id,
+            fencing_token: claim.fencing_token,
+          },
+        },
+        claimExpiryEvidence,
+      );
+      if (result.operation_status === "accepted") return "expired";
+      if (
+        result.error?.code === "version_conflict" ||
+        result.error?.code === "invalid_state_transition" ||
+        result.error?.code === "precondition_failed" ||
+        result.error?.code === "not_found"
+      ) return "stale";
+      return "retry";
+    },
+  });
   const pluginServices = new Map<string, unknown>([
     ["workfabric.tenant_id", config.tenant_id],
     ["channel.routes", channelRoutes],
@@ -950,6 +1068,7 @@ export async function composeNodeService(
   const endpointInbox = new EndpointInboxQueryService({
     directory: storage.endpointDirectory,
     inbox: storage.endpointInbox,
+    clock,
     defaultPageLimit: 25,
     maxPageLimit: 100,
   });
@@ -1011,6 +1130,7 @@ export async function composeNodeService(
   async function stopExecutionResources(): Promise<void> {
     let failure: unknown;
     try { await pluginHost.stop(); } catch (error) { failure = error; }
+    try { await claimExpiryRunner.stop(); } catch (error) { failure ??= error; }
     try { await localPump?.stop(); } catch (error) { failure ??= error; }
     try { await clusterHost?.drain(); } catch (error) { failure ??= error; }
     if (failure !== undefined) throw failure;
@@ -1033,6 +1153,7 @@ export async function composeNodeService(
       try {
         if (config.role === "worker" || config.role === "all") {
           clusterHost?.start();
+          claimExpiryRunner.start();
         }
         localPump?.start();
         await pluginHost.start();

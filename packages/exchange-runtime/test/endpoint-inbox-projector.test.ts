@@ -104,6 +104,42 @@ describe("EndpointInboxProjector", () => {
     })).resolves.toEqual({ items: [] });
   });
 
+  it("projects capability-scoped claimable Handoffs into the candidate pool", async () => {
+    const store = new MemoryEndpointInboxStore();
+    const projector = new EndpointInboxProjector(store);
+
+    await projector.apply(event({
+      event_type: "workfabric.handoff.claim_pool_opened.v1",
+      protocol_data: {
+        resource_version: 1,
+        change: {
+          change_type: "created",
+          from_state: null,
+          to_state: "claimable",
+          changed_fields: ["lifecycle_state"],
+          details: {
+            lifecycle_state: "claimable",
+            capability_ids: ["software.implementation"],
+          },
+        },
+        receipt: null,
+      },
+    }));
+
+    await expect(store.listClaimableHandoffs({
+      tenant_id: "tenant_01",
+      endpoint_id: "endpoint_agent",
+      capability_ids: ["software.implementation"],
+      limit: 10,
+    })).resolves.toMatchObject({
+      items: [{
+        handoff_id: "handoff_01",
+        lifecycle_state: "claimable",
+        capability_ids: ["software.implementation"],
+      }],
+    });
+  });
+
   it("ignores non-Handoff events", async () => {
     const store = new MemoryEndpointInboxStore();
     const projector = new EndpointInboxProjector(store);

@@ -85,9 +85,14 @@ export class DeterministicAcceptancePolicy {
 }
 
 function canonicalRequirement(value: Record<string, unknown> | null): value is Record<string, unknown> & { readonly capability_id: string } {
-  if (value === null || !Object.hasOwn(value, "capability_id") || Object.keys(value).some((key) => !["capability_id", "version_constraint", "input_media_types", "output_media_types", "constraints", "extensions"].includes(key))) return false;
+  if (value === null || !Object.hasOwn(value, "capability_id") || Object.keys(value).some((key) => !["capability_id", "version_constraint", "input_media_types", "output_media_types", "assignment_mode", "constraints", "extensions"].includes(key))) return false;
   if (typeof value.capability_id !== "string" || !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/.test(value.capability_id) || value.capability_id.length > 128) return false;
   if (value.version_constraint !== undefined && (typeof value.version_constraint !== "string" || value.version_constraint.length === 0 || value.version_constraint.length > 256)) return false;
+  if (
+    value.assignment_mode !== undefined &&
+    value.assignment_mode !== "external_resolution" &&
+    value.assignment_mode !== "eligible_pool_claim"
+  ) return false;
   for (const field of ["input_media_types", "output_media_types"] as const) {
     const media = value[field];
     if (media !== undefined) {

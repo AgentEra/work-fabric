@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 export const handoffStates = [
   "target_resolution_pending",
   "target_unavailable",
+  "claimable",
+  "claimed",
   "offered",
   "accepted",
   "result_returned",

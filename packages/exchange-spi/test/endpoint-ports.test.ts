@@ -16,10 +16,14 @@ describe("Endpoint boundary ports", () => {
       "workfabric.endpoint.session.heartbeat.v1",
       "workfabric.endpoint.session.close.v1",
       "workfabric.endpoint.read.v1",
+      "workfabric.endpoint.identity.discover.v1",
+      "workfabric.endpoint.capability-summary.discover.v1",
       "workfabric.endpoint.discover.v1",
+      "workfabric.endpoint.capability.read.v1",
       "workfabric.endpoint.inbox.read.v1",
+      "workfabric.endpoint.claim-pool.read.v1",
     ]);
-    expect(new Set(ENDPOINT_AUTHORITY_ACTIONS).size).toBe(8);
+    expect(new Set(ENDPOINT_AUTHORITY_ACTIONS).size).toBe(12);
   });
 
   it("keeps persistence and constraint contracts transport-neutral", () => {

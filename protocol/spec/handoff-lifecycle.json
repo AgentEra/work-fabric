@@ -1,10 +1,12 @@
 {
   "spec_version": "1.0",
   "name": "WFPP v1 Handoff Lifecycle",
-  "initial_states": ["target_resolution_pending", "offered"],
+  "initial_states": ["target_resolution_pending", "claimable", "offered"],
   "states": [
     "target_resolution_pending",
     "target_unavailable",
+    "claimable",
+    "claimed",
     "offered",
     "accepted",
     "result_returned",
@@ -37,8 +39,65 @@
       "interaction": "handoff.offer",
       "from": [null],
       "to": "target_resolution_pending",
-      "required_conditions": ["capability_target"],
+      "required_conditions": ["capability_target", "external_resolution"],
       "event_type": "workfabric.handoff.target_resolution_requested.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.offer",
+      "from": [null],
+      "to": "claimable",
+      "required_conditions": ["capability_target", "eligible_pool_claim"],
+      "event_type": "workfabric.handoff.claim_pool_opened.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.claim",
+      "from": ["claimable"],
+      "to": "claimed",
+      "required_conditions": [
+        "claimant_authorized",
+        "claimant_eligible",
+        "claim_lease_available"
+      ],
+      "event_type": "workfabric.handoff.claimed.v1",
+      "effects": [
+        {
+          "type": "issue_receipt",
+          "receipt_type": "claim_acquired"
+        }
+      ]
+    },
+    {
+      "interaction": "handoff.renew_claim",
+      "from": ["claimed"],
+      "to": "claimed",
+      "required_conditions": [
+        "claim_fence_current",
+        "heartbeat_sequence_next",
+        "claim_lease_active"
+      ],
+      "event_type": "workfabric.handoff.claim_renewed.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.release_claim",
+      "from": ["claimed"],
+      "to": "claimable",
+      "required_conditions": [
+        "claim_fence_current",
+        "heartbeat_sequence_next",
+        "claim_lease_active"
+      ],
+      "event_type": "workfabric.handoff.claim_released.v1",
+      "effects": []
+    },
+    {
+      "interaction": "handoff.expire_claim",
+      "from": ["claimed"],
+      "to": "claimable",
+      "required_conditions": ["claim_fence_current", "claim_lease_elapsed"],
+      "event_type": "workfabric.handoff.claim_expired.v1",
       "effects": []
     },
     {
@@ -71,6 +130,23 @@
       ]
     },
     {
+      "interaction": "handoff.accept",
+      "from": ["claimed"],
+      "to": "accepted",
+      "required_conditions": [
+        "claim_fence_current",
+        "claim_lease_active",
+        "context_available"
+      ],
+      "event_type": "workfabric.handoff.accepted.v1",
+      "effects": [
+        {
+          "type": "issue_receipt",
+          "receipt_type": "responsibility_accepted"
+        }
+      ]
+    },
+    {
       "interaction": "handoff.decline",
       "from": ["offered"],
       "to": "declined",
@@ -80,7 +156,7 @@
     },
     {
       "interaction": "handoff.expire",
-      "from": ["target_resolution_pending", "offered"],
+      "from": ["target_resolution_pending", "claimable", "claimed", "offered"],
       "to": "expired",
       "required_conditions": ["accept_by_elapsed"],
       "event_type": "workfabric.handoff.expired.v1",
@@ -88,7 +164,7 @@
     },
     {
       "interaction": "handoff.cancel",
-      "from": ["target_resolution_pending", "offered", "accepted"],
+      "from": ["target_resolution_pending", "claimable", "claimed", "offered", "accepted"],
       "to": "cancelled",
       "required_conditions": ["policy_allows_cancel"],
       "event_type": "workfabric.handoff.cancelled.v1",
@@ -168,7 +244,26 @@
       "required_conditions": [
         "recipient_authorized",
         "redelegation_allowed",
-        "child_capability_target"
+        "child_capability_target",
+        "eligible_pool_claim"
+      ],
+      "event_type": "workfabric.handoff.claim_pool_opened.v1",
+      "effects": [
+        {
+          "type": "create_child_handoff",
+          "child_initial_state": "claimable"
+        }
+      ]
+    },
+    {
+      "interaction": "handoff.transfer",
+      "from": ["accepted"],
+      "to": "accepted",
+      "required_conditions": [
+        "recipient_authorized",
+        "redelegation_allowed",
+        "child_capability_target",
+        "external_resolution"
       ],
       "event_type": "workfabric.handoff.target_resolution_requested.v1",
       "effects": [

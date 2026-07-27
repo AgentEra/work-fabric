@@ -129,6 +129,14 @@ def test_role_prompt_defines_the_handoff_draft_identifier_contract() -> None:
     assert "include every output field" in prompt
 
 
+def test_role_prompt_requires_a_self_contained_user_facing_response() -> None:
+    prompt = role_prompt(valid_request()["task"]["role"])
+
+    assert "sole canonical user-facing result" in prompt
+    assert "must not rely on request_summary, missing_information, or handoff draft fields" in prompt
+    assert "every deliverable explicitly requested in the Handoff intent" in prompt
+
+
 def test_defaults_omitted_handoff_draft_fields_when_no_draft_is_required() -> None:
     output = validate_assistant_output({
         "request_summary": "整理后的请求",

@@ -34,7 +34,18 @@ class NeutralLongConnectionClient implements FeishuLongConnectionClient {
 }
 
 const loaded = await loadNodeConfiguration(process.env);
-const service = await composeNodeService(loaded.service, {
+const testPort = process.env.WORK_FABRIC_TEST_LISTEN_PORT;
+const service = await composeNodeService({
+  ...loaded.service,
+  ...(testPort === undefined
+    ? {}
+    : {
+        listen: {
+          ...loaded.service.listen,
+          port: Number(testPort),
+        },
+      }),
+}, {
   configuration_revision: loaded.revision,
   plugins: loaded.plugins,
   admission: loaded.admission,

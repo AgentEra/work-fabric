@@ -54,7 +54,7 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 8. **逻辑图与物理存储分离**：协作关系可以投影为图，但权威事务状态不绑定单一图数据库。
 9. **最小授权**：交接携带与当前工作绑定的授权范围，不向 Agent 或 Adapter 发放租户级长期权限。
 10. **自动化来自端点可替换性**：人类端点可以逐步替换为 Agent 端点，而协议、治理和交接链保持稳定。
-11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、目标解析协议和可靠派发；目标选择与执行计划由外部人、规则或 Agent Brain 决定。
+11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、受限候选池、机械认领、目标解析协议和可靠派发；复杂的排名、推荐、成本/负载决策与执行计划由外部人、规则或 Agent Brain 决定。
 12. **模块职责闭环**：每个模块必须完整拥有并完成自身职责，只通过稳定协议或 SPI 与其他模块交换事实；不得跨层代偿另一个模块的业务语义、决策或执行。
 13. **依赖面向契约**：Core、Runtime、Agent、Connector 和 Channel 模块不得依赖彼此的具体存储、进程或供应商实现。组合层可以把实现适配到窄接口，但不能把具体实现泄漏到消费模块。
 
@@ -243,17 +243,18 @@ extension_fields
 | Deadline / Expiry | 接收责任和返回结果的时间边界 |
 | Correlation / Causation | 所属协作链及直接上游原因 |
 
-### 5.3 Target Resolution、Handoff Dispatch 与 Execution Scheduling
+### 5.3 Capability Discovery、Target Assignment、Handoff Dispatch 与 Execution Scheduling
 
-三者必须保持独立：
+四者必须保持独立：
 
-- **Target Resolution** 决定 Handoff 应绑定到哪个 Actor 或 Endpoint。它可以由发起方直接完成，也可以由外部人工选择器、规则服务或 AI Scheduling Brain 完成。Work Fabric 提供候选 Endpoint 的事实查询和解析结果提交协议，但不实现排名、推荐或选择算法。
+- **Capability Discovery** 通过身份卡片、能力摘要、能力契约和受保护 Binding 渐进披露参与实体，不把内部 Module、Skill 实现或凭据暴露为协作事实。
+- **Target Assignment** 决定 Handoff 应绑定到哪个 Actor 或 Endpoint。它支持 Direct Target、经过权限过滤的 Pool Claim，以及外部人工选择器、规则服务或 AI Scheduling Brain 提交的 Resolution。Pool Claim 只实现排他预留、Lease 与 fencing，不实现候选排名、推荐或智能选择。
 - **Handoff Dispatch** 在目标确定后选择兼容 Binding，可靠投递 Handoff，维护 Delivery、Ack、重试、死信与恢复，并验证接收方是否有资格代表目标承担责任。这是 Work Fabric 的原生连接职责。
 - **Execution Scheduling** 决定任务如何拆分、何时执行、使用哪些模型、工具或内部 Worker，完全属于接收方 Runtime、Workflow 或外部系统。
 
-Capability Target 表达尚未解析的能力需求。未得到经过授权的解析结果前，Work Fabric 不得把并发抢占或“首个响应者”当作默认分派策略。底层乐观并发只用于保证同一 Handoff 的权威状态不会被多个写入同时提交，不代表业务调度决策。
+Capability Target 表达尚未绑定的能力需求。为保持兼容，未显式声明 Assignment Mode 时继续使用 `external_resolution`；只有显式选择 `eligible_pool_claim` 的 Handoff 才允许合法候选 Endpoint 自主认领。全网广播和无权限的“首个响应者胜出”始终禁止。
 
-3A 已提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容；4A 已补齐 Endpoint Directory、未排序事实查询和基于 Directory 的显式目标资格校验。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析 fail-closed 且不产生权威写入。具体 Resolver 仍是外部参与方，不进入 Work Fabric。
+3A 已提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容；4A 已补齐 Endpoint Directory、未排序事实查询和基于 Directory 的显式目标资格校验。Candidate Claim 已实现显式 `eligible_pool_claim`、`claimable` / `claimed` 生命周期、权限与 Capability 过滤的候选视图、原子 Claim Lease、fencing、续租/释放/过期命令、HTTP/SDK、Agent Gateway 显式认领接入，以及部署宿主内有界、可多实例竞争的机械过期 Runner，详见[能力发现、候选认领与外部调度](capability-discovery-and-claim.md)。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析/认领 fail-closed 且不产生权威写入。具体 Resolver、候选排名和智能调度仍是外部参与方，不进入 Work Fabric。
 
 ```mermaid
 flowchart LR
@@ -298,6 +299,7 @@ Receipt 至少区分：
 
 - `DELIVERED`
 - `RECEIVED`
+- `CLAIM_ACQUIRED`
 - `RESPONSIBILITY_ACCEPTED`
 - `RESULT_RECEIVED`
 - `RESULT_VERIFIED`

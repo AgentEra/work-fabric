@@ -17,6 +17,7 @@ describe("DeterministicAcceptancePolicy", () => {
     expect(policy.decide(snapshot(), event("workfabric.handoff.offered.v1"), false)).toEqual({ kind: "accept" });
     expect(policy.decide(snapshot({ package: { ...state.package, target: { endpoint_id: "endpoint-1" } } }), event("workfabric.handoff.offered.v1"), false)).toEqual({ kind: "accept" });
     expect(policy.decide(snapshot({ package: { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis" } }, }, target_binding: binding }), event("workfabric.handoff.offered.v1"), false)).toEqual({ kind: "accept" });
+    expect(policy.decide(snapshot({ package: { ...state.package, target: { capability_requirement: { capability_id: "information.synthesis", assignment_mode: "external_resolution" } }, }, target_binding: binding }), event("workfabric.handoff.offered.v1"), false)).toEqual({ kind: "accept" });
   });
 
   it.each([
@@ -28,7 +29,7 @@ describe("DeterministicAcceptancePolicy", () => {
   ])("declines %s", (_name, handoff, code) => expect(policy.decide(handoff, event("workfabric.handoff.offered.v1"), code === "already_running")).toEqual({ kind: "decline", code }));
 
   it.each(["result_returned", "verified", "closed", "declined", "expired", "cancelled", "transferred", "target_unavailable"])("declines every terminal lifecycle", (lifecycle_state) => expect(policy.decide(snapshot({ lifecycle_state }), event("workfabric.handoff.offered.v1"), false)).toEqual({ kind: "decline", code: "terminal" }));
-  it.each(["accepted", "rework_requested", "target_resolution_pending"])("ignores non-offered non-terminal lifecycle", (lifecycle_state) => expect(policy.decide(snapshot({ lifecycle_state }), event("workfabric.handoff.offered.v1"), false)).toEqual({ kind: "ignore", code: "not_offered" }));
+  it.each(["accepted", "rework_requested", "target_resolution_pending", "claimable", "claimed"])("ignores non-offered non-terminal lifecycle", (lifecycle_state) => expect(policy.decide(snapshot({ lifecycle_state }), event("workfabric.handoff.offered.v1"), false)).toEqual({ kind: "ignore", code: "not_offered" }));
   it("ignores own status or result redelivery", () => expect(policy.decide(snapshot(), event("workfabric.handoff.status_reported.v1", "actor-1"), false)).toEqual({ kind: "ignore", code: "own_update" }));
   it.each([
     ["non-RFC3339 deadline", { ...state.package, accept_by: "tomorrow" }],

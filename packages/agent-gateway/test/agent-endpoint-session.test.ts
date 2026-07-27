@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   WorkFabricHttpError,
   type AckResult,
+  type EndpointClaimableHandoff,
   type EndpointSession,
   type EventDelivery,
   type HandoffReadModel,
@@ -102,6 +103,16 @@ const terminalDelivery: EventDelivery = {
   }],
 };
 
+const claimableHandoff: EndpointClaimableHandoff = {
+  partition_id: "handoff:handoff_claimable",
+  handoff_id: "handoff_claimable",
+  resource_version: 1,
+  lifecycle_state: "claimable",
+  capability_ids: ["software.implementation"],
+  last_event_id: "event_claimable",
+  observed_position: 1,
+};
+
 function waitForAbort(signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
@@ -130,6 +141,7 @@ function fakeClient(options: {
       heartbeat,
       closeSession: vi.fn(async () => ({ ...endpointSession, state: "closed" as const })),
       listInboxPartitions: vi.fn(async () => ({ items: [{ partition_id: partitionId, latest_position: 1, active_handoff_count: 1 }] })),
+      listClaimableHandoffs: vi.fn(async () => ({ items: [structuredClone(claimableHandoff)] })),
     },
     subscriptions: {
       get: vi.fn(async () => structuredClone(subscription)),
@@ -193,6 +205,26 @@ describe("AgentGateway", () => {
     expect(fake.accept).not.toHaveBeenCalled();
     await incoming.value?.acknowledgeSignal("acknowledged");
     expect(fake.acknowledge).toHaveBeenCalledOnce();
+    expect(fake.accept).not.toHaveBeenCalled();
+    await session.close();
+  });
+
+  it("exposes the authorized Claim pool without automatically claiming or accepting", async () => {
+    const fake = fakeClient();
+    const claim = vi.fn();
+    Reflect.set(fake.client.handoffs, "claim", claim);
+    const gateway = new AgentGateway(fake.client, config());
+    const session = await gateway.start();
+
+    await expect(session.claimableHandoffs({ limit: 10 })).resolves.toEqual({
+      items: [claimableHandoff],
+    });
+    expect(fake.client.endpoints.listClaimableHandoffs).toHaveBeenCalledWith(
+      "endpoint_agent",
+      { limit: 10 },
+      {},
+    );
+    expect(claim).not.toHaveBeenCalled();
     expect(fake.accept).not.toHaveBeenCalled();
     await session.close();
   });

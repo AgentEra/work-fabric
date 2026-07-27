@@ -39,6 +39,27 @@ export type HandoffReferencePayload = JsonObject & {
   readonly handoff_id: string;
 };
 
+export type HandoffClaimPayload = HandoffReferencePayload & {
+  readonly claim_id: string;
+  readonly requested_lease_seconds?: number;
+};
+
+export type HandoffClaimControlPayload = HandoffReferencePayload & {
+  readonly claim_id: string;
+  readonly fencing_token: number;
+  readonly heartbeat_sequence: number;
+};
+
+export type HandoffClaimExpirePayload = HandoffReferencePayload & {
+  readonly claim_id: string;
+  readonly fencing_token: number;
+};
+
+export type HandoffAcceptPayload = HandoffReferencePayload & {
+  readonly claim_id?: string;
+  readonly fencing_token?: number;
+};
+
 export type HandoffTargetResolutionPayload = HandoffReferencePayload & {
   readonly resolved_target: ExplicitHandoffTarget;
   readonly evidence?: readonly JsonObject[];
@@ -105,6 +126,24 @@ function handoffId(payload: HandoffReferencePayload): void {
   bounded(payload.handoff_id, "handoff_id", 128);
 }
 
+function positiveInteger(value: number, field: string): number {
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new TypeError(`${field} must be a positive safe integer`);
+  }
+  return value;
+}
+
+function claimId(payload: { readonly claim_id: string }): void {
+  bounded(payload.claim_id, "claim_id", 128);
+}
+
+function claimFence(
+  payload: { readonly claim_id: string; readonly fencing_token: number },
+): void {
+  claimId(payload);
+  positiveInteger(payload.fencing_token, "fencing_token");
+}
+
 export class HandoffClient {
   constructor(
     private readonly config: NormalizedClientOptions,
@@ -140,7 +179,64 @@ export class HandoffClient {
     return this.send("report_target_unavailable", payload, options);
   }
 
-  accept(payload: HandoffReferencePayload, options: ExistingHandoffCommandOptions) {
+  claim(
+    payload: HandoffClaimPayload,
+    options: ExistingHandoffCommandOptions,
+  ): Promise<OperationResult> {
+    handoffId(payload);
+    claimId(payload);
+    if (payload.requested_lease_seconds !== undefined) {
+      positiveInteger(
+        payload.requested_lease_seconds,
+        "requested_lease_seconds",
+      );
+    }
+    return this.send("claim", payload, options);
+  }
+
+  renewClaim(
+    payload: HandoffClaimControlPayload,
+    options: ExistingHandoffCommandOptions,
+  ): Promise<OperationResult> {
+    handoffId(payload);
+    claimFence(payload);
+    positiveInteger(payload.heartbeat_sequence, "heartbeat_sequence");
+    return this.send("renew_claim", payload, options);
+  }
+
+  releaseClaim(
+    payload: HandoffClaimControlPayload,
+    options: ExistingHandoffCommandOptions,
+  ): Promise<OperationResult> {
+    handoffId(payload);
+    claimFence(payload);
+    positiveInteger(payload.heartbeat_sequence, "heartbeat_sequence");
+    return this.send("release_claim", payload, options);
+  }
+
+  expireClaim(
+    payload: HandoffClaimExpirePayload,
+    options: ExistingHandoffCommandOptions,
+  ): Promise<OperationResult> {
+    handoffId(payload);
+    claimFence(payload);
+    return this.send("expire_claim", payload, options);
+  }
+
+  accept(payload: HandoffAcceptPayload, options: ExistingHandoffCommandOptions) {
+    const hasClaimId = payload.claim_id !== undefined;
+    const hasFence = payload.fencing_token !== undefined;
+    if (hasClaimId !== hasFence) {
+      throw new TypeError(
+        "claim_id and fencing_token must be supplied together",
+      );
+    }
+    if (hasClaimId && hasFence) {
+      claimFence({
+        claim_id: payload.claim_id as string,
+        fencing_token: payload.fencing_token as number,
+      });
+    }
     return this.existing("accept", payload, options);
   }
 

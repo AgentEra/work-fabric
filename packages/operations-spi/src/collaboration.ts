@@ -45,6 +45,8 @@ export interface SafeTargetBinding {
 export type ResponsibilityLifecycleState =
   | "target_resolution_pending"
   | "target_unavailable"
+  | "claimable"
+  | "claimed"
   | "offered"
   | "accepted"
   | "result_returned"

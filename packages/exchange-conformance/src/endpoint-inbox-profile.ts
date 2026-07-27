@@ -16,6 +16,7 @@ function fact(overrides: Partial<EndpointInboxRoutingFact> = {}): EndpointInboxR
     handoff_id: "h_profile_01",
     resource_version: 1,
     lifecycle_state: "offered",
+    capability_ids: [],
     last_event_id: "event_profile_01",
     observed_position: 1,
     visible_actor_ids: ["actor_profile_01"],
@@ -55,6 +56,81 @@ export async function verifyEndpointInboxProfile(
     items: [{ partition_id: "handoff:h_profile_01", latest_position: 1, active_handoff_count: 1 }],
   });
   assert.deepEqual(await store.listPartitions({ ...query, tenant_id: "tenant_other" }), { items: [] });
+
+  await store.upsertRoutingFact(fact({
+    handoff_id: "h_claimable",
+    partition_id: "handoff:h_claimable",
+    lifecycle_state: "claimable",
+    capability_ids: ["software.implementation"],
+    last_event_id: "event_claimable",
+    observed_position: 2,
+  }));
+  assert.deepEqual(await store.listClaimableHandoffs({
+    tenant_id: "tenant_profile_01",
+    endpoint_id: "endpoint_profile_01",
+    capability_ids: ["software.implementation"],
+    limit: 10,
+  }), {
+    items: [{
+      partition_id: "handoff:h_claimable",
+      handoff_id: "h_claimable",
+      resource_version: 1,
+      lifecycle_state: "claimable",
+      capability_ids: ["software.implementation"],
+      last_event_id: "event_claimable",
+      observed_position: 2,
+    }],
+  });
+  assert.deepEqual(await store.listClaimableHandoffs({
+    tenant_id: "tenant_profile_01",
+    endpoint_id: "endpoint_profile_01",
+    capability_ids: ["different.capability"],
+    limit: 10,
+  }), { items: [] });
+  await store.upsertRoutingFact(fact({
+    handoff_id: "h_claimable",
+    partition_id: "handoff:h_claimable",
+    resource_version: 2,
+    lifecycle_state: "claimed",
+    capability_ids: ["software.implementation"],
+    active_claim: {
+      claim_id: "claim_profile_01",
+      fencing_token: 1,
+      expires_at: "2026-07-27T00:00:00Z",
+    },
+    last_event_id: "event_claimed",
+    observed_position: 3,
+  }));
+  assert.deepEqual(await store.listClaimableHandoffs({
+    tenant_id: "tenant_profile_01",
+    endpoint_id: "endpoint_profile_01",
+    capability_ids: ["software.implementation"],
+    limit: 10,
+  }), { items: [] });
+  assert.deepEqual(await store.listExpiredClaims({
+    tenant_id: "tenant_profile_01",
+    expires_at_or_before: "2026-07-27T00:00:00Z",
+    limit: 10,
+  }), {
+    items: [{
+      partition_id: "handoff:h_claimable",
+      handoff_id: "h_claimable",
+      resource_version: 2,
+      claim_id: "claim_profile_01",
+      fencing_token: 1,
+      expires_at: "2026-07-27T00:00:00Z",
+    }],
+  });
+  await store.upsertRoutingFact(fact({
+    handoff_id: "h_claimable",
+    partition_id: "handoff:h_claimable",
+    resource_version: 3,
+    lifecycle_state: "completed",
+    capability_ids: ["software.implementation"],
+    last_event_id: "event_claimable_completed",
+    observed_position: 4,
+    active: false,
+  }));
 
   await store.upsertRoutingFact(fact({
     handoff_id: "h_profile_02",

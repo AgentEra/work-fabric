@@ -11,6 +11,7 @@ import {
 } from "@work-fabric/endpoint-directory";
 import {
   EndpointInboxQueryError,
+  type EndpointClaimableHandoffInput,
   type EndpointInboxPartitionInput,
   type EndpointInboxQueryService,
 } from "@work-fabric/exchange-runtime";
@@ -176,10 +177,19 @@ export function registerEndpointRoutes(
   server.get<{ Querystring: Record<string, unknown> }>(
     "/v1/endpoints",
     async (request, reply) => {
-      const auth = await authorizeRoute(request, deps, "workfabric.endpoint.discover.v1", null);
-      if (auth.kind === "denied") return reply.code(auth.problem.status).send(auth.problem);
       const limit = positive(request.query.limit);
       if (Number.isNaN(limit)) return problem(reply, 400, "invalid_request", "Invalid discovery query", request.url);
+      const disclosure = one(request.query.disclosure) ?? "full";
+      if (!["identity", "summary", "full"].includes(disclosure)) {
+        return problem(reply, 400, "invalid_request", "Invalid discovery disclosure", request.url);
+      }
+      const disclosureAction = disclosure === "identity"
+        ? "workfabric.endpoint.identity.discover.v1"
+        : disclosure === "summary"
+          ? "workfabric.endpoint.capability-summary.discover.v1"
+          : "workfabric.endpoint.discover.v1";
+      const auth = await authorizeRoute(request, deps, disclosureAction, null);
+      if (auth.kind === "denied") return reply.code(auth.problem.status).send(auth.problem);
       const input: EndpointDiscoveryInput = {
         ...(one(request.query.capability_id) === undefined ? {} : { capability_id: one(request.query.capability_id)! }),
         ...(one(request.query.version_constraint) === undefined ? {} : { version_constraint: one(request.query.version_constraint)! }),
@@ -190,7 +200,36 @@ export function registerEndpointRoutes(
         ...(limit === undefined ? {} : { limit }),
       };
       try {
+        if (disclosure === "identity") {
+          return reply.send(await deps.directory.discoverIdentities(directoryContext(auth), input));
+        }
+        if (disclosure === "summary") {
+          return reply.send(await deps.directory.discoverCapabilityCards(directoryContext(auth), input));
+        }
         return reply.send(await deps.directory.discover(directoryContext(auth), input));
+      } catch (error) {
+        return errorResponse(reply, error, request.url);
+      }
+    },
+  );
+
+  server.get<{ Params: { endpointId: string; capabilityId: string } }>(
+    "/v1/endpoints/:endpointId/capabilities/:capabilityId",
+    async (request, reply) => {
+      const resourceId = `${request.params.endpointId}/${request.params.capabilityId}`;
+      const auth = await authorizeRoute(
+        request,
+        deps,
+        "workfabric.endpoint.capability.read.v1",
+        resourceId,
+      );
+      if (auth.kind === "denied") return reply.code(auth.problem.status).send(auth.problem);
+      try {
+        return reply.send(await deps.directory.getCapability(
+          directoryContext(auth),
+          request.params.endpointId,
+          request.params.capabilityId,
+        ));
       } catch (error) {
         return errorResponse(reply, error, request.url);
       }
@@ -253,6 +292,49 @@ export function registerEndpointRoutes(
       try {
         return reply.send(await deps.inbox.listPartitions(
           { tenant_id: auth.principal.tenant_id, principal: auth.principal },
+          request.params.endpointId,
+          input,
+        ));
+      } catch (error) {
+        return errorResponse(reply, error, request.url);
+      }
+    },
+  );
+
+  server.get<{ Params: { endpointId: string }; Querystring: Record<string, unknown> }>(
+    "/v1/endpoints/:endpointId/claimable-handoffs",
+    async (request, reply) => {
+      const auth = await authorizeRoute(
+        request,
+        deps,
+        "workfabric.endpoint.claim-pool.read.v1",
+        request.params.endpointId,
+      );
+      if (auth.kind === "denied") {
+        return reply.code(auth.problem.status).send(auth.problem);
+      }
+      const limit = positive(request.query.limit);
+      if (Number.isNaN(limit)) {
+        return problem(
+          reply,
+          400,
+          "invalid_request",
+          "Invalid Endpoint candidate pool query",
+          request.url,
+        );
+      }
+      const input: EndpointClaimableHandoffInput = {
+        ...(one(request.query.cursor) === undefined
+          ? {}
+          : { cursor: one(request.query.cursor)! }),
+        ...(limit === undefined ? {} : { limit }),
+      };
+      try {
+        return reply.send(await deps.inbox.listClaimableHandoffs(
+          {
+            tenant_id: auth.principal.tenant_id,
+            principal: auth.principal,
+          },
           request.params.endpointId,
           input,
         ));

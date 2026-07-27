@@ -90,6 +90,7 @@ describe("SQLite supporting stores", () => {
       handoff_id: "handoff-local",
       resource_version: 1,
       lifecycle_state: "offered",
+      capability_ids: [],
       last_event_id: "event-local",
       observed_position: 1,
       visible_actor_ids: ["actor-local"],

@@ -56,6 +56,10 @@
       "uniqueItems": true,
       "items": {
         "enum": [
+          "target_resolution_pending",
+          "target_unavailable",
+          "claimable",
+          "claimed",
           "offered",
           "accepted",
           "result_returned",

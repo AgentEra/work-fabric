@@ -16,6 +16,7 @@ const SELF_ENDPOINT_ACTIONS = new Set([
   "workfabric.endpoint.session.heartbeat.v1",
   "workfabric.endpoint.session.close.v1",
   "workfabric.endpoint.inbox.read.v1",
+  "workfabric.endpoint.claim-pool.read.v1",
 ]);
 const SELF_SUBSCRIPTION_ACTIONS = new Set([
   "workfabric.subscription.read.v1",
@@ -32,6 +33,14 @@ const RESPONSIBLE_HANDOFF_ACTIONS = new Set([
   "workfabric.query.handoff.read.v1",
   "workfabric.handoff.report_status.v1",
   "workfabric.handoff.return_result.v1",
+]);
+const CLAIMABLE_HANDOFF_ACTIONS = new Set([
+  "workfabric.handoff.claim.v1",
+]);
+const CLAIM_HOLDER_ACTIONS = new Set([
+  "workfabric.handoff.renew_claim.v1",
+  "workfabric.handoff.release_claim.v1",
+  "workfabric.handoff.accept.v1",
 ]);
 
 const manifest = Object.freeze({
@@ -93,6 +102,13 @@ function previouslyAccepted(state: HandoffState, grant: AgentRuntimeAuthorityGra
   return responsibleActorMatches(state.recipient, grant);
 }
 
+function activeClaimMatches(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
+  return state.active_claim !== null
+    && state.active_claim.actor.actor_type === "agent"
+    && state.active_claim.actor.actor_id === grant.actor_id
+    && state.active_claim.endpoint_id === grant.endpoint_id;
+}
+
 function exactRuntimeGrant(request: AuthorityRequest, grants: readonly AgentRuntimeAuthorityGrant[]): AgentRuntimeAuthorityGrant | null {
   try {
     if (typeof request !== "object" || request === null) return null;
@@ -120,7 +136,11 @@ function exactRuntimeGrant(request: AuthorityRequest, grants: readonly AgentRunt
 
 function selfEndpointAllowed(action: unknown, resourceId: unknown, grant: AgentRuntimeAuthorityGrant): boolean {
   if (typeof action !== "string" || !SELF_ENDPOINT_ACTIONS.has(action)) return false;
-  if (action === "workfabric.endpoint.session.open.v1" || action === "workfabric.endpoint.inbox.read.v1") return resourceId === grant.endpoint_id;
+  if (
+    action === "workfabric.endpoint.session.open.v1"
+    || action === "workfabric.endpoint.inbox.read.v1"
+    || action === "workfabric.endpoint.claim-pool.read.v1"
+  ) return resourceId === grant.endpoint_id;
   if (!boundedIdentifier(resourceId)) return false;
   const prefix = `${grant.endpoint_id}/`;
   const suffix = resourceId.startsWith(prefix) ? resourceId.slice(prefix.length) : "";
@@ -147,14 +167,24 @@ export class AgentRuntimeAuthorityPolicy implements AuthorityPolicy {
     if (selfEndpointAllowed(action, resourceId, grant)) return ALLOW;
     if (typeof action === "string" && SELF_SUBSCRIPTION_ACTIONS.has(action) && resourceId === grant.subscription_id) return ALLOW;
     if (typeof action !== "string" || !boundedIdentifier(resourceId)
-      || (!TARGETED_HANDOFF_ACTIONS.has(action) && !RESPONSIBLE_HANDOFF_ACTIONS.has(action))) return DENY;
+      || (
+        !TARGETED_HANDOFF_ACTIONS.has(action)
+        && !RESPONSIBLE_HANDOFF_ACTIONS.has(action)
+        && !CLAIMABLE_HANDOFF_ACTIONS.has(action)
+        && !CLAIM_HOLDER_ACTIONS.has(action)
+      )) return DENY;
     try {
       const model = await this.handoffs.getHandoff(resourceId);
       const handoff = validateRuntimeHandoffReadModel(model, grant.tenant_id, resourceId);
       if (handoff === null) return DENY;
       const { state } = handoff;
       const lifecycleState = state.lifecycle_state;
-      if (action === "workfabric.query.handoff.read.v1" && (targeted(state, grant) || previouslyAccepted(state, grant))) return ALLOW;
+      if (
+        action === "workfabric.query.handoff.read.v1"
+        && (targeted(state, grant) || previouslyAccepted(state, grant) || activeClaimMatches(state, grant))
+      ) return ALLOW;
+      if (CLAIMABLE_HANDOFF_ACTIONS.has(action) && lifecycleState === "claimable") return ALLOW;
+      if (CLAIM_HOLDER_ACTIONS.has(action) && lifecycleState === "claimed" && activeClaimMatches(state, grant)) return ALLOW;
       if (TARGETED_HANDOFF_ACTIONS.has(action) && lifecycleState === "offered" && targeted(state, grant)) return ALLOW;
       if (RESPONSIBLE_HANDOFF_ACTIONS.has(action) && lifecycleState === "accepted" && responsible(state, grant)) return ALLOW;
     } catch {

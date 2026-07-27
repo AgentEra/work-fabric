@@ -487,7 +487,14 @@ function allowRules(): readonly LocalAuthorityAllowRule[] {
       action: "workfabric.handoff.offer.v1",
       resource_id: null,
     },
-    ...["accept", "report_status", "return_result"].map(
+    ...[
+      "claim",
+      "renew_claim",
+      "release_claim",
+      "accept",
+      "report_status",
+      "return_result",
+    ].map(
       (action): LocalAuthorityAllowRule => ({
         tenant_id: "tenant_01",
         principal_id: "principal_agent",
@@ -509,7 +516,7 @@ function allowRules(): readonly LocalAuthorityAllowRule[] {
         resource_id: "handoff_1",
       }),
     ),
-    ...["resolve_target", "report_target_unavailable"].map(
+    ...["resolve_target", "report_target_unavailable", "expire_claim"].map(
       (action): LocalAuthorityAllowRule => ({
         tenant_id: "tenant_01",
         principal_id: "principal_resolver",
@@ -528,6 +535,7 @@ interface Harness {
   readonly persistence: ExchangePersistence;
   readonly context: ContextRepository;
   readonly ids: TestIds;
+  readonly clock: TestClock;
   readonly identity: TrackingIdentityProvider;
   readonly authority: TrackingAuthorityPolicy;
   readonly validator: TrackingValidator;
@@ -541,6 +549,7 @@ function harness(options: {
   readonly validator?: WfppCommandValidator;
   readonly order?: string[];
   readonly ids?: TestIds;
+  readonly clock?: TestClock;
   readonly targetEligibility?: TargetEligibilityVerifier;
 } = {}): Harness {
   const persistence =
@@ -548,6 +557,7 @@ function harness(options: {
   const context =
     options.context ?? new TrackingContextRepository(options.order);
   const ids = options.ids ?? new TestIds(options.order);
+  const clock = options.clock ?? new TestClock(options.order);
   const identity = new TrackingIdentityProvider(
     options.identityRecords ?? identityRecords(),
     options.order,
@@ -567,7 +577,7 @@ function harness(options: {
       authority,
       context,
       validator: commandValidator,
-      clock: new TestClock(options.order),
+      clock,
       ids,
       ...(options.targetEligibility === undefined
         ? {}
@@ -576,6 +586,7 @@ function harness(options: {
     persistence,
     context,
     ids,
+    clock,
     identity,
     authority,
     validator: commandValidator,
@@ -750,6 +761,7 @@ describe("ExchangeApplication", () => {
     expect(result).toMatchObject({
       operation_status: "accepted",
       resource: { resource_id: "handoff_1", resource_version: 2 },
+      receipt: null,
     });
     expect(replay).toEqual({
       ...result,
@@ -786,6 +798,362 @@ describe("ExchangeApplication", () => {
         target: { actor_id: "actor_agent" },
         resolved_by: { actor_id: "actor_resolver", actor_type: "system" },
         resolver_endpoint_id: "endpoint_resolver",
+      },
+    });
+  });
+
+  it("verifies an eligible claimant and atomically records its fenced Claim lease", async () => {
+    const persistence = new TrackingMemoryPersistence();
+    const targetEligibility = new TrackingTargetEligibilityVerifier({
+      kind: "eligible",
+    });
+    const current = harness({ persistence, targetEligibility });
+    const offered = await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              assignment_mode: "eligible_pool_claim",
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+    expect(offered).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_id: "handoff_1", resource_version: 1 },
+    });
+
+    const result = await current.application.handle({
+      ...existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 1 },
+      ),
+      message_id: "message_claim",
+      message_type: "workfabric.handoff.claim.v1",
+      idempotency_key: "claim-01",
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_01",
+        requested_lease_seconds: 60,
+      },
+    }, { token: "agent" });
+
+    expect(targetEligibility.requests).toEqual([{
+      tenant_id: "tenant_01",
+      exchange_id: "exchange_01",
+      handoff_id: "handoff_1",
+      requirement: {
+        capability_id: "software.implementation",
+        assignment_mode: "eligible_pool_claim",
+      },
+      proposed_target: { endpoint_id: "endpoint_agent" },
+      principal: agentPrincipal,
+    }]);
+    expect(persistence.commitCalls).toBe(2);
+    expect(result).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_id: "handoff_1", resource_version: 2 },
+      receipt: {
+        receipt_type: "claim_acquired",
+        extensions: {
+          "workfabric.dev/claim": {
+            claim_id: "claim_client_01",
+            fencing_token: 1,
+            heartbeat_sequence: 0,
+            accepted_lease_seconds: 60,
+            expires_at: "2026-07-15T02:01:00Z",
+            renew_after: "2026-07-15T02:00:40Z",
+          },
+        },
+      },
+    });
+    const records = await persistence.readStream("handoff_1");
+    expect(records.map(({ event_type }) => event_type)).toEqual([
+      "workfabric.handoff.claim_pool_opened.v1",
+      "workfabric.handoff.claimed.v1",
+    ]);
+    const state = replayHandoff(records.map((event) => ({
+      stream_version: event.stream_version,
+      event: handoffEventFromJson(event.domain_data),
+    })));
+    expect(state).toMatchObject({
+      lifecycle_state: "claimed",
+      claim_fencing_token: 1,
+      active_claim: {
+        claim_id: "claim_client_01",
+        actor: { actor_id: "actor_agent", actor_type: "agent" },
+        endpoint_id: "endpoint_agent",
+        fencing_token: 1,
+        heartbeat_sequence: 0,
+        accepted_lease_seconds: 60,
+        expires_at: "2026-07-15T02:01:00Z",
+        renew_after: "2026-07-15T02:00:40Z",
+      },
+    });
+    expectSchemaValid(result);
+  });
+
+  it("renews a fenced Claim and accepts responsibility only with the current fence", async () => {
+    const persistence = new TrackingMemoryPersistence();
+    const current = harness({
+      persistence,
+      targetEligibility: new TrackingTargetEligibilityVerifier({
+        kind: "eligible",
+      }),
+    });
+    await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              assignment_mode: "eligible_pool_claim",
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+    await current.application.handle({
+      ...existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 1 },
+      ),
+      message_id: "message_claim",
+      message_type: "workfabric.handoff.claim.v1",
+      idempotency_key: "claim-01",
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_01",
+        requested_lease_seconds: 60,
+      },
+    }, { token: "agent" });
+
+    const renewed = await current.application.handle({
+      ...existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 2 },
+      ),
+      message_id: "message_renew_claim",
+      message_type: "workfabric.handoff.renew_claim.v1",
+      idempotency_key: "renew-claim-01",
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+        heartbeat_sequence: 1,
+      },
+    }, { token: "agent" });
+    expect(renewed).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 3 },
+      receipt: null,
+    });
+
+    const accepted = await current.application.handle(
+      existingEnvelope(
+        "accept",
+        {
+          handoff_id: "handoff_1",
+          claim_id: "claim_client_01",
+          fencing_token: 1,
+        },
+        { actor: "agent", expectedVersion: 3 },
+      ),
+      { token: "agent" },
+    );
+    expect(accepted).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 4 },
+      receipt: { receipt_type: "responsibility_accepted" },
+    });
+    const records = await persistence.readStream("handoff_1");
+    expect(records.map(({ event_type }) => event_type)).toEqual([
+      "workfabric.handoff.claim_pool_opened.v1",
+      "workfabric.handoff.claimed.v1",
+      "workfabric.handoff.claim_renewed.v1",
+      "workfabric.handoff.accepted.v1",
+    ]);
+    const state = replayHandoff(records.map((event) => ({
+      stream_version: event.stream_version,
+      event: handoffEventFromJson(event.domain_data),
+    })));
+    expect(state).toMatchObject({
+      lifecycle_state: "accepted",
+      recipient: { actor_id: "actor_agent", actor_type: "agent" },
+      active_claim: null,
+      claim_fencing_token: 1,
+      target_binding: {
+        target: { endpoint_id: "endpoint_agent" },
+        resolver_endpoint_id: "endpoint_agent",
+      },
+    });
+  });
+
+  it("returns a released Claim to the pool and increments the next fencing token", async () => {
+    const persistence = new TrackingMemoryPersistence();
+    const targetEligibility = new TrackingTargetEligibilityVerifier({
+      kind: "eligible",
+    });
+    const current = harness({ persistence, targetEligibility });
+    await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              assignment_mode: "eligible_pool_claim",
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+    await current.application.handle({
+      ...existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 1 },
+      ),
+      message_id: "message_claim",
+      message_type: "workfabric.handoff.claim.v1",
+      idempotency_key: "claim-01",
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_01",
+        requested_lease_seconds: 60,
+      },
+    }, { token: "agent" });
+    const released = await current.application.handle({
+      ...existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 2 },
+      ),
+      message_id: "message_release_claim",
+      message_type: "workfabric.handoff.release_claim.v1",
+      idempotency_key: "release-claim-01",
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+        heartbeat_sequence: 1,
+      },
+    }, { token: "agent" });
+    expect(released).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 3 },
+    });
+
+    const reclaimed = await current.application.handle({
+      ...existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 3 },
+      ),
+      message_id: "message_reclaim",
+      message_type: "workfabric.handoff.claim.v1",
+      idempotency_key: "claim-02",
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_02",
+        requested_lease_seconds: 60,
+      },
+    }, { token: "agent" });
+    expect(reclaimed).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 4 },
+      receipt: {
+        receipt_type: "claim_acquired",
+        extensions: {
+          "workfabric.dev/claim": {
+            claim_id: "claim_client_02",
+            fencing_token: 2,
+          },
+        },
+      },
+    });
+    expect(targetEligibility.requests).toHaveLength(2);
+  });
+
+  it("mechanically expires a due Claim without assigning responsibility", async () => {
+    const persistence = new TrackingMemoryPersistence();
+    const current = harness({
+      persistence,
+      targetEligibility: new TrackingTargetEligibilityVerifier({
+        kind: "eligible",
+      }),
+    });
+    await current.application.handle(
+      offerEnvelope({
+        payload: {
+          ...offerPayload,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              assignment_mode: "eligible_pool_claim",
+            },
+          },
+        },
+      }),
+      { token: "human" },
+    );
+    await current.application.handle({
+      ...existingEnvelope(
+        "accept",
+        { handoff_id: "handoff_1" },
+        { actor: "agent", expectedVersion: 1 },
+      ),
+      message_id: "message_claim",
+      message_type: "workfabric.handoff.claim.v1",
+      idempotency_key: "claim-01",
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_01",
+        requested_lease_seconds: 60,
+      },
+    }, { token: "agent" });
+    current.clock.value = "2026-07-15T02:01:00Z";
+
+    const expired = await current.application.handle({
+      ...targetResolutionEnvelope(
+        "workfabric.handoff.resolve_target.v1",
+        { handoff_id: "handoff_1" },
+      ),
+      message_id: "message_expire_claim",
+      message_type: "workfabric.handoff.expire_claim.v1",
+      idempotency_key: "expire-claim-01",
+      expected_version: 2,
+      payload: {
+        handoff_id: "handoff_1",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+      },
+    }, { token: "resolver" });
+    expect(expired).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 3 },
+    });
+    const records = await persistence.readStream("handoff_1");
+    const state = replayHandoff(records.map((event) => ({
+      stream_version: event.stream_version,
+      event: handoffEventFromJson(event.domain_data),
+    })));
+    expect(state).toMatchObject({
+      lifecycle_state: "claimable",
+      active_claim: null,
+      current_responsible_actor: {
+        actor_id: "actor_human",
+        actor_type: "human",
       },
     });
   });

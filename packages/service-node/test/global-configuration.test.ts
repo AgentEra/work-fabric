@@ -106,6 +106,7 @@ describe("global node configuration", () => {
             FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
             INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
             WORK_FABRIC_ADMIN_TOKEN: "synthetic-admin-token",
+            WORK_FABRIC_TEST_LISTEN_PORT: "0",
           },
         },
       );
@@ -205,6 +206,7 @@ describe("global node configuration", () => {
     }) as typeof globalThis.fetch;
     const service = await composeNodeService({
       ...loaded.service,
+      listen: { ...loaded.service.listen, port: 0 },
       sqlite: {
         ...loaded.service.sqlite!,
         location: join(databaseDirectory, "work-fabric.db"),

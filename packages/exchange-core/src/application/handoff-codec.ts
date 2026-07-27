@@ -43,6 +43,20 @@ function boolean(value: JsonValue | undefined, field: string): boolean {
   return value;
 }
 
+function positiveInteger(
+  value: JsonValue | undefined,
+  field: string,
+): number {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value <= 0
+  ) {
+    return invalidPayload(field);
+  }
+  return value;
+}
+
 function array(value: JsonValue | undefined, field: string): readonly JsonValue[] {
   if (!Array.isArray(value)) return invalidPayload(field);
   return value;
@@ -305,8 +319,71 @@ export function decodeHandoffCommand(
         reason: objectArray(payload.reason, "payload.reason"),
         evidence: objectArray(payload.evidence, "payload.evidence"),
       };
+    case "workfabric.handoff.claim.v1":
+      return {
+        kind: "claim",
+        handoff_id: handoffId(payload),
+        actor,
+        endpoint_id: envelope.endpoint_id,
+        claim_id: string(payload.claim_id, "payload.claim_id"),
+        ...(payload.requested_lease_seconds === undefined
+          ? {}
+          : {
+              requested_lease_seconds: positiveInteger(
+                payload.requested_lease_seconds,
+                "payload.requested_lease_seconds",
+              ),
+            }),
+      };
+    case "workfabric.handoff.renew_claim.v1":
+    case "workfabric.handoff.release_claim.v1":
+      return {
+        kind:
+          envelope.message_type === "workfabric.handoff.renew_claim.v1"
+            ? "renew_claim"
+            : "release_claim",
+        handoff_id: handoffId(payload),
+        actor,
+        endpoint_id: envelope.endpoint_id,
+        claim_id: string(payload.claim_id, "payload.claim_id"),
+        fencing_token: positiveInteger(
+          payload.fencing_token,
+          "payload.fencing_token",
+        ),
+        heartbeat_sequence: positiveInteger(
+          payload.heartbeat_sequence,
+          "payload.heartbeat_sequence",
+        ),
+      };
+    case "workfabric.handoff.expire_claim.v1":
+      return {
+        kind: "expire_claim",
+        handoff_id: handoffId(payload),
+        actor,
+        claim_id: string(payload.claim_id, "payload.claim_id"),
+        fencing_token: positiveInteger(
+          payload.fencing_token,
+          "payload.fencing_token",
+        ),
+      };
     case "workfabric.handoff.accept.v1":
-      return { kind: "accept", handoff_id: handoffId(payload), actor };
+      return {
+        kind: "accept",
+        handoff_id: handoffId(payload),
+        actor,
+        endpoint_id: envelope.endpoint_id,
+        ...(payload.claim_id === undefined
+          ? {}
+          : { claim_id: string(payload.claim_id, "payload.claim_id") }),
+        ...(payload.fencing_token === undefined
+          ? {}
+          : {
+              fencing_token: positiveInteger(
+                payload.fencing_token,
+                "payload.fencing_token",
+              ),
+            }),
+      };
     case "workfabric.handoff.decline.v1":
       return { kind: "decline", handoff_id: handoffId(payload), actor };
     case "workfabric.handoff.expire.v1":
@@ -386,6 +463,7 @@ export interface EncodedHandoffEvents {
 }
 
 type ReceiptType =
+  | "claim_acquired"
   | "responsibility_accepted"
   | "result_received"
   | "result_verified";
@@ -397,7 +475,9 @@ interface EventProjection {
 }
 
 type StateChangedField =
+  | "active_claim"
   | "child_handoff_id"
+  | "claim_fencing_token"
   | "current_responsible_actor"
   | "lifecycle_state"
   | "package"
@@ -413,6 +493,7 @@ function projectEvent(event: HandoffEvent): EventProjection {
   switch (event.event_type) {
     case "workfabric.handoff.offered.v1":
     case "workfabric.handoff.target_resolution_requested.v1":
+    case "workfabric.handoff.claim_pool_opened.v1":
       return {
         change_type: "created",
         changed_fields: [
@@ -420,6 +501,34 @@ function projectEvent(event: HandoffEvent): EventProjection {
           "lifecycle_state",
           "package",
         ],
+        receipt_type: null,
+      };
+    case "workfabric.handoff.claimed.v1":
+      return {
+        change_type: "claimed",
+        changed_fields: [
+          "active_claim",
+          "claim_fencing_token",
+          "lifecycle_state",
+        ],
+        receipt_type: "claim_acquired",
+      };
+    case "workfabric.handoff.claim_renewed.v1":
+      return {
+        change_type: "claim_renewed",
+        changed_fields: ["active_claim"],
+        receipt_type: null,
+      };
+    case "workfabric.handoff.claim_released.v1":
+      return {
+        change_type: "claim_released",
+        changed_fields: ["active_claim", "lifecycle_state"],
+        receipt_type: null,
+      };
+    case "workfabric.handoff.claim_expired.v1":
+      return {
+        change_type: "claim_expired",
+        changed_fields: ["active_claim", "lifecycle_state"],
         receipt_type: null,
       };
     case "workfabric.handoff.target_resolved.v1":
@@ -449,6 +558,8 @@ function projectEvent(event: HandoffEvent): EventProjection {
           "current_responsible_actor",
           "lifecycle_state",
           "recipient",
+          "active_claim",
+          "target_binding",
         ],
         receipt_type: "responsibility_accepted",
       };
@@ -551,6 +662,7 @@ function visibleActorIds(state: HandoffState): readonly string[] {
     state.initiator.actor_id,
     ...(state.recipient === null ? [] : [state.recipient.actor_id]),
     state.verifier.actor_id,
+    ...(state.active_claim === null ? [] : [state.active_claim.actor.actor_id]),
     ...("actor_id" in state.package.target
       ? [state.package.target.actor_id]
       : []),
@@ -567,6 +679,7 @@ function visibleEndpointIds(
 ): readonly string[] {
   return unique([
     ...authorizedEndpointIds,
+    ...(state.active_claim === null ? [] : [state.active_claim.endpoint_id]),
     ...(state.target_binding !== null &&
     "endpoint_id" in state.target_binding.target
       ? [state.target_binding.target.endpoint_id]
@@ -621,6 +734,15 @@ function routingDetails(state: HandoffState, event: HandoffEvent): JsonObject {
     ...(capabilities.length === 0
       ? {}
       : { capability_ids: capabilities }),
+    ...(state.active_claim === null
+      ? {}
+      : {
+          active_claim: {
+            claim_id: state.active_claim.claim_id,
+            fencing_token: state.active_claim.fencing_token,
+            expires_at: state.active_claim.expires_at,
+          },
+        }),
     lifecycle_state: state.lifecycle_state,
     ...targetResolutionDetails(event),
   };
@@ -641,6 +763,20 @@ function receipt(
     endpoint_id: input.envelope.endpoint_id,
     resource_version: resourceVersion,
     recorded_at: input.now,
+    ...(event.event_type !== "workfabric.handoff.claimed.v1"
+      ? {}
+      : {
+          extensions: {
+            "workfabric.dev/claim": {
+              claim_id: event.claim.claim_id,
+              fencing_token: event.claim.fencing_token,
+              heartbeat_sequence: event.claim.heartbeat_sequence,
+              accepted_lease_seconds: event.claim.accepted_lease_seconds,
+              expires_at: event.claim.expires_at,
+              renew_after: event.claim.renew_after,
+            },
+          },
+        }),
   };
 }
 

@@ -10,6 +10,7 @@ import type {
   ActorRef,
   ActorType,
   AuthorityScope,
+  HandoffClaim,
   HandoffLifecycleState,
   HandoffPackage,
   HandoffState,
@@ -146,6 +147,17 @@ function requirePositiveInteger(
   return value;
 }
 
+function requireNonNegativeInteger(
+  value: unknown,
+  path: string,
+  invalid: InvalidStoredValue,
+): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    invalid(path);
+  }
+  return value;
+}
+
 function requireNullableString(
   value: unknown,
   path: string,
@@ -249,6 +261,8 @@ function decodeLifecycleState(
   switch (lifecycleState) {
     case "target_resolution_pending":
     case "target_unavailable":
+    case "claimable":
+    case "claimed":
     case "offered":
     case "accepted":
     case "result_returned":
@@ -330,6 +344,72 @@ function decodeNullableTargetBinding(
   invalid: InvalidStoredValue,
 ): TargetBinding | null {
   return value === null ? null : decodeTargetBinding(value, path, invalid);
+}
+
+function decodeClaim(
+  value: unknown,
+  path: string,
+  invalid: InvalidStoredValue,
+): HandoffClaim {
+  const claim = requireRecord(value, path, invalid);
+  requireOnlyKeys(
+    claim,
+    [
+      "claim_id",
+      "actor",
+      "endpoint_id",
+      "fencing_token",
+      "heartbeat_sequence",
+      "accepted_lease_seconds",
+      "expires_at",
+      "renew_after",
+    ],
+    path,
+    invalid,
+  );
+  return {
+    claim_id: requireString(claim.claim_id, `${path}.claim_id`, invalid),
+    actor: decodeActor(claim.actor, `${path}.actor`, invalid),
+    endpoint_id: requireString(
+      claim.endpoint_id,
+      `${path}.endpoint_id`,
+      invalid,
+    ),
+    fencing_token: requirePositiveInteger(
+      claim.fencing_token,
+      `${path}.fencing_token`,
+      invalid,
+    ),
+    heartbeat_sequence: requireNonNegativeInteger(
+      claim.heartbeat_sequence,
+      `${path}.heartbeat_sequence`,
+      invalid,
+    ),
+    accepted_lease_seconds: requirePositiveInteger(
+      claim.accepted_lease_seconds,
+      `${path}.accepted_lease_seconds`,
+      invalid,
+    ),
+    expires_at: requireString(
+      claim.expires_at,
+      `${path}.expires_at`,
+      invalid,
+    ),
+    renew_after: requireString(
+      claim.renew_after,
+      `${path}.renew_after`,
+      invalid,
+    ),
+  };
+}
+
+function decodeNullableClaim(
+  value: unknown,
+  path: string,
+  invalid: InvalidStoredValue,
+): HandoffClaim | null {
+  if (value === null) return null;
+  return decodeClaim(value, path, invalid);
 }
 
 function decodeTarget(
@@ -586,6 +666,19 @@ function targetBindingToJson(binding: TargetBinding): JsonObject {
   };
 }
 
+function claimToJson(claim: HandoffClaim): JsonObject {
+  return {
+    claim_id: claim.claim_id,
+    actor: actorToJson(claim.actor),
+    endpoint_id: claim.endpoint_id,
+    fencing_token: claim.fencing_token,
+    heartbeat_sequence: claim.heartbeat_sequence,
+    accepted_lease_seconds: claim.accepted_lease_seconds,
+    expires_at: claim.expires_at,
+    renew_after: claim.renew_after,
+  };
+}
+
 function authorityScopeToJson(authority: AuthorityScope): JsonObject {
   const base: JsonObject = {
     delegation_id: authority.delegation_id,
@@ -655,6 +748,9 @@ export function handoffStateToJson(state: HandoffState): JsonObject {
       state.target_binding === null
         ? null
         : targetBindingToJson(state.target_binding),
+    active_claim:
+      state.active_claim === null ? null : claimToJson(state.active_claim),
+    claim_fencing_token: state.claim_fencing_token,
     package: packageToJson(state.package),
     result: state.result,
     parent_handoff_id: state.parent_handoff_id,
@@ -678,6 +774,8 @@ export function handoffStateFromJson(value: JsonObject): HandoffState {
       "verifier",
       "current_responsible_actor",
       "target_binding",
+      "active_claim",
+      "claim_fencing_token",
       "package",
       "result",
       "parent_handoff_id",
@@ -714,6 +812,18 @@ export function handoffStateFromJson(value: JsonObject): HandoffState {
       "target_binding",
       invalidState,
     ),
+    active_claim:
+      state.active_claim === undefined
+        ? null
+        : decodeNullableClaim(state.active_claim, "active_claim", invalidState),
+    claim_fencing_token:
+      state.claim_fencing_token === undefined
+        ? 0
+        : requireNonNegativeInteger(
+            state.claim_fencing_token,
+            "claim_fencing_token",
+            invalidState,
+          ),
     package: decodePackage(state.package, "package", invalidState),
     result:
       state.result === null
@@ -743,6 +853,7 @@ export function handoffEventToJson(event: HandoffEvent): JsonObject {
   switch (event.event_type) {
     case "workfabric.handoff.offered.v1":
     case "workfabric.handoff.target_resolution_requested.v1":
+    case "workfabric.handoff.claim_pool_opened.v1":
       return {
         ...common,
         thread_id: event.thread_id,
@@ -762,8 +873,34 @@ export function handoffEventToJson(event: HandoffEvent): JsonObject {
         reason: event.reason,
         evidence: event.evidence,
       };
+    case "workfabric.handoff.claimed.v1":
+    case "workfabric.handoff.claim_renewed.v1":
+      return { ...common, claim: claimToJson(event.claim) };
+    case "workfabric.handoff.claim_released.v1":
+      return {
+        ...common,
+        claim_id: event.claim_id,
+        actor: actorToJson(event.actor),
+        endpoint_id: event.endpoint_id,
+        fencing_token: event.fencing_token,
+        heartbeat_sequence: event.heartbeat_sequence,
+      };
+    case "workfabric.handoff.claim_expired.v1":
+      return {
+        ...common,
+        claim_id: event.claim_id,
+        actor: actorToJson(event.actor),
+        endpoint_id: event.endpoint_id,
+        fencing_token: event.fencing_token,
+      };
     case "workfabric.handoff.accepted.v1":
-      return { ...common, recipient: actorToJson(event.recipient) };
+      return {
+        ...common,
+        recipient: actorToJson(event.recipient),
+        ...(event.binding === undefined
+          ? {}
+          : { binding: targetBindingToJson(event.binding) }),
+      };
     case "workfabric.handoff.declined.v1":
     case "workfabric.handoff.expired.v1":
     case "workfabric.handoff.closed.v1":
@@ -799,8 +936,13 @@ function decodeEventType(
   switch (eventType) {
     case "workfabric.handoff.offered.v1":
     case "workfabric.handoff.target_resolution_requested.v1":
+    case "workfabric.handoff.claim_pool_opened.v1":
     case "workfabric.handoff.target_resolved.v1":
     case "workfabric.handoff.target_unavailable.v1":
+    case "workfabric.handoff.claimed.v1":
+    case "workfabric.handoff.claim_renewed.v1":
+    case "workfabric.handoff.claim_released.v1":
+    case "workfabric.handoff.claim_expired.v1":
     case "workfabric.handoff.accepted.v1":
     case "workfabric.handoff.declined.v1":
     case "workfabric.handoff.expired.v1":
@@ -822,6 +964,7 @@ function eventKeys(eventType: HandoffEvent["event_type"]): readonly string[] {
   switch (eventType) {
     case "workfabric.handoff.offered.v1":
     case "workfabric.handoff.target_resolution_requested.v1":
+    case "workfabric.handoff.claim_pool_opened.v1":
       return [
         ...common,
         "thread_id",
@@ -841,8 +984,28 @@ function eventKeys(eventType: HandoffEvent["event_type"]): readonly string[] {
         "reason",
         "evidence",
       ];
+    case "workfabric.handoff.claimed.v1":
+    case "workfabric.handoff.claim_renewed.v1":
+      return [...common, "claim"];
+    case "workfabric.handoff.claim_released.v1":
+      return [
+        ...common,
+        "claim_id",
+        "actor",
+        "endpoint_id",
+        "fencing_token",
+        "heartbeat_sequence",
+      ];
+    case "workfabric.handoff.claim_expired.v1":
+      return [
+        ...common,
+        "claim_id",
+        "actor",
+        "endpoint_id",
+        "fencing_token",
+      ];
     case "workfabric.handoff.accepted.v1":
-      return [...common, "recipient"];
+      return [...common, "recipient", "binding"];
     case "workfabric.handoff.declined.v1":
     case "workfabric.handoff.expired.v1":
     case "workfabric.handoff.closed.v1":
@@ -877,6 +1040,7 @@ export function handoffEventFromJson(value: JsonObject): HandoffEvent {
   switch (eventType) {
     case "workfabric.handoff.offered.v1":
     case "workfabric.handoff.target_resolution_requested.v1":
+    case "workfabric.handoff.claim_pool_opened.v1":
       return {
         event_type: eventType,
         handoff_id: handoffId,
@@ -935,11 +1099,69 @@ export function handoffEventFromJson(value: JsonObject): HandoffEvent {
         occurred_at: occurredAt,
       };
     }
+    case "workfabric.handoff.claimed.v1":
+    case "workfabric.handoff.claim_renewed.v1":
+      return {
+        event_type: eventType,
+        handoff_id: handoffId,
+        claim: decodeClaim(event.claim, "claim", invalidEvent),
+        occurred_at: occurredAt,
+      };
+    case "workfabric.handoff.claim_released.v1":
+      return {
+        event_type: eventType,
+        handoff_id: handoffId,
+        claim_id: requireString(event.claim_id, "claim_id", invalidEvent),
+        actor: decodeActor(event.actor, "actor", invalidEvent),
+        endpoint_id: requireString(
+          event.endpoint_id,
+          "endpoint_id",
+          invalidEvent,
+        ),
+        fencing_token: requirePositiveInteger(
+          event.fencing_token,
+          "fencing_token",
+          invalidEvent,
+        ),
+        heartbeat_sequence: requirePositiveInteger(
+          event.heartbeat_sequence,
+          "heartbeat_sequence",
+          invalidEvent,
+        ),
+        occurred_at: occurredAt,
+      };
+    case "workfabric.handoff.claim_expired.v1":
+      return {
+        event_type: eventType,
+        handoff_id: handoffId,
+        claim_id: requireString(event.claim_id, "claim_id", invalidEvent),
+        actor: decodeActor(event.actor, "actor", invalidEvent),
+        endpoint_id: requireString(
+          event.endpoint_id,
+          "endpoint_id",
+          invalidEvent,
+        ),
+        fencing_token: requirePositiveInteger(
+          event.fencing_token,
+          "fencing_token",
+          invalidEvent,
+        ),
+        occurred_at: occurredAt,
+      };
     case "workfabric.handoff.accepted.v1":
       return {
         event_type: eventType,
         handoff_id: handoffId,
         recipient: decodeActor(event.recipient, "recipient", invalidEvent),
+        ...(event.binding === undefined
+          ? {}
+          : {
+              binding: decodeTargetBinding(
+                event.binding,
+                "binding",
+                invalidEvent,
+              ),
+            }),
         occurred_at: occurredAt,
       };
     case "workfabric.handoff.declined.v1":

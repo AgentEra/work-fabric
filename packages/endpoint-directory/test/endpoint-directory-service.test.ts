@@ -219,6 +219,57 @@ describe("EndpointDirectoryService", () => {
     ).resolves.toEqual({ items: [] });
   });
 
+  it("progressively discloses identity, capability summary, and one capability contract", async () => {
+    const { service } = createFixture();
+    await service.provision(adminContext, registration, null);
+    await service.openSession(
+      runtimeContext,
+      registration.endpoint_id,
+      openRequest,
+    );
+
+    const identities = await service.discoverIdentities(adminContext);
+    expect(identities.items).toEqual([{
+      endpoint_id: registration.endpoint_id,
+      actor: registration.actor,
+      endpoint_type: registration.endpoint_type,
+      display_name: registration.display_name,
+      protocol_versions: registration.protocol_versions,
+      availability: "available",
+      lease: {
+        expires_at: "2026-07-15T09:01:00Z",
+        renew_after: "2026-07-15T09:00:40Z",
+      },
+    }]);
+    expect(identities.items[0]).not.toHaveProperty("bindings");
+    expect(identities.items[0]).not.toHaveProperty("capabilities");
+
+    const summaries = await service.discoverCapabilityCards(adminContext, {
+      capability_id: capability.capability_id,
+    });
+    expect(summaries.items[0]?.capabilities).toEqual([{
+      capability_id: capability.capability_id,
+      version: capability.version,
+      name: capability.name,
+      description: capability.description,
+    }]);
+    expect(summaries.items[0]?.capabilities[0]).not.toHaveProperty("constraints");
+    expect(summaries.items[0]?.capabilities[0]).not.toHaveProperty("input_schema_refs");
+
+    await expect(
+      service.getCapability(
+        adminContext,
+        registration.endpoint_id,
+        capability.capability_id,
+      ),
+    ).resolves.toEqual({
+      endpoint_id: registration.endpoint_id,
+      actor: registration.actor,
+      availability: "available",
+      capability,
+    });
+  });
+
   it("rejects a Runtime that cannot represent the provisioned Actor and Endpoint", async () => {
     const { service } = createFixture();
     await service.provision(adminContext, registration, null);

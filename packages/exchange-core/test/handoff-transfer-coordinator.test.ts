@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   acceptChildAndTransferParent,
+  decideHandoff,
   evolveHandoff,
   offerChildHandoff,
   type ActorRef,
@@ -124,6 +125,21 @@ function accepted(decision: TransferDecision): {
   return decision;
 }
 
+function acceptCommand(
+  overrides: Partial<{
+    endpoint_id: string;
+    claim_id: string;
+    fencing_token: number;
+  }> = {},
+) {
+  return {
+    kind: "accept" as const,
+    handoff_id: "handoff_child",
+    actor: childRecipient,
+    ...overrides,
+  };
+}
+
 function expectRejected(
   decision: TransferDecision,
   code: Extract<TransferDecision, { readonly kind: "rejected" }>["error"]["code"],
@@ -161,6 +177,123 @@ describe("Handoff Transfer coordinator", () => {
     ]);
     expect(parent.lifecycle_state).toBe("accepted");
     expect(parent.current_responsible_actor).toEqual(parentRecipient);
+  });
+
+  it("uses the root assignment semantics for capability-target children", () => {
+    const parent = acceptedParent();
+    const capabilityPackage = {
+      ...packageFor(childRecipient, false),
+      target: {
+        capability_requirement: {
+          capability_id: "software.implementation",
+          assignment_mode: "eligible_pool_claim" as const,
+        },
+      },
+    };
+
+    const pool = accepted(
+      offerChildHandoff(
+        parent,
+        "handoff_child",
+        capabilityPackage,
+        parentRecipient,
+        "2026-07-15T02:30:00Z",
+      ),
+    );
+    expect(pool.child_events[0]).toMatchObject({
+      event_type: "workfabric.handoff.claim_pool_opened.v1",
+      parent_handoff_id: parent.handoff_id,
+    });
+
+    const external = accepted(
+      offerChildHandoff(
+        parent,
+        "handoff_external",
+        {
+          ...capabilityPackage,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              assignment_mode: "external_resolution" as const,
+            },
+          },
+        },
+        parentRecipient,
+        "2026-07-15T02:30:00Z",
+      ),
+    );
+    expect(external.child_events[0]).toMatchObject({
+      event_type: "workfabric.handoff.target_resolution_requested.v1",
+      parent_handoff_id: parent.handoff_id,
+    });
+  });
+
+  it("transfers atomically when a capability-target child is accepted by its fenced Claim holder", () => {
+    const parent = acceptedParent();
+    const childPackage = {
+      ...packageFor(childRecipient, false),
+      target: {
+        capability_requirement: {
+          capability_id: "software.implementation",
+          assignment_mode: "eligible_pool_claim" as const,
+        },
+      },
+    };
+    const offered = accepted(
+      offerChildHandoff(
+        parent,
+        "handoff_child",
+        childPackage,
+        parentRecipient,
+        "2026-07-15T02:30:00Z",
+      ),
+    ).child_events[0]!;
+    const claimable = evolveHandoff(null, offered, 1);
+    const claim = decideHandoff(
+      claimable,
+      {
+        kind: "claim",
+        handoff_id: "handoff_child",
+        actor: childRecipient,
+        endpoint_id: "endpoint_child",
+        claim_id: "claim_child",
+      },
+      {
+        ...decisionContext,
+        claimant_eligible: true,
+        claim_lease: {
+          accepted_lease_seconds: 60,
+          expires_at: "2026-07-15T03:01:00Z",
+          renew_after: "2026-07-15T03:00:30Z",
+        },
+      },
+    );
+    if (claim.kind !== "accepted") throw new Error("Claim fixture failed");
+    const claimed = evolveHandoff(claimable, claim.events[0]!, 2);
+
+    const transfer = accepted(
+      acceptChildAndTransferParent(
+        parent,
+        claimed,
+        acceptCommand({
+          endpoint_id: "endpoint_child",
+          claim_id: "claim_child",
+          fencing_token: 1,
+        }),
+        decisionContext,
+      ),
+    );
+    expect(transfer.child_events[0]).toMatchObject({
+      event_type: "workfabric.handoff.accepted.v1",
+      binding: {
+        target: { endpoint_id: "endpoint_child" },
+        resolver_endpoint_id: "endpoint_child",
+      },
+    });
+    expect(transfer.parent_events[0]).toMatchObject({
+      event_type: "workfabric.handoff.transferred.v1",
+      child_handoff_id: "handoff_child",
+    });
   });
 
   it("allows only the current Recipient to initiate Transfer", () => {
@@ -231,7 +364,7 @@ describe("Handoff Transfer coordinator", () => {
       acceptChildAndTransferParent(
         parent,
         child,
-        childRecipient,
+        acceptCommand(),
         decisionContext,
       ),
     );
@@ -267,7 +400,7 @@ describe("Handoff Transfer coordinator", () => {
       acceptChildAndTransferParent(
         parent,
         child,
-        childRecipient,
+        acceptCommand(),
         decisionContext,
       ),
       "precondition_failed",
@@ -290,7 +423,7 @@ describe("Handoff Transfer coordinator", () => {
       acceptChildAndTransferParent(
         parent,
         child,
-        childRecipient,
+        acceptCommand(),
         decisionContext,
       ),
       "precondition_failed",
@@ -324,7 +457,7 @@ describe("Handoff Transfer coordinator", () => {
       acceptChildAndTransferParent(
         parent,
         child,
-        childRecipient,
+        acceptCommand(),
         decisionContext,
       ),
       "permission_denied",
@@ -344,7 +477,7 @@ describe("Handoff Transfer coordinator", () => {
       acceptChildAndTransferParent(
         parent,
         child,
-        childRecipient,
+        acceptCommand(),
         decisionContext,
       ),
       "precondition_failed",
@@ -374,7 +507,7 @@ describe("Handoff Transfer coordinator", () => {
       acceptChildAndTransferParent(
         transferred,
         child,
-        childRecipient,
+        acceptCommand(),
         decisionContext,
       ),
       "invalid_state_transition",

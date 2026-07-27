@@ -320,6 +320,7 @@ describe("Agent Gateway real reference flow", () => {
     const endpointInbox = new EndpointInboxQueryService({
       directory: endpointDirectoryStore,
       inbox: endpointInboxStore,
+      clock: exchangeClock,
       defaultPageLimit: 20,
       maxPageLimit: 100,
     });
@@ -476,6 +477,69 @@ describe("Agent Gateway real reference flow", () => {
       }, {
         expectedVersion: 4,
         idempotencyKey: "gateway-reference-result",
+      });
+
+      const poolOffer: HandoffOfferPayload = {
+        ...offer,
+        target: {
+          capability_requirement: {
+            capability_id: capability.capability_id,
+            version_constraint: ">=1.0.0 <2.0.0",
+            input_media_types: ["text/markdown"],
+            output_media_types: ["application/json"],
+            assignment_mode: "eligible_pool_claim",
+          },
+        },
+      };
+      const poolOffered = await humanSdk.handoffs.offer(poolOffer, {
+        idempotencyKey: "gateway-reference-pool-offer",
+      });
+      const poolHandoffId = poolOffered.resource?.resource_id;
+      if (typeof poolHandoffId !== "string") throw new TypeError("pool offer failed");
+      const poolRecords = await persistence.readStream(poolHandoffId);
+      for (const record of poolRecords) await inboxProjector.apply(record);
+
+      await expect(session.claimableHandoffs()).resolves.toMatchObject({
+        items: [{
+          handoff_id: poolHandoffId,
+          lifecycle_state: "claimable",
+          capability_ids: [capability.capability_id],
+        }],
+      });
+      await expect(runtimeSdk.queries.getHandoff(poolHandoffId)).resolves.toMatchObject({
+        state: {
+          lifecycle_state: "claimable",
+          active_claim: null,
+        },
+      });
+
+      await expect(session.handoffs.claim({
+        handoff_id: poolHandoffId,
+        claim_id: "claim_gateway_reference",
+        requested_lease_seconds: 60,
+      }, {
+        expectedVersion: 1,
+        idempotencyKey: "gateway-reference-claim",
+      })).resolves.toMatchObject({
+        operation_status: "accepted",
+        receipt: {
+          receipt_type: "claim_acquired",
+        },
+        resource: { resource_version: 2 },
+      });
+      await expect(session.handoffs.accept({
+        handoff_id: poolHandoffId,
+        claim_id: "claim_gateway_reference",
+        fencing_token: 1,
+      }, {
+        expectedVersion: 2,
+        idempotencyKey: "gateway-reference-pool-accept",
+      })).resolves.toMatchObject({
+        operation_status: "accepted",
+        receipt: {
+          receipt_type: "responsibility_accepted",
+        },
+        resource: { resource_version: 3 },
       });
 
       expect(persistedDeliveryIds).toContain(incoming.value.delivery.delivery_id);

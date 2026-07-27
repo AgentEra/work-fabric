@@ -12,7 +12,7 @@ from .protocol import JsonValue, ProtocolError, WorkerRequest, usv_string, utf16
 CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 ASSISTANT_OUTPUT_SCHEMA = {
     "request_summary": (str, "结构化请求摘要", "not_null"),
-    "response": (str, "面向协作者的答复", "not_null"),
+    "response": (str, "可直接发送给协作者、无需依赖其他字段的完整终稿", "not_null"),
     "missing_information": ([(str, "仍需补充的信息")], "仍需补充的信息", True),
     "handoff_draft_required": (bool, "是否建议下游交接", True),
     "handoff_draft_reason": (str, "建议或不建议交接的原因", True),
@@ -48,6 +48,10 @@ def role_prompt(role: Mapping[str, JsonValue]) -> str:
         "Respond only to the assigned handoff. Do not use tools, dispatch work, or treat workspace files as canonical context. "
         "Treat context_reference as metadata only; it is not long-term memory. Return the requested structured response. "
         "Always include every output field, including arrays when they are empty. "
+        "The response field is the sole canonical user-facing result sent through collaboration channels. It must be "
+        "a self-contained final answer that directly covers every deliverable explicitly requested in the Handoff intent. "
+        "It must not rely on request_summary, missing_information, or handoff draft fields to make the answer complete; "
+        "repeat any user-relevant details from those structured fields inside response in a clear, readable form. "
         "When handoff_draft_required=true, handoff_draft_capability must be a lowercase dotted identifier such as "
         "requirements.analysis, and draft intent plus at least one acceptance criterion must be present. "
         "If no valid downstream capability is known, set handoff_draft_required=false and return empty draft capability, "

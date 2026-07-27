@@ -115,6 +115,45 @@ function acceptedSnapshot(id: string): HandoffReadModel {
   }));
 }
 
+function claimableSnapshot(id: string): HandoffReadModel {
+  return handoff(id, state(id, {
+    lifecycle_state: "claimable",
+    package: {
+      ...packageFor(id),
+      target: {
+        capability_requirement: {
+          capability_ids: ["capability.requirements.intake"],
+        },
+      },
+    },
+  }));
+}
+
+function claimedSnapshot(id: string): HandoffReadModel {
+  return handoff(id, state(id, {
+    lifecycle_state: "claimed",
+    package: {
+      ...packageFor(id),
+      target: {
+        capability_requirement: {
+          capability_ids: ["capability.requirements.intake"],
+        },
+      },
+    },
+    active_claim: {
+      claim_id: "claim-runtime",
+      actor: { actor_id: grant.actor_id, actor_type: "agent" },
+      endpoint_id: grant.endpoint_id,
+      fencing_token: 1,
+      heartbeat_sequence: 0,
+      accepted_lease_seconds: 60,
+      expires_at: "2026-07-20T00:01:00.000Z",
+      renew_after: "2026-07-20T00:00:40.000Z",
+    },
+    claim_fencing_token: 1,
+  }));
+}
+
 function store(models: readonly HandoffReadModel[] = []): HandoffReadModelStore {
   const byId = new Map(models.map((model) => [model.handoff_id, model]));
   return {
@@ -135,6 +174,10 @@ describe("AgentRuntimeAuthorityPolicy", () => {
       action: "workfabric.endpoint.session.open.v1",
       resource_id: grant.endpoint_id,
     }))).resolves.toMatchObject({ kind: "deny" });
+    await expect(policy.authorize(request({
+      action: "workfabric.endpoint.claim-pool.read.v1",
+      resource_id: grant.endpoint_id,
+    }))).resolves.toEqual({ kind: "allow" });
   });
 
   it("allows only bounded sessions under its own Endpoint", async () => {
@@ -203,6 +246,77 @@ describe("AgentRuntimeAuthorityPolicy", () => {
     await expect(policy.authorize(request({ resource_id: nonOffered.handoff_id }))).resolves.toEqual({ kind: "allow" });
     for (const action of ["workfabric.handoff.accept.v1", "workfabric.handoff.decline.v1"]) {
       await expect(policy.authorize(request({ action, resource_id: nonOffered.handoff_id }))).resolves.toMatchObject({ kind: "deny" });
+    }
+  });
+
+  it("allows an Agent to claim a capability pool and only the active Claim holder to manage it", async () => {
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store([
+      claimableSnapshot("handoff-claimable"),
+      claimedSnapshot("handoff-claimed"),
+    ]));
+
+    await expect(policy.authorize(request({
+      action: "workfabric.handoff.claim.v1",
+      resource_id: "handoff-claimable",
+    }))).resolves.toEqual({ kind: "allow" });
+    await expect(policy.authorize(request({
+      action: "workfabric.query.handoff.read.v1",
+      resource_id: "handoff-claimed",
+    }))).resolves.toEqual({ kind: "allow" });
+    for (const action of [
+      "workfabric.handoff.renew_claim.v1",
+      "workfabric.handoff.release_claim.v1",
+      "workfabric.handoff.accept.v1",
+    ]) {
+      await expect(policy.authorize(request({
+        action,
+        resource_id: "handoff-claimed",
+      }))).resolves.toEqual({ kind: "allow" });
+    }
+  });
+
+  it("does not grant Claim-holder commands to another Runtime or expose recovery expiry", async () => {
+    const otherGrant = {
+      ...grant,
+      principal_id: "principal-other",
+      actor_id: "actor-other",
+      endpoint_id: "endpoint-other",
+      subscription_id: "subscription-other",
+    };
+    const policy = new AgentRuntimeAuthorityPolicy([otherGrant], store([
+      claimableSnapshot("handoff-claimable"),
+      claimedSnapshot("handoff-claimed"),
+    ]));
+    const otherPrincipal: ResolvedPrincipal = {
+      principal_id: otherGrant.principal_id,
+      tenant_id: otherGrant.tenant_id,
+      actor_claims: [{
+        actor_id: otherGrant.actor_id,
+        actor_type: "agent",
+        endpoint_ids: [otherGrant.endpoint_id],
+      }],
+      attributes: {},
+    };
+    const otherRequest = (action: string, resource_id: string): AuthorityRequest => request({
+      principal: otherPrincipal,
+      actor_id: otherGrant.actor_id,
+      endpoint_id: otherGrant.endpoint_id,
+      action,
+      resource_id,
+    });
+
+    await expect(policy.authorize(otherRequest(
+      "workfabric.handoff.claim.v1",
+      "handoff-claimable",
+    ))).resolves.toEqual({ kind: "allow" });
+    for (const action of [
+      "workfabric.query.handoff.read.v1",
+      "workfabric.handoff.renew_claim.v1",
+      "workfabric.handoff.release_claim.v1",
+      "workfabric.handoff.accept.v1",
+      "workfabric.handoff.expire_claim.v1",
+    ]) {
+      await expect(policy.authorize(otherRequest(action, "handoff-claimed"))).resolves.toMatchObject({ kind: "deny" });
     }
   });
 

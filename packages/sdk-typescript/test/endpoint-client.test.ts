@@ -80,6 +80,12 @@ describe("EndpointClient", () => {
       if (url.includes("/sessions/") && url.endsWith("/close")) return json({ ...session, heartbeat_sequence: 2, state: "closed", availability: "unavailable" });
       if (url.endsWith("/sessions")) return json(session);
       if (url.includes("/inbox/partitions")) return json({ items: [], next_cursor: "next / 01" });
+      if (url.includes("/capabilities/")) return json({
+        endpoint_id: registration.endpoint_id,
+        actor: registration.actor,
+        availability: "available",
+        capability,
+      });
       if (url.includes("?")) return json({ items: [] });
       if (init?.method === "PUT") return json(registration);
       return json({ ...registration, capabilities: [], availability: "unavailable", lease: { expires_at: "2026-07-15T00:00:00Z", renew_after: "2026-07-15T00:00:00Z" } });
@@ -95,6 +101,18 @@ describe("EndpointClient", () => {
       cursor: "cursor / 01",
       limit: 20,
     });
+    await sdk.endpoints.discoverIdentities({
+      availability: ["available"],
+      limit: 10,
+    });
+    await sdk.endpoints.discoverCapabilityCards({
+      capability_id: "software.implementation",
+      limit: 10,
+    });
+    await sdk.endpoints.getCapability(
+      registration.endpoint_id,
+      capability.capability_id,
+    );
     await sdk.endpoints.openSession(registration.endpoint_id, {
       client_session_id: "client_01",
       protocol_version: "1.0",
@@ -114,6 +132,10 @@ describe("EndpointClient", () => {
       cursor: "cursor / 01",
       limit: 10,
     });
+    await sdk.endpoints.listClaimableHandoffs(registration.endpoint_id, {
+      cursor: "claim cursor / 01",
+      limit: 10,
+    });
     await sdk.endpoints.closeSession(registration.endpoint_id, session.session_id, {
       fencing_token: 1,
       heartbeat_sequence: 2,
@@ -124,9 +146,13 @@ describe("EndpointClient", () => {
       ["PUT", "https://fabric.example.test/api/v1/admin/endpoints/agent%20%2F%2001"],
       ["GET", "https://fabric.example.test/api/v1/endpoints/agent%20%2F%2001"],
       ["GET", "https://fabric.example.test/api/v1/endpoints?capability_id=software.implementation%2Freview&input_media_type=application%2Fjson&input_media_type=text%2Fmarkdown&availability=available&availability=busy&cursor=cursor+%2F+01&limit=20"],
+      ["GET", "https://fabric.example.test/api/v1/endpoints?disclosure=identity&availability=available&limit=10"],
+      ["GET", "https://fabric.example.test/api/v1/endpoints?disclosure=summary&capability_id=software.implementation&limit=10"],
+      ["GET", "https://fabric.example.test/api/v1/endpoints/agent%20%2F%2001/capabilities/software.implementation"],
       ["POST", "https://fabric.example.test/api/v1/endpoints/agent%20%2F%2001/sessions"],
       ["POST", "https://fabric.example.test/api/v1/endpoints/agent%20%2F%2001/sessions/session%20%2F%2001/heartbeat"],
       ["GET", "https://fabric.example.test/api/v1/endpoints/agent%20%2F%2001/inbox/partitions?cursor=cursor+%2F+01&limit=10"],
+      ["GET", "https://fabric.example.test/api/v1/endpoints/agent%20%2F%2001/claimable-handoffs?cursor=claim+cursor+%2F+01&limit=10"],
       ["POST", "https://fabric.example.test/api/v1/endpoints/agent%20%2F%2001/sessions/session%20%2F%2001/close"],
     ]);
   });

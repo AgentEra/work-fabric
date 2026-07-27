@@ -28,6 +28,8 @@ function object(value: unknown, label: string): JsonObject {
 function lifecycle(record: EventRecord): {
   readonly state: string;
   readonly resourceVersion: number;
+  readonly capabilityIds: readonly string[];
+  readonly activeClaim: NonNullable<EndpointInboxRoutingFact["active_claim"]> | null;
 } {
   const protocol = object(record.protocol_data, "protocol_data");
   const resourceVersion = protocol.resource_version;
@@ -43,7 +45,49 @@ function lifecycle(record: EventRecord): {
   if (typeof state !== "string" || state.length === 0 || state.length > 64) {
     throw new TypeError("protocol lifecycle state is invalid");
   }
-  return { state, resourceVersion: Number(resourceVersion) };
+  const details = object(change.details, "protocol_data.change.details");
+  const capabilityValue = details.capability_ids;
+  if (
+    capabilityValue !== undefined &&
+    (
+      !Array.isArray(capabilityValue) ||
+      capabilityValue.some((value) =>
+        typeof value !== "string" ||
+        value.length === 0 ||
+        value.length > 128
+      )
+    )
+  ) {
+    throw new TypeError("protocol capability_ids are invalid");
+  }
+  const capabilityIds = capabilityValue === undefined
+    ? []
+    : [...new Set(capabilityValue as readonly string[])];
+  const claimValue = details.active_claim;
+  let activeClaim: NonNullable<EndpointInboxRoutingFact["active_claim"]> | null = null;
+  if (claimValue !== undefined) {
+    const claim = object(claimValue, "protocol_data.change.details.active_claim");
+    if (
+      typeof claim.claim_id !== "string" ||
+      claim.claim_id.length === 0 ||
+      !Number.isSafeInteger(claim.fencing_token) ||
+      Number(claim.fencing_token) <= 0 ||
+      typeof claim.expires_at !== "string"
+    ) {
+      throw new TypeError("protocol active_claim is invalid");
+    }
+    activeClaim = {
+      claim_id: claim.claim_id,
+      fencing_token: Number(claim.fencing_token),
+      expires_at: claim.expires_at,
+    };
+  }
+  return {
+    state,
+    resourceVersion: Number(resourceVersion),
+    capabilityIds,
+    activeClaim,
+  };
 }
 
 function assertRecord(record: EventRecord): void {
@@ -84,6 +128,8 @@ export class EndpointInboxProjector {
       handoff_id: record.handoff_id,
       resource_version: state.resourceVersion,
       lifecycle_state: state.state,
+      capability_ids: state.capabilityIds,
+      active_claim: state.activeClaim,
       last_event_id: record.event_id,
       observed_position: record.partition_position,
       visible_actor_ids: [...record.visible_actor_ids],

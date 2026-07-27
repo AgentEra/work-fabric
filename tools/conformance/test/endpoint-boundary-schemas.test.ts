@@ -126,6 +126,23 @@ const projectedEndpoint = {
   extensions: {},
 };
 
+const identityCard = {
+  endpoint_id: projectedEndpoint.endpoint_id,
+  actor,
+  endpoint_type: projectedEndpoint.endpoint_type,
+  display_name: projectedEndpoint.display_name,
+  protocol_versions: projectedEndpoint.protocol_versions,
+  availability: projectedEndpoint.availability,
+  lease: projectedEndpoint.lease,
+};
+
+const capabilitySummary = {
+  capability_id: capability.capability_id,
+  version: capability.version,
+  name: capability.name,
+  description: capability.description,
+};
+
 describe("Endpoint boundary resource schemas", () => {
   it.each([
     ["endpoint-registration", registration],
@@ -138,6 +155,26 @@ describe("Endpoint boundary resource schemas", () => {
       { items: [projectedEndpoint], next_cursor: "cursor_02" },
     ],
     [
+      "endpoint-identity-page",
+      { items: [identityCard], next_cursor: "cursor_02" },
+    ],
+    [
+      "endpoint-capability-page",
+      {
+        items: [{ ...identityCard, capabilities: [capabilitySummary] }],
+        next_cursor: "cursor_02",
+      },
+    ],
+    [
+      "endpoint-capability-contract",
+      {
+        endpoint_id: projectedEndpoint.endpoint_id,
+        actor,
+        availability: "available",
+        capability,
+      },
+    ],
+    [
       "endpoint-inbox-partition-page",
       {
         items: [
@@ -145,6 +182,23 @@ describe("Endpoint boundary resource schemas", () => {
             partition_id: "handoff:h_01",
             latest_position: 7,
             active_handoff_count: 1,
+          },
+        ],
+        next_cursor: "cursor_02",
+      },
+    ],
+    [
+      "endpoint-claimable-handoff-page",
+      {
+        items: [
+          {
+            partition_id: "handoff:h_claimable",
+            handoff_id: "h_claimable",
+            resource_version: 1,
+            lifecycle_state: "claimable",
+            capability_ids: ["software.implementation"],
+            last_event_id: "event_claimable",
+            observed_position: 8,
           },
         ],
         next_cursor: "cursor_02",

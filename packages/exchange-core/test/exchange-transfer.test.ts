@@ -445,6 +445,7 @@ function rules(): readonly LocalAuthorityAllowRule[] {
     ...["handoff_2", "handoff_bad_partition", "handoff_bad_thread"].flatMap(
       (handoffId) => [
         rule(childAgent, "workfabric.handoff.accept.v1", handoffId),
+        rule(childAgent, "workfabric.handoff.claim.v1", handoffId),
         rule(
           childAgentTenant2,
           "workfabric.handoff.accept.v1",
@@ -466,6 +467,7 @@ function harness(
   persistence = new TrackingPersistence(),
   context = new TrackingContext(),
   ids = new TestIds(),
+  clock: Clock = new TestClock(),
 ): Harness {
   return {
     application: new ExchangeApplication({
@@ -474,8 +476,22 @@ function harness(
       identity: new LocalIdentityProvider(identities()),
       authority: new LocalAuthorityPolicy(rules()),
       validator,
-      clock: new TestClock(),
+      clock,
       ids,
+      target_eligibility: {
+        manifest: {
+          profile: "exchange.target-eligibility.v1",
+          adapter: "transfer-test",
+          capabilities: {
+            explicit_target_only: true,
+            no_candidate_selection: true,
+            fail_closed: true,
+          },
+        },
+        async verify() {
+          return { kind: "eligible" as const };
+        },
+      },
     }),
     persistence,
     context,
@@ -625,6 +641,88 @@ describe("ExchangeApplication Handoff Transfer", () => {
       lifecycle_state: "transferred",
       child_handoff_id: "handoff_2",
       current_responsible_actor: null,
+    });
+  });
+
+  it("carries the current Claim fence through child Accept and transfers the parent atomically", async () => {
+    const current = harness(
+      undefined,
+      undefined,
+      undefined,
+      { now: () => "2026-07-15T03:00:00Z" },
+    );
+    await current.application.handle(rootOffer(), { token: "human" });
+    await current.application.handle(parentAccept(), { token: "parent" });
+    const base = transfer();
+    const payload = base.payload as {
+      readonly parent_handoff_id: string;
+      readonly child_offer: Record<string, unknown>;
+    };
+    const childOffer = payload.child_offer;
+    const transferred = await current.application.handle({
+      ...base,
+      payload: {
+        ...payload,
+        child_offer: {
+          ...childOffer,
+          target: {
+            capability_requirement: {
+              capability_id: "software.implementation",
+              assignment_mode: "eligible_pool_claim",
+            },
+          },
+        },
+      },
+    }, { token: "parent" });
+    expect(transferred).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_id: "handoff_2", resource_version: 1 },
+    });
+    expect(await state(current.persistence, "handoff_2")).toMatchObject({
+      lifecycle_state: "claimable",
+      parent_handoff_id: "handoff_1",
+    });
+
+    const claimed = await current.application.handle({
+      ...childAccept(),
+      message_id: "message_claim_child",
+      message_type: "workfabric.handoff.claim.v1",
+      idempotency_key: "claim-child-01",
+      expected_version: 1,
+      payload: {
+        handoff_id: "handoff_2",
+        claim_id: "claim_child",
+        requested_lease_seconds: 60,
+      },
+    }, { token: "child" });
+    expect(claimed).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 2 },
+      receipt: { receipt_type: "claim_acquired" },
+    });
+
+    const acceptedChild = await current.application.handle({
+      ...childAccept(),
+      expected_version: 2,
+      payload: {
+        handoff_id: "handoff_2",
+        claim_id: "claim_child",
+        fencing_token: 1,
+      },
+    }, { token: "child" });
+    expect(acceptedChild, JSON.stringify(acceptedChild)).toMatchObject({
+      operation_status: "accepted",
+      resource: { resource_version: 3 },
+      receipt: { receipt_type: "responsibility_accepted" },
+    });
+    expect(await state(current.persistence, "handoff_1")).toMatchObject({
+      lifecycle_state: "transferred",
+      child_handoff_id: "handoff_2",
+    });
+    expect(await state(current.persistence, "handoff_2")).toMatchObject({
+      lifecycle_state: "accepted",
+      recipient: { actor_id: "actor_child", actor_type: "agent" },
+      active_claim: null,
     });
   });
 

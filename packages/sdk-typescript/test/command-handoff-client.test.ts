@@ -156,7 +156,11 @@ describe("HandoffClient", () => {
     await handoffs.offer(offer, { idempotencyKey: "offer-key" });
     await handoffs.resolveTarget({ handoff_id: "handoff_01", resolved_target: { actor_id: "agent_02" } }, next);
     await handoffs.reportTargetUnavailable({ handoff_id: "handoff_01", reason_code: "no_candidate", reason: content, evidence: [] }, next);
-    await handoffs.accept({ handoff_id: "handoff_01" }, next);
+    await handoffs.claim({ handoff_id: "handoff_01", claim_id: "claim_01", requested_lease_seconds: 60 }, next);
+    await handoffs.renewClaim({ handoff_id: "handoff_01", claim_id: "claim_01", fencing_token: 1, heartbeat_sequence: 1 }, next);
+    await handoffs.releaseClaim({ handoff_id: "handoff_01", claim_id: "claim_01", fencing_token: 1, heartbeat_sequence: 2 }, next);
+    await handoffs.expireClaim({ handoff_id: "handoff_01", claim_id: "claim_01", fencing_token: 1 }, next);
+    await handoffs.accept({ handoff_id: "handoff_01", claim_id: "claim_01", fencing_token: 1 }, next);
     await handoffs.decline({ handoff_id: "handoff_01" }, next);
     await handoffs.expire({ handoff_id: "handoff_01" }, next);
     await handoffs.cancel({ handoff_id: "handoff_01", reason: content }, next);
@@ -171,6 +175,10 @@ describe("HandoffClient", () => {
       "workfabric.handoff.offer.v1",
       "workfabric.handoff.resolve_target.v1",
       "workfabric.handoff.report_target_unavailable.v1",
+      "workfabric.handoff.claim.v1",
+      "workfabric.handoff.renew_claim.v1",
+      "workfabric.handoff.release_claim.v1",
+      "workfabric.handoff.expire_claim.v1",
       "workfabric.handoff.accept.v1",
       "workfabric.handoff.decline.v1",
       "workfabric.handoff.expire.v1",
@@ -202,7 +210,17 @@ describe("HandoffClient", () => {
       causation_id: "event_01",
       payload: { handoff_id: "handoff_01", resolved_target: { actor_id: "agent_02" }, evidence: [] },
     });
-    expect(envelopes[12]?.payload).toEqual({ parent_handoff_id: "handoff_01", child_offer: offer });
+    expect(envelopes[3]?.payload).toEqual({
+      handoff_id: "handoff_01",
+      claim_id: "claim_01",
+      requested_lease_seconds: 60,
+    });
+    expect(envelopes[6]?.payload).toEqual({
+      handoff_id: "handoff_01",
+      claim_id: "claim_01",
+      fencing_token: 1,
+    });
+    expect(envelopes[16]?.payload).toEqual({ parent_handoff_id: "handoff_01", child_offer: offer });
   });
 
   it("rejects unsafe command metadata before I/O", async () => {
@@ -212,6 +230,14 @@ describe("HandoffClient", () => {
     expect(() => handoffs.accept({ handoff_id: "" }, { expectedVersion: 1, idempotencyKey: "key" })).toThrow(TypeError);
     expect(() => handoffs.accept({ handoff_id: "handoff_01" }, { expectedVersion: 0, idempotencyKey: "key" })).toThrow(TypeError);
     expect(() => handoffs.accept({ handoff_id: "handoff_01" }, { expectedVersion: 1, idempotencyKey: " " })).toThrow(TypeError);
+    expect(() => handoffs.claim(
+      { handoff_id: "handoff_01", claim_id: "claim_01", requested_lease_seconds: 0 },
+      { expectedVersion: 1, idempotencyKey: "claim-key" },
+    )).toThrow(TypeError);
+    expect(() => handoffs.renewClaim(
+      { handoff_id: "handoff_01", claim_id: "claim_01", fencing_token: 0, heartbeat_sequence: 1 },
+      { expectedVersion: 1, idempotencyKey: "renew-key" },
+    )).toThrow(TypeError);
     expect(fetch).not.toHaveBeenCalled();
   });
 });

@@ -61,8 +61,15 @@ describe("AgentlyProcessDriver", () => {
   it("sends graceful termination then forced termination after cancellation grace", async () => {
     const kill = vi.spyOn(process, "kill");
     const controller = new AbortController();
-    const pending = runFixture("ignore-term", { grace: 1, signal: controller.signal });
-    setTimeout(() => controller.abort(), 50);
+    let workerReady!: () => void;
+    const ready = new Promise<void>((resolve) => { workerReady = resolve; });
+    const pending = runFixture("ignore-term", {
+      grace: 1,
+      signal: controller.signal,
+      onProgress: async () => workerReady(),
+    });
+    await ready;
+    controller.abort();
     await expect(pending).rejects.toMatchObject({ code: "agently_worker_cancelled" });
     expect(kill.mock.calls.map(([_pid, signal]) => signal)).toEqual(expect.arrayContaining(["SIGTERM", "SIGKILL"]));
     kill.mockRestore();

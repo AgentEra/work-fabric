@@ -74,7 +74,7 @@ Work Fabric 是连接和交换层，不是任务决策或执行大脑：
 | Handoff Dispatch：把已确定的交接可靠送达，处理 Binding、Delivery、Ack、重试和恢复 | Work Fabric |
 | Execution Scheduling：拆解步骤、选择模型与工具、安排参与方内部执行 | 人、Agent Runtime、Workflow 或外部系统 |
 
-直接指定 Actor 或 Endpoint 的 Handoff 不依赖任何 Resolver。Capability Target 只表达待解析的能力需求；Work Fabric 可以提供候选 Endpoint 事实，但不排名、不推荐、不自动选择。外部 Resolver 通过统一协议提交目标解析结果后，Work Fabric 校验目标、记录决策来源并完成派发。消息送达不等于责任接受，只有接收方明确接受 Handoff 后责任才发生迁移。
+直接指定 Actor 或 Endpoint 的 Handoff 不依赖任何 Resolver。Capability Target 默认由外部 Resolver 提交明确目标；也可以显式开启经过权限和能力过滤的候选池，由 Endpoint 原子 Claim。Claim 只是带 Lease 和 fencing 的排他预留，不等于责任接受。Work Fabric 不排名、不推荐、不自动选择，也不自动 Claim；只有接收方显式 Accept 后责任才发生迁移。
 
 ## 一次交接如何完成
 
@@ -206,7 +206,7 @@ SDK 提供 Canonical Command、完整 Handoff 便捷方法、Query、Operations�
 
 ## Endpoint 与外部 Agent Runtime
 
-阶段 4A 已提供生产形态的原生 Agent 连接边界：管理员注册绑定 Actor 的 Endpoint；外部 Runtime 通过单活 fenced Session 声明 Capability 和可用性；外部 Resolver 读取未排序、未评分的事实并用标准命令提交明确目标；Endpoint Inbox 把已提交 Handoff Event 投影为可重建的路由事实；`@work-fabric/agent-gateway` 通过公开 TypeScript SDK 维护租约、发现分区并汇聚 Durable SSE。
+阶段 4A 已提供生产形态的原生 Agent 连接边界：管理员注册绑定 Actor 的 Endpoint；外部 Runtime 通过单活 fenced Session 声明 Capability 和可用性；参与方可按 Identity、Capability Summary、Capability Contract 渐进披露；外部 Resolver 可提交明确目标，或 Endpoint 从权限与 Capability 过滤后的候选池显式 Claim；Endpoint Inbox 把已提交 Handoff Event 投影为可重建的路由事实；`@work-fabric/agent-gateway` 通过公开 TypeScript SDK 维护租约、发现分区、查询候选池并汇聚 Durable SSE。
 
 ```text
 Admin provision
@@ -218,7 +218,7 @@ Admin provision
   -> External Runtime explicitly accepts/declines and performs work
 ```
 
-Gateway 只处理连接机械：它不比较候选、不安排任务、不调用模型或 Codex、不自动 Ack，也不自动接受 Handoff。Delivery Ack 仅表示信号已持久接收；Handoff Accept 才表示责任移交，两者必须分别显式提交。每个 Subscription × Partition 独立保存游标和 Ack 位置，不承诺跨分区全局顺序；有界队列通过背压等待，不丢弃信号。
+Gateway 只处理连接机械：它不比较候选、不安排任务、不调用模型或 Codex、不自动 Claim、不自动 Ack，也不自动接受 Handoff。Delivery Ack 仅表示信号已持久接收；Claim 仅表示排他预留；Handoff Accept 才表示责任移交，三者必须分别显式提交。每个 Subscription × Partition 独立保存游标和 Ack 位置，不承诺跨分区全局顺序；有界队列通过背压等待，不丢弃信号。
 
 本地评估可使用 Memory Endpoint Adapter；持久部署可使用 PostgreSQL Endpoint Directory/Inbox Adapter，公共 SPI、HTTP 和 SDK 不绑定数据库。完整接入顺序、配置上限、错误模型和外部 Runtime 示例见 [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)。
 

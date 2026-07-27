@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-claim-command",
+  "title": "Handoff Claim Command Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_id", "claim_id"],
+  "properties": {
+    "handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "claim_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "requested_lease_seconds": {
+      "type": "integer",
+      "minimum": 10,
+      "maximum": 300
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

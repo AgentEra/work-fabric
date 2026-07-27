@@ -16,7 +16,7 @@
       "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
     },
     "receipt_type": {
-      "enum": ["delivered", "received", "responsibility_accepted", "result_received", "result_verified"]
+      "enum": ["delivered", "received", "claim_acquired", "responsibility_accepted", "result_received", "result_verified"]
     },
     "handoff_id": {
       "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"

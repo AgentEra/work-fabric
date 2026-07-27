@@ -27,6 +27,12 @@
       "assertions": ["The immutable Capability Requirement and separate Target Binding are both retained.", "Core validates one explicit target but never selects, ranks, or schedules candidates.", "Concurrent resolutions commit at most one authoritative binding.", "Unavailable eligibility verification fails closed without persistence."]
     },
     {
+      "id": "eligible_pool_claim",
+      "description": "An explicitly pool-routed Capability Handoff is progressively disclosed to eligible Endpoints and can be atomically claimed with a fenced Lease.",
+      "interactions": ["handoff.claim", "handoff.renew_claim", "handoff.release_claim", "handoff.expire_claim"],
+      "assertions": ["Candidate discovery is capability-filtered but does not itself grant authority.", "Claim revalidates authority and capability eligibility.", "Only one current Claim fence can mutate or accept the Handoff.", "Claim never transfers execution responsibility."]
+    },
+    {
       "id": "handoff_accept",
       "description": "An authorized Recipient accepts responsibility for an offered or rework-requested Handoff.",
       "interactions": ["handoff.accept"],
