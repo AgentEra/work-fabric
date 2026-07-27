@@ -5,7 +5,10 @@ import { AgentlyRuntimeDriverFactory, validateAgentlyRuntimeDriverConfig } from 
 import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-sqlite";
 import {
   CatalogCapabilityResolver,
+  CatalogCapabilityDisclosure,
   HandoffCapabilityInvocationPort,
+  JsonSchemaInvocationValidator,
+  PollingAuxiliaryHandoffWaiter,
   type AuxiliaryHandoffWaiter,
   type InvocationAuthorityProvider,
   type InvocationSchemaValidator,
@@ -24,8 +27,10 @@ import {
   type AgentRuntimeDriver,
   type AgentRuntimeStateStore,
 } from "@work-fabric/agent-runtime-spi";
+import { FeishuCapabilitySchemaRegistry } from "@work-fabric/provider-feishu";
 import { BearerTokenProvider, WorkFabricClient } from "@work-fabric/sdk-typescript";
 
+import { LocalInvocationAuthorityProvider } from "./local-invocation-authority.js";
 import { dailyAssistantGatewayConfig } from "./subscription.js";
 
 export interface RuntimeComposition {
@@ -65,13 +70,30 @@ export async function composeAgentRuntime(
   let capabilityHostDependencies = {};
   if (loaded.service.capability_invocation.enabled) {
     if (
-      dependencies.capability === undefined ||
       !isCapabilityAwareAgentRuntimeDriver(dependencies.driver)
     ) {
       throw new TypeError(
-        "Capability invocation dependencies and a capability-aware Driver are required",
+        "A capability-aware Driver is required",
       );
     }
+    const capability = dependencies.capability ?? {
+      authority: new LocalInvocationAuthorityProvider({
+        tenant_id: loaded.service.work_fabric.tenant_id,
+        agent_actor_id: loaded.participant.actor_id,
+        queries: client.queries,
+        allowed_namespaces:
+          loaded.service.capability_invocation.allowed_namespaces,
+        allowed_resource_policy_refs: [
+          "feishu.shared-folder.default",
+        ],
+      }),
+      schemas: new JsonSchemaInvocationValidator(
+        new FeishuCapabilitySchemaRegistry(),
+      ),
+      waiter: new PollingAuxiliaryHandoffWaiter({
+        queries: client.queries,
+      }),
+    };
     const invocations = new HandoffCapabilityInvocationPort({
       tenant_id: loaded.service.work_fabric.tenant_id,
       owner_id: `${loaded.service.runtime_id}:capability-invocations`,
@@ -80,8 +102,8 @@ export async function composeAgentRuntime(
         actor_type: "agent",
       },
       resolver: new CatalogCapabilityResolver(client.citizens),
-      schemas: dependencies.capability.schemas,
-      authority: dependencies.capability.authority,
+      schemas: capability.schemas,
+      authority: capability.authority,
       handoffs: {
         offer: (payload, options) => client.handoffs.offer(payload, options),
         resolveTarget: (payload, options) =>
@@ -89,11 +111,14 @@ export async function composeAgentRuntime(
         getHandoff: (handoffId, options) =>
           client.queries.getHandoff(handoffId, options),
       },
-      waiter: dependencies.capability.waiter,
+      waiter: capability.waiter,
       state: dependencies.state,
     });
     capabilityHostDependencies = {
       turn_driver: dependencies.driver,
+      capability_disclosure: new CatalogCapabilityDisclosure(
+        client.citizens,
+      ),
       capability_invocations: invocations,
       capability_limits: {
         max_invocations_per_handoff:

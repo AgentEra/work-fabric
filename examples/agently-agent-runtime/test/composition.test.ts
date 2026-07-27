@@ -90,7 +90,7 @@ describe("Daily Assistant Runtime composition", () => {
     );
   });
 
-  it("requires explicit governance, schema and waiter ports when capability invocation is enabled", async () => {
+  it("composes Catalog disclosure, local Authority, Schema validation and waiting when capability invocation is enabled", async () => {
     const enabled = await loadAgentRuntimeConfiguration({
       document: {
         revision: "test",
@@ -123,10 +123,11 @@ describe("Daily Assistant Runtime composition", () => {
       },
     };
 
-    await expect(composeAgentRuntime(enabled, {
+    const composition = await composeAgentRuntime(enabled, {
       driver: turnDriver,
       state,
-    })).rejects.toThrow(/capability invocation dependencies/i);
+    });
+    await composition.host.close();
 
     const authority: InvocationAuthorityProvider = {
       async authorize() {
@@ -150,12 +151,12 @@ describe("Daily Assistant Runtime composition", () => {
         return { outcome: "succeeded", data: {}, artifacts: [] };
       },
     };
-    const composition = await composeAgentRuntime(enabled, {
+    const overridden = await composeAgentRuntime(enabled, {
       driver: turnDriver,
       state,
       capability: { authority, schemas, waiter },
     });
-    await composition.host.close();
+    await overridden.host.close();
   });
 
   it("uses the configured acceptance capability subset", async () => {

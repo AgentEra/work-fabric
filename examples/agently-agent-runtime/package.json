@@ -7,6 +7,7 @@
     "provision": "tsx src/provision.ts"
   },
   "dependencies": {
-    "@work-fabric/agent-capability-runtime": "0.1.0"
+    "@work-fabric/agent-capability-runtime": "0.1.0",
+    "@work-fabric/provider-feishu": "0.1.0"
   }
 }
