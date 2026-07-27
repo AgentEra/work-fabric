@@ -86,6 +86,49 @@ async def test_rejects_invalid_handoff_draft_from_the_model() -> None:
         await execute_with_agent(request, agent)
 
 
+@pytest.mark.asyncio
+async def test_retries_one_invalid_model_shape_inside_the_agent_boundary() -> None:
+    request = parse_request(valid_request())
+    agent = FakeAgent()
+    calls = 0
+
+    async def recovering_start() -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return {
+                "request_summary": "summary",
+                "response": "response",
+                "missing_information": [],
+                "handoff_draft_required": True,
+                "handoff_draft_reason": "reason",
+                "handoff_draft_capability": "not-valid",
+                "handoff_draft_intent": "intent",
+                "handoff_draft_acceptance_criteria": ["criterion"],
+            }
+        return await FakeAgent().async_start()
+
+    agent.async_start = recovering_start  # type: ignore[method-assign]
+
+    output = await execute_with_agent(request, agent)
+
+    assert calls == 2
+    assert output["response"] == "已收到并完成整理"
+
+
+def test_marks_empty_required_lists_as_present_in_the_agently_schema() -> None:
+    assert ASSISTANT_OUTPUT_SCHEMA["missing_information"][2] is True
+    assert ASSISTANT_OUTPUT_SCHEMA["handoff_draft_acceptance_criteria"][2] is True
+
+
+def test_role_prompt_defines_the_handoff_draft_identifier_contract() -> None:
+    prompt = role_prompt(valid_request()["task"]["role"])
+
+    assert "requirements.analysis" in prompt
+    assert "handoff_draft_required=false" in prompt
+    assert "include every output field" in prompt
+
+
 def test_defaults_omitted_handoff_draft_fields_when_no_draft_is_required() -> None:
     output = validate_assistant_output({
         "request_summary": "整理后的请求",

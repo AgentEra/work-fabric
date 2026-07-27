@@ -13,12 +13,12 @@ CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 ASSISTANT_OUTPUT_SCHEMA = {
     "request_summary": (str, "结构化请求摘要", "not_null"),
     "response": (str, "面向协作者的答复", "not_null"),
-    "missing_information": [(str, "仍需补充的信息")],
+    "missing_information": ([(str, "仍需补充的信息")], "仍需补充的信息", True),
     "handoff_draft_required": (bool, "是否建议下游交接", True),
     "handoff_draft_reason": (str, "建议或不建议交接的原因", True),
     "handoff_draft_capability": (str, "建议的能力 ID；无则为空字符串", True),
     "handoff_draft_intent": (str, "建议交接意图；无则为空字符串", True),
-    "handoff_draft_acceptance_criteria": [(str, "建议验收条件")],
+    "handoff_draft_acceptance_criteria": ([(str, "建议验收条件")], "建议验收条件", True),
 }
 _AGENTLY_LOG_SINK: TextIO | None = None
 
@@ -46,7 +46,12 @@ def role_prompt(role: Mapping[str, JsonValue]) -> str:
         f"You are the Work Fabric role {role['role_id']} ({role['display_name']}).\n"
         f"Role description: {role['description']}\n"
         "Respond only to the assigned handoff. Do not use tools, dispatch work, or treat workspace files as canonical context. "
-        "Treat context_reference as metadata only; it is not long-term memory. Return the requested structured response."
+        "Treat context_reference as metadata only; it is not long-term memory. Return the requested structured response. "
+        "Always include every output field, including arrays when they are empty. "
+        "When handoff_draft_required=true, handoff_draft_capability must be a lowercase dotted identifier such as "
+        "requirements.analysis, and draft intent plus at least one acceptance criterion must be present. "
+        "If no valid downstream capability is known, set handoff_draft_required=false and return empty draft capability, "
+        "intent, and acceptance criteria."
     )
 
 
@@ -99,14 +104,21 @@ def validate_assistant_output(value: object) -> dict[str, JsonValue]:
 
 
 async def execute_with_agent(request: WorkerRequest, agent: AgentPort) -> Mapping[str, JsonValue]:
-    result = await (
+    prepared = (
         agent.use_workspace(cast(str, request.task["workspace_path"]))
         .role(role_prompt(cast(Mapping[str, JsonValue], request.task["role"])), always=True)
         .input(task_prompt_input(request.task))
         .output(ASSISTANT_OUTPUT_SCHEMA, format="json")
-        .async_start()
     )
-    return validate_assistant_output(result)
+    last_error: AssistantOutputError | None = None
+    for _attempt in range(2):
+        result = await prepared.async_start()
+        try:
+            return validate_assistant_output(result)
+        except AssistantOutputError as error:
+            last_error = error
+    assert last_error is not None
+    raise last_error
 
 
 def required_environment(name: str) -> str:
