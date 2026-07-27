@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
 
 describe("Feishu collaboration channel E2E", () => {
-  it("connects an explicit mention to one Intake Handoff and returns its event to the original chat", async () => {
+  it("connects an explicit mention without fabricating an assistant reply before a Result", async () => {
     const sent: Array<Record<string, unknown>> = [];
     const localResponses: Array<{ status: number; body: string }> = [];
     const systemFetch = globalThis.fetch.bind(globalThis);
@@ -54,10 +54,10 @@ describe("Feishu collaboration channel E2E", () => {
       } });
       expect(duplicate.json()).toMatchObject({ accepted: true, duplicate: true });
       const deadline = Date.now() + 4_000;
-      while (sent.length < 2 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      while (sent.length < 1 && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
       const ingress = await service.http.dispatch({ method: "GET", url: "/v1/operations/connectors/feishu-primary/ingress", headers: { authorization: "Bearer connector-token", "x-wf-actor-id": "actor-human", "x-wf-endpoint-id": "endpoint-human" } });
-      if (sent.length < 2) throw new Error(JSON.stringify({ ingress: ingress.json(), localResponses, sent }));
-      expect(sent.map((item) => item.receive_id).sort()).toEqual(["oc-original", "oc-project"]);
+      if (sent.length < 1) throw new Error(JSON.stringify({ ingress: ingress.json(), localResponses, sent }));
+      expect(sent.map((item) => item.receive_id)).toEqual(["oc-project"]);
       expect(sent.every((item) => item.msg_type === "text")).toBe(true);
     } finally { await service.close(); }
   }, 10_000);

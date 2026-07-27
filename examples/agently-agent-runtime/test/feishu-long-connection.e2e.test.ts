@@ -235,7 +235,7 @@ describe("Feishu long connection collaboration channel E2E", () => {
       });
 
       const deadline = Date.now() + 4_000;
-      while (sent.length < 2 && Date.now() < deadline) {
+      while (sent.length < 1 && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
       const ingress = await service.http.dispatch({
@@ -279,10 +279,7 @@ describe("Feishu long connection collaboration channel E2E", () => {
           resource: { resource_type: "handoff", resource_version: 1 },
         },
       });
-      expect(sent.map((item) => item.receive_id).sort()).toEqual([
-        "oc-original",
-        "oc-project",
-      ]);
+      expect(sent.map((item) => item.receive_id)).toEqual(["oc-project"]);
       expect(sent.every((item) => item.msg_type === "text")).toBe(true);
       expect(localRequests.some((request) =>
         request.pathname.startsWith("/v1/connectors/feishu/")
@@ -293,7 +290,7 @@ describe("Feishu long connection collaboration channel E2E", () => {
 
     expect(longConnections.clients).toHaveLength(1);
     expect(client.status()).toMatchObject({ state: "stopped", code: "stopped" });
-    expect(sent).toHaveLength(2);
+    expect(sent).toHaveLength(1);
   }, 10_000);
 
   it("passes a Feishu mention through the Daily Assistant Runtime and renders its Result", async () => {
@@ -391,8 +388,22 @@ describe("Feishu long connection collaboration channel E2E", () => {
       // Replaying the exact same Feishu ingress must therefore still yield one
       // and only one model invocation for this isolated fixture.
       await eventually(async () => expect(model!.requests).toHaveLength(1), 5_000);
-      await eventually(async () => expect(sent.some((message) => JSON.stringify(message).includes("workfabric.handoff.result_returned.v1"))).toBe(true), 10_000);
-      expect(sent.some((message) => message.receive_id === "oc-results")).toBe(true);
+      await eventually(async () => {
+        expect(sent).toHaveLength(2);
+        expect(sent.map((message) => message.receive_id).sort()).toEqual([
+          "oc-original",
+          "oc-results",
+        ]);
+        for (const message of sent) {
+          const content = JSON.stringify(message);
+          expect(content).toContain(
+            "需求已整理，建议交给需求分析角色确认",
+          );
+          expect(content).not.toMatch(
+            /workfabric\.handoff|handoff-daily-1|result_returned|State:/,
+          );
+        }
+      }, 10_000);
       const completed = await service.human.queries.getHandoff(handoffId);
       const events = await service.human.queries.listHandoffEvents(handoffId);
       expect(completed.state.child_handoff_id).toBeNull();
