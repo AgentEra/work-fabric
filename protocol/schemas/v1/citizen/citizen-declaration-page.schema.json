@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:citizen-declaration-page",
+  "title": "Network Citizen Declaration Summary Page",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:citizen-declaration#/$defs/summary"
+      }
+    }
+  }
+}

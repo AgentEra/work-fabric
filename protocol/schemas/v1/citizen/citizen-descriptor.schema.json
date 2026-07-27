@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:citizen-descriptor",
+  "title": "Network Citizen Descriptor",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "citizen_id",
+    "citizen_kind",
+    "version",
+    "identity",
+    "protocol",
+    "declarations",
+    "availability",
+    "extensions"
+  ],
+  "properties": {
+    "citizen_id": {
+      "$ref": "#/$defs/citizen_id"
+    },
+    "citizen_kind": {
+      "$ref": "#/$defs/citizen_kind"
+    },
+    "version": {
+      "$ref": "urn:work-fabric:schema:v1:citizen-declaration#/$defs/semantic_version"
+    },
+    "identity": {
+      "oneOf": [
+        { "type": "null" },
+        { "$ref": "#/$defs/identity" }
+      ]
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["versions", "bindings"],
+      "properties": {
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[1-9][0-9]*(?:\\.[0-9]+)*$",
+            "maxLength": 64
+          }
+        },
+        "bindings": {
+          "type": "array",
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9+.-]{0,63}$"
+          }
+        }
+      }
+    },
+    "declarations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "digest"],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1024
+        },
+        "digest": {
+          "$ref": "urn:work-fabric:schema:v1:citizen-declaration#/$defs/sha256_digest"
+        }
+      }
+    },
+    "availability": {
+      "$ref": "#/$defs/availability"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "citizen_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[-.][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "citizen_kind": {
+      "enum": [
+        "decision-body",
+        "capability-provider",
+        "channel",
+        "context-provider",
+        "governance-provider",
+        "observer"
+      ]
+    },
+    "availability": {
+      "enum": ["available", "degraded", "draining", "unavailable"]
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["principal_id"],
+      "dependentRequired": {
+        "endpoint_id": ["actor"]
+      },
+      "properties": {
+        "principal_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        },
+        "actor": {
+          "$ref": "urn:work-fabric:schema:v1:actor-ref"
+        },
+        "endpoint_id": {
+          "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+        }
+      }
+    }
+  }
+}
