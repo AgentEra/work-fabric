@@ -62,6 +62,21 @@ export interface CapabilityInvocationPort {
   ): Promise<CapabilityInvocationResult>;
 }
 
+export interface RuntimeCapabilitySummary {
+  readonly citizen_id: string;
+  readonly capability_id: string;
+  readonly version: string;
+  readonly name: string;
+  readonly description: string;
+}
+
+export interface CapabilityDisclosurePort {
+  list(
+    namespaces: readonly string[],
+    signal: AbortSignal,
+  ): Promise<readonly RuntimeCapabilitySummary[]>;
+}
+
 export interface RuntimeCapabilityRequest {
   readonly invocation_id: string;
   readonly capability_id: string;
@@ -88,6 +103,7 @@ export interface RuntimeCapabilityContinuation {
 export interface CapabilityAwareAgentRuntimeDriver {
   executeTurn(
     task: RuntimeTaskPackage,
+    availableCapabilities: readonly RuntimeCapabilitySummary[],
     continuation: RuntimeCapabilityContinuation | null,
     progress: (update: RuntimeProgress) => Promise<void>,
     signal: AbortSignal,
@@ -316,6 +332,42 @@ function runtimeRequest(value: unknown): RuntimeCapabilityRequest {
     input: jsonObject(source.input, "input"),
     reason: string(source.reason, "reason", 8_192),
   });
+}
+
+function runtimeCapabilitySummary(value: unknown): RuntimeCapabilitySummary {
+  const source = exactObject(
+    value,
+    ["citizen_id", "capability_id", "version", "name", "description"],
+    "Runtime capability summary",
+  );
+  const version = string(source.version, "version", 64);
+  if (!SEMVER.test(version)) throw new TypeError("version is invalid");
+  return deepFreeze({
+    citizen_id: opaqueId(source.citizen_id, "citizen_id"),
+    capability_id: capabilityId(source.capability_id),
+    version,
+    name: string(source.name, "name", 256),
+    description: string(source.description, "description", 2_048),
+  });
+}
+
+export function validateRuntimeCapabilitySummaries(
+  value: unknown,
+): readonly RuntimeCapabilitySummary[] {
+  if (!Array.isArray(value) || value.length > 32) {
+    throw new TypeError("Runtime capability summaries must be a bounded array");
+  }
+  const summaries = value.map((item) => runtimeCapabilitySummary(item));
+  const identities = new Set<string>();
+  for (const summary of summaries) {
+    const identity =
+      `${summary.citizen_id}\u0000${summary.capability_id}\u0000${summary.version}`;
+    if (identities.has(identity)) {
+      throw new TypeError("Runtime capability summaries contain a duplicate");
+    }
+    identities.add(identity);
+  }
+  return deepFreeze(summaries);
 }
 
 export function validateCapabilityInvocationRequest(

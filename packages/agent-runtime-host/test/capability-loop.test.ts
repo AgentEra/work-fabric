@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   CapabilityAwareAgentRuntimeDriver,
+  CapabilityDisclosurePort,
   CapabilityInvocationPort,
+  RuntimeCapabilitySummary,
   RuntimeDriverTurn,
   RuntimeTaskPackage,
 } from "@work-fabric/agent-runtime-spi";
@@ -39,20 +41,37 @@ const finalResponse = {
   extensions: {},
 };
 
+const availableCapabilities: readonly RuntimeCapabilitySummary[] = [{
+  citizen_id: "citizen-feishu",
+  capability_id: "feishu.document.create",
+  version: "1.0.0",
+  name: "Create document",
+  description: "Create one simple Docx document.",
+}];
+
 function turnDriver(turns: readonly RuntimeDriverTurn[]) {
   let index = 0;
   return {
     executeTurn: vi.fn(async (
       _task: RuntimeTaskPackage,
-      _continuation: Parameters<
+      _availableCapabilities: Parameters<
         CapabilityAwareAgentRuntimeDriver["executeTurn"]
       >[1],
-      _progress: Parameters<
+      _continuation: Parameters<
         CapabilityAwareAgentRuntimeDriver["executeTurn"]
       >[2],
+      _progress: Parameters<
+        CapabilityAwareAgentRuntimeDriver["executeTurn"]
+      >[3],
       _signal: AbortSignal,
     ) => turns[index++]!),
   } satisfies CapabilityAwareAgentRuntimeDriver;
+}
+
+function disclosurePort() {
+  return {
+    list: vi.fn(async () => availableCapabilities),
+  } satisfies CapabilityDisclosurePort;
 }
 
 function invocationPort() {
@@ -92,10 +111,12 @@ describe("runCapabilityContinuationLoop", () => {
       { kind: "final", response: finalResponse },
     ]);
     const invocations = invocationPort();
+    const disclosure = disclosurePort();
 
     const result = await runCapabilityContinuationLoop({
       task,
       driver,
+      disclosure,
       invocations,
       limits: {
         max_invocations_per_handoff: 4,
@@ -107,6 +128,11 @@ describe("runCapabilityContinuationLoop", () => {
     });
 
     expect(result).toEqual(finalResponse);
+    expect(disclosure.list).toHaveBeenCalledTimes(1);
+    expect(driver.executeTurn.mock.calls[0]?.[1]).toEqual(availableCapabilities);
+    expect(driver.executeTurn.mock.calls[1]?.[1]).toBe(
+      driver.executeTurn.mock.calls[0]?.[1],
+    );
     expect(invocations.invoke).toHaveBeenCalledWith({
       invocation_id: "invocation-1",
       original_handoff_id: task.handoff_id,
@@ -117,7 +143,7 @@ describe("runCapabilityContinuationLoop", () => {
       reason: "为团队创建协作文档",
       deadline: task.result_due_at,
     }, expect.any(AbortSignal));
-    expect(driver.executeTurn.mock.calls[1]?.[1]).toMatchObject({
+    expect(driver.executeTurn.mock.calls[1]?.[2]).toMatchObject({
       request: { invocation_id: "invocation-1" },
       result: {
         outcome: "succeeded",
@@ -145,6 +171,7 @@ describe("runCapabilityContinuationLoop", () => {
     await expect(runCapabilityContinuationLoop({
       task,
       driver,
+      disclosure: disclosurePort(),
       invocations,
       limits: {
         max_invocations_per_handoff: 4,
@@ -173,6 +200,7 @@ describe("runCapabilityContinuationLoop", () => {
     await expect(runCapabilityContinuationLoop({
       task,
       driver: duplicateDriver,
+      disclosure: disclosurePort(),
       invocations: duplicatePort,
       limits: {
         max_invocations_per_handoff: 4,
@@ -195,6 +223,7 @@ describe("runCapabilityContinuationLoop", () => {
           capability_id: "email.message.send",
         },
       }]),
+      disclosure: disclosurePort(),
       invocations: disallowedPort,
       limits: {
         max_invocations_per_handoff: 4,
@@ -221,6 +250,7 @@ describe("runCapabilityContinuationLoop", () => {
           reason: "create",
         },
       }]),
+      disclosure: disclosurePort(),
       invocations,
       limits: {
         max_invocations_per_handoff: 4,
@@ -231,5 +261,29 @@ describe("runCapabilityContinuationLoop", () => {
       now: () => "2026-07-27T12:00:00.000Z",
     })).rejects.toThrow(/deadline/i);
     expect(invocations.invoke).not.toHaveBeenCalled();
+  });
+
+  it("fails before the first model turn when capability disclosure fails", async () => {
+    const driver = turnDriver([{ kind: "final", response: finalResponse }]);
+    const catalogFailure = new Error("catalog unavailable");
+
+    await expect(runCapabilityContinuationLoop({
+      task,
+      driver,
+      disclosure: {
+        async list() {
+          throw catalogFailure;
+        },
+      },
+      invocations: invocationPort(),
+      limits: {
+        max_invocations_per_handoff: 4,
+        allowed_namespaces: ["feishu."],
+      },
+      progress: async () => undefined,
+      signal: new AbortController().signal,
+      now: () => "2026-07-27T10:00:00.000Z",
+    })).rejects.toBe(catalogFailure);
+    expect(driver.executeTurn).not.toHaveBeenCalled();
   });
 });

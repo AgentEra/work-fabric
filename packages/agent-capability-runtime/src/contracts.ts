@@ -7,6 +7,7 @@ import type {
 import type {
   CitizenCardPage,
   CitizenDeclarationContract,
+  CitizenDeclarationSummaryPage,
   CitizenRisk,
   CitizenSchemaReference,
 } from "@work-fabric/network-citizen-spi";
@@ -31,6 +32,17 @@ export interface CapabilityCatalogClient {
     declarationId: string,
     options?: RequestOptions,
   ): Promise<CitizenDeclarationContract>;
+}
+
+export interface CapabilityDisclosureCatalogClient {
+  list(
+    input: CitizenDiscoveryInput,
+    options?: RequestOptions,
+  ): Promise<CitizenCardPage>;
+  listDeclarations(
+    citizenId: string,
+    options?: RequestOptions,
+  ): Promise<CitizenDeclarationSummaryPage>;
 }
 
 export interface BoundCapabilityContract {

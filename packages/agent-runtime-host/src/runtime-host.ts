@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import type {
   CapabilityAwareAgentRuntimeDriver,
+  CapabilityDisclosurePort,
   CapabilityInvocationPort,
   AgentRuntimeDriver,
   AgentRuntimeStateStore,
@@ -53,6 +54,7 @@ export interface AgentRuntimeHostDependencies {
   readonly state: AgentRuntimeStateStore;
   readonly driver: AgentRuntimeDriver;
   readonly turn_driver?: CapabilityAwareAgentRuntimeDriver;
+  readonly capability_disclosure?: CapabilityDisclosurePort;
   readonly capability_invocations?: CapabilityInvocationPort;
   readonly capability_limits?: CapabilityLoopLimits;
   readonly packageLoader: Pick<HandoffPackageLoader, "load">;
@@ -142,10 +144,11 @@ export class AgentRuntimeHost {
     if (dependencies.session === undefined && dependencies.startSession === undefined) invalid("invalid_runtime_host", "session");
     const capabilityParts = [
       dependencies.turn_driver,
+      dependencies.capability_disclosure,
       dependencies.capability_invocations,
       dependencies.capability_limits,
     ].filter((part) => part !== undefined).length;
-    if (capabilityParts !== 0 && capabilityParts !== 3) {
+    if (capabilityParts !== 0 && capabilityParts !== 4) {
       invalid("invalid_runtime_host", "capability_dependencies");
     }
     this.session = dependencies.session ?? null;
@@ -462,6 +465,7 @@ export class AgentRuntimeHost {
           : await runCapabilityContinuationLoop({
               task: loaded.task,
               driver: this.dependencies.turn_driver,
+              disclosure: this.dependencies.capability_disclosure!,
               invocations: this.dependencies.capability_invocations!,
               limits: this.dependencies.capability_limits!,
               progress: publishProgress,

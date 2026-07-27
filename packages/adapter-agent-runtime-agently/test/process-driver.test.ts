@@ -55,6 +55,7 @@ describe("AgentlyProcessDriver", () => {
 
     const requested = await capabilityDriver.executeTurn(
       task("turn-capability"),
+      [],
       null,
       async () => undefined,
       signal,
@@ -74,6 +75,7 @@ describe("AgentlyProcessDriver", () => {
     }
     const completed = await capabilityDriver.executeTurn(
       task("turn-capability"),
+      [],
       {
         request: requested.request,
         result: {

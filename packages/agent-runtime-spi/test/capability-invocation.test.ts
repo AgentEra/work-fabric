@@ -4,6 +4,7 @@ import {
   validateCapabilityCandidate,
   validateCapabilityInvocationRequest,
   validateCapabilityInvocationResult,
+  validateRuntimeCapabilitySummaries,
   validateRuntimeCapabilityContinuation,
   validateRuntimeDriverTurn,
 } from "../src/index.js";
@@ -117,6 +118,53 @@ describe("Agent capability invocation contracts", () => {
         summary: [{ text: "已创建项目简报。" }],
       },
     });
+  });
+
+  it("validates and freezes bounded public capability summaries", () => {
+    const summaries = validateRuntimeCapabilitySummaries([{
+      citizen_id: "feishu-document-actions",
+      capability_id: "feishu.document.create",
+      version: "1.0.0",
+      name: "Create document",
+      description: "Create one simple Docx document.",
+    }]);
+
+    expect(summaries).toEqual([{
+      citizen_id: "feishu-document-actions",
+      capability_id: "feishu.document.create",
+      version: "1.0.0",
+      name: "Create document",
+      description: "Create one simple Docx document.",
+    }]);
+    expect(Object.isFrozen(summaries)).toBe(true);
+    expect(Object.isFrozen(summaries[0])).toBe(true);
+  });
+
+  it.each([
+    [[{
+      citizen_id: "provider",
+      capability_id: "feishu.document.create",
+      version: "1.0.0",
+      name: "Create",
+      description: "Create.",
+      folder_token: "secret",
+    }], /fields/i],
+    [Array.from({ length: 33 }, (_, index) => ({
+      citizen_id: `provider-${index}`,
+      capability_id: "feishu.document.create",
+      version: "1.0.0",
+      name: "Create",
+      description: "Create.",
+    })), /bounded/i],
+    [[{
+      citizen_id: "provider",
+      capability_id: "feishu.document.create",
+      version: "latest",
+      name: "Create",
+      description: "Create.",
+    }], /version/i],
+  ])("rejects unsafe capability summaries", (value, message) => {
+    expect(() => validateRuntimeCapabilitySummaries(value)).toThrow(message);
   });
 
   it.each([

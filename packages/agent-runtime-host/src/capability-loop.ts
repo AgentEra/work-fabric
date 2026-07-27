@@ -1,8 +1,10 @@
 import {
   validateCapabilityInvocationRequest,
+  validateRuntimeCapabilitySummaries,
   validateRuntimeCapabilityContinuation,
   validateRuntimeDriverTurn,
   type CapabilityAwareAgentRuntimeDriver,
+  type CapabilityDisclosurePort,
   type CapabilityInvocationPort,
   type RuntimeDriverResult,
   type RuntimeProgress,
@@ -19,6 +21,7 @@ export interface CapabilityLoopLimits {
 export interface CapabilityContinuationLoopInput {
   readonly task: RuntimeTaskPackage;
   readonly driver: CapabilityAwareAgentRuntimeDriver;
+  readonly disclosure: CapabilityDisclosurePort;
   readonly invocations: CapabilityInvocationPort;
   readonly limits: CapabilityLoopLimits;
   readonly progress: (update: RuntimeProgress) => Promise<void>;
@@ -68,6 +71,12 @@ export async function runCapabilityContinuationLoop(
   const now = input.now ?? (() => new Date().toISOString());
   const invocationIds = new Set<string>();
   let continuation = null;
+  const availableCapabilities = validateRuntimeCapabilitySummaries(
+    await input.disclosure.list(
+      input.limits.allowed_namespaces,
+      input.signal,
+    ),
+  );
 
   for (;;) {
     if (input.signal.aborted) {
@@ -78,6 +87,7 @@ export async function runCapabilityContinuationLoop(
     }
     const turn = validateRuntimeDriverTurn(await input.driver.executeTurn(
       input.task,
+      availableCapabilities,
       continuation,
       input.progress,
       input.signal,

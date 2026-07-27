@@ -8,6 +8,7 @@ import {
   type AgentRuntimeDriverFactory,
   type CapabilityAwareAgentRuntimeDriver,
   type RuntimeCapabilityContinuation,
+  type RuntimeCapabilitySummary,
   type RuntimeDriverResult,
   type RuntimeDriverTurn,
   type RuntimeProgress,
@@ -133,12 +134,46 @@ export class AgentlyProcessDriver
     );
   }
 
-  async executeTurn(
+  executeTurn(
+    task: RuntimeTaskPackage,
+    availableCapabilities: readonly RuntimeCapabilitySummary[],
+    continuation: RuntimeCapabilityContinuation | null,
+    progress: (update: RuntimeProgress) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<RuntimeDriverTurn>;
+  executeTurn(
     task: RuntimeTaskPackage,
     continuation: RuntimeCapabilityContinuation | null,
     progress: (update: RuntimeProgress) => Promise<void>,
     signal: AbortSignal,
+  ): Promise<RuntimeDriverTurn>;
+  async executeTurn(
+    task: RuntimeTaskPackage,
+    availableCapabilitiesOrContinuation:
+      | readonly RuntimeCapabilitySummary[]
+      | RuntimeCapabilityContinuation
+      | null,
+    continuationOrProgress:
+      | RuntimeCapabilityContinuation
+      | null
+      | ((update: RuntimeProgress) => Promise<void>),
+    progressOrSignal:
+      | ((update: RuntimeProgress) => Promise<void>)
+      | AbortSignal,
+    optionalSignal?: AbortSignal,
   ): Promise<RuntimeDriverTurn> {
+    const modern = Array.isArray(availableCapabilitiesOrContinuation);
+    const continuation = (
+      modern
+        ? continuationOrProgress
+        : availableCapabilitiesOrContinuation
+    ) as RuntimeCapabilityContinuation | null;
+    const progress = (
+      modern ? progressOrSignal : continuationOrProgress
+    ) as (update: RuntimeProgress) => Promise<void>;
+    const signal = (
+      modern ? optionalSignal : progressOrSignal
+    ) as AbortSignal;
     const request = turnRequestFor(task, continuation, this.config);
     return this.executeWorker(
       request,

@@ -137,6 +137,17 @@ describe("AgentRuntimeHost", () => {
         execute: legacyExecute,
       },
       turn_driver: turnDriver,
+      capability_disclosure: {
+        async list() {
+          return [{
+            citizen_id: "citizen-feishu",
+            capability_id: "feishu.document.create",
+            version: "1.0.0",
+            name: "Create document",
+            description: "Create one simple Docx document.",
+          }];
+        },
+      },
       capability_invocations: invocations,
       capability_limits: {
         max_invocations_per_handoff: 4,
