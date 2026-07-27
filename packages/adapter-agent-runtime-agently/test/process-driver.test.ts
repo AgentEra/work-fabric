@@ -2,7 +2,10 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
+import type {
+  CapabilityAwareAgentRuntimeDriver,
+  RuntimeTaskPackage,
+} from "@work-fabric/agent-runtime-spi";
 
 import { AgentlyProcessDriver, AgentlyRuntimeDriverFactory, validateAgentlyRuntimeDriverConfig } from "../src/index.js";
 
@@ -30,6 +33,76 @@ async function runFixture(scenario: string, options: { readonly timeout?: number
 }
 
 describe("AgentlyProcessDriver", () => {
+  it("executes v2 capability and final turns without changing the v1 driver path", async () => {
+    const config = validateAgentlyRuntimeDriverConfig({
+      python: {
+        executable: worker,
+        module: "work_fabric_agently_runtime",
+      },
+      workspace_root: process.cwd(),
+      execution_timeout_seconds: 2,
+      cancellation_grace_seconds: 1,
+      provider: {
+        type: "OpenAICompatible",
+        base_url: "https://model.example.test/v1",
+        model: "test-model",
+        api_key: "agently-test-secret",
+      },
+    }, "test", { config_directory: process.cwd() });
+    const driver = new AgentlyProcessDriver(config);
+    const capabilityDriver: CapabilityAwareAgentRuntimeDriver = driver;
+    const signal = new AbortController().signal;
+
+    const requested = await capabilityDriver.executeTurn(
+      task("turn-capability"),
+      null,
+      async () => undefined,
+      signal,
+    );
+    expect(requested).toEqual({
+      kind: "capability_request",
+      request: {
+        invocation_id: "invocation-fixture-1",
+        capability_id: "feishu.document.create",
+        version_constraint: "1.0.0",
+        input: { title: "项目需求" },
+        reason: "创建团队文档",
+      },
+    });
+    if (requested.kind !== "capability_request") {
+      throw new Error("fixture did not request a capability");
+    }
+    const completed = await capabilityDriver.executeTurn(
+      task("turn-capability"),
+      {
+        request: requested.request,
+        result: {
+          outcome: "failed",
+          invocation_id: requested.request.invocation_id,
+          auxiliary_handoff_id: null,
+          code: "provider_unavailable",
+          message: "Provider unavailable",
+          retryable: true,
+        },
+      },
+      async () => undefined,
+      signal,
+    );
+    expect(completed).toMatchObject({
+      kind: "final",
+      response: {
+        summary: [{ text: "Agent handled provider facts" }],
+      },
+    });
+
+    const legacy = await driver.execute(
+      task("success"),
+      async () => undefined,
+      signal,
+    );
+    expect(legacy.summary[0]).toMatchObject({ text: "done" });
+  });
+
   it("accepts ordered progress followed by exactly one completed record", async () => {
     const { progress, result } = await runFixture("success");
     expect(progress).toMatchObject([{ sequence: 1 }, { sequence: 2 }]);

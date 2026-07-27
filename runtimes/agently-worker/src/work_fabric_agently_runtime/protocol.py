@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal, Mapping, TextIO, TypeAlias
 
 PROTOCOL = "workfabric.agent-runtime/1"
+TURN_PROTOCOL = "workfabric.agent-runtime/2"
 MAX_JSON_DEPTH = 32
 MAX_JSON_NODES = 10_000
 MAX_JSON_STRING_BYTES = 131_072
@@ -23,9 +24,10 @@ class ProtocolError(ValueError):
 
 @dataclass(frozen=True)
 class WorkerRequest:
-    protocol: Literal["workfabric.agent-runtime/1"]
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"]
     command_id: str
     task: Mapping[str, JsonValue]
+    continuation: Mapping[str, JsonValue] | None
     provider_type: Literal["OpenAICompatible"]
     provider_base_url: str
     provider_model: str
@@ -33,8 +35,8 @@ class WorkerRequest:
 
 @dataclass(frozen=True)
 class WorkerRecord:
-    protocol: Literal["workfabric.agent-runtime/1"]
-    type: Literal["progress", "completed", "failed"]
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"]
+    type: Literal["progress", "completed", "final", "capability_request", "failed"]
     command_id: str
     payload: Mapping[str, JsonValue]
 
@@ -172,10 +174,99 @@ def _validate_task(value: object) -> dict[str, JsonValue]:
     return safe_task
 
 
+def _validate_capability_request(value: object) -> dict[str, JsonValue]:
+    request = _exact_object(
+        value,
+        ("invocation_id", "capability_id", "version_constraint", "input", "reason"),
+        "continuation.request",
+    )
+    for field in ("invocation_id", "capability_id", "version_constraint", "reason"):
+        _string(request[field], f"continuation.request.{field}", 8_192)
+    if not isinstance(request["input"], dict):
+        _fail("continuation.request.input is invalid")
+    return _json_object(request, "continuation.request")
+
+
+def _validate_capability_result(value: object) -> dict[str, JsonValue]:
+    if not isinstance(value, dict):
+        _fail("continuation.result contains unknown or missing fields")
+    outcome = value.get("outcome")
+    if outcome == "succeeded":
+        result = _exact_object(
+            value,
+            (
+                "outcome", "invocation_id", "auxiliary_handoff_id", "candidate",
+                "data", "artifacts",
+            ),
+            "continuation.result",
+        )
+        candidate = _exact_object(
+            result["candidate"],
+            (
+                "citizen_id", "endpoint_id", "capability_id",
+                "capability_version", "contract_digest",
+            ),
+            "continuation.result.candidate",
+        )
+        for field in candidate:
+            _string(candidate[field], f"continuation.result.candidate.{field}", 256)
+        if not isinstance(result["data"], dict):
+            _fail("continuation.result.data is invalid")
+        if not isinstance(result["artifacts"], list) or any(
+            not isinstance(item, dict) for item in result["artifacts"]
+        ):
+            _fail("continuation.result.artifacts is invalid")
+    elif outcome in ("rejected", "failed"):
+        result = _exact_object(
+            value,
+            (
+                "outcome", "invocation_id", "auxiliary_handoff_id",
+                "code", "message", "retryable",
+            ),
+            "continuation.result",
+        )
+        for field in ("invocation_id", "code", "message"):
+            _string(result[field], f"continuation.result.{field}", 8_192)
+        if result["auxiliary_handoff_id"] is not None:
+            _string(
+                result["auxiliary_handoff_id"],
+                "continuation.result.auxiliary_handoff_id",
+                128,
+            )
+        if not isinstance(result["retryable"], bool):
+            _fail("continuation.result.retryable is invalid")
+    else:
+        _fail("continuation.result.outcome is invalid")
+    return _json_object(result, "continuation.result")
+
+
+def _validate_continuation(value: object) -> dict[str, JsonValue]:
+    continuation = _exact_object(
+        value,
+        ("request", "result"),
+        "continuation",
+    )
+    request = _validate_capability_request(continuation["request"])
+    result = _validate_capability_result(continuation["result"])
+    if request["invocation_id"] != result["invocation_id"]:
+        _fail("continuation invocation_id does not match")
+    safe = {"request": request, "result": result}
+    _reject_secret_fields(safe)
+    return safe
+
+
 def parse_request(value: object) -> WorkerRequest:
     safe = _json(value, _JsonBudget())
-    request = _exact_object(safe, ("protocol", "command_id", "task", "provider"), "request")
-    if request["protocol"] != PROTOCOL:
+    if not isinstance(safe, dict):
+        _fail("request contains unknown or missing fields")
+    protocol = safe.get("protocol")
+    fields = (
+        ("protocol", "command_id", "task", "provider")
+        if protocol == PROTOCOL
+        else ("protocol", "command_id", "task", "continuation", "provider")
+    )
+    request = _exact_object(safe, fields, "request")
+    if protocol not in (PROTOCOL, TURN_PROTOCOL):
         _fail("request protocol is unsupported")
     command_id = _string(request["command_id"], "request.command_id", 128)
     task = _validate_task(request["task"])
@@ -183,9 +274,14 @@ def parse_request(value: object) -> WorkerRequest:
     if provider["type"] != "OpenAICompatible":
         _fail("provider.type is unsupported")
     return WorkerRequest(
-        protocol=PROTOCOL,
+        protocol=protocol,
         command_id=command_id,
         task=task,
+        continuation=(
+            None
+            if protocol == PROTOCOL or request["continuation"] is None
+            else _validate_continuation(request["continuation"])
+        ),
         provider_type="OpenAICompatible",
         provider_base_url=_string(provider["base_url"], "provider.base_url", 8_192),
         provider_model=_string(provider["model"], "provider.model", 8_192),
@@ -204,12 +300,21 @@ def _result(value: object) -> dict[str, JsonValue]:
     return _json_object(result, "result")
 
 
-def progress_record(command_id: str, sequence: int, progress: float | None, message: str, observed_at: str) -> WorkerRecord:
+def progress_record(
+    command_id: str,
+    sequence: int,
+    progress: float | None,
+    message: str,
+    observed_at: str,
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"] = PROTOCOL,
+) -> WorkerRecord:
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         _fail("progress sequence is invalid")
     if progress is not None and (not isinstance(progress, (int, float)) or isinstance(progress, bool) or not 0 <= progress <= 1):
         _fail("progress value is invalid")
-    return WorkerRecord(PROTOCOL, "progress", _string(command_id, "command_id", 128), {
+    if protocol not in (PROTOCOL, TURN_PROTOCOL):
+        _fail("record protocol is unsupported")
+    return WorkerRecord(protocol, "progress", _string(command_id, "command_id", 128), {
         "sequence": sequence, "progress": progress, "message": _string(message, "progress message", 8_192),
         "observed_at": _string(observed_at, "progress timestamp", 128),
     })
@@ -219,10 +324,36 @@ def completed_record(command_id: str, result: object) -> WorkerRecord:
     return WorkerRecord(PROTOCOL, "completed", _string(command_id, "command_id", 128), {"result": _result(result)})
 
 
-def failed_record(command_id: str, code: str, message: str, retryable: bool) -> WorkerRecord:
+def final_record(command_id: str, response: object) -> WorkerRecord:
+    return WorkerRecord(
+        TURN_PROTOCOL,
+        "final",
+        _string(command_id, "command_id", 128),
+        {"response": _result(response)},
+    )
+
+
+def capability_request_record(command_id: str, value: object) -> WorkerRecord:
+    return WorkerRecord(
+        TURN_PROTOCOL,
+        "capability_request",
+        _string(command_id, "command_id", 128),
+        {"request": _validate_capability_request(value)},
+    )
+
+
+def failed_record(
+    command_id: str,
+    code: str,
+    message: str,
+    retryable: bool,
+    protocol: Literal["workfabric.agent-runtime/1", "workfabric.agent-runtime/2"] = PROTOCOL,
+) -> WorkerRecord:
     if not isinstance(retryable, bool):
         _fail("failure retryable is invalid")
-    return WorkerRecord(PROTOCOL, "failed", _string(command_id, "command_id", 128), {
+    if protocol not in (PROTOCOL, TURN_PROTOCOL):
+        _fail("record protocol is unsupported")
+    return WorkerRecord(protocol, "failed", _string(command_id, "command_id", 128), {
         "code": _string(code, "failure code", 128), "message": _string(message, "failure message", 8_192), "retryable": retryable,
     })
 

@@ -9,7 +9,16 @@ from typing import TextIO
 
 from .assistant import execute as execute_agently
 from .assistant import validate_assistant_output
-from .protocol import JsonValue, WorkerRequest, completed_record, failed_record, progress_record, write_record
+from .protocol import (
+    JsonValue,
+    WorkerRequest,
+    capability_request_record,
+    completed_record,
+    failed_record,
+    final_record,
+    progress_record,
+    write_record,
+)
 
 Executor = Callable[[WorkerRequest], Awaitable[Mapping[str, JsonValue]]]
 
@@ -53,14 +62,57 @@ async def run(
 ) -> int:
     environment_secret = os.environ.get("AGENTLY_MODEL_API_KEY", "")
     secrets = tuple(secret for secret in (*secrets, environment_secret) if secret)
-    write_record(stdout, progress_record(request.command_id, 1, 0.0, "Agently worker started", _observed_at()))
+    write_record(
+        stdout,
+        progress_record(
+            request.command_id,
+            1,
+            0.0,
+            "Agently worker started",
+            _observed_at(),
+            request.protocol,
+        ),
+    )
     try:
         if _task_contains_secret(request.task, secrets):
             raise ValueError("worker task contains a configured secret")
-        output = validate_assistant_output(await execute(request))
+        raw_output = await execute(request)
+        output = (
+            raw_output
+            if request.protocol == "workfabric.agent-runtime/2"
+            else validate_assistant_output(raw_output)
+        )
         if _contains_secret(output, secrets):
             raise ValueError("model output contains a configured secret")
-        write_record(stdout, progress_record(request.command_id, 2, 1.0, "Agently worker completed model response", _observed_at()))
+        write_record(
+            stdout,
+            progress_record(
+                request.command_id,
+                2,
+                1.0,
+                "Agently worker completed model response",
+                _observed_at(),
+                request.protocol,
+            ),
+        )
+        if request.protocol == "workfabric.agent-runtime/2":
+            kind = output.get("kind")
+            if kind == "final":
+                write_record(
+                    stdout,
+                    final_record(request.command_id, output.get("response")),
+                )
+            elif kind == "capability_request":
+                write_record(
+                    stdout,
+                    capability_request_record(
+                        request.command_id,
+                        output.get("request"),
+                    ),
+                )
+            else:
+                raise ValueError("Agently worker returned an invalid turn")
+            return 0
         result: dict[str, JsonValue] = {
             "summary": [{"kind": "text", "media_type": "text/plain", "text": output["response"]}],
             "artifacts": [],
@@ -76,5 +128,14 @@ async def run(
         for secret in secrets:
             safe_message = safe_message.replace(secret, "[REDACTED]")
         _diagnostic(stderr, safe_message)
-        write_record(stdout, failed_record(request.command_id, "execution_failed", "Agently worker could not complete the request", False))
+        write_record(
+            stdout,
+            failed_record(
+                request.command_id,
+                "execution_failed",
+                "Agently worker could not complete the request",
+                False,
+                request.protocol,
+            ),
+        )
         return 1

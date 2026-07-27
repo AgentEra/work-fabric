@@ -1,6 +1,17 @@
-import type { RuntimeDriverResult, RuntimeJsonObject, RuntimeJsonValue, RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
+import {
+  validateRuntimeCapabilityContinuation,
+  validateRuntimeDriverTurn,
+  type RuntimeCapabilityContinuation,
+  type RuntimeDriverResult,
+  type RuntimeDriverTurn,
+  type RuntimeJsonObject,
+  type RuntimeJsonValue,
+  type RuntimeTaskPackage,
+} from "@work-fabric/agent-runtime-spi";
 
 export const AGENTLY_WORKER_PROTOCOL = "workfabric.agent-runtime/1" as const;
+export const AGENTLY_WORKER_TURN_PROTOCOL =
+  "workfabric.agent-runtime/2" as const;
 export const MAX_JSON_DEPTH = 32;
 export const MAX_JSON_NODES = 10_000;
 export const MAX_JSON_STRING_BYTES = 131_072;
@@ -12,10 +23,47 @@ export interface AgentlyWorkerRequestV1 {
   readonly provider: { readonly type: "OpenAICompatible"; readonly base_url: string; readonly model: string };
 }
 
+export interface AgentlyWorkerRequestV2 {
+  readonly protocol: typeof AGENTLY_WORKER_TURN_PROTOCOL;
+  readonly command_id: string;
+  readonly task: RuntimeTaskPackage;
+  readonly continuation: RuntimeCapabilityContinuation | null;
+  readonly provider: {
+    readonly type: "OpenAICompatible";
+    readonly base_url: string;
+    readonly model: string;
+  };
+}
+
 export type AgentlyWorkerRecordV1 =
   | { readonly protocol: typeof AGENTLY_WORKER_PROTOCOL; readonly type: "progress"; readonly command_id: string; readonly sequence: number; readonly progress: number | null; readonly message: string; readonly observed_at: string }
   | { readonly protocol: typeof AGENTLY_WORKER_PROTOCOL; readonly type: "completed"; readonly command_id: string; readonly result: RuntimeDriverResult }
   | { readonly protocol: typeof AGENTLY_WORKER_PROTOCOL; readonly type: "failed"; readonly command_id: string; readonly code: string; readonly message: string; readonly retryable: boolean };
+
+export type AgentlyWorkerTurnRecordV2 =
+  | {
+      readonly protocol: typeof AGENTLY_WORKER_TURN_PROTOCOL;
+      readonly type: "progress";
+      readonly command_id: string;
+      readonly sequence: number;
+      readonly progress: number | null;
+      readonly message: string;
+      readonly observed_at: string;
+    }
+  | {
+      readonly protocol: typeof AGENTLY_WORKER_TURN_PROTOCOL;
+      readonly type: "final" | "capability_request";
+      readonly command_id: string;
+      readonly turn: RuntimeDriverTurn;
+    }
+  | {
+      readonly protocol: typeof AGENTLY_WORKER_TURN_PROTOCOL;
+      readonly type: "failed";
+      readonly command_id: string;
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: boolean;
+    };
 
 interface JsonBudget { nodes: number; stringBytes: number; readonly seen: WeakSet<object>; }
 
@@ -130,4 +178,145 @@ export function parseAgentlyWorkerRecord(value: unknown, expectedCommandId: stri
     return { protocol: AGENTLY_WORKER_PROTOCOL, type: "failed", command_id: expectedCommandId, code: string(parsed.code, "worker failure code", 128), message: string(parsed.message, "worker failure message", 8_192), retryable: parsed.retryable };
   }
   throw new TypeError("worker record type is unsupported");
+}
+
+export function parseAgentlyWorkerTurnRecord(
+  value: unknown,
+  expectedCommandId: string,
+): AgentlyWorkerTurnRecordV2 {
+  const safe = json(value, {
+    nodes: 0,
+    stringBytes: 0,
+    seen: new WeakSet<object>(),
+  });
+  const discriminator = plainObject(safe, "worker turn record");
+  if (discriminator.type === "progress") {
+    const header = exactObject(
+      discriminator,
+      [
+        "protocol",
+        "type",
+        "command_id",
+        "sequence",
+        "progress",
+        "message",
+        "observed_at",
+      ],
+      "worker turn progress record",
+    );
+    if (header.protocol !== AGENTLY_WORKER_TURN_PROTOCOL) {
+      throw new TypeError("worker turn protocol is unsupported");
+    }
+    command(header.command_id, expectedCommandId);
+    if (
+      !Number.isSafeInteger(header.sequence) ||
+      (header.sequence as number) < 1
+    ) {
+      throw new TypeError("worker progress sequence is invalid");
+    }
+    if (
+      header.progress !== null &&
+      (typeof header.progress !== "number" ||
+        !Number.isFinite(header.progress) ||
+        header.progress < 0 ||
+        header.progress > 1)
+    ) {
+      throw new TypeError("worker progress value is invalid");
+    }
+    return {
+      protocol: AGENTLY_WORKER_TURN_PROTOCOL,
+      type: "progress",
+      command_id: expectedCommandId,
+      sequence: header.sequence as number,
+      progress: header.progress as number | null,
+      message: string(header.message, "worker progress message", 8_192),
+      observed_at: string(
+        header.observed_at,
+        "worker progress timestamp",
+        128,
+      ),
+    };
+  }
+  if (discriminator.type === "final") {
+    const parsed = exactObject(
+      discriminator,
+      ["protocol", "type", "command_id", "response"],
+      "worker final record",
+    );
+    if (parsed.protocol !== AGENTLY_WORKER_TURN_PROTOCOL) {
+      throw new TypeError("worker turn protocol is unsupported");
+    }
+    command(parsed.command_id, expectedCommandId);
+    return {
+      protocol: AGENTLY_WORKER_TURN_PROTOCOL,
+      type: "final",
+      command_id: expectedCommandId,
+      turn: validateRuntimeDriverTurn({
+        kind: "final",
+        response: parsed.response,
+      }),
+    };
+  }
+  if (discriminator.type === "capability_request") {
+    const parsed = exactObject(
+      discriminator,
+      ["protocol", "type", "command_id", "request"],
+      "worker capability request record",
+    );
+    if (parsed.protocol !== AGENTLY_WORKER_TURN_PROTOCOL) {
+      throw new TypeError("worker turn protocol is unsupported");
+    }
+    command(parsed.command_id, expectedCommandId);
+    return {
+      protocol: AGENTLY_WORKER_TURN_PROTOCOL,
+      type: "capability_request",
+      command_id: expectedCommandId,
+      turn: validateRuntimeDriverTurn({
+        kind: "capability_request",
+        request: parsed.request,
+      }),
+    };
+  }
+  if (discriminator.type === "failed") {
+    const parsed = exactObject(
+      discriminator,
+      [
+        "protocol",
+        "type",
+        "command_id",
+        "code",
+        "message",
+        "retryable",
+      ],
+      "worker turn failed record",
+    );
+    if (parsed.protocol !== AGENTLY_WORKER_TURN_PROTOCOL) {
+      throw new TypeError("worker turn protocol is unsupported");
+    }
+    command(parsed.command_id, expectedCommandId);
+    if (typeof parsed.retryable !== "boolean") {
+      throw new TypeError("worker retryable is invalid");
+    }
+    return {
+      protocol: AGENTLY_WORKER_TURN_PROTOCOL,
+      type: "failed",
+      command_id: expectedCommandId,
+      code: string(parsed.code, "worker failure code", 128),
+      message: string(parsed.message, "worker failure message", 8_192),
+      retryable: parsed.retryable,
+    };
+  }
+  throw new TypeError("worker turn record type is unsupported");
+}
+
+export function normalizeAgentlyWorkerRequestV2(
+  value: AgentlyWorkerRequestV2,
+): AgentlyWorkerRequestV2 {
+  return {
+    ...value,
+    continuation:
+      value.continuation === null
+        ? null
+        : validateRuntimeCapabilityContinuation(value.continuation),
+  };
 }

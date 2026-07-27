@@ -2,11 +2,31 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { dirname } from "node:path";
 
-import { validateDriverManifest, type AgentRuntimeDriver, type AgentRuntimeDriverFactory, type RuntimeDriverResult, type RuntimeProgress, type RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
+import {
+  validateDriverManifest,
+  type AgentRuntimeDriver,
+  type AgentRuntimeDriverFactory,
+  type CapabilityAwareAgentRuntimeDriver,
+  type RuntimeCapabilityContinuation,
+  type RuntimeDriverResult,
+  type RuntimeDriverTurn,
+  type RuntimeProgress,
+  type RuntimeTaskPackage,
+} from "@work-fabric/agent-runtime-spi";
 
 import { type AgentlyRuntimeDriverConfig, validateAgentlyRuntimeDriverConfig } from "./config.js";
 import { NdjsonReader } from "./ndjson-reader.js";
-import { AGENTLY_WORKER_PROTOCOL, parseAgentlyWorkerRecord, type AgentlyWorkerRequestV1 } from "./protocol.js";
+import {
+  AGENTLY_WORKER_PROTOCOL,
+  AGENTLY_WORKER_TURN_PROTOCOL,
+  normalizeAgentlyWorkerRequestV2,
+  parseAgentlyWorkerRecord,
+  parseAgentlyWorkerTurnRecord,
+  type AgentlyWorkerRecordV1,
+  type AgentlyWorkerRequestV1,
+  type AgentlyWorkerRequestV2,
+  type AgentlyWorkerTurnRecordV2,
+} from "./protocol.js";
 
 export const MAX_STDIN_BYTES = 1_048_576;
 export const MAX_STDOUT_LINE_BYTES = 262_144;
@@ -56,12 +76,41 @@ function requestFor(task: RuntimeTaskPackage, config: AgentlyRuntimeDriverConfig
   return { protocol: AGENTLY_WORKER_PROTOCOL, command_id: randomUUID(), task, provider: { type: "OpenAICompatible", base_url: config.provider.base_url, model: config.provider.model } };
 }
 
+function turnRequestFor(
+  task: RuntimeTaskPackage,
+  continuation: RuntimeCapabilityContinuation | null,
+  config: AgentlyRuntimeDriverConfig,
+): AgentlyWorkerRequestV2 {
+  return normalizeAgentlyWorkerRequestV2({
+    protocol: AGENTLY_WORKER_TURN_PROTOCOL,
+    command_id: randomUUID(),
+    task,
+    continuation,
+    provider: {
+      type: "OpenAICompatible",
+      base_url: config.provider.base_url,
+      model: config.provider.model,
+    },
+  });
+}
+
 function signalProcessGroup(pid: number | undefined, signal: NodeJS.Signals): boolean {
   if (process.platform === "win32" || pid === undefined || !Number.isSafeInteger(pid) || pid < 1) return false;
   try { process.kill(-pid, signal); return true; } catch { return false; }
 }
 
-export class AgentlyProcessDriver implements AgentRuntimeDriver {
+type WorkerProgressRecord = {
+  readonly type: "progress";
+  readonly sequence: number;
+  readonly progress: number | null;
+  readonly message: string;
+  readonly observed_at: string;
+};
+
+type WorkerRecord = AgentlyWorkerRecordV1 | AgentlyWorkerTurnRecordV2;
+
+export class AgentlyProcessDriver
+  implements AgentRuntimeDriver, CapabilityAwareAgentRuntimeDriver {
   readonly manifest = validateDriverManifest({
     driver_type: "agently", protocol_version: "1",
     capability_ids: ["collaboration.request.intake", "information.synthesis", "collaboration.handoff.draft"],
@@ -73,10 +122,48 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
   ) {}
 
   async execute(task: RuntimeTaskPackage, progress: (update: RuntimeProgress) => Promise<void>, signal: AbortSignal): Promise<RuntimeDriverResult> {
+    const request = requestFor(task, this.config);
+    return this.executeWorker(
+      request,
+      progress,
+      signal,
+      (raw) => parseAgentlyWorkerRecord(raw, request.command_id),
+      (record) => record.type === "completed" ? record.result : undefined,
+      "completed",
+    );
+  }
+
+  async executeTurn(
+    task: RuntimeTaskPackage,
+    continuation: RuntimeCapabilityContinuation | null,
+    progress: (update: RuntimeProgress) => Promise<void>,
+    signal: AbortSignal,
+  ): Promise<RuntimeDriverTurn> {
+    const request = turnRequestFor(task, continuation, this.config);
+    return this.executeWorker(
+      request,
+      progress,
+      signal,
+      (raw) => parseAgentlyWorkerTurnRecord(raw, request.command_id),
+      (record) =>
+        record.type === "final" || record.type === "capability_request"
+          ? record.turn
+          : undefined,
+      "final or capability_request",
+    );
+  }
+
+  private async executeWorker<T>(
+    request: AgentlyWorkerRequestV1 | AgentlyWorkerRequestV2,
+    progress: (update: RuntimeProgress) => Promise<void>,
+    signal: AbortSignal,
+    parseRecord: (raw: unknown) => WorkerRecord,
+    terminalFrom: (record: WorkerRecord) => T | undefined,
+    terminalLabel: string,
+  ): Promise<T> {
     if (signal.aborted) throw error("agently_worker_cancelled", "Agently worker execution was cancelled");
     if (process.platform === "win32") throw error("agently_worker_spawn", "Agently worker process-group isolation is unavailable on this platform");
-    if (secretIn(task, this.config.provider.api_key)) throw error("agently_worker_input", "Agently worker request contains a configured secret");
-    const request = requestFor(task, this.config);
+    if (secretIn(request, this.config.provider.api_key)) throw error("agently_worker_input", "Agently worker request contains a configured secret");
     let input: string;
     try { input = `${JSON.stringify(request)}\n`; } catch { throw error("agently_worker_input", "Agently worker request is not serializable"); }
     if (Buffer.byteLength(input, "utf8") > MAX_STDIN_BYTES) throw error("agently_worker_input", "Agently worker request exceeds its bound");
@@ -96,10 +183,10 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
       throw error("agently_worker_spawn", "Agently worker standard streams are unavailable");
     }
 
-    return new Promise<RuntimeDriverResult>((resolve, reject) => {
+    return new Promise<T>((resolve, reject) => {
       let settled = false;
       let accepting = true;
-      let terminal: RuntimeDriverResult | undefined;
+      let terminal: T | undefined;
       let lastSequence = 0;
       let stderr = Buffer.alloc(0);
       let observedStdout = Buffer.alloc(0);
@@ -129,7 +216,7 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
           });
         } catch { /* an optional diagnostic observer must not affect execution */ }
       };
-      const settle = (outcome: { readonly result: RuntimeDriverResult } | { readonly failure: AgentlyWorkerError }) => {
+      const settle = (outcome: { readonly result: T } | { readonly failure: AgentlyWorkerError }) => {
         if (settled) return;
         settled = true;
         cleanup();
@@ -172,15 +259,22 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
           appendRuntimeLog("worker_stdout");
           for (const raw of reader.push(chunk)) {
             if (!accepting) return;
-            const record = parseAgentlyWorkerRecord(raw, request.command_id);
+            const record = parseRecord(raw);
             if (secretIn(record, this.config.provider.api_key)) throw error("agently_worker_protocol", "Agently worker attempted to return a secret");
             if (terminal !== undefined) throw error("agently_worker_protocol", "Agently worker emitted records after a terminal record");
             if (record.type === "progress") {
-              if (record.sequence <= lastSequence) throw error("agently_worker_protocol", "Agently worker progress sequence is not increasing");
-              lastSequence = record.sequence;
-              await progress({ sequence: record.sequence, progress: record.progress, message: record.message, observed_at: record.observed_at });
-            } else if (record.type === "completed") terminal = record.result;
-            else throw error("agently_worker_failed", "Agently worker reported failure");
+              const progressRecord = record as WorkerProgressRecord;
+              if (progressRecord.sequence <= lastSequence) throw error("agently_worker_protocol", "Agently worker progress sequence is not increasing");
+              lastSequence = progressRecord.sequence;
+              await progress({ sequence: progressRecord.sequence, progress: progressRecord.progress, message: progressRecord.message, observed_at: progressRecord.observed_at });
+            } else if (record.type === "failed") {
+              throw error("agently_worker_failed", "Agently worker reported failure");
+            } else {
+              terminal = terminalFrom(record);
+              if (terminal === undefined) {
+                throw error("agently_worker_protocol", "Agently worker emitted an unsupported terminal record");
+              }
+            }
           }
         }
         reader.finish();
@@ -193,7 +287,7 @@ export class AgentlyProcessDriver implements AgentRuntimeDriver {
           if (!accepting) return;
           accepting = false;
           if (exitCode !== 0 || terminationSignal !== null) { settle({ failure: error("agently_worker_exit", "Agently worker exited unsuccessfully", redact(stderr, this.config.provider.api_key)) }); return; }
-          if (terminal === undefined) { settle({ failure: error("agently_worker_protocol", "Agently worker did not emit exactly one completed record") }); return; }
+          if (terminal === undefined) { settle({ failure: error("agently_worker_protocol", `Agently worker did not emit exactly one ${terminalLabel} record`) }); return; }
           settle({ result: terminal });
         }, () => undefined);
       });

@@ -35,3 +35,10 @@ def valid_request() -> dict[str, Any]:
             "model": "test-model",
         },
     }
+
+
+def valid_request_v2() -> dict[str, Any]:
+    value = valid_request()
+    value["protocol"] = "workfabric.agent-runtime/2"
+    value["continuation"] = None
+    return value

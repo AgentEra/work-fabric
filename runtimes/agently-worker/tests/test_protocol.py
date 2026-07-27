@@ -7,7 +7,9 @@ import pytest
 
 from work_fabric_agently_runtime.protocol import (
     ProtocolError,
+    capability_request_record,
     completed_record,
+    final_record,
     parse_request,
     read_request,
     utf16_code_units,
@@ -15,7 +17,65 @@ from work_fabric_agently_runtime.protocol import (
     write_record,
 )
 
-from .conftest import valid_request
+from .conftest import valid_request, valid_request_v2
+
+
+def test_v2_request_accepts_only_a_normalized_capability_continuation() -> None:
+    value = valid_request_v2()
+    parsed = parse_request(value)
+    assert parsed.protocol == "workfabric.agent-runtime/2"
+    assert parsed.continuation is None
+
+    value["continuation"] = {
+        "request": {
+            "invocation_id": "invocation-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "1.0.0",
+            "input": {"title": "项目需求"},
+            "reason": "创建团队文档",
+        },
+        "result": {
+            "outcome": "failed",
+            "invocation_id": "invocation-1",
+            "auxiliary_handoff_id": None,
+            "code": "provider_unavailable",
+            "message": "Provider unavailable",
+            "retryable": True,
+        },
+    }
+    parsed = parse_request(value)
+    assert parsed.continuation is not None
+    assert parsed.continuation["result"]["code"] == "provider_unavailable"
+
+    value["continuation"]["result"]["api_key"] = "forbidden"
+    with pytest.raises(ProtocolError, match="unknown|secret"):
+        parse_request(value)
+
+
+def test_v2_terminal_records_are_strict_final_or_capability_request() -> None:
+    final = final_record(
+        "command-2",
+        {
+            "summary": [{"kind": "text", "text": "已完成"}],
+            "artifacts": [],
+            "evidence": [],
+            "extensions": {},
+        },
+    )
+    assert final.protocol == "workfabric.agent-runtime/2"
+    assert final.type == "final"
+    requested = capability_request_record(
+        "command-2",
+        {
+            "invocation_id": "invocation-2",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "^1.0.0",
+            "input": {"title": "项目需求"},
+            "reason": "创建团队文档",
+        },
+    )
+    assert requested.protocol == "workfabric.agent-runtime/2"
+    assert requested.type == "capability_request"
 
 
 def test_rejects_secret_inside_task_json() -> None:

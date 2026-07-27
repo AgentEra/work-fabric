@@ -11,7 +11,65 @@ import pytest
 from work_fabric_agently_runtime.protocol import parse_request
 from work_fabric_agently_runtime.runner import run
 
-from .conftest import valid_request
+from .conftest import valid_request, valid_request_v2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("turn", "terminal_type"),
+    [
+        (
+            {
+                "kind": "capability_request",
+                "request": {
+                    "invocation_id": "invocation-1",
+                    "capability_id": "feishu.document.create",
+                    "version_constraint": "1.0.0",
+                    "input": {"title": "项目需求"},
+                    "reason": "创建团队文档",
+                },
+            },
+            "capability_request",
+        ),
+        (
+            {
+                "kind": "final",
+                "response": {
+                    "summary": [{"kind": "text", "text": "已完成"}],
+                    "artifacts": [],
+                    "evidence": [],
+                    "extensions": {},
+                },
+            },
+            "final",
+        ),
+    ],
+)
+async def test_runner_emits_exactly_one_v2_turn_terminal(
+    turn,
+    terminal_type: str,
+) -> None:
+    stdout = io.StringIO()
+    stderr = io.StringIO()
+
+    async def fake_execute(_request):
+        return turn
+
+    result = await run(
+        parse_request(valid_request_v2()),
+        execute=fake_execute,
+        stdout=stdout,
+        stderr=stderr,
+    )
+
+    assert result == 0
+    records = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert [record["protocol"] for record in records] == [
+        "workfabric.agent-runtime/2",
+        "workfabric.agent-runtime/2",
+        "workfabric.agent-runtime/2",
+    ]
+    assert records[-1]["type"] == terminal_type
 
 
 @pytest.mark.asyncio
