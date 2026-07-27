@@ -179,7 +179,16 @@ export class HandoffPackageLoader {
   async load(handoffId: string, workspacePath: string, options: RuntimeHandoffLoadOptions = {}): Promise<LoadedRuntimeHandoff> {
     id(handoffId, "handoff_id");
     if (typeof workspacePath !== "string" || workspacePath.length === 0) invalid("invalid_workspace_path", "workspace_path");
-    const snapshot = cloneFrozenJson(await this.queries.getHandoff(handoffId, options.signal === undefined ? {} : { signal: options.signal }), "snapshot");
+    const received = cloneFrozenJson(await this.queries.getHandoff(handoffId, options.signal === undefined ? {} : { signal: options.signal }), "snapshot");
+    const receivedState = record(received.state, "state");
+    const snapshot = cloneFrozenJson({
+      ...received,
+      state: {
+        ...receivedState,
+        ...(Object.hasOwn(receivedState, "active_claim") ? {} : { active_claim: null }),
+        ...(Object.hasOwn(receivedState, "claim_fencing_token") ? {} : { claim_fencing_token: 0 }),
+      },
+    }, "snapshot");
     if (snapshot.tenant_id !== this.tenantId || snapshot.handoff_id !== handoffId || !Number.isSafeInteger(snapshot.stream_version) || snapshot.stream_version < 1) invalid("snapshot_identity_mismatch", "snapshot");
     const state = record(snapshot.state, "state"); exact(state, STATE_FIELDS, "state");
     if (state.handoff_id !== handoffId || state.resource_version !== snapshot.stream_version) invalid("snapshot_version_mismatch", "state");

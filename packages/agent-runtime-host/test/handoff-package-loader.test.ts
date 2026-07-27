@@ -36,6 +36,27 @@ describe("HandoffPackageLoader", () => {
     expect(client.listHandoffEvents).toHaveBeenCalledWith("handoff-1", expect.objectContaining({ fromVersion: 1, limit: 100 }));
   });
 
+  it("loads a persisted pre-claim snapshot using the protocol defaults", async () => {
+    const legacy = structuredClone(snapshot);
+    delete (legacy.state as Record<string, unknown>).active_claim;
+    delete (legacy.state as Record<string, unknown>).claim_fencing_token;
+    const client = {
+      getHandoff: vi.fn(async () => legacy),
+      listHandoffEvents: vi.fn(async () => [event(1), event(2)]),
+    };
+
+    await expect(
+      new HandoffPackageLoader(
+        client,
+        "tenant-1",
+        role,
+        () => "2026-07-26T12:00:00.000Z",
+      ).load("handoff-1", "/workspace/t1/h1"),
+    ).resolves.toMatchObject({
+      task: { handoff_id: "handoff-1", stream_version: 2 },
+    });
+  });
+
   it("accepts the protocol assignment mode in a resolved Capability requirement", async () => {
     const resolved = structuredClone(snapshot) as unknown as {
       state: {
