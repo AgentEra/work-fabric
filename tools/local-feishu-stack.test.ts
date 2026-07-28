@@ -43,6 +43,11 @@ describe("LocalFeishuStackSupervisor", () => {
         "FEISHU_EXTERNAL_TENANT_ID=tenant-external",
         "FEISHU_BOT_OPEN_ID=bot-open-id",
         "WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true",
+        "WORK_FABRIC_CONFIG_APPLICATION=legacy-service",
+        "WORK_FABRIC_AGENT_RUNTIME_CONFIG=/legacy/agent-runtime.yaml",
+        "WORK_FABRIC_AGENT_RUNTIME_CONFIG_APPLICATION=legacy-agent",
+        "WORK_FABRIC_FEISHU_PROVIDER_CONFIG=/legacy/feishu-provider.yaml",
+        "WORK_FABRIC_FEISHU_PROVIDER_CONFIG_APPLICATION=legacy-provider",
       ].join("\n"));
       const environment = await prepareLocalFeishuEnvironment({
         WORK_FABRIC_ENV_FILE: envFile,
@@ -62,6 +67,19 @@ describe("LocalFeishuStackSupervisor", () => {
       expect(provider.service.document_access.mode).toBe(
         "development_app_identity",
       );
+      expect(environment.WORK_FABRIC_CONFIG_APPLICATION).toBe("work-fabric");
+      expect(environment.WORK_FABRIC_AGENT_RUNTIME_CONFIG).toBe(
+        resolvedConfig,
+      );
+      expect(
+        environment.WORK_FABRIC_AGENT_RUNTIME_CONFIG_APPLICATION,
+      ).toBe("daily-assistant");
+      expect(environment.WORK_FABRIC_FEISHU_PROVIDER_CONFIG).toBe(
+        resolvedConfig,
+      );
+      expect(
+        environment.WORK_FABRIC_FEISHU_PROVIDER_CONFIG_APPLICATION,
+      ).toBe("feishu-provider");
       expect(await readFile(resolvedConfig, "utf8")).not.toContain(
         "tenant-external\n",
       );

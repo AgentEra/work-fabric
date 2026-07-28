@@ -116,6 +116,11 @@ export async function prepareLocalFeishuEnvironment(
     Object.entries({
       ...combined,
       WORK_FABRIC_CONFIG: resolvedPath,
+      WORK_FABRIC_CONFIG_APPLICATION: "work-fabric",
+      WORK_FABRIC_AGENT_RUNTIME_CONFIG: resolvedPath,
+      WORK_FABRIC_AGENT_RUNTIME_CONFIG_APPLICATION: "daily-assistant",
+      WORK_FABRIC_FEISHU_PROVIDER_CONFIG: resolvedPath,
+      WORK_FABRIC_FEISHU_PROVIDER_CONFIG_APPLICATION: "feishu-provider",
     }).filter((entry): entry is [string, string] =>
       typeof entry[1] === "string"
     ),
