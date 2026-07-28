@@ -1050,6 +1050,7 @@ export async function composeNodeService(
     storage.subscriptions,
     storage.persistence,
     storage.persistence,
+    storage.context,
   );
   const collaboration = new StoreBackedCollaborationQueryService(
     storage.collaboration,

@@ -287,6 +287,7 @@ describe("Agent Gateway real reference flow", () => {
     );
     const query: ExchangeQueryService = {
       ...stored,
+      getContextBundle: stored.getContextBundle.bind(stored),
       async getHandoff(requestTenantId, handoffId) {
         const records = await persistence.readStream(handoffId);
         const partitionId = records[0]?.partition_id;

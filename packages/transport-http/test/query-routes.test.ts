@@ -13,6 +13,23 @@ const model = {
   tenant_id: "tenant_01", partition_id: "partition_01", handoff_id: "handoff_01",
   stream_version: 2, state: { lifecycle_state: "offered", target_binding: { target: { actor_id: "actor_01" } } }, latest_status: null,
 };
+const contextBundle = {
+  context_id: "context_01",
+  version: 1,
+  created_at: "2026-07-28T08:00:00.000Z",
+  items: [{
+    kind: "data",
+    schema_ref: "urn:work-fabric:schema:feishu:conversation-message:1",
+    data: { message_id: "om-prior", text: "prior message" },
+  }],
+  visibility_scope: {
+    actor_ids: ["actor_01"],
+    endpoint_ids: ["endpoint_01"],
+    expires_at: "2026-07-28T09:00:00.000Z",
+  },
+  digest: { algorithm: "sha-256", value: "context-01-v1" },
+  extensions: {},
+};
 const runtimeSubscription = {
   subscription_id: "subscription_01", tenant_id: "tenant_01",
   owner: { actor_id: "actor_01", actor_type: "agent" as const }, endpoint_id: "endpoint_01",
@@ -38,15 +55,35 @@ beforeAll(async () => { schemas = await loadWfppSchemaValidator("protocol/schema
 function fixture() {
   const query: ExchangeQueryService = {
     async getHandoff() { return structuredClone(model); },
+    async getContextBundle(_tenantId, actorId, endpointId, reference) {
+      return actorId === "actor_01" &&
+        endpointId === "endpoint_01" &&
+        reference.context_id === "context_01" &&
+        reference.version === 1 &&
+        reference.digest === "sha-256:context-01-v1"
+        ? structuredClone(contextBundle)
+        : null;
+    },
     async readHandoffEvents() { return [{ specversion: "1.0", id: "event_01", source: "urn:test", type: "workfabric.handoff.target_resolved.v1", subject: "handoff_01", time: "2026-07-15T00:00:00Z", datacontenttype: "application/json", dataschema: "urn:test", wftenant: "tenant_01", wfexchange: "exchange_01", wfthread: "thread_01", wfhandoff: "handoff_01", wfactor: "actor_01", wfendpoint: "endpoint_01", wfsequence: 2, wfvisibility: "participants", data: { resource_version: 2 } }]; },
     async listPartitionHandoffs() { return [model]; }, async readPartitionEvents() { return []; },
     async getSubscription() { return structuredClone(runtimeSubscription); }, async listSubscriptions() { return []; },
     async listProjectionFailures() { return []; }, async listDeliveryAttempts() { return []; }, async getDeliveryPosition() { return 0; },
   };
-  const actions = ["workfabric.query.handoff.read.v1", "workfabric.subscription.read.v1", "workfabric.subscription.manage.v1"];
+  const actions = [
+    "workfabric.query.handoff.read.v1",
+    "workfabric.context.content.read.v1",
+    "workfabric.subscription.read.v1",
+    "workfabric.subscription.manage.v1",
+  ];
   const authority = new LocalAuthorityPolicy(actions.map((action) => ({
     tenant_id: "tenant_01", principal_id: "principal_01", actor_id: "actor_01", actor_type: "agent" as const,
-    endpoint_id: "endpoint_01", action, resource_id: action.includes("handoff") ? "handoff_01" : "subscription_01",
+    endpoint_id: "endpoint_01",
+    action,
+    resource_id: action.includes("handoff")
+      ? "handoff_01"
+      : action.includes("context")
+        ? "context_01"
+        : "subscription_01",
   })));
   const subscriptions = new MemorySubscriptionStore();
   const service = createHttpService({
@@ -69,6 +106,31 @@ describe("participant query routes", () => {
     expect(handoff.json()).toEqual(model);
     expect(events.status_code).toBe(200);
     expect(JSON.stringify(events.json())).not.toMatch(/domain_data|commit_id|partition_position/);
+    await service.close();
+  });
+
+  it("returns only the exact authorized Context version and digest", async () => {
+    const { service } = fixture();
+    const available = await service.dispatch({
+      method: "GET",
+      url: "/v1/contexts/context_01/versions/1?digest=sha-256%3Acontext-01-v1",
+      headers,
+    });
+    const hidden = await service.dispatch({
+      method: "GET",
+      url: "/v1/contexts/context_hidden/versions/1?digest=sha-256%3Acontext-01-v1",
+      headers,
+    });
+    const invalid = await service.dispatch({
+      method: "GET",
+      url: "/v1/contexts/context_01/versions/0",
+      headers,
+    });
+
+    expect(available.status_code).toBe(200);
+    expect(available.json()).toEqual(contextBundle);
+    expect(hidden.status_code).toBe(403);
+    expect(invalid.status_code).toBe(400);
     await service.close();
   });
 

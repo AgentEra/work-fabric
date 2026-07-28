@@ -145,6 +145,7 @@ describe("TypeScript SDK real HTTP reference", () => {
     const stored = new StoreBackedExchangeQueryService(persistence, models, subscriptions, persistence, persistence);
     const query: ExchangeQueryService = {
       ...stored,
+      getContextBundle: stored.getContextBundle.bind(stored),
       async getHandoff(requestTenantId, handoffId) {
         const records = await persistence.readStream(handoffId);
         const partitionId = records[0]?.partition_id;

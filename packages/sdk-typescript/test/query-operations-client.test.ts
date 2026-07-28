@@ -42,6 +42,7 @@ describe("QueryClient and OperationsClient", () => {
       if (url.endsWith("/health/live")) return json({ status: "live" });
       if (url.endsWith("/health/ready")) return json({ status: "not_ready" }, 503);
       if (url.endsWith("/v1/admin/health")) return json({ status: "ready", dependencies: [] });
+      if (url.includes("/contexts/")) return json({ context_id: "context / 01", version: 2 });
       if (url.includes("/handoffs/") && !url.includes("/events")) return json({ handoff_id: "handoff / 01" });
       if (url.includes("/handoffs/") && url.includes("/events")) return json({ events: [] });
       if (url.includes("/partitions/") && url.includes("/handoffs")) return json({ handoffs: [] });
@@ -54,6 +55,11 @@ describe("QueryClient and OperationsClient", () => {
     const { queries, operations } = clients(fetch);
 
     await queries.getHandoff("handoff / 01");
+    await queries.getContextBundle({
+      contextId: "context / 01",
+      version: 2,
+      digest: "sha-256:abc/123",
+    });
     await queries.listHandoffEvents("handoff / 01", { fromVersion: 2, limit: 25 });
     await queries.listPartitionHandoffs("partition / 01", { limit: 20 });
     await queries.listPartitionEvents("partition / 01", { afterPosition: 0, limit: 30 });
@@ -67,6 +73,7 @@ describe("QueryClient and OperationsClient", () => {
 
     expect(requests.map(({ url }) => url)).toEqual([
       "https://fabric.example.test/api/v1/handoffs/handoff%20%2F%2001",
+      "https://fabric.example.test/api/v1/contexts/context%20%2F%2001/versions/2?digest=sha-256%3Aabc%2F123",
       "https://fabric.example.test/api/v1/handoffs/handoff%20%2F%2001/events?from_version=2&limit=25",
       "https://fabric.example.test/api/v1/partitions/partition%20%2F%2001/handoffs?limit=20",
       "https://fabric.example.test/api/v1/partitions/partition%20%2F%2001/events?after_position=0&limit=30",
@@ -78,9 +85,9 @@ describe("QueryClient and OperationsClient", () => {
       "https://fabric.example.test/api/health/live",
       "https://fabric.example.test/api/health/ready",
     ]);
-    expect(requests[8]?.headers.get("x-wf-actor-id")).toBe("actor_01");
-    expect(requests[9]?.headers.get("x-wf-actor-id")).toBeNull();
+    expect(requests[9]?.headers.get("x-wf-actor-id")).toBe("actor_01");
     expect(requests[10]?.headers.get("x-wf-actor-id")).toBeNull();
+    expect(requests[11]?.headers.get("x-wf-actor-id")).toBeNull();
   });
 
   it("rejects invalid positions before I/O and maps Problem Details", async () => {
@@ -93,6 +100,16 @@ describe("QueryClient and OperationsClient", () => {
     const { queries, operations } = clients(fetch);
 
     expect(() => queries.listHandoffEvents("handoff_01", { fromVersion: 0 })).toThrow(TypeError);
+    expect(() => queries.getContextBundle({
+      contextId: "context_01",
+      version: 0,
+      digest: null,
+    })).toThrow(TypeError);
+    expect(() => queries.getContextBundle({
+      contextId: "context_01",
+      version: 1,
+      digest: "",
+    })).toThrow(TypeError);
     expect(() => queries.listPartitionEvents("partition_01", { afterPosition: -1 })).toThrow(TypeError);
     expect(() => operations.listSubscriptions({ limit: Number.MAX_SAFE_INTEGER + 1 })).toThrow(TypeError);
     expect(fetch).not.toHaveBeenCalled();
