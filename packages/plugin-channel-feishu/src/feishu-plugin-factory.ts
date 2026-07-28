@@ -3,6 +3,7 @@ import type { CollaborationAdmissionService } from "@work-fabric/admission-spi";
 import type {
   ChannelHandoffSnapshotSource,
   ChannelRouteStore,
+  ConversationContextMaterializer,
 } from "@work-fabric/channel-spi";
 import {
   FeishuActionReferenceCodec,
@@ -14,6 +15,7 @@ import {
   FeishuTenantAccessTokenProvider,
   type FeishuLongConnectionClient,
   type FeishuLongConnectionClientFactory,
+  type FeishuConversationApi,
   type FeishuTenantTokenProvider,
 } from "@work-fabric/connector-feishu";
 import { ConnectorWorker } from "@work-fabric/connector-runtime";
@@ -34,6 +36,15 @@ export interface ChannelSignalRegistration {
   register(instanceId: string, adapter: SignalAdapter): void;
   unregister(instanceId: string): void;
 }
+
+export interface FeishuConversationContextProviderFactory {
+  create(input: {
+    readonly api: FeishuConversationApi;
+    readonly credential_ref: string;
+    readonly now: () => string;
+  }): ConversationContextMaterializer;
+}
+
 interface RuntimeClock { now(): string; nowEpochSeconds(): number; }
 
 function sharedTenantTokenProvider(
@@ -78,6 +89,33 @@ function validatedAdmissionCapability(value: unknown): CollaborationAdmissionSer
     throw new TypeError("collaboration.admission capability is invalid");
   }
   throw new TypeError("collaboration.admission capability is invalid");
+}
+
+function validatedConversationContextFactory(
+  value: unknown,
+): FeishuConversationContextProviderFactory {
+  if ((typeof value !== "object" || value === null) && typeof value !== "function") {
+    throw new TypeError("Feishu conversation Context Provider factory is invalid");
+  }
+  const descriptor = Object.getOwnPropertyDescriptor(value, "create");
+  if (descriptor === undefined || !("value" in descriptor) || typeof descriptor.value !== "function") {
+    throw new TypeError("Feishu conversation Context Provider factory is invalid");
+  }
+  const create = descriptor.value as FeishuConversationContextProviderFactory["create"];
+  return {
+    create(input) {
+      const materializer = Reflect.apply(create, value, [input]) as unknown;
+      if (materializer === null || typeof materializer !== "object") {
+        throw new TypeError("Feishu conversation Context Provider is invalid");
+      }
+      const method = Object.getOwnPropertyDescriptor(materializer, "materialize")
+        ?? Object.getOwnPropertyDescriptor(Object.getPrototypeOf(materializer), "materialize");
+      if (method === undefined || !("value" in method) || typeof method.value !== "function") {
+        throw new TypeError("Feishu conversation Context Provider is invalid");
+      }
+      return materializer as ConversationContextMaterializer;
+    },
+  };
 }
 
 type FeishuWebhookPluginConfig = Extract<
@@ -261,15 +299,26 @@ export class FeishuPluginFactory implements PluginFactory {
             context.service.get<unknown>("collaboration.admission"),
           ),
         });
-    const actionCodec = new FeishuActionReferenceCodec({ encryption_key: createHash("sha256").update(config.credentials.app_secret).digest() });
-    const mapper = new FeishuEventMapper({ participant_resolver: participantResolver, action_codec: actionCodec, clock, message_policy: new FeishuIntakeMessagePolicy({ bot_open_id: config.bot_open_id, participant_resolver: participantResolver, target: config.inbound.intake_target, clock, accept_within_seconds: config.inbound.accept_within_seconds, result_due_within_seconds: config.inbound.result_due_within_seconds, max_intent_length: 4_000, delegation: config.inbound.delegation }) });
-    const receipt = new FeishuIntakeReceiptHandler({ plugin_instance_id: instance.instance_id, routes, subscriptions, max_delivery_attempts: config.worker.max_attempts, on_handoff_ready: wakeHandoff });
-    const observation: ConnectorObservationSink = { manifest: { profile: "connector.observation-sink.v1", adapter: "feishu-inert", capabilities: {} }, async record(input) { return { kind: "accepted", receipt_id: `ignored:${input.ingress_id}`, event_ids: [] }; } };
-    const worker = new ConnectorWorker({ store: ingress, mapper, command_sink: commandSink, observation_sink: observation, accepted_receipt_handler: receipt, clock, retry_policy: { nextAvailableAt(attempt, _code, now) { return addSeconds(now, Math.min(300, 2 ** Math.min(attempt, 8))); } }, scope: { tenant_id: tenantId, connector_id: config.connector_id, worker_id: `plugin:${instance.instance_id}`, lease_seconds: config.worker.lease_seconds, batch_limit: config.worker.batch_limit, max_attempts: config.worker.max_attempts, max_error_detail_length: 256 } });
     const credentialRef = `feishu:${instance.instance_id}`;
     const tokenProvider = sharedTenantTokenProvider(context, instance.instance_id)
       ?? new FeishuTenantAccessTokenProvider({ credential_provider: { async loadAppCredentials(reference) { if (reference !== credentialRef) throw new TypeError("credential scope mismatch"); return { app_id: config.credentials.app_id, app_secret: config.credentials.app_secret }; } }, fetch, base_url: "https://open.feishu.cn", clock, expiry_skew_seconds: 60, request_timeout_ms: 10_000, max_cache_entries: 1 });
     const messages = new FeishuOpenApiClient({ token_provider: tokenProvider, fetch, base_url: "https://open.feishu.cn", request_timeout_ms: 10_000, max_response_bytes: 64_000 });
+    const conversationContext = config.conversation_context.enabled
+      ? validatedConversationContextFactory(
+          context.service.get<unknown>(
+            "feishu.conversation_context_provider_factory",
+          ),
+        ).create({
+          api: messages,
+          credential_ref: credentialRef,
+          now: clock.now,
+        })
+      : undefined;
+    const actionCodec = new FeishuActionReferenceCodec({ encryption_key: createHash("sha256").update(config.credentials.app_secret).digest() });
+    const mapper = new FeishuEventMapper({ participant_resolver: participantResolver, action_codec: actionCodec, clock, message_policy: new FeishuIntakeMessagePolicy({ bot_open_id: config.bot_open_id, participant_resolver: participantResolver, target: config.inbound.intake_target, clock, accept_within_seconds: config.inbound.accept_within_seconds, result_due_within_seconds: config.inbound.result_due_within_seconds, max_intent_length: 4_000, delegation: config.inbound.delegation, ...(conversationContext === undefined ? {} : { conversation_context: { materializer: conversationContext, policy: { lookback_seconds: config.conversation_context.lookback_seconds, maximum_messages: config.conversation_context.maximum_messages, maximum_bytes: config.conversation_context.maximum_bytes } } }) }) });
+    const receipt = new FeishuIntakeReceiptHandler({ plugin_instance_id: instance.instance_id, routes, subscriptions, max_delivery_attempts: config.worker.max_attempts, on_handoff_ready: wakeHandoff });
+    const observation: ConnectorObservationSink = { manifest: { profile: "connector.observation-sink.v1", adapter: "feishu-inert", capabilities: {} }, async record(input) { return { kind: "accepted", receipt_id: `ignored:${input.ingress_id}`, event_ids: [] }; } };
+    const worker = new ConnectorWorker({ store: ingress, mapper, command_sink: commandSink, observation_sink: observation, accepted_receipt_handler: receipt, clock, retry_policy: { nextAvailableAt(attempt, _code, now) { return addSeconds(now, Math.min(300, 2 ** Math.min(attempt, 8))); } }, scope: { tenant_id: tenantId, connector_id: config.connector_id, worker_id: `plugin:${instance.instance_id}`, lease_seconds: config.worker.lease_seconds, batch_limit: config.worker.batch_limit, max_attempts: config.worker.max_attempts, max_error_detail_length: 256 } });
     const delegate = new FeishuSignalAdapter({ messages, renderer: new FeishuEventRenderer({ action_codec: actionCodec, clock, max_text_bytes: 100_000, max_card_bytes: 25_000 }) });
     const routeAdapter = new FeishuRouteAwareSignalAdapter({ tenant_id: tenantId, plugin_instance_id: instance.instance_id, connector_id: config.connector_id, external_tenant_id: config.external_tenant_id, credential_ref: credentialRef, render_mode: config.outbound.default_render_mode, actor_id: config.inbound.intake_target.actor_id, endpoint_id: config.inbound.intake_target.endpoint_id, routes, handoff_snapshots: handoffSnapshots, static_channels: config.outbound.channels satisfies Readonly<Record<string, FeishuStaticChannelConfig>>, delegate });
     return new FeishuPluginInstance(instance.instance_id, tenantId, config, worker, routeAdapter, signals, webhooks, subscriptions, clock, longConnection, longConnectionSource);

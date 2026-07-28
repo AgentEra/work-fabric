@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { ConversationContextMaterializer } from "@work-fabric/channel-spi";
 import type { ConnectorIngressClaim } from "@work-fabric/connector-spi";
 import type { FeishuParticipantResolution, FeishuParticipantResolver } from "@work-fabric/connector-feishu";
 import { FeishuIntakeMessagePolicy } from "../src/index.js";
@@ -29,7 +30,7 @@ function claim(overrides: Record<string, unknown> = {}): ConnectorIngressClaim {
 function policy(resolution: FeishuParticipantResolution = {
   kind: "resolved",
   identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
-}) {
+}, conversationContext?: ConversationContextMaterializer) {
   const participantResolver: FeishuParticipantResolver = {
     async resolve() { return resolution; },
   };
@@ -45,10 +46,135 @@ function policy(resolution: FeishuParticipantResolution = {
       scopes: ["work:read", "document:read", "document:write"],
       may_redelegate: true,
     },
+    ...(conversationContext === undefined ? {} : {
+      conversation_context: {
+        materializer: conversationContext,
+        policy: {
+          lookback_seconds: 86_400,
+          maximum_messages: 20,
+          maximum_bytes: 65_536,
+        },
+      },
+    }),
   });
 }
 
 describe("FeishuIntakeMessagePolicy", () => {
+  it("attaches one opaque materialized ContextBundle using only route, identity, delegation and policy facts", async () => {
+    const bundle = {
+      context_id: "context-feishu-1",
+      version: 1,
+      created_at: "2026-07-17T00:00:00.000Z",
+      items: [{
+        kind: "data",
+        data: { text: "historical body remains opaque to Channel" },
+      }],
+      visibility_scope: {
+        actor_ids: ["actor-agent"],
+        endpoint_ids: ["endpoint-agent"],
+        expires_at: "2026-07-24T00:00:05.000Z",
+      },
+      digest: { algorithm: "sha-256", value: "context-digest" },
+      extensions: {},
+    };
+    const materialize = vi.fn(async () => ({
+      kind: "materialized" as const,
+      bundle,
+    }));
+    const result = await policy(undefined, { materialize }).mapMessage(claim({
+      thread_id: "omt-thread-1",
+    }));
+
+    expect(materialize).toHaveBeenCalledWith({
+      tenant_id: "tenant-1",
+      provider_family: "feishu",
+      external_tenant_id: "tenant-key-1",
+      conversation_id: "oc-1",
+      trigger_message_id: "om-1",
+      thread_id: "omt-thread-1",
+      root_message_id: "om-root-1",
+      triggered_at: "2026-07-17T00:00:00.000Z",
+      represented_actor_id: "actor-human",
+      recipient_actor_id: "actor-agent",
+      recipient_endpoint_id: "endpoint-agent",
+      delegation_id: expect.stringMatching(/^intake-/),
+      delegation_scopes: ["work:read", "document:read", "document:write"],
+      delegation_expires_at: "2026-07-24T00:00:05.000Z",
+      policy: {
+        lookback_seconds: 86_400,
+        maximum_messages: 20,
+        maximum_bytes: 65_536,
+      },
+    }, expect.any(AbortSignal));
+    expect(result).toMatchObject({
+      kind: "command",
+      command: {
+        input: {
+          context_bundle: bundle,
+          work_reference: {
+            extensions: {
+              "workfabric.dev/thread_id": "omt-thread-1",
+            },
+          },
+        },
+      },
+    });
+  });
+
+  it("retries temporary materialization failures without creating a Handoff command", async () => {
+    await expect(policy(undefined, {
+      async materialize() {
+        return {
+          kind: "temporarily_unavailable",
+          code: "feishu_history_temporarily_unavailable",
+        };
+      },
+    }).mapMessage(claim())).resolves.toEqual({
+      kind: "rejected",
+      reason_code: "conversation_context_temporarily_unavailable",
+      retryable: true,
+    });
+  });
+
+  it("turns permanent materialization failure into a deterministic audience-bound fact bundle", async () => {
+    const result = await policy(undefined, {
+      async materialize() {
+        return {
+          kind: "permanently_unavailable",
+          code: "feishu_history_unavailable",
+        };
+      },
+    }).mapMessage(claim());
+
+    expect(result).toMatchObject({
+      kind: "command",
+      command: {
+        input: {
+          context_bundle: {
+            context_id: expect.stringMatching(/^context_unavailable_/),
+            version: 1,
+            items: [{
+              kind: "fact",
+              data: {
+                fact: "context_unavailable",
+                code: "feishu_history_unavailable",
+              },
+            }],
+            visibility_scope: {
+              actor_ids: ["actor-agent"],
+              endpoint_ids: ["endpoint-agent"],
+              expires_at: "2026-07-24T00:00:05.000Z",
+            },
+            digest: {
+              algorithm: "sha-256",
+              value: expect.stringMatching(/^[a-f0-9]{64}$/),
+            },
+          },
+        },
+      },
+    });
+  });
+
   it("binds participant admission to the exact command idempotency key", async () => {
     const resolve = vi.fn(async () => ({
       kind: "resolved" as const,

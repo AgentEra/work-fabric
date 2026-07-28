@@ -166,7 +166,8 @@ import {
 import { BearerTokenProvider, ConnectorSdkCommandSink, WorkFabricClient } from "@work-fabric/sdk-typescript";
 import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
 import type { FeishuLongConnectionClientFactory } from "@work-fabric/connector-feishu";
-import { FeishuPluginFactory, FeishuWebhookRegistry, validateFeishuPluginConfig, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import { FeishuPluginFactory, FeishuWebhookRegistry, validateFeishuPluginConfig, type FeishuConversationContextProviderFactory, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import { FeishuConversationContextProvider } from "@work-fabric/provider-feishu";
 import { FeishuOpenApiClient, FeishuTenantAccessTokenProvider, type FeishuTenantTokenProvider } from "@work-fabric/connector-feishu";
 import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 
@@ -956,6 +957,14 @@ export async function composeNodeService(
     ["connector.command_sink", connectorCommandSink],
     ["channel.signal_registry", channelSignalRouter],
     ["feishu.webhook_registry", webhookRegistry],
+    [
+      "feishu.conversation_context_provider_factory",
+      {
+        create(input) {
+          return new FeishuConversationContextProvider(input);
+        },
+      } satisfies FeishuConversationContextProviderFactory,
+    ],
     ...(admissionComposition === undefined
       ? []
       : [["collaboration.admission", admissionComposition.service] as const]),

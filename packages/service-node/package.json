@@ -43,6 +43,7 @@
     "@work-fabric/operations-runtime": "0.1.0",
     "@work-fabric/operations-spi": "0.1.0",
     "@work-fabric/protocol-runtime": "0.1.0",
+    "@work-fabric/provider-feishu": "0.1.0",
     "@work-fabric/plugin-channel-feishu": "0.1.0",
     "@work-fabric/plugin-runtime": "0.1.0",
     "@work-fabric/sdk-typescript": "0.1.0",

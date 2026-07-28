@@ -80,10 +80,18 @@ export interface FeishuPluginWorkerConfig {
   readonly max_attempts: number;
 }
 
+export interface FeishuConversationContextConfig {
+  readonly enabled: boolean;
+  readonly lookback_seconds: number;
+  readonly maximum_messages: number;
+  readonly maximum_bytes: number;
+}
+
 interface FeishuPluginConfigBase {
   readonly connector_id: string;
   readonly external_tenant_id: string;
   readonly bot_open_id: string;
+  readonly conversation_context: FeishuConversationContextConfig;
   readonly outbound: FeishuPluginOutboundConfig;
   readonly worker: FeishuPluginWorkerConfig;
 }
@@ -156,6 +164,13 @@ function id(value: unknown, field: string, maximum = 255): string {
 }
 function bool(value: unknown, field: string): boolean { if (typeof value !== "boolean") throw new TypeError(`${field} is invalid`); return value; }
 function integer(value: unknown, field: string, fallback: number, max: number): number { const n = value ?? fallback; if (!Number.isSafeInteger(n) || (n as number) <= 0 || (n as number) > max) throw new RangeError(`${field} is outside its bound`); return n as number; }
+function rangedInteger(value: unknown, field: string, fallback: number, minimum: number, maximum: number): number {
+  const result = value ?? fallback;
+  if (!Number.isSafeInteger(result) || (result as number) < minimum || (result as number) > maximum) {
+    throw new RangeError(`${field} is outside its bound`);
+  }
+  return result as number;
+}
 function namedRecord(value: unknown, field: string, maximum: number): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${field} must be an object`);
   const result = value as Record<string, unknown>;
@@ -172,7 +187,7 @@ function stringList(value: unknown, field: string): readonly string[] {
 }
 
 export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
-  const root = object(value, "Feishu plugin config", ["connector_id", "external_tenant_id", "bot_open_id", "credentials", "inbound", "outbound", "identities", "identity_admission", "worker"]);
+  const root = object(value, "Feishu plugin config", ["connector_id", "external_tenant_id", "bot_open_id", "credentials", "inbound", "outbound", "conversation_context", "identities", "identity_admission", "worker"]);
   const identitiesDescriptor = ownDataDescriptor(root, "identities", "identities");
   const admissionDescriptor = ownDataDescriptor(root, "identity_admission", "identity_admission");
   if ((identitiesDescriptor === undefined) === (admissionDescriptor === undefined)) throw new TypeError("exactly one of identities or identity_admission is required");
@@ -229,8 +244,19 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
     participantConfig = { identity_admission: { policy_id: id(identityAdmission.policy_id, "identity_admission.policy_id", 128) } };
   }
   const worker = object(root.worker, "worker", ["poll_interval_ms", "lease_seconds", "batch_limit", "max_attempts"]);
+  const conversationContext = object(
+    root.conversation_context ?? {},
+    "conversation_context",
+    ["enabled", "lookback_seconds", "maximum_messages", "maximum_bytes"],
+  );
   const base: FeishuPluginConfigBase = {
     connector_id: id(root.connector_id, "connector_id", 128), external_tenant_id: id(root.external_tenant_id, "external_tenant_id"), bot_open_id: id(root.bot_open_id, "bot_open_id"),
+    conversation_context: {
+      enabled: bool(conversationContext.enabled ?? false, "conversation_context.enabled"),
+      lookback_seconds: rangedInteger(conversationContext.lookback_seconds, "conversation_context.lookback_seconds", 86_400, 60, 604_800),
+      maximum_messages: rangedInteger(conversationContext.maximum_messages, "conversation_context.maximum_messages", 20, 1, 50),
+      maximum_bytes: rangedInteger(conversationContext.maximum_bytes, "conversation_context.maximum_bytes", 65_536, 1_024, 131_072),
+    },
     outbound: { enabled: bool(outbound.enabled, "outbound.enabled"), default_render_mode: outbound.default_render_mode, channels, subscriptions },
     worker: { poll_interval_ms: integer(worker.poll_interval_ms, "worker.poll_interval_ms", 1000, 60_000), lease_seconds: integer(worker.lease_seconds, "worker.lease_seconds", 30, 3600), batch_limit: integer(worker.batch_limit, "worker.batch_limit", 100, 1000), max_attempts: integer(worker.max_attempts, "worker.max_attempts", 8, 100) },
   };

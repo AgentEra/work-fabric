@@ -304,6 +304,11 @@ applications:
             connector_id: feishu-primary
             external_tenant_id: ${FEISHU_EXTERNAL_TENANT_ID}
             bot_open_id: ${FEISHU_BOT_OPEN_ID}
+            conversation_context:
+              enabled: true
+              lookback_seconds: 86400
+              maximum_messages: 20
+              maximum_bytes: 65536
             credentials:
               app_id: ${FEISHU_APP_ID}
               app_secret: ${FEISHU_APP_SECRET}
@@ -320,6 +325,7 @@ applications:
               delegation:
                 scopes:
                   - work:read
+                  - conversation:read
                   - document:read
                   - document:write
                   - document:delete

@@ -53,6 +53,49 @@ const admission = () => {
 };
 
 describe("Feishu plugin configuration", () => {
+  it("keeps conversation context disabled when absent and applies bounded defaults when enabled", () => {
+    expect(validateFeishuPluginConfig(valid())).toMatchObject({
+      conversation_context: {
+        enabled: false,
+        lookback_seconds: 86_400,
+        maximum_messages: 20,
+        maximum_bytes: 65_536,
+      },
+    });
+    expect(validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { enabled: true },
+    })).toMatchObject({
+      conversation_context: {
+        enabled: true,
+        lookback_seconds: 86_400,
+        maximum_messages: 20,
+        maximum_bytes: 65_536,
+      },
+    });
+  });
+
+  it.each([
+    ["lookback_seconds", 59],
+    ["lookback_seconds", 604_801],
+    ["maximum_messages", 0],
+    ["maximum_messages", 51],
+    ["maximum_bytes", 1_023],
+    ["maximum_bytes", 131_073],
+  ])("rejects out-of-range conversation context %s=%s", (field, value) => {
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { enabled: true, [field]: value },
+    })).toThrow(new RegExp(field));
+  });
+
+  it("rejects unknown conversation context keys", () => {
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { enabled: true, semantic_summary: true },
+    })).toThrow(/conversation_context.*unknown/i);
+  });
+
   it("keeps valid Webhook configuration source-compatible", () => {
     const parsed = validateFeishuPluginConfig(valid());
     expect(parsed.inbound.intake_target.actor_id).toBe("actor-agent");

@@ -176,6 +176,39 @@ afterEach(() => {
 });
 
 describe("FeishuPluginFactory", () => {
+  it("composes enabled conversation context through an injected Provider factory", async () => {
+    const fixture = createLongConnectionFixture();
+    const materializer = { materialize: vi.fn() };
+    const create = vi.fn(() => materializer);
+    const context = {
+      ...fixture.context,
+      service: {
+        get<T>(key: string): T {
+          if (key === "feishu.conversation_context_provider_factory") {
+            return { create } as T;
+          }
+          return fixture.context.service.get<T>(key);
+        },
+      },
+    };
+    const configured = {
+      ...longConnectionConfig(),
+      conversation_context: { enabled: true },
+    };
+
+    await new FeishuPluginFactory().create(context, {
+      instance_id: "feishu-primary",
+      type: "collaboration-channel.feishu",
+      config: configured,
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      api: expect.any(Object),
+      credential_ref: "feishu:feishu-primary",
+      now: expect.any(Function),
+    });
+  });
+
   it("keeps legacy exact mapping local and never creates a representation grant", async () => {
     const resolver = new LegacyFeishuParticipantResolver({
       tenant_id: "tenant-1",
