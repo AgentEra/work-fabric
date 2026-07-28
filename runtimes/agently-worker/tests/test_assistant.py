@@ -204,6 +204,18 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
     assert capability["kind"] == "capability_request"
     assert capability["request"]["capability_id"] == "feishu.document.create"
 
+    capability_without_reason = validate_turn_assistant_output({
+        "turn_type": "capability_request",
+        "request_summary": "需要创建飞书文档",
+        "response": "",
+        "invocation_id": "invocation-3",
+        "capability_id": "feishu.document.create",
+        "version_constraint": "2.0.0",
+        "input": {"title": "项目需求"},
+        "reason": "",
+    })
+    assert capability_without_reason["request"]["reason"] == "需要创建飞书文档"
+
     with pytest.raises(AssistantOutputError, match="unknown|missing|invalid"):
         validate_turn_assistant_output({
             "turn_type": "capability_request",
@@ -313,4 +325,5 @@ def test_real_agently_timeout_is_a_provider_transport_setting_not_request_body()
     request_data = OpenAICompatible(agent.request.prompt, agent.request.settings).generate_request_data()
 
     assert request_data.client_options["timeout"].read == 120
+    assert request_data.stream is False
     assert "timeout" not in request_data.request_options

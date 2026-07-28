@@ -292,6 +292,28 @@ describe("Network Citizen HTTP resources", () => {
       "workfabric.citizen.session.declarations.replace.v1",
       "workfabric.citizen.session.close.v1",
     ]);
+    expect(
+      authority.requests
+        .filter(({ action }) => action.startsWith("workfabric.citizen.session."))
+        .map(({ action, resource_id }) => ({ action, resource_id })),
+    ).toEqual([
+      {
+        action: "workfabric.citizen.session.open.v1",
+        resource_id: citizenId,
+      },
+      {
+        action: "workfabric.citizen.session.heartbeat.v1",
+        resource_id: citizenId,
+      },
+      {
+        action: "workfabric.citizen.session.declarations.replace.v1",
+        resource_id: citizenId,
+      },
+      {
+        action: "workfabric.citizen.session.close.v1",
+        resource_id: citizenId,
+      },
+    ]);
     await service.close();
   });
 

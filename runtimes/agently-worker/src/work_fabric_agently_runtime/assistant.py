@@ -152,7 +152,10 @@ def validate_turn_assistant_output(
     if not isinstance(value, dict) or set(value) != set(ASSISTANT_TURN_OUTPUT_SCHEMA):
         raise AssistantOutputError("assistant turn output has unknown or missing fields")
     turn_type = value["turn_type"]
-    _non_empty_string(value["request_summary"], "request_summary")
+    request_summary = _non_empty_string(
+        value["request_summary"],
+        "request_summary",
+    )
     if turn_type == "final":
         response = _non_empty_string(value["response"], "response")
         if any(value[field] not in ("", {}) for field in (
@@ -201,7 +204,10 @@ def validate_turn_assistant_output(
                 value["version_constraint"], "version_constraint", 256
             ),
             "input": cast(dict[str, JsonValue], value["input"]),
-            "reason": _non_empty_string(value["reason"], "reason"),
+            "reason": _non_empty_string(
+                request_summary if value["reason"] == "" else value["reason"],
+                "reason",
+            ),
         },
     }
 
@@ -268,6 +274,7 @@ def configure_agently(agently: Any, request: WorkerRequest, api_key: str) -> Non
         "api_key": api_key,
         "model": request.provider_model,
         "request_retry": {"max_attempts": 2},
+        "stream": False,
         "timeout": {"connect": 30, "read": 120, "write": 30, "pool": 30},
     })
 

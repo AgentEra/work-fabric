@@ -357,7 +357,7 @@ export function registerCitizenRoutes(
         request,
         dependencies,
         "workfabric.citizen.session.heartbeat.v1",
-        `${request.params.citizenId}/${request.params.sessionId}`,
+        request.params.citizenId,
       );
       if (authorized.kind === "denied") {
         return reply.code(authorized.problem.status).send(authorized.problem);
@@ -387,7 +387,7 @@ export function registerCitizenRoutes(
         request,
         dependencies,
         "workfabric.citizen.session.declarations.replace.v1",
-        `${request.params.citizenId}/${request.params.sessionId}`,
+        request.params.citizenId,
       );
       if (authorized.kind === "denied") {
         return reply.code(authorized.problem.status).send(authorized.problem);
@@ -423,7 +423,7 @@ export function registerCitizenRoutes(
         request,
         dependencies,
         "workfabric.citizen.session.close.v1",
-        `${request.params.citizenId}/${request.params.sessionId}`,
+        request.params.citizenId,
       );
       if (authorized.kind === "denied") {
         return reply.code(authorized.problem.status).send(authorized.problem);
