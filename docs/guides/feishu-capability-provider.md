@@ -62,10 +62,6 @@ state:
   type: sqlite
   location: ./var/feishu-provider.db
   busy_timeout_ms: 5000
-shared_folder:
-  token: ${FEISHU_SHARED_FOLDER_TOKEN}
-  policy_ref: feishu.shared-folder.default
-  visibility: tenant_readable
 capability_citizen:
   citizen_id: feishu-actions
   principal_id: principal-feishu-actions
@@ -84,11 +80,19 @@ context_citizen:
 Memory Store；长期本地运行使用 SQLite。多实例生产部署应通过同一 Store SPI
 注入具备事务唯一约束的外部实现，不能把 SQLite 文件共享给多个进程。
 
+文档目录、知识空间、模板和内容结构不属于部署配置。调用方可以显式传入
+`resource_uri`，也可以传入由使用侧 `DocumentPlacementResolver` 动态解释的
+`policy_ref`。身份代理和原生 ACL 实现同样由组合根注入；未注入时文档操作
+失败关闭。
+
 ## 4. 运行时组合
 
 组合根负责注入实现，业务模块不自行读取 YAML：
 
 ```ts
+import {
+  BrokeredDocumentAccessAuthorizer,
+} from "@work-fabric/document-provider-spi";
 import {
   FeishuCapabilityExecutor,
   FeishuCapabilityExecutorPortAdapter,
@@ -109,6 +113,11 @@ const backend = new FeishuOpenApiCapabilityBackend({
   max_response_bytes: config.open_api.max_response_bytes,
 });
 
+const documentAccess = new BrokeredDocumentAccessAuthorizer({
+  subjects: nativeDocumentSubjectResolver,
+  permissions: nativeDocumentPermissionGateway,
+});
+
 const executor = new FeishuCapabilityExecutor({
   citizen_id: config.capability_citizen.citizen_id,
   endpoint_id: config.capability_citizen.endpoint_id,
@@ -117,10 +126,8 @@ const executor = new FeishuCapabilityExecutor({
   ownership: providerStore,
   confirmation: confirmationService,
   targets: conversationRouteResolver,
-  shared_folder: {
-    token: config.shared_folder.token,
-    policy_ref: config.shared_folder.policy_ref,
-  },
+  document_access: documentAccess,
+  placement: usageOwnedPlacementResolver,
 });
 
 const executorPort = new FeishuCapabilityExecutorPortAdapter(executor);
@@ -167,7 +174,60 @@ Provider 继续只拥有自身 Endpoint 的 Delivery/Ack/Accept/Status/Result �
 `capability:invoke`，并至少绑定一个非空 `resource_ref`；完整声明和
 Contract digest 仍由运行时动态发现，不写入 YAML。
 
-## 5. 飞书权限与资源授权
+## 5. 身份代理、飞书权限与资源授权
+
+Work Fabric 不保存飞书文档 ACL。飞书消息入口只在 Handoff 上附带有界代理
+范围，示例本地配置为：
+
+```yaml
+inbound:
+  delegation:
+    scopes:
+      - work:read
+      - document:read
+      - document:write
+      - document:delete
+      - message:send
+    may_redelegate: true
+```
+
+这不是文档授权，只表示接收任务的 Agent 可以向能力 Provider 发起对应类型的
+代理请求。`InvocationAuthorityProvider` 会从已接受的原始 Handoff 派生更窄、
+不可再次转授的子委托。Provider 再通过 `DocumentAccessAuthorizer` 把内部
+`represented_actor_id` 解析成厂商侧身份，并用用户身份凭据或企业 ACL 服务
+确认该用户对目标文档/容器的原生权限。
+
+有效授权始终是：
+
+```text
+原始 Handoff 委托
+∩ 子调用 operation scope
+∩ 飞书文档/容器原生权限
+∩ Provider 的幂等、revision、确认等安全约束
+```
+
+应用/机器人可以拥有覆盖较广的技术访问能力，但该能力只解决“能否连通”，
+不能代替派发人的业务授权。生产模式下，无法解析派发人身份、用户授权过期、
+ACL 服务不可用或飞书拒绝时，Provider 都在文档调用前失败关闭。
+
+为了先跑通真实飞书文档链路，本地配置可临时选择开发期应用身份适配器：
+
+```yaml
+service:
+  development_mode: true
+  document_access:
+    mode: development_app_identity
+    # 仅表示默认创建位置，不是 ACL。
+    default_resource_uri: feishu://drive/root
+```
+
+它还必须同时设置
+`WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true`，否则 Provider 在启动前
+拒绝运行。`development_mode: false` 时该模式同样无法启用。这条路径只允许
+create/read/update/append，保留 Handoff 委托与 operation scope 检查，并使用
+不超过五分钟且不超过原委托期限的授权证据；delete 仍被拒绝。它是组合根中的
+临时授权 Adapter，不进入 Core、Agent、Handoff、Contract 或飞书 Provider
+业务模块。后续替换为 `BrokeredDocumentAccessAuthorizer` 时这些模块都不改。
 
 仅为实际启用能力申请权限，并在飞书开放平台发布新版本、完成管理员审批。
 应用需启用机器人能力，使用应用身份 `tenant_access_token`：
@@ -177,8 +237,9 @@ Contract digest 仍由运行时动态发现，不写入 YAML。
 | 接收群内 `@机器人` | 订阅 `im.message.receive_v1`；开启“接收群聊中 @ 机器人消息事件” |
 | 接收机器人单聊 | 开启“读取用户发给机器人的单聊消息” |
 | `feishu.message.send` | 开启“以应用的身份发消息”；机器人需在目标群内，用户需在应用可用范围 |
-| 文档 create/read/update/append | 开启对应 Docx 创建、读取和编辑权限；应用还必须是目标文件/文件夹的协作者 |
+| 文档 create/read/update/append | 开启对应 Docx 创建、读取和编辑权限；技术调用身份必须能访问资源，同时代理用户必须通过原生 ACL 检查 |
 | 文档 delete | 开启云空间文件删除能力；代码仍额外限制为同租户、同 Citizen/Endpoint 创建且经确认的文档 |
+| 用户权限判断 | 开启“判断当前用户是否有云文档权限”；身份代理服务需维护或动态取得派发人的用户授权 |
 | 内部员工通配准入 | Contact 用户查询权限、应用通讯录可见范围覆盖目标员工 |
 
 飞书的资源协作者权限和 API scope 是两层条件；仅开 API scope 不会让应用
@@ -193,6 +254,8 @@ Contract digest 仍由运行时动态发现，不写入 YAML。
 ## 6. 安全与失败语义
 
 - 输入拒绝未知字段、超长字符串、不支持的 Markdown 与未授权目标。
+- 每次文档操作都重新通过 `DocumentAccessAuthorizer`；Provider 所有权不绕过
+  派发人的原生权限。
 - 文档写入使用 expected revision；冲突返回 `revision_conflict`。
 - 删除 proof 绑定 tenant、Human Actor、capability、document、输入 digest 和
   expiry，消费一次后失效。
@@ -209,7 +272,8 @@ Application View：
 
 - `work-fabric`：Exchange、飞书长连接 Channel、Admission 和 Authority；
 - `daily-assistant`：Agently、Agent 身份、能力调用策略；
-- `feishu-provider`：飞书 OpenAPI、共享目录策略、两个 Citizen 和独立状态。
+- `feishu-provider`：飞书 OpenAPI、身份/ACL 与位置解析适配器、两个 Citizen
+  和独立状态。
 
 创建 owner-only 的 env 文件；其中只保存部署值和 secret，不保存动态能力
 声明。若某个 App Secret 曾进入聊天、截图或日志，应先在飞书开放平台轮换：
@@ -221,18 +285,32 @@ WORK_FABRIC_ADMISSION_FINGERPRINT_KEY=<随机值>
 WORK_FABRIC_ADMISSION_GRANT_KEY=<随机值>
 FEISHU_APP_ID=<企业自建应用 App ID>
 FEISHU_APP_SECRET=<已轮换 App Secret>
-FEISHU_SHARED_FOLDER_TOKEN=<共享文件夹 URL 中的 token>
 FEISHU_CONNECTOR_ACCESS_TOKEN=<随机值>
 INTAKE_AGENT_ACCESS_TOKEN=<随机值>
 FEISHU_PROVIDER_ACCESS_TOKEN=<随机值>
 AGENTLY_MODEL_API_KEY=<模型密钥>
 FEISHU_EXTERNAL_TENANT_ID=<飞书事件中的 tenant key>
 FEISHU_BOT_OPEN_ID=<机器人 open_id>
+# 仅本地临时应用身份文档联调；生产环境禁止设置
+WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true
 ```
 
-共享目录必须把该企业自建应用添加为可编辑协作者，并设置为“组织内获得链接的
-人可阅读”或更高的组织内可见级别。Provider 在打开任何 Endpoint/Citizen
-session 前同时探测目录列表与公开权限；预检不通过时不会形成半启动能力。
+无需配置固定共享文件夹。当前开发配置默认写入应用云空间根目录；若需要让
+当前飞书用户直接看到文档，可把
+`service.document_access.default_resource_uri` 改成一个测试目录：
+
+```yaml
+default_resource_uri: feishu://drive/folder/<测试文件夹 token>
+```
+
+该目录只是 placement。常用落点仍应由使用侧位置策略决定，可以是个人云空间、
+共享文件夹、知识空间或以后接入的其他文档系统。具体内容结构、模板和默认目录
+也由使用侧 Context/Skill/策略维护。
+
+生产配置使用 `mode: brokered_native`，并由组合根注入身份代理、飞书原生
+权限检查和位置解析实现。未注入时每次文档调用都会失败关闭。只有同时满足
+开发模式、YAML 显式选择和环境危险确认时，仓库本地组合才使用应用身份；
+它不会因原生适配器缺失而自动降级。
 
 ```bash
 uv sync --project runtimes/agently-worker
@@ -260,6 +338,14 @@ URL；`offered`、`accepted`、Citizen ID 和 Handoff ID 不作为聊天回复�
 Console 可选，仅用于观察 Handoff/Delivery/Operations，不参与连接、认领、
 调用或回复。
 
+若创建失败，依次确认：
+
+1. 飞书应用已发布含 Docx 创建、读取和编辑权限的新版本并完成管理员审批；
+2. env 文件包含危险确认开关，YAML 仍处于开发适配器模式；
+3. 如配置了测试文件夹，应用技术身份能够访问该文件夹；
+4. 原始飞书 Handoff 含 `document:write` 且允许派生子委托；
+5. `npm run local:feishu:status` 显示 Service、Provider、Agent 均存活。
+
 ## 8. 验证
 
 ```bash
@@ -283,4 +369,5 @@ OpenAPI 只在 Provider 边界替换为测试 backend。
 `local-stack.e2e.test.ts` 进一步启动真实 Agently Python Worker 与飞书长连接
 Channel，验证一次 `@机器人` 消息恰好创建一个文档，第二轮 Agent 只返回一条
 含文档 URL 的语义回复，并拒绝把 Handoff 状态码当作聊天内容。真实飞书
-smoke test 应使用专用测试文件夹，只删除本次测试创建的文档。
+smoke test 应使用专用测试策略落点，只删除本次测试创建且仍由当前 Provider
+管理的文档。

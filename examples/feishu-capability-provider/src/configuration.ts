@@ -33,6 +33,12 @@ export interface FeishuProviderServiceConfiguration {
     readonly location: string;
     readonly busy_timeout_ms: number;
   };
+  readonly document_access:
+    | { readonly mode: "brokered_native" }
+    | {
+        readonly mode: "development_app_identity";
+        readonly default_resource_uri: string;
+      };
   readonly citizen_lease: {
     readonly requested_lease_seconds: number;
     readonly heartbeat_safety_margin_ms: number;
@@ -105,6 +111,7 @@ function service(
     "work_fabric",
     "concurrency",
     "runtime_state",
+    "document_access",
     "citizen_lease",
   ], path);
   if (typeof root.development_mode !== "boolean") {
@@ -122,6 +129,34 @@ function service(
   exact(concurrency, ["max_active_runs", "queue_capacity"], `${path}.concurrency`);
   const runtimeState = object(root.runtime_state, `${path}.runtime_state`);
   exact(runtimeState, ["location", "busy_timeout_ms"], `${path}.runtime_state`);
+  const documentAccess = object(
+    root.document_access,
+    `${path}.document_access`,
+  );
+  let parsedDocumentAccess: FeishuProviderServiceConfiguration[
+    "document_access"
+  ];
+  if (documentAccess.mode === "brokered_native") {
+    exact(documentAccess, ["mode"], `${path}.document_access`);
+    parsedDocumentAccess = Object.freeze({
+      mode: "brokered_native" as const,
+    });
+  } else if (documentAccess.mode === "development_app_identity") {
+    exact(
+      documentAccess,
+      ["mode", "default_resource_uri"],
+      `${path}.document_access`,
+    );
+    parsedDocumentAccess = Object.freeze({
+      mode: "development_app_identity" as const,
+      default_resource_uri: string(
+        documentAccess.default_resource_uri,
+        `${path}.document_access.default_resource_uri`,
+      ),
+    });
+  } else {
+    throw new TypeError(`${path}.document_access.mode is invalid`);
+  }
   const lease = object(root.citizen_lease, `${path}.citizen_lease`);
   exact(lease, [
     "requested_lease_seconds",
@@ -145,6 +180,7 @@ function service(
       location: string(runtimeState.location, `${path}.runtime_state.location`, 4_096),
       busy_timeout_ms: positive(runtimeState.busy_timeout_ms, `${path}.runtime_state.busy_timeout_ms`, 60_000),
     }),
+    document_access: parsedDocumentAccess,
     citizen_lease: Object.freeze({
       requested_lease_seconds: positive(lease.requested_lease_seconds, `${path}.citizen_lease.requested_lease_seconds`, 86_400),
       heartbeat_safety_margin_ms: positive(lease.heartbeat_safety_margin_ms, `${path}.citizen_lease.heartbeat_safety_margin_ms`, 300_000),
@@ -237,7 +273,6 @@ export async function loadFeishuProviderConfiguration(
     { service: snapshot.value.service, provider },
     [
       "service.work_fabric.access_token",
-      "provider.shared_folder.token",
     ],
     {
       resolver: new EnvironmentSecretResolver(environment),

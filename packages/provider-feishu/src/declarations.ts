@@ -7,7 +7,9 @@ const schema = (
   name: string,
   body: Record<string, unknown>,
 ): { readonly uri: string; readonly digest: `sha256:${string}` } => ({
-  uri: `urn:work-fabric:schema:feishu:${name}:1`,
+  uri: `urn:work-fabric:schema:feishu:${name}:${
+    name.startsWith("message") ? "1" : "2"
+  }`,
   digest: canonicalCitizenDigest(body),
 });
 
@@ -33,10 +35,44 @@ const content = {
 const documentReference = {
   type: "object",
   additionalProperties: false,
-  required: ["document_token"],
+  required: ["resource_uri"],
   properties: {
-    document_token: { type: "string", minLength: 1, maxLength: 512 },
+    resource_uri: {
+      type: "string",
+      minLength: 1,
+      maxLength: 2_048,
+      format: "uri",
+    },
   },
+};
+const placement = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["resource_uri"],
+      properties: {
+        resource_uri: {
+          type: "string",
+          minLength: 1,
+          maxLength: 2_048,
+          format: "uri",
+        },
+      },
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["policy_ref"],
+      properties: {
+        policy_ref: {
+          type: "string",
+          minLength: 3,
+          maxLength: 256,
+        },
+      },
+    },
+  ],
 };
 const documentToken = { type: "string", minLength: 1, maxLength: 512 };
 const revision = { type: "string", minLength: 1, maxLength: 128 };
@@ -69,6 +105,7 @@ const DEFINITIONS = Object.freeze({
   documentCreateInput: objectSchema(["title", "content"], {
     title: { type: "string", minLength: 1, maxLength: 512 },
     content,
+    placement,
   }),
   documentCreateOutput: objectSchema([
     "document_token", "url", "title", "revision",
@@ -134,11 +171,12 @@ function capability(input: {
   readonly output: keyof typeof DEFINITIONS;
   readonly risk: CitizenDeclaration["risk"];
   readonly confirmation?: CitizenDeclaration["confirmation"];
+  readonly version?: string;
 }): CitizenDeclaration {
   return Object.freeze({
     declaration_id: input.id,
     declaration_kind: "capability",
-    version: "1.0.0",
+    version: input.version ?? "2.0.0",
     name: input.name,
     description: input.description,
     input_schema: schema(input.input, DEFINITIONS[input.input]),
@@ -205,6 +243,7 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       input: "messageSendInput",
       output: "messageSendOutput",
       risk: "medium",
+      version: "1.0.0",
     }),
   ]);
 }
@@ -213,7 +252,7 @@ export function feishuContextDeclarations(): readonly CitizenDeclaration[] {
   return Object.freeze([Object.freeze({
     declaration_id: "feishu.document.context",
     declaration_kind: "context",
-    version: "1.0.0",
+    version: "2.0.0",
     name: "Feishu document context",
     description: "Resolve one authorized Docx as bounded simple content.",
     input_schema: schema("documentReadInput", DEFINITIONS.documentReadInput),

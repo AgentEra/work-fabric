@@ -3,12 +3,11 @@ import { describe, expect, it, vi } from "vitest";
 import { ManagedFeishuProviderComposition } from "../src/composition.js";
 
 describe("ManagedFeishuProviderComposition", () => {
-  it("preflights before exposing either Citizen or starting the Handoff Host", async () => {
+  it("starts Citizens and Handoff Host without a configured document container", async () => {
     const calls: string[] = [];
     const composition = new ManagedFeishuProviderComposition({
       capability_citizen_id: "citizen-capability",
       context_citizen_id: "citizen-context",
-      preflight: async () => { calls.push("preflight"); },
       capability_citizen: {
         start: vi.fn(async () => { calls.push("capability:start"); }),
         health: vi.fn(async () => ({ status: "available" as const })),
@@ -27,7 +26,6 @@ describe("ManagedFeishuProviderComposition", () => {
     });
     await composition.start();
     expect(calls).toEqual([
-      "preflight",
       "capability:start",
       "context:start",
       "host:start",
@@ -38,7 +36,7 @@ describe("ManagedFeishuProviderComposition", () => {
       context_citizen: "citizen-context",
     });
     await composition.close();
-    expect(calls.slice(4)).toEqual([
+    expect(calls.slice(3)).toEqual([
       "host:close",
       "context:close",
       "capability:close",
@@ -51,7 +49,6 @@ describe("ManagedFeishuProviderComposition", () => {
     const composition = new ManagedFeishuProviderComposition({
       capability_citizen_id: "citizen-capability",
       context_citizen_id: "citizen-context",
-      preflight: async () => { calls.push("preflight"); },
       capability_citizen: {
         start: async () => { calls.push("capability:start"); },
         health: async () => ({ status: "available" as const }),
@@ -73,7 +70,6 @@ describe("ManagedFeishuProviderComposition", () => {
     });
     await expect(composition.start()).rejects.toThrow("context failed");
     expect(calls).toEqual([
-      "preflight",
       "capability:start",
       "context:start",
       "context:close",

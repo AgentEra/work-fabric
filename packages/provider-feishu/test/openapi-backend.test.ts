@@ -102,6 +102,9 @@ describe("FeishuOpenApiCapabilityBackend", () => {
     const created = await backend.createDocument({
       title: "项目需求",
       content: { media_type: "text/markdown", text: "# 背景\n\n需求正文" },
+      placement: {
+        resource_uri: "feishu://drive/folder/fld-project",
+      },
       idempotency_key: "create-key-1",
     });
 
@@ -114,6 +117,10 @@ describe("FeishuOpenApiCapabilityBackend", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.init?.headers).toMatchObject({
       authorization: "Bearer tenant-token",
+    });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({
+      title: "项目需求",
+      folder_token: "fld-project",
     });
     expect(JSON.parse(String(calls[1]?.init?.body))).toMatchObject({
       children: [

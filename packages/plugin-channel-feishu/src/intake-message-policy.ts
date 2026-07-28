@@ -12,6 +12,10 @@ export interface FeishuIntakeMessagePolicyOptions {
   readonly accept_within_seconds: number;
   readonly result_due_within_seconds: number;
   readonly max_intent_length: number;
+  readonly delegation: {
+    readonly scopes: readonly string[];
+    readonly may_redelegate: boolean;
+  };
 }
 
 function bounded(value: unknown, field: string, maximum = 2048): string {
@@ -84,8 +88,9 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
       intent: [{ kind: "text", media_type: "text/plain", text }],
       authority_scope: {
         delegation_id: `intake-${createHash("sha256").update(messageId).digest("hex").slice(0, 24)}`,
-        scopes: ["work:read"], resource_refs: [reference],
-        expires_at: addSeconds(now, this.options.result_due_within_seconds), may_redelegate: false,
+        scopes: [...this.options.delegation.scopes], resource_refs: [reference],
+        expires_at: addSeconds(now, this.options.result_due_within_seconds),
+        may_redelegate: this.options.delegation.may_redelegate,
       },
       acceptance_criteria: [{
         criterion_id: "intake_outcome_reported",

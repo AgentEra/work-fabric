@@ -3,6 +3,7 @@ export * from "./citizen-runtime.js";
 export * from "./config.js";
 export * from "./contracts.js";
 export * from "./declarations.js";
+export * from "./document-resource-adapter.js";
 export * from "./executor.js";
 export * from "./execution-adapter.js";
 export * from "./memory-store.js";

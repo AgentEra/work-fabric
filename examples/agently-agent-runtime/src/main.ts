@@ -83,9 +83,6 @@ export async function composeAgentRuntime(
         queries: client.queries,
         allowed_namespaces:
           loaded.service.capability_invocation.allowed_namespaces,
-        allowed_resource_policy_refs: [
-          "feishu.shared-folder.default",
-        ],
       }),
       schemas: new JsonSchemaInvocationValidator(
         new FeishuCapabilitySchemaRegistry(),

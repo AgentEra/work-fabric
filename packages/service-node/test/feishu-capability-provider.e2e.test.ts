@@ -396,9 +396,19 @@ describe("public Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
               id: "chat-http-loop",
             }),
           },
-          shared_folder: {
-            token: "fld-shared-team",
-            policy_ref: "feishu.shared-folder.default",
+          document_access: {
+            async authorize(input) {
+              return {
+                decision: "allow",
+                evidence_ref: "acl-http-loop",
+                valid_until: input.expires_at,
+              };
+            },
+          },
+          placement: {
+            async resolve() {
+              return { resource_uri: "feishu://drive/root" };
+            },
           },
         }),
       );
@@ -477,7 +487,7 @@ describe("public Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
         authority: {
           authorize: async ({ request, candidate }) => ({
             delegation_id: "delegation-feishu-http-loop",
-            scopes: ["capability:invoke"],
+            scopes: ["capability:invoke", "document:write"],
             resource_refs: [
               `urn:work-fabric:capability-invocation:${request.original_handoff_id}:${request.invocation_id}`,
             ],
@@ -487,14 +497,14 @@ describe("public Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
               "workfabric.dev/capability_authority": {
                 original_handoff_id: request.original_handoff_id,
                 invocation_id: request.invocation_id,
-                initiating_actor_id: "actor-human-requester",
+                represented_actor_id: "actor-human-requester",
+                delegation_id: "delegation-feishu-http-loop",
+                parent_delegation_id: "delegation-human-agent",
+                delegation_scopes: ["document:write"],
+                delegation_expires_at: request.deadline,
                 capability_version: candidate.capability_version,
                 contract_digest: candidate.contract_digest,
                 allowed_target_refs: [],
-                allowed_document_tokens: [],
-                allowed_resource_policy_refs: [
-                  "feishu.shared-folder.default",
-                ],
                 confirmation_proof_refs: [],
               },
             },
@@ -533,7 +543,7 @@ describe("public Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
         original_handoff_id: "handoff-original-owned-by-assistant",
         thread_id: "thread-http-loop",
         capability_id: declaration.declaration_id,
-        version_constraint: "1.0.0",
+        version_constraint: declaration.version,
         input: {
           title: "客户项目需求",
           content: {

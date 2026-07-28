@@ -24,6 +24,10 @@ const bundle = {
             location: ".local/feishu-provider-runtime.db",
             busy_timeout_ms: 5_000,
           },
+          document_access: {
+            mode: "development_app_identity",
+            default_resource_uri: "feishu://drive/root",
+          },
           citizen_lease: {
             requested_lease_seconds: 60,
             heartbeat_safety_margin_ms: 5_000,
@@ -50,11 +54,6 @@ const bundle = {
                   type: "sqlite",
                   location: ".local/feishu-provider.db",
                   busy_timeout_ms: 5_000,
-                },
-                shared_folder: {
-                  token: "${FEISHU_SHARED_FOLDER_TOKEN}",
-                  policy_ref: "feishu.shared-folder.default",
-                  visibility: "tenant_readable",
                 },
                 capability_citizen: {
                   citizen_id: "citizen-feishu-capability",
@@ -85,11 +84,14 @@ describe("Feishu Provider configuration", () => {
       document: bundle,
       environment: {
         FEISHU_PROVIDER_ACCESS_TOKEN: "provider-token",
-        FEISHU_SHARED_FOLDER_TOKEN: "folder-token",
       },
     });
     expect(loaded.service.work_fabric.access_token).toBe("provider-token");
-    expect(loaded.provider.shared_folder.token).toBe("folder-token");
+    expect(loaded.service.document_access).toEqual({
+      mode: "development_app_identity",
+      default_resource_uri: "feishu://drive/root",
+    });
+    expect(loaded.provider).not.toHaveProperty("shared_folder");
     expect(loaded.provider.credential_ref).toBe("feishu-primary");
     expect(loaded.participant.endpoint_id).toBe("endpoint-feishu-provider");
   });
@@ -97,7 +99,7 @@ describe("Feishu Provider configuration", () => {
   it("fails closed when a required secret is missing", async () => {
     await expect(loadFeishuProviderConfiguration({
       document: bundle,
-      environment: { FEISHU_PROVIDER_ACCESS_TOKEN: "provider-token" },
+      environment: {},
     })).rejects.toThrow();
   });
 
@@ -108,5 +110,26 @@ describe("Feishu Provider configuration", () => {
       document: changed,
       environment: {},
     })).rejects.toThrow("plugins.instances");
+  });
+
+  it("strictly rejects unknown and malformed document access modes", async () => {
+    const unknown = structuredClone(bundle);
+    Object.assign(
+      unknown.value.applications["feishu-provider"].service.document_access,
+      { allow_all: true },
+    );
+    await expect(loadFeishuProviderConfiguration({
+      document: unknown,
+      environment: { FEISHU_PROVIDER_ACCESS_TOKEN: "provider-token" },
+    })).rejects.toThrow(/document_access/);
+
+    const malformed = structuredClone(bundle);
+    malformed.value.applications[
+      "feishu-provider"
+    ].service.document_access.mode = "production_allow_all";
+    await expect(loadFeishuProviderConfiguration({
+      document: malformed,
+      environment: { FEISHU_PROVIDER_ACCESS_TOKEN: "provider-token" },
+    })).rejects.toThrow(/document_access.mode/);
   });
 });

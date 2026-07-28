@@ -317,6 +317,14 @@ applications:
                 endpoint_id: endpoint-intake-agent
               accept_within_seconds: 86400
               result_due_within_seconds: 604800
+              delegation:
+                scopes:
+                  - work:read
+                  - document:read
+                  - document:write
+                  - document:delete
+                  - message:send
+                may_redelegate: true
             outbound:
               enabled: true
               default_render_mode: card
@@ -412,6 +420,12 @@ applications:
       runtime_state:
         location: ./var/feishu-provider-runtime.db
         busy_timeout_ms: 5000
+      document_access:
+        # Local smoke-test adapter only. It still requires the separate
+        # WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true process guard.
+        mode: development_app_identity
+        # Placement only; this is not a document ACL or allowlist.
+        default_resource_uri: feishu://drive/root
       citizen_lease:
         requested_lease_seconds: 60
         heartbeat_safety_margin_ms: 5000
@@ -434,10 +448,6 @@ applications:
               type: sqlite
               location: ./var/feishu-provider.db
               busy_timeout_ms: 5000
-            shared_folder:
-              token: ${FEISHU_SHARED_FOLDER_TOKEN}
-              policy_ref: feishu.shared-folder.default
-              visibility: tenant_readable
             capability_citizen:
               citizen_id: citizen-feishu-capability
               principal_id: principal-feishu-provider

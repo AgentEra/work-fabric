@@ -1,4 +1,11 @@
 import type { RuntimeJsonObject } from "@work-fabric/agent-runtime-spi";
+import {
+  validateDocumentAccessRequest,
+  type DocumentAccessAuthorizer,
+  type DocumentOperation,
+  type DocumentPlacementResolver,
+  type DocumentResourceReference,
+} from "@work-fabric/document-provider-spi";
 
 import {
   FeishuProviderBackendError,
@@ -16,6 +23,9 @@ import {
   normalizeFeishuInput,
   type NormalizedFeishuInput,
 } from "./validation.js";
+import {
+  FeishuDocumentResourceAdapter,
+} from "./document-resource-adapter.js";
 
 const STABLE_ERRORS = new Set([
   "invalid_input",
@@ -32,6 +42,8 @@ const STABLE_ERRORS = new Set([
   "feishu_temporarily_unavailable",
   "external_outcome_unknown",
   "deadline_exceeded",
+  "document_authorization_unavailable",
+  "unsupported_resource_type",
 ]);
 
 export interface FeishuCapabilityExecutorDependencies {
@@ -42,10 +54,9 @@ export interface FeishuCapabilityExecutorDependencies {
   readonly ownership: FeishuResourceOwnershipStore;
   readonly confirmation: FeishuConfirmationVerifier;
   readonly targets: FeishuConversationTargetResolver;
-  readonly shared_folder: {
-    readonly token: string;
-    readonly policy_ref: string;
-  };
+  readonly document_access: DocumentAccessAuthorizer;
+  readonly placement: DocumentPlacementResolver;
+  readonly resources?: FeishuDocumentResourceAdapter;
   readonly now?: () => string;
 }
 
@@ -58,13 +69,6 @@ function success(
 
 function rejected(code: string, message: string): FeishuCapabilityOutcome {
   return { outcome: "rejected", code, message, retryable: false };
-}
-
-function allowedDocument(
-  request: FeishuCapabilityExecutionRequest,
-  token: string,
-): boolean {
-  return request.authority.allowed_document_tokens.includes(token);
 }
 
 function targetRef(target: FeishuMessageTarget): string {
@@ -100,9 +104,12 @@ function backendFailure(error: unknown): FeishuCapabilityOutcome {
 
 export class FeishuCapabilityExecutor {
   private readonly now: () => string;
+  private readonly resources: FeishuDocumentResourceAdapter;
 
   constructor(private readonly dependencies: FeishuCapabilityExecutorDependencies) {
     this.now = dependencies.now ?? (() => new Date().toISOString());
+    this.resources =
+      dependencies.resources ?? new FeishuDocumentResourceAdapter();
   }
 
   async execute(
@@ -165,7 +172,7 @@ export class FeishuCapabilityExecutor {
           ? await this.dependencies.targets.resolveCurrentConversation({
               tenant_id: request.tenant_id,
               original_handoff_id: request.original_handoff_id,
-              initiating_actor_id: request.initiating_actor_id,
+              initiating_actor_id: request.represented_actor_id,
             })
           : input.target;
         if (!request.authority.allowed_target_refs.includes(targetRef(target))) {
@@ -180,20 +187,26 @@ export class FeishuCapabilityExecutor {
         return success(result);
       }
       case "document_create": {
-        if (
-          !request.authority.allowed_resource_policy_refs.includes(
-            this.dependencies.shared_folder.policy_ref,
-          )
-        ) {
-          return rejected(
-            "authority_denied",
-            "Shared folder policy is not authorized",
-          );
-        }
+        const placement = await this.dependencies.placement.resolve({
+          tenant_id: request.tenant_id,
+          represented_actor_id: request.represented_actor_id,
+          delegation_id: request.delegation_id,
+          placement: input.placement,
+          ...(request.signal === undefined
+            ? {}
+            : { signal: request.signal }),
+        });
+        this.resolveContainer(placement);
+        const denied = await this.authorize(
+          request,
+          "create",
+          placement,
+        );
+        if (denied !== null) return denied;
         const result = await this.dependencies.backend.createDocument({
           title: input.title,
           content: input.content,
-          folder_token: this.dependencies.shared_folder.token,
+          placement,
           idempotency_key: request.idempotency_key,
           ...(request.signal === undefined ? {} : { signal: request.signal }),
         });
@@ -203,7 +216,7 @@ export class FeishuCapabilityExecutor {
           citizen_id: this.dependencies.citizen_id,
           endpoint_id: this.dependencies.endpoint_id,
           original_handoff_id: request.original_handoff_id,
-          initiating_actor_id: request.initiating_actor_id,
+          initiating_actor_id: request.represented_actor_id,
           create_idempotency_key: request.idempotency_key,
           created_at: this.now(),
           last_known_revision: result.revision,
@@ -215,18 +228,11 @@ export class FeishuCapabilityExecutor {
         }]);
       }
       case "document_read": {
-        const ownership = await this.dependencies.ownership.getOwnership(
-          request.tenant_id,
-          input.document_token,
-        );
-        if (
-          !allowedDocument(request, input.document_token) &&
-          (ownership === null || ownership.deleted_at !== null)
-        ) {
-          return rejected("authority_denied", "Document read is not authorized");
-        }
+        const documentToken = this.resolveDocument(input.document);
+        const denied = await this.authorize(request, "read", input.document);
+        if (denied !== null) return denied;
         const result = await this.dependencies.backend.readDocument({
-          document_token: input.document_token,
+          document_token: documentToken,
           max_bytes: input.max_bytes,
           ...(request.signal === undefined ? {} : { signal: request.signal }),
         });
@@ -246,18 +252,18 @@ export class FeishuCapabilityExecutor {
       }
       case "document_update":
       case "document_append": {
+        const documentToken = this.resolveDocument(input.document);
+        const operation = input.kind === "document_update"
+          ? "update"
+          : "append";
+        const denied = await this.authorize(request, operation, input.document);
+        if (denied !== null) return denied;
         const ownership = await this.dependencies.ownership.getOwnership(
           request.tenant_id,
-          input.document_token,
+          documentToken,
         );
-        if (
-          !allowedDocument(request, input.document_token) &&
-          (ownership === null || ownership.deleted_at !== null)
-        ) {
-          return rejected("authority_denied", "Document mutation is not authorized");
-        }
         const common = {
-          document_token: input.document_token,
+          document_token: documentToken,
           expected_revision: input.expected_revision,
           content: input.content,
           idempotency_key: request.idempotency_key,
@@ -269,17 +275,22 @@ export class FeishuCapabilityExecutor {
               ...(input.title === undefined ? {} : { title: input.title }),
             })
           : await this.dependencies.backend.appendDocument(common);
-        await this.dependencies.ownership.updateRevision(
-          request.tenant_id,
-          input.document_token,
-          result.revision,
-        );
+        if (ownership !== null && ownership.deleted_at === null) {
+          await this.dependencies.ownership.updateRevision(
+            request.tenant_id,
+            documentToken,
+            result.revision,
+          );
+        }
         return success(result);
       }
       case "document_delete": {
+        const documentToken = this.resolveDocument(input.document);
+        const denied = await this.authorize(request, "delete", input.document);
+        if (denied !== null) return denied;
         const ownership = await this.dependencies.ownership.getOwnership(
           request.tenant_id,
-          input.document_token,
+          documentToken,
         );
         if (
           ownership === null ||
@@ -307,9 +318,9 @@ export class FeishuCapabilityExecutor {
         }
         const confirmed = await this.dependencies.confirmation.consume({
           tenant_id: request.tenant_id,
-          human_actor_id: request.initiating_actor_id,
+          human_actor_id: request.represented_actor_id,
           capability_id: "feishu.document.delete",
-          document_token: input.document_token,
+          document_token: documentToken,
           normalized_input_digest: normalizedInputDigest,
           proof_reference: input.confirmation_proof,
         });
@@ -320,18 +331,110 @@ export class FeishuCapabilityExecutor {
           );
         }
         const result = await this.dependencies.backend.deleteDocument({
-          document_token: input.document_token,
+          document_token: documentToken,
           expected_revision: input.expected_revision,
           idempotency_key: request.idempotency_key,
           ...(request.signal === undefined ? {} : { signal: request.signal }),
         });
         await this.dependencies.ownership.markDeleted(
           request.tenant_id,
-          input.document_token,
+          documentToken,
           this.now(),
         );
         return success(result);
       }
+    }
+  }
+
+  private resolveDocument(reference: DocumentResourceReference): string {
+    const resolved = this.resolveResource(reference);
+    if (resolved.kind !== "document") {
+      throw new FeishuProviderBackendError(
+        "unsupported_resource_type",
+        false,
+      );
+    }
+    return resolved.document_token;
+  }
+
+  private resolveContainer(reference: DocumentResourceReference): void {
+    const resolved = this.resolveResource(reference);
+    if (resolved.kind !== "container") {
+      throw new FeishuProviderBackendError(
+        "unsupported_resource_type",
+        false,
+      );
+    }
+  }
+
+  private resolveResource(
+    reference: DocumentResourceReference,
+  ): ReturnType<FeishuDocumentResourceAdapter["resolve"]> {
+    try {
+      return this.resources.resolve(reference);
+    } catch {
+      throw new FeishuProviderBackendError(
+        "unsupported_resource_type",
+        false,
+      );
+    }
+  }
+
+  private async authorize(
+    request: FeishuCapabilityExecutionRequest,
+    operation: DocumentOperation,
+    resource: DocumentResourceReference,
+  ): Promise<FeishuCapabilityOutcome | null> {
+    const now = Date.parse(this.now());
+    const delegationExpiry = Date.parse(request.delegation_expires_at);
+    if (
+      !Number.isFinite(now) ||
+      !Number.isFinite(delegationExpiry) ||
+      delegationExpiry <= now
+    ) {
+      return rejected("authority_denied", "Delegation has expired");
+    }
+    const requiredScope = operation === "read"
+      ? "document:read"
+      : operation === "delete"
+        ? "document:delete"
+        : "document:write";
+    if (!request.delegation_scopes.includes(requiredScope)) {
+      return rejected("authority_denied", "Delegation scope is insufficient");
+    }
+    try {
+      const decision = await this.dependencies.document_access.authorize(
+        validateDocumentAccessRequest({
+          tenant_id: request.tenant_id,
+          represented_actor_id: request.represented_actor_id,
+          delegation_id: request.delegation_id,
+          operation,
+          resource,
+          scopes: request.delegation_scopes,
+          expires_at: request.delegation_expires_at,
+        }),
+        request.signal,
+      );
+      if (decision.decision === "deny") {
+        return rejected(
+          "authority_denied",
+          "Native document permission denied",
+        );
+      }
+      if (
+        !Number.isFinite(Date.parse(decision.valid_until)) ||
+        Date.parse(decision.valid_until) <= now ||
+        Date.parse(decision.valid_until) >
+          delegationExpiry
+      ) {
+        throw new TypeError("document authorization lifetime is invalid");
+      }
+      return null;
+    } catch {
+      throw new FeishuProviderBackendError(
+        "document_authorization_unavailable",
+        true,
+      );
     }
   }
 }

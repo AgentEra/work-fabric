@@ -1,4 +1,8 @@
 import type { RuntimeJsonObject } from "@work-fabric/agent-runtime-spi";
+import type {
+  DocumentPlacementRequest,
+  DocumentResourceReference,
+} from "@work-fabric/document-provider-spi";
 
 export interface SimpleDocumentContent {
   readonly media_type: "text/plain" | "text/markdown";
@@ -23,7 +27,7 @@ export interface FeishuCapabilityBackend {
   createDocument(input: {
     readonly title: string;
     readonly content: SimpleDocumentContent;
-    readonly folder_token?: string;
+    readonly placement: DocumentResourceReference;
     readonly idempotency_key: string;
     readonly signal?: AbortSignal;
   }): Promise<{
@@ -98,15 +102,16 @@ export type FeishuCapabilityOutcome =
 
 export interface FeishuInvocationAuthority {
   readonly allowed_target_refs: readonly string[];
-  readonly allowed_document_tokens: readonly string[];
-  readonly allowed_resource_policy_refs: readonly string[];
   readonly confirmation_proof_refs: readonly string[];
 }
 
 export interface FeishuCapabilityExecutionRequest {
   readonly tenant_id: string;
   readonly original_handoff_id: string;
-  readonly initiating_actor_id: string;
+  readonly represented_actor_id: string;
+  readonly delegation_id: string;
+  readonly delegation_scopes: readonly string[];
+  readonly delegation_expires_at: string;
   readonly invocation_id: string;
   readonly idempotency_key: string;
   readonly capability_id: string;
@@ -114,6 +119,10 @@ export interface FeishuCapabilityExecutionRequest {
   readonly authority: FeishuInvocationAuthority;
   readonly signal?: AbortSignal;
 }
+
+export type FeishuDocumentPlacementRequest =
+  | DocumentPlacementRequest
+  | null;
 
 export interface FeishuExecutionRecord {
   readonly tenant_id: string;

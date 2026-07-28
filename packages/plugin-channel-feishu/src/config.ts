@@ -51,6 +51,10 @@ export interface FeishuCommonInboundConfig {
   };
   readonly accept_within_seconds: number;
   readonly result_due_within_seconds: number;
+  readonly delegation: {
+    readonly scopes: readonly string[];
+    readonly may_redelegate: boolean;
+  };
 }
 
 export interface FeishuWebhookInboundConfig extends FeishuCommonInboundConfig {
@@ -172,16 +176,19 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
   const identitiesDescriptor = ownDataDescriptor(root, "identities", "identities");
   const admissionDescriptor = ownDataDescriptor(root, "identity_admission", "identity_admission");
   if ((identitiesDescriptor === undefined) === (admissionDescriptor === undefined)) throw new TypeError("exactly one of identities or identity_admission is required");
-  const inboundCandidate = object(root.inbound, "inbound", ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]);
+  const inboundCandidate = object(root.inbound, "inbound", ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds", "delegation"]);
   if (inboundCandidate.transport !== "webhook" && inboundCandidate.transport !== "long_connection") throw new TypeError("inbound.transport is invalid");
   const transport = inboundCandidate.transport;
   const inbound = object(root.inbound, "inbound", transport === "webhook"
-    ? ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]
-    : ["enabled", "transport", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]);
+    ? ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds", "delegation"]
+    : ["enabled", "transport", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds", "delegation"]);
   const credentials = object(root.credentials, "credentials", transport === "webhook"
     ? ["app_id", "app_secret", "verification_token", "encrypt_key", "work_fabric_access_token"]
     : ["app_id", "app_secret", "work_fabric_access_token"]);
   const target = object(inbound.intake_target, "inbound.intake_target", ["actor_id", "endpoint_id"]);
+  const delegation = inbound.delegation === undefined
+    ? { scopes: ["work:read"], may_redelegate: false }
+    : object(inbound.delegation, "inbound.delegation", ["scopes", "may_redelegate"]);
   if (inbound.mention_only !== true) throw new TypeError("inbound.mention_only must be true");
   const outbound = object(root.outbound, "outbound", ["enabled", "default_render_mode", "channels", "subscriptions"]);
   if (outbound.default_render_mode !== "text" && outbound.default_render_mode !== "card") throw new TypeError("outbound.default_render_mode is invalid");
@@ -233,6 +240,10 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
     intake_target: { actor_id: id(target.actor_id, "inbound.intake_target.actor_id", 128), endpoint_id: id(target.endpoint_id, "inbound.intake_target.endpoint_id", 128) },
     accept_within_seconds: integer(inbound.accept_within_seconds, "inbound.accept_within_seconds", 86_400, 2_592_000),
     result_due_within_seconds: integer(inbound.result_due_within_seconds, "inbound.result_due_within_seconds", 604_800, 31_536_000),
+    delegation: {
+      scopes: stringList(delegation.scopes, "inbound.delegation.scopes"),
+      may_redelegate: bool(delegation.may_redelegate, "inbound.delegation.may_redelegate"),
+    },
   } satisfies FeishuCommonInboundConfig;
   const commonCredentials = {
     app_id: id(credentials.app_id, "credentials.app_id", 512),

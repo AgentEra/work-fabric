@@ -1,5 +1,12 @@
 import { createHash } from "node:crypto";
 
+import {
+  validateDocumentPlacementRequest,
+  validateDocumentResourceReference,
+  type DocumentPlacementRequest,
+  type DocumentResourceReference,
+} from "@work-fabric/document-provider-spi";
+
 import type {
   FeishuCapabilityExecutionRequest,
   FeishuMessageTarget,
@@ -97,12 +104,6 @@ function content(value: unknown): SimpleDocumentContent {
   return { media_type: object.media_type, text };
 }
 
-function document(value: unknown): string {
-  const object = exact(value, ["kind", "token"], [], "document");
-  if (object.kind !== "docx") throw new TypeError("document.kind is invalid");
-  return string(object.token, "document.token", 128);
-}
-
 function target(value: unknown):
   | { readonly kind: "current_conversation" }
   | FeishuMessageTarget {
@@ -143,28 +144,29 @@ export type NormalizedFeishuInput =
       readonly kind: "document_create";
       readonly title: string;
       readonly content: SimpleDocumentContent;
+      readonly placement: DocumentPlacementRequest | null;
     }
   | {
       readonly kind: "document_read";
-      readonly document_token: string;
+      readonly document: DocumentResourceReference;
       readonly max_bytes: number;
     }
   | {
       readonly kind: "document_update";
-      readonly document_token: string;
+      readonly document: DocumentResourceReference;
       readonly expected_revision: string;
       readonly title?: string;
       readonly content: SimpleDocumentContent;
     }
   | {
       readonly kind: "document_append";
-      readonly document_token: string;
+      readonly document: DocumentResourceReference;
       readonly expected_revision: string;
       readonly content: SimpleDocumentContent;
     }
   | {
       readonly kind: "document_delete";
-      readonly document_token: string;
+      readonly document: DocumentResourceReference;
       readonly expected_revision: string;
       readonly confirmation_proof: string;
     };
@@ -189,11 +191,18 @@ export function normalizeFeishuInput(
       };
     }
     case "feishu.document.create": {
-      const value = exact(request.input, ["title", "content"]);
+      const value = exact(
+        request.input,
+        ["title", "content"],
+        ["placement"],
+      );
       return {
         kind: "document_create",
         title: string(value.title, "title", 512),
         content: content(value.content),
+        placement: value.placement === undefined
+          ? null
+          : validateDocumentPlacementRequest(value.placement),
       };
     }
     case "feishu.document.read": {
@@ -205,7 +214,7 @@ export function normalizeFeishuInput(
       ) throw new TypeError("max_bytes is invalid");
       return {
         kind: "document_read",
-        document_token: document(value.document),
+        document: validateDocumentResourceReference(value.document),
         max_bytes: value.max_bytes as number,
       };
     }
@@ -217,7 +226,7 @@ export function normalizeFeishuInput(
       );
       return {
         kind: "document_update",
-        document_token: document(value.document),
+        document: validateDocumentResourceReference(value.document),
         expected_revision: string(
           value.expected_revision,
           "expected_revision",
@@ -236,7 +245,7 @@ export function normalizeFeishuInput(
       );
       return {
         kind: "document_append",
-        document_token: document(value.document),
+        document: validateDocumentResourceReference(value.document),
         expected_revision: string(
           value.expected_revision,
           "expected_revision",
@@ -252,7 +261,7 @@ export function normalizeFeishuInput(
       );
       return {
         kind: "document_delete",
-        document_token: document(value.document),
+        document: validateDocumentResourceReference(value.document),
         expected_revision: string(
           value.expected_revision,
           "expected_revision",

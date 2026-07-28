@@ -10,6 +10,7 @@
   "dependencies": {
     "@work-fabric/agent-runtime-spi": "0.1.0",
     "@work-fabric/connector-feishu": "0.1.0",
+    "@work-fabric/document-provider-spi": "0.1.0",
     "@work-fabric/network-citizen-runtime": "0.1.0",
     "@work-fabric/network-citizen-spi": "0.1.0"
   }

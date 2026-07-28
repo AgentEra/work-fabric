@@ -1,5 +1,10 @@
 # Local Feishu Document Creation Runtime Design
 
+> Superseded on 2026-07-28 by
+> [Delegated document access](../../specs/2026-07-28-delegated-document-access.md).
+> This file is retained as historical design context; its mandatory shared
+> folder is no longer a permission boundary or startup requirement.
+
 **Status:** Approved in conversation on 2026-07-27
 
 ## 1. Goal

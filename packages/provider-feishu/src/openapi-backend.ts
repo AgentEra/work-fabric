@@ -10,6 +10,7 @@ import {
   type FeishuCapabilityBackend,
   type SimpleDocumentContent,
 } from "./contracts.js";
+import { FeishuDocumentResourceAdapter } from "./document-resource-adapter.js";
 
 export interface FeishuOpenApiRequestClientOptions {
   readonly credential_ref: string;
@@ -293,6 +294,7 @@ export class FeishuOpenApiCapabilityBackend
   implements FeishuCapabilityBackend {
   private readonly now: () => string;
   private readonly requests: FeishuOpenApiRequestClient;
+  private readonly resources = new FeishuDocumentResourceAdapter();
 
   constructor(private readonly options: FeishuOpenApiCapabilityBackendOptions) {
     this.requests = new FeishuOpenApiRequestClient(options);
@@ -339,14 +341,21 @@ export class FeishuOpenApiCapabilityBackend
   async createDocument(
     input: Parameters<FeishuCapabilityBackend["createDocument"]>[0],
   ): ReturnType<FeishuCapabilityBackend["createDocument"]> {
+    const placement = this.resources.resolve(input.placement);
+    if (placement.kind !== "container") {
+      throw new FeishuProviderBackendError(
+        "unsupported_resource_type",
+        false,
+      );
+    }
     const created = await this.request(
       "POST",
       "/open-apis/docx/v1/documents",
       {
         title: input.title,
-        ...(input.folder_token === undefined
+        ...(placement.folder_token === null
           ? {}
-          : { folder_token: input.folder_token }),
+          : { folder_token: placement.folder_token }),
       },
       input.signal,
     );

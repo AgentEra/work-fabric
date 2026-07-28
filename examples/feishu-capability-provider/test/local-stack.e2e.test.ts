@@ -48,7 +48,7 @@ afterEach(async () => {
 });
 
 describe("local Feishu assistant stack", () => {
-  it("creates one shared-folder document and returns one Agent-authored semantic reply", async () => {
+  it("creates one dynamically placed document under delegated native access and returns one Agent-authored semantic reply", async () => {
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-full-stack-"));
     directories.push(directory);
     const model = await startFakeOpenAiCompatibleServer({
@@ -59,7 +59,7 @@ describe("local Feishu assistant stack", () => {
         response: "",
         invocation_id: "invocation-create-doc-1",
         capability_id: "feishu.document.create",
-        version_constraint: "1.0.0",
+        version_constraint: "2.0.0",
         input: {
           title: "本地联调需求",
           content: {
@@ -99,13 +99,13 @@ describe("local Feishu assistant stack", () => {
       `WORK_FABRIC_ADMISSION_GRANT_KEY=${"g".repeat(32)}`,
       "FEISHU_APP_ID=app-id",
       "FEISHU_APP_SECRET=app-secret",
-      "FEISHU_SHARED_FOLDER_TOKEN=folder-local",
       `FEISHU_CONNECTOR_ACCESS_TOKEN=${"x".repeat(32)}`,
       `INTAKE_AGENT_ACCESS_TOKEN=${"i".repeat(32)}`,
       `FEISHU_PROVIDER_ACCESS_TOKEN=${"p".repeat(32)}`,
       "AGENTLY_MODEL_API_KEY=model-key",
       "FEISHU_EXTERNAL_TENANT_ID=tenant-key",
       "FEISHU_BOT_OPEN_ID=ou-bot",
+      "WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true",
     ].join("\n"));
     const environment = await prepareLocalFeishuEnvironment({
       WORK_FABRIC_ENV_FILE: envFile,
@@ -263,7 +263,26 @@ describe("local Feishu assistant stack", () => {
             base_url: origin,
           },
         },
-      }, environment, feishuFetch);
+      }, environment, feishuFetch, {
+        document_access: {
+          async authorize(input) {
+            expect(input.represented_actor_id).toBe("actor-feishu-user");
+            expect(input.operation).toBe("create");
+            return {
+              decision: "allow",
+              evidence_ref: "native-acl-e2e-1",
+              valid_until: input.expires_at,
+            };
+          },
+        },
+        placement: {
+          async resolve() {
+            return {
+              resource_uri: "feishu://drive/folder/folder-local",
+            };
+          },
+        },
+      });
       await provider.start();
       const agentConfig = await loadAgentRuntimeConfiguration({ environment });
       const loadedAgent = {

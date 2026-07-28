@@ -36,13 +36,13 @@ describe("LocalFeishuStackSupervisor", () => {
         `WORK_FABRIC_ADMISSION_GRANT_KEY=${"g".repeat(32)}`,
         "FEISHU_APP_ID=app-id",
         "FEISHU_APP_SECRET=app-secret",
-        "FEISHU_SHARED_FOLDER_TOKEN=folder-token",
         `FEISHU_CONNECTOR_ACCESS_TOKEN=${"x".repeat(32)}`,
         `INTAKE_AGENT_ACCESS_TOKEN=${"i".repeat(32)}`,
         `FEISHU_PROVIDER_ACCESS_TOKEN=${"p".repeat(32)}`,
         "AGENTLY_MODEL_API_KEY=model-key",
         "FEISHU_EXTERNAL_TENANT_ID=tenant-external",
         "FEISHU_BOT_OPEN_ID=bot-open-id",
+        "WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true",
       ].join("\n"));
       const environment = await prepareLocalFeishuEnvironment({
         WORK_FABRIC_ENV_FILE: envFile,
@@ -58,7 +58,10 @@ describe("LocalFeishuStackSupervisor", () => {
       ]);
       expect(service.service.tenant_id).toBe("tenant-local");
       expect(agent.role.role_id).toBe("daily-assistant");
-      expect(provider.provider.shared_folder.token).toBe("folder-token");
+      expect(provider.provider).not.toHaveProperty("shared_folder");
+      expect(provider.service.document_access.mode).toBe(
+        "development_app_identity",
+      );
       expect(await readFile(resolvedConfig, "utf8")).not.toContain(
         "tenant-external\n",
       );

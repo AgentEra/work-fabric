@@ -36,20 +36,20 @@ function strings(value: unknown): readonly string[] {
 
 function authority(value: CitizenJsonObject): {
   readonly original_handoff_id: string;
-  readonly initiating_actor_id: string;
+  readonly represented_actor_id: string;
+  readonly delegation_id: string;
+  readonly delegation_scopes: readonly string[];
+  readonly delegation_expires_at: string;
   readonly allowed_target_refs: readonly string[];
-  readonly allowed_document_tokens: readonly string[];
-  readonly allowed_resource_policy_refs: readonly string[];
   readonly confirmation_proof_refs: readonly string[];
 } {
   return {
     original_handoff_id: nonEmpty(value.original_handoff_id),
-    initiating_actor_id: nonEmpty(value.initiating_actor_id),
+    represented_actor_id: nonEmpty(value.represented_actor_id),
+    delegation_id: nonEmpty(value.delegation_id),
+    delegation_scopes: strings(value.delegation_scopes),
+    delegation_expires_at: nonEmpty(value.delegation_expires_at),
     allowed_target_refs: strings(value.allowed_target_refs),
-    allowed_document_tokens: strings(value.allowed_document_tokens),
-    allowed_resource_policy_refs: strings(
-      value.allowed_resource_policy_refs,
-    ),
     confirmation_proof_refs: strings(value.confirmation_proof_refs),
   };
 }
@@ -80,16 +80,16 @@ export class FeishuCapabilityExecutorPortAdapter
     return this.executor.execute({
       tenant_id: context.tenant_id,
       original_handoff_id: evidence.original_handoff_id,
-      initiating_actor_id: evidence.initiating_actor_id,
+      represented_actor_id: evidence.represented_actor_id,
+      delegation_id: evidence.delegation_id,
+      delegation_scopes: evidence.delegation_scopes,
+      delegation_expires_at: evidence.delegation_expires_at,
       invocation_id: request.invocation_id,
       idempotency_key: `${context.citizen_id}:${request.invocation_id}`,
       capability_id: request.capability_id,
       input: request.input,
       authority: {
         allowed_target_refs: evidence.allowed_target_refs,
-        allowed_document_tokens: evidence.allowed_document_tokens,
-        allowed_resource_policy_refs:
-          evidence.allowed_resource_policy_refs,
         confirmation_proof_refs: evidence.confirmation_proof_refs,
       },
       signal: context.signal,

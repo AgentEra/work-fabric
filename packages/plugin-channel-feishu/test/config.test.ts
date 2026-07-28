@@ -11,6 +11,10 @@ const valid = () => ({
   inbound: {
     enabled: true, transport: "webhook", route_id: "primary", mention_only: true,
     intake_target: { actor_id: "actor-agent", endpoint_id: "endpoint-agent" },
+    delegation: {
+      scopes: ["work:read", "document:read", "document:write"],
+      may_redelegate: true,
+    },
   },
   outbound: { enabled: true, default_render_mode: "card", channels: {}, subscriptions: {} },
   identities: [{ external_open_id: "ou-human", actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" }],
@@ -52,6 +56,10 @@ describe("Feishu plugin configuration", () => {
   it("keeps valid Webhook configuration source-compatible", () => {
     const parsed = validateFeishuPluginConfig(valid());
     expect(parsed.inbound.intake_target.actor_id).toBe("actor-agent");
+    expect(parsed.inbound.delegation).toEqual({
+      scopes: ["work:read", "document:read", "document:write"],
+      may_redelegate: true,
+    });
     expect(feishuSecretPaths("plugins.instances.feishu-primary.config", parsed)).toEqual([
       "plugins.instances.feishu-primary.config.credentials.app_id",
       "plugins.instances.feishu-primary.config.credentials.app_secret",
@@ -171,6 +179,20 @@ describe("Feishu plugin configuration", () => {
     expect(() => validateFeishuPluginConfig({ ...valid(), surprise: true })).toThrow(/unknown/);
     expect(() => validateFeishuPluginConfig({ ...valid(), identities: [...valid().identities, ...valid().identities] })).toThrow(/duplicate/);
     expect(() => validateFeishuPluginConfig({ ...valid(), worker: { ...valid().worker, batch_limit: 1001 } })).toThrow(/batch_limit/);
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      inbound: {
+        ...valid().inbound,
+        delegation: { scopes: ["document:write", "document:write"], may_redelegate: true },
+      },
+    })).toThrow(/duplicate/i);
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      inbound: {
+        ...valid().inbound,
+        delegation: { scopes: ["document:write"], may_redelegate: "yes" },
+      },
+    })).toThrow(/may_redelegate/i);
   });
 
   it("normalizes strict static channels and canonical subscription filters", () => {

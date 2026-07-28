@@ -15,6 +15,19 @@ The Daily Assistant is an **external Runtime Host**. Work Fabric Core remains th
 
 The local static bearer tokens used in examples are development-only fixtures. Use a real Identity and Authority provider in shared environments. Rotate any Feishu App Secret or model key that has ever been exposed before using it again.
 
+For document capabilities, the accepted original Handoff must explicitly
+permit the relevant `document:*` scope and redelegation. The local Invocation
+Authority derives a narrower, non-redelegable child grant and preserves the
+original Human as `represented_actor_id`; the Agent cannot supply or override
+that identity. The document Provider then checks the connected system's native
+ACL through its deployment-injected identity broker.
+
+The unified local bundle temporarily supports an explicitly unsafe
+application-identity document adapter so real Feishu creation can be tested
+before represented-user OAuth is available. It is selected and guarded in the
+Feishu Provider composition, not in the Agent Runtime. The Agent still receives
+no Feishu credential and still needs the original delegated document scope.
+
 ## Local setup
 
 From the repository root, install the isolated Python worker environment:
@@ -30,6 +43,7 @@ single bundle and Supervisor documented in
 ```bash
 export WORK_FABRIC_ENV_FILE=/absolute/path/to/feishu.env
 export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml"
+export WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true
 npm run local:feishu:start
 ```
 

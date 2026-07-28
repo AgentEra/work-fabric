@@ -41,6 +41,10 @@ function policy(resolution: FeishuParticipantResolution = {
     accept_within_seconds: 86_400,
     result_due_within_seconds: 604_800,
     max_intent_length: 4_000,
+    delegation: {
+      scopes: ["work:read", "document:read", "document:write"],
+      may_redelegate: true,
+    },
   });
 }
 
@@ -58,6 +62,7 @@ describe("FeishuIntakeMessagePolicy", () => {
       accept_within_seconds: 86_400,
       result_due_within_seconds: 604_800,
       max_intent_length: 4_000,
+      delegation: { scopes: ["work:read"], may_redelegate: false },
     }).mapMessage(claim());
     if (mapped.kind !== "command") throw new Error("expected command");
     expect(resolve).toHaveBeenCalledWith(expect.objectContaining({
@@ -76,6 +81,10 @@ describe("FeishuIntakeMessagePolicy", () => {
           work_reference: { uri: "feishu://tenant-key-1/message/om-1" },
           target: { actor_id: "actor-agent" },
           intent: [{ kind: "text", media_type: "text/plain", text: "create a requirement" }],
+          authority_scope: {
+            scopes: ["work:read", "document:read", "document:write"],
+            may_redelegate: true,
+          },
           verifier: { actor_id: "actor-human", actor_type: "agent" },
         },
       },

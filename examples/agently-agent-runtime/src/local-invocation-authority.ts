@@ -20,7 +20,6 @@ export interface LocalInvocationAuthorityProviderOptions {
     ): Promise<HandoffReadModel>;
   };
   readonly allowed_namespaces: readonly string[];
-  readonly allowed_resource_policy_refs: readonly string[];
   readonly now?: () => string;
 }
 
@@ -52,6 +51,32 @@ function deny(): never {
   throw new Error("Capability authority denied");
 }
 
+function requiredScope(capabilityId: string): string {
+  if (capabilityId === "feishu.document.read") return "document:read";
+  if (capabilityId === "feishu.document.delete") return "document:delete";
+  if (
+    capabilityId === "feishu.document.create" ||
+    capabilityId === "feishu.document.update" ||
+    capabilityId === "feishu.document.append"
+  ) return "document:write";
+  if (capabilityId === "feishu.message.send") return "message:send";
+  deny();
+}
+
+function stringArray(value: unknown): readonly string[] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > 32 ||
+    value.some((item) =>
+      typeof item !== "string" ||
+      item.length === 0 ||
+      item.length > 128
+    )
+  ) return null;
+  return value as string[];
+}
+
 export class LocalInvocationAuthorityProvider
   implements InvocationAuthorityProvider {
   private readonly now: () => string;
@@ -63,8 +88,7 @@ export class LocalInvocationAuthorityProvider
     if (
       options.tenant_id.length === 0 ||
       options.agent_actor_id.length === 0 ||
-      options.allowed_namespaces.length === 0 ||
-      options.allowed_resource_policy_refs.length === 0
+      options.allowed_namespaces.length === 0
     ) {
       throw new TypeError("Local capability Authority configuration is invalid");
     }
@@ -100,7 +124,12 @@ export class LocalInvocationAuthorityProvider
     const initiator = record(state?.initiator);
     const responsible = record(state?.current_responsible_actor);
     const handoffPackage = record(state?.package);
+    const parentAuthority = record(handoffPackage?.authority_scope);
     const originalDeadline = handoffPackage?.result_due_at;
+    const parentDelegationId = parentAuthority?.delegation_id;
+    const parentScopes = stringArray(parentAuthority?.scopes);
+    const parentExpiresAt = parentAuthority?.expires_at;
+    const operationScope = requiredScope(request.capability_id);
     if (
       snapshot.tenant_id !== this.options.tenant_id ||
       snapshot.handoff_id !== request.original_handoff_id ||
@@ -112,7 +141,16 @@ export class LocalInvocationAuthorityProvider
       responsible.actor_id !== this.options.agent_actor_id ||
       typeof originalDeadline !== "string" ||
       !Number.isFinite(Date.parse(originalDeadline)) ||
-      Date.parse(request.deadline) > Date.parse(originalDeadline)
+      Date.parse(request.deadline) > Date.parse(originalDeadline) ||
+      typeof parentDelegationId !== "string" ||
+      parentDelegationId.length === 0 ||
+      parentDelegationId.length > 128 ||
+      parentScopes === null ||
+      !parentScopes.includes(operationScope) ||
+      typeof parentExpiresAt !== "string" ||
+      !Number.isFinite(Date.parse(parentExpiresAt)) ||
+      Date.parse(request.deadline) > Date.parse(parentExpiresAt) ||
+      parentAuthority?.may_redelegate !== true
     ) deny();
 
     const delegationId =
@@ -128,7 +166,7 @@ export class LocalInvocationAuthorityProvider
         .slice(0, 32)}`;
     return Object.freeze({
       delegation_id: delegationId,
-      scopes: Object.freeze(["capability:invoke"]),
+      scopes: Object.freeze(["capability:invoke", operationScope]),
       resource_refs: Object.freeze([input.work_reference_uri]),
       expires_at: request.deadline,
       may_redelegate: false,
@@ -136,14 +174,14 @@ export class LocalInvocationAuthorityProvider
         "workfabric.dev/capability_authority": Object.freeze({
           original_handoff_id: request.original_handoff_id,
           invocation_id: request.invocation_id,
-          initiating_actor_id: initiator.actor_id,
+          represented_actor_id: initiator.actor_id,
+          delegation_id: delegationId,
+          parent_delegation_id: parentDelegationId,
+          delegation_scopes: Object.freeze([operationScope]),
+          delegation_expires_at: request.deadline,
           capability_version: input.candidate.capability_version,
           contract_digest: input.candidate.contract_digest,
           allowed_target_refs: Object.freeze([]),
-          allowed_document_tokens: Object.freeze([]),
-          allowed_resource_policy_refs: Object.freeze([
-            ...this.options.allowed_resource_policy_refs,
-          ]),
           confirmation_proof_refs: Object.freeze([]),
         }),
       }),

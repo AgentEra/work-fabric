@@ -41,6 +41,14 @@ inside the Provider. Destructive delete additionally consumes a durable,
 single-use confirmation proof bound to tenant, Human Actor, operation,
 document and normalized input.
 
+Document Contract v2 removes the fixed shared-folder permission boundary.
+Work Fabric carries only the represented Human, delegation lineage, operation
+scope and expiry. A replaceable document access authorizer resolves that Actor
+through an identity broker and verifies the connected system's native ACL
+before every operation. Placement is resolved dynamically from an opaque
+resource URI or usage-owned policy; templates, spaces and content conventions
+remain outside deployment configuration.
+
 The Provider returns typed facts only. The original Agent keeps responsibility
 for the original Handoff and alone authors the final user-facing Result; the
 Channel only transports that Result. No transfer, target ranking, workflow

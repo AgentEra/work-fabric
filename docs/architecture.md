@@ -465,6 +465,13 @@ Handoff，不扩大到其他参与者的工作。目标绑定证据使用正式 
 幂等、文档所有权和 revision 完全封装在 Provider，删除确认由独立 Governance
 模块负责。该实现验证模块可以新增而无需修改 Exchange Core。
 
+文档系统自身是资源权限的唯一权威。Fabric 只携带原始派发人、委托谱系、
+操作范围和期限；Invocation Authority 从已接受的原 Handoff 派生更窄的子
+委托。Document Provider 在每次增删改查前，通过可替换的 Identity Broker
+与原生 ACL Gateway 验证被代理人的权限；Provider 的技术凭据、资源所有权或
+固定目录都不能绕过该检查。文档位置由 opaque resource URI 或使用侧动态
+策略解析，空间类型、目录结构、模板和内容规范不进入 Core 或部署 ACL。
+
 ## 10. Identity、Delegation 与 Trust
 
 - 所有写操作关联 Principal、Actor 和 Endpoint。

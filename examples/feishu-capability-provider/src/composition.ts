@@ -10,6 +10,10 @@ import {
   composeAgentRuntimeHost,
 } from "@work-fabric/agent-runtime-host";
 import { CapabilityProviderDriver } from "@work-fabric/capability-provider-runtime";
+import type {
+  DocumentAccessAuthorizer,
+  DocumentPlacementResolver,
+} from "@work-fabric/document-provider-spi";
 import {
   FeishuOpenApiClient,
   FeishuTenantAccessTokenProvider,
@@ -27,7 +31,6 @@ import {
   FeishuContextCitizenRuntime,
   FeishuDocumentContextProvider,
   FeishuOpenApiCapabilityBackend,
-  FeishuSharedFolderPolicyVerifier,
   MemoryFeishuProviderStore,
   SqliteFeishuProviderStore,
   feishuCapabilityDeclarations,
@@ -45,6 +48,9 @@ import {
   type LoadedFeishuProviderConfiguration,
 } from "./configuration.js";
 import { EnvironmentFeishuAppCredentialProvider } from "./credentials.js";
+import {
+  createConfiguredDocumentServices,
+} from "./development-document-access.js";
 
 interface LifecycleCitizen {
   start(): Promise<void>;
@@ -70,7 +76,6 @@ export interface FeishuProviderComposition {
 export interface ManagedFeishuProviderCompositionDependencies {
   readonly capability_citizen_id: string;
   readonly context_citizen_id: string;
-  readonly preflight: () => Promise<void>;
   readonly capability_citizen: LifecycleCitizen;
   readonly context_citizen: LifecycleCitizen;
   readonly host: LifecycleHost;
@@ -97,7 +102,6 @@ export class ManagedFeishuProviderComposition
       throw new Error("Feishu Provider composition cannot be restarted");
     }
     try {
-      await this.dependencies.preflight();
       await this.dependencies.capability_citizen.start();
       this.capabilityStarted = true;
       await this.dependencies.context_citizen.start();
@@ -273,19 +277,26 @@ function contextRequest(
     !Array.isArray(request.authority)
       ? request.authority as CitizenJsonObject
       : {};
-  const tokens = authority.allowed_document_tokens;
   if (
     typeof request.tenant_id !== "string" ||
-    typeof request.document_token !== "string" ||
+    request.document === null ||
+    typeof request.document !== "object" ||
+    Array.isArray(request.document) ||
     !Number.isSafeInteger(request.max_bytes) ||
-    !Array.isArray(tokens) ||
-    tokens.some((item) => typeof item !== "string")
+    typeof authority.represented_actor_id !== "string" ||
+    typeof authority.delegation_id !== "string" ||
+    !Array.isArray(authority.delegation_scopes) ||
+    authority.delegation_scopes.some((item) => typeof item !== "string") ||
+    typeof authority.delegation_expires_at !== "string"
   ) throw new TypeError("Feishu context request is invalid");
   return provider.read({
     tenant_id: request.tenant_id,
-    document_token: request.document_token,
+    document: request.document as { readonly resource_uri: string },
     max_bytes: request.max_bytes as number,
-    authority: { allowed_document_tokens: tokens as string[] },
+    represented_actor_id: authority.represented_actor_id,
+    delegation_id: authority.delegation_id,
+    delegation_scopes: authority.delegation_scopes as string[],
+    delegation_expires_at: authority.delegation_expires_at,
     signal,
   }) as Promise<CitizenJsonObject>;
 }
@@ -294,7 +305,13 @@ export async function composeFeishuProvider(
   loaded: LoadedFeishuProviderConfiguration,
   environment: Readonly<Record<string, string | undefined>> = process.env,
   fetchImplementation: typeof globalThis.fetch = globalThis.fetch,
+  documentServices?: {
+    readonly document_access: DocumentAccessAuthorizer;
+    readonly placement: DocumentPlacementResolver;
+  },
 ): Promise<FeishuProviderComposition> {
+  const resolvedDocumentServices = documentServices ??
+    createConfiguredDocumentServices(loaded.service, environment);
   for (const location of [
     loaded.service.runtime_state.location,
     loaded.provider.state.type === "sqlite"
@@ -349,13 +366,14 @@ export async function composeFeishuProvider(
           throw new Error("current conversation context is unavailable");
         },
       },
-      shared_folder: {
-        token: loaded.provider.shared_folder.token,
-        policy_ref: loaded.provider.shared_folder.policy_ref,
-      },
+      document_access: resolvedDocumentServices.document_access,
+      placement: resolvedDocumentServices.placement,
     }),
   );
-  const documentContext = new FeishuDocumentContextProvider({ backend });
+  const documentContext = new FeishuDocumentContextProvider({
+    backend,
+    document_access: resolvedDocumentServices.document_access,
+  });
   const client = new WorkFabricClient({
     baseUrl: loaded.service.work_fabric.base_url,
     tenantId: loaded.service.work_fabric.tenant_id,
@@ -442,22 +460,10 @@ export async function composeFeishuProvider(
     }),
     queries: client.queries,
   });
-  const preflight = new FeishuSharedFolderPolicyVerifier({
-    credential_ref: loaded.provider.credential_ref,
-    token_provider: tokenProvider,
-    fetch: fetchImplementation,
-    base_url: loaded.provider.open_api.base_url,
-    request_timeout_ms: loaded.provider.open_api.request_timeout_ms,
-    max_response_bytes: loaded.provider.open_api.max_response_bytes,
-    folder_token: loaded.provider.shared_folder.token,
-    policy_ref: loaded.provider.shared_folder.policy_ref,
-    visibility: loaded.provider.shared_folder.visibility,
-  });
   return new ManagedFeishuProviderComposition({
     capability_citizen_id:
       loaded.provider.capability_citizen.citizen_id,
     context_citizen_id: loaded.provider.context_citizen.citizen_id,
-    preflight: async () => { await preflight.verify(shutdown.signal); },
     capability_citizen: {
       start: () => capabilityRuntime.start(citizenContext),
       health: () => capabilityRuntime.health(),

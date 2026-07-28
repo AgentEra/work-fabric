@@ -20,11 +20,6 @@ export interface FeishuProviderConfig {
         readonly location: string;
         readonly busy_timeout_ms: number;
       };
-  readonly shared_folder: {
-    readonly token: string;
-    readonly policy_ref: string;
-    readonly visibility: "tenant_readable";
-  };
   readonly capability_citizen: FeishuProviderCitizenConfig;
   readonly context_citizen: FeishuProviderCitizenConfig;
 }
@@ -94,7 +89,6 @@ export function validateFeishuProviderConfig(
     "credential_ref",
     "open_api",
     "state",
-    "shared_folder",
     "capability_citizen",
     "context_citizen",
   ]);
@@ -131,14 +125,6 @@ export function validateFeishuProviderConfig(
   } else {
     throw new TypeError("state.type is invalid");
   }
-  const sharedFolder = object(source.shared_folder, "shared_folder", [
-    "token",
-    "policy_ref",
-    "visibility",
-  ]);
-  if (sharedFolder.visibility !== "tenant_readable") {
-    throw new TypeError("shared_folder.visibility is invalid");
-  }
   return Object.freeze({
     credential_ref: string(source.credential_ref, "credential_ref", 255),
     open_api: Object.freeze({
@@ -155,15 +141,6 @@ export function validateFeishuProviderConfig(
       ),
     }),
     state: normalizedState,
-    shared_folder: Object.freeze({
-      token: string(sharedFolder.token, "shared_folder.token", 512),
-      policy_ref: string(
-        sharedFolder.policy_ref,
-        "shared_folder.policy_ref",
-        256,
-      ),
-      visibility: "tenant_readable" as const,
-    }),
     capability_citizen: citizen(
       source.capability_citizen,
       "capability_citizen",

@@ -126,9 +126,23 @@ function executor(input: {
       ownership: store,
       confirmation,
       targets,
-      shared_folder: {
-        token: "fld-shared-team",
-        policy_ref: "feishu.shared-folder.default",
+      document_access: {
+        async authorize() {
+          return {
+            decision: "allow",
+            evidence_ref: "acl-test",
+            valid_until: "2026-07-27T11:00:00.000Z",
+          };
+        },
+      },
+      placement: {
+        async resolve(input) {
+          if (
+            input.placement !== null &&
+            "resource_uri" in input.placement
+          ) return { resource_uri: input.placement.resource_uri };
+          return { resource_uri: "feishu://drive/root" };
+        },
       },
       now: () => "2026-07-27T10:00:00.000Z",
     }),
@@ -143,15 +157,21 @@ function request(
   return {
     tenant_id: "tenant-1",
     original_handoff_id: "handoff-original-1",
-    initiating_actor_id: "actor-human-1",
+    represented_actor_id: "actor-human-1",
+    delegation_id: "delegation-child-1",
+    delegation_scopes: [
+      "document:read",
+      "document:write",
+      "document:delete",
+      "message:send",
+    ],
+    delegation_expires_at: "2026-07-27T12:00:00.000Z",
     invocation_id: `invocation-${capabilityId}`,
     idempotency_key: idempotencyKey,
     capability_id: capabilityId,
     input,
     authority: {
       allowed_target_refs: ["feishu://chat/chat-current-1"],
-      allowed_document_tokens: ["external-doc-1"],
-      allowed_resource_policy_refs: ["feishu.shared-folder.default"],
       confirmation_proof_refs: ["proof-delete-1"],
     },
   };
@@ -181,7 +201,7 @@ describe("Feishu Capability Provider", () => {
     const schemas = feishuSchemaDocuments();
     expect(
       JSON.stringify(
-        schemas.get("urn:work-fabric:schema:feishu:documentCreateInput:1"),
+        schemas.get("urn:work-fabric:schema:feishu:documentCreateInput:2"),
       ),
     ).not.toContain("folder_token");
     expect(feishuContextDeclarations()).toMatchObject([
@@ -192,34 +212,25 @@ describe("Feishu Capability Provider", () => {
     ]);
   });
 
-  it("injects the private shared folder only after Authority policy validation", async () => {
+  it("resolves document placement without exposing vendor container tokens in results", async () => {
     const fixture = executor();
-    const denied = request(
-      "feishu.document.create",
-      {
-        title: "客户项目需求",
-        content: { media_type: "text/plain", text: "初始内容" },
-      },
-      "create-policy-denied",
-    );
-    denied.authority.allowed_resource_policy_refs = [];
-
-    await expect(fixture.executor.execute(denied)).resolves.toMatchObject({
-      outcome: "rejected",
-      code: "authority_denied",
-    });
-    expect(fixture.api.createDocument).not.toHaveBeenCalled();
-
     const created = await fixture.executor.execute(request(
       "feishu.document.create",
       {
         title: "客户项目需求",
         content: { media_type: "text/plain", text: "初始内容" },
+        placement: {
+          resource_uri: "feishu://drive/folder/fld-shared-team",
+        },
       },
       "create-policy-allowed",
     ));
     expect(fixture.api.createDocument).toHaveBeenCalledWith(
-      expect.objectContaining({ folder_token: "fld-shared-team" }),
+      expect.objectContaining({
+        placement: {
+          resource_uri: "feishu://drive/folder/fld-shared-team",
+        },
+      }),
     );
     expect(JSON.stringify(created)).not.toContain("fld-shared-team");
   });
@@ -264,7 +275,7 @@ describe("Feishu Capability Provider", () => {
     const read = await fixture.executor.execute(request(
       "feishu.document.read",
       {
-        document: { kind: "docx", token },
+        document: { resource_uri: `feishu://docx/${token}` },
         max_bytes: 64_000,
       },
       "read-1",
@@ -281,7 +292,7 @@ describe("Feishu Capability Provider", () => {
     const updated = await fixture.executor.execute(request(
       "feishu.document.update",
       {
-        document: { kind: "docx", token },
+        document: { resource_uri: `feishu://docx/${token}` },
         expected_revision: "1",
         title: "客户项目需求 v2",
         content: { media_type: "text/plain", text: "更新内容" },
@@ -295,7 +306,7 @@ describe("Feishu Capability Provider", () => {
     const appended = await fixture.executor.execute(request(
       "feishu.document.append",
       {
-        document: { kind: "docx", token },
+        document: { resource_uri: `feishu://docx/${token}` },
         expected_revision: "2",
         content: { media_type: "text/plain", text: "\n追加内容" },
       },
@@ -309,7 +320,7 @@ describe("Feishu Capability Provider", () => {
     const deleted = await fixture.executor.execute(request(
       "feishu.document.delete",
       {
-        document: { kind: "docx", token },
+        document: { resource_uri: `feishu://docx/${token}` },
         expected_revision: "3",
         confirmation_proof: "proof-delete-1",
       },
@@ -339,7 +350,7 @@ describe("Feishu Capability Provider", () => {
     const result = await fixture.executor.execute(request(
       "feishu.document.delete",
       {
-        document: { kind: "docx", token: "external-doc-1" },
+        document: { resource_uri: "feishu://docx/external-doc-1" },
         expected_revision: "7",
         confirmation_proof: "proof-delete-1",
       },
@@ -398,13 +409,25 @@ describe("Feishu Capability Provider", () => {
     ));
     if (created.outcome !== "succeeded") throw new Error("create failed");
     const token = created.data.document_token as string;
-    const context = new FeishuDocumentContextProvider({ backend: api });
+    const authorize = vi.fn(async () => ({
+      decision: "allow" as const,
+      evidence_ref: "context-acl-1",
+      valid_until: "2026-07-27T11:00:00.000Z",
+    }));
+    const context = new FeishuDocumentContextProvider({
+      backend: api,
+      document_access: { authorize },
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
 
     const resolved = await context.read({
       tenant_id: "tenant-1",
-      document_token: token,
+      document: { resource_uri: `feishu://docx/${token}` },
       max_bytes: 64_000,
-      authority: { allowed_document_tokens: [token] },
+      represented_actor_id: "actor-human-1",
+      delegation_id: "delegation-context-1",
+      delegation_scopes: ["document:read"],
+      delegation_expires_at: "2026-07-27T12:00:00.000Z",
     });
 
     expect(resolved).toMatchObject({
@@ -415,5 +438,33 @@ describe("Feishu Capability Provider", () => {
         source: "feishu.docx",
       },
     });
+    expect(authorize).toHaveBeenCalledWith(expect.objectContaining({
+      represented_actor_id: "actor-human-1",
+      operation: "read",
+      resource: { resource_uri: `feishu://docx/${token}` },
+    }), undefined);
+
+    const stale = new FeishuDocumentContextProvider({
+      backend: api,
+      document_access: {
+        async authorize() {
+          return {
+            decision: "allow",
+            evidence_ref: "stale-context-acl",
+            valid_until: "2026-07-27T09:59:59.000Z",
+          };
+        },
+      },
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
+    await expect(stale.read({
+      tenant_id: "tenant-1",
+      document: { resource_uri: `feishu://docx/${token}` },
+      max_bytes: 64_000,
+      represented_actor_id: "actor-human-1",
+      delegation_id: "delegation-context-1",
+      delegation_scopes: ["document:read"],
+      delegation_expires_at: "2026-07-27T12:00:00.000Z",
+    })).rejects.toThrow(/Authority denied/i);
   });
 });

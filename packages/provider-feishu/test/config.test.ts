@@ -14,11 +14,6 @@ const config = {
     location: "./var/feishu-provider.db",
     busy_timeout_ms: 5_000,
   },
-  shared_folder: {
-    token: "fld-shared-team",
-    policy_ref: "feishu.shared-folder.default",
-    visibility: "tenant_readable",
-  },
   capability_citizen: {
     citizen_id: "feishu-actions",
     principal_id: "principal-feishu-actions",
@@ -39,11 +34,7 @@ describe("validateFeishuProviderConfig", () => {
   it("accepts bootstrap references and bounds without static capabilities or secrets", () => {
     const result = validateFeishuProviderConfig(config);
     expect(result.state.type).toBe("sqlite");
-    expect(result.shared_folder).toEqual({
-      token: "fld-shared-team",
-      policy_ref: "feishu.shared-folder.default",
-      visibility: "tenant_readable",
-    });
+    expect(result).not.toHaveProperty("shared_folder");
     expect(JSON.stringify(result)).not.toMatch(/app_secret|access_token/);
   });
 
@@ -54,17 +45,18 @@ describe("validateFeishuProviderConfig", () => {
     })).toThrow(/field/i);
   });
 
-  it("rejects missing or unsupported shared-folder policy fields", () => {
-    const { shared_folder: _omitted, ...withoutFolder } = config;
-    expect(() => validateFeishuProviderConfig(withoutFolder)).toThrow(
-      /shared_folder/i,
-    );
+  it("rejects document ACL and placement policy embedded in deployment config", () => {
     expect(() => validateFeishuProviderConfig({
       ...config,
       shared_folder: {
-        ...config.shared_folder,
-        visibility: "private",
+        token: "fld-forbidden",
+        policy_ref: "customer.default",
+        visibility: "tenant_readable",
       },
-    })).toThrow(/visibility/i);
+    })).toThrow(/field/i);
+    expect(() => validateFeishuProviderConfig({
+      ...config,
+      allowed_document_tokens: ["doc-forbidden"],
+    })).toThrow(/field/i);
   });
 });

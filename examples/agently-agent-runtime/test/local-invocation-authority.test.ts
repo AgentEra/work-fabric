@@ -27,6 +27,13 @@ function snapshot(overrides: Record<string, unknown> = {}): HandoffReadModel {
       },
       package: {
         result_due_at: "2026-07-27T12:00:00.000Z",
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["document:write"],
+          resource_refs: ["feishu://tenant/message/message-1"],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: true,
+        },
       },
       ...overrides,
     },
@@ -77,7 +84,6 @@ function authority(read = snapshot()) {
       agent_actor_id: "actor-intake-agent",
       queries: { getHandoff },
       allowed_namespaces: ["feishu."],
-      allowed_resource_policy_refs: ["feishu.shared-folder.default"],
       now: () => "2026-07-27T10:00:00.000Z",
     }),
   };
@@ -98,7 +104,7 @@ describe("LocalInvocationAuthorityProvider", () => {
     );
     expect(result).toMatchObject({
       delegation_id: expect.stringMatching(/^capability-delegation-[a-f0-9]{32}$/),
-      scopes: ["capability:invoke"],
+      scopes: ["capability:invoke", "document:write"],
       resource_refs: [
         "urn:work-fabric:capability-invocation:handoff-original:invocation-1",
       ],
@@ -108,14 +114,16 @@ describe("LocalInvocationAuthorityProvider", () => {
         "workfabric.dev/capability_authority": {
           original_handoff_id: "handoff-original",
           invocation_id: "invocation-1",
-          initiating_actor_id: "actor-human",
+          represented_actor_id: "actor-human",
+          delegation_id: expect.stringMatching(
+            /^capability-delegation-[a-f0-9]{32}$/,
+          ),
+          parent_delegation_id: "delegation-human-agent",
+          delegation_scopes: ["document:write"],
+          delegation_expires_at: "2026-07-27T11:00:00.000Z",
           capability_version: "1.0.0",
           contract_digest: digest,
           allowed_target_refs: [],
-          allowed_document_tokens: [],
-          allowed_resource_policy_refs: [
-            "feishu.shared-folder.default",
-          ],
           confirmation_proof_refs: [],
         },
       },
@@ -182,6 +190,42 @@ describe("LocalInvocationAuthorityProvider", () => {
     });
     await expect(fixture.authority.authorize(
       changed,
+      new AbortController().signal,
+    )).rejects.toThrow(/authority denied/i);
+  });
+
+  it("denies missing operation scope and non-redelegable original authority", async () => {
+    const missingScope = snapshot({
+      package: {
+        result_due_at: "2026-07-27T12:00:00.000Z",
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["document:read"],
+          resource_refs: [],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: true,
+        },
+      },
+    });
+    await expect(authority(missingScope).authority.authorize(
+      input(),
+      new AbortController().signal,
+    )).rejects.toThrow(/authority denied/i);
+
+    const nonRedelegable = snapshot({
+      package: {
+        result_due_at: "2026-07-27T12:00:00.000Z",
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["document:write"],
+          resource_refs: [],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: false,
+        },
+      },
+    });
+    await expect(authority(nonRedelegable).authority.authorize(
+      input(),
       new AbortController().signal,
     )).rejects.toThrow(/authority denied/i);
   });

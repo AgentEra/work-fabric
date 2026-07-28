@@ -268,6 +268,18 @@ CRUD/追加、OpenAPI、幂等、资源所有权与稳定错误；文档上下�
 `@work-fabric/governance-confirmation` 消费绑定人、文档、输入摘要和过期时间
 的单次确认凭证。
 
+文档 Contract v2 不再把固定共享文件夹当成权限边界。Work Fabric 只传递原始
+派发人、委托谱系、操作范围和期限；Provider 在每一次增删改查前通过可替换的
+身份代理与文档系统原生 ACL 重新鉴权。文档/空间位置由使用侧动态解析，
+模板、目录和内容结构不进入工程部署配置。
+
+为了先完成真实飞书联调，独立 Provider 组合根还提供一个受双重门槛保护的
+开发期应用身份 Adapter：YAML 必须显式选择
+`development_app_identity`，进程必须同时设置
+`WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true`，且服务必须处于开发模式。
+它不进入 Fabric Core，不替代 Handoff scope，并拒绝删除；生产
+`brokered_native` 模式继续默认失败关闭。
+
 参考闭环已经通过 SQLite + 公共 HTTP/SSE + TypeScript SDK 验证：动态
 Citizen/Contract 绑定、辅助 Handoff Offer/目标解析、Provider
 Gateway/Host、类型化 Result 与 Agent 调用状态均走正式边界。目标约束默认
@@ -325,6 +337,8 @@ npm run console:build
 uv sync --project runtimes/agently-worker
 export WORK_FABRIC_ENV_FILE=/absolute/path/to/feishu.env
 export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml"
+# 仅本地临时文档联调；生产禁止
+export WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true
 npm run local:feishu:start
 ```
 
@@ -403,6 +417,7 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 - Connector ingress 是有界、可保留清理的操作缓冲，不是新的业务真相库；Webhook/长连接只 durable accept，映射 worker 才通过公开 SDK 提交命令。
 - 飞书身份必须映射到已有 Actor/Endpoint；任意聊天默认 inert，只有配置策略或本 Connector 签发的受限动作可以产生协议操作。
 - 飞书文档仍由飞书持有，Exchange 只保存版本化引用和有界元数据；凭据只以 opaque reference 出现在配置中。
+- 文档 Provider 必须以原始派发人的代理身份通过文档系统原生 ACL；应用自身的广泛技术权限、Provider 所有权和固定目录都不能替代业务授权。
 - Reconciliation 只产生可见 discrepancy，不静默覆盖 Work Fabric 或外部系统状态。
 - Connector Worker 在公共 side effect 前续租并校验 fencing；PostgreSQL retention 使用有界 `pruneExpired()` 批次，不让 ingress 成为永久内容库。
 - 交互动作同时绑定飞书用户与签发时的 Work Fabric 身份快照；文档原文读取需要 tenant/connector scope 和显式授权。
