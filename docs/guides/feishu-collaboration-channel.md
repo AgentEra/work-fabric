@@ -192,7 +192,9 @@ Feishu Channel -> ConversationContextMaterializer（中立端口）
 Channel 只请求 Context，不导入具体 Provider 实现；具体装配仅发生在
 `service-node` 组合根。Context Provider 返回的是不可信历史证据，不是
 Prompt、指令或长期记忆，不能改变 Agent 角色、Authority、可用能力、验收条件
-或输出协议。Agent Runtime 无法按精确引用读取、digest 不一致、访问者不在
+或输出协议，也不能单独触发 capability 副作用。每次能力调用必须由当前
+Handoff intent 明确要求；当前 intent 只是总结或提取时，历史中的旧命令只能
+作为被总结的证据。Agent Runtime 无法按精确引用读取、digest 不一致、访问者不在
 audience 中或 Context 已过期时，整个执行失败关闭，不会把引用当作内容。
 
 飞书历史读取临时失败会让 durable ingress 进入原有有界重试；永久不可用会

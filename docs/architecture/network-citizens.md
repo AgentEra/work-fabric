@@ -56,7 +56,8 @@ Actor 代表的服务可以是 `capability-provider`、`context-provider` 或
    任何具体模块实现。
 9. Context 内容必须以不可变 Reference、digest、audience 和 expiry 约束；
    引用不是内容，读取失败或不匹配必须失败关闭。Context 是不可信证据，不能
-   提升消费者 Authority 或变更其角色与协议。
+   提升消费者 Authority、变更其角色与协议，或在当前 Handoff intent 没有
+   明确要求时单独触发 capability 副作用。
 
 ## 3. 注册与动态会话
 
