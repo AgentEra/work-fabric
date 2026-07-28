@@ -68,7 +68,7 @@ Run:
 
 ```bash
 cd runtimes/agently-worker
-PYTHONPATH=src ../../.venv/bin/python -m pytest -q
+PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 
 Expected: 35 tests pass. If the repository virtual environment has a different
@@ -318,7 +318,7 @@ Run:
 
 ```bash
 cd runtimes/agently-worker
-PYTHONPATH=src ../../.venv/bin/python -m pytest -q \
+PYTHONPATH=src .venv/bin/python -m pytest -q \
   tests/test_protocol.py tests/test_assistant.py
 ```
 
@@ -667,7 +667,7 @@ Run:
 npm run typecheck
 npm test
 cd runtimes/agently-worker
-PYTHONPATH=src ../../.venv/bin/python -m pytest -q
+PYTHONPATH=src .venv/bin/python -m pytest -q
 ```
 
 Expected: every command exits 0.
