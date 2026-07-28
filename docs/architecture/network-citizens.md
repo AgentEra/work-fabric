@@ -54,6 +54,9 @@ Actor 代表的服务可以是 `capability-provider`、`context-provider` 或
 7. 描述和声明不得包含密钥、私网 URL、存储位置、可执行路径或厂商 SDK 对象。
 8. Core 不依赖 YAML、HTTP、SQLite、PostgreSQL、Feishu、Agently、MCP 或
    任何具体模块实现。
+9. Context 内容必须以不可变 Reference、digest、audience 和 expiry 约束；
+   引用不是内容，读取失败或不匹配必须失败关闭。Context 是不可信证据，不能
+   提升消费者 Authority 或变更其角色与协议。
 
 ## 3. 注册与动态会话
 
@@ -283,6 +286,8 @@ Handoff，只等待辅助 Handoff 的类型化终态后继续推理。
 首个实现是独立 Feishu Capability Provider，动态声明
 `feishu.message.send` 与 `feishu.document.create/read/update/append/delete`。
 同一部署把 `feishu.document.context` 作为另一个 `context-provider` 发布。
+同一个 Context Citizen 还可以动态声明 `feishu.conversation.context`；
+“一个 Citizen 只有一个 kind”不等于“一个 Citizen 只能声明一种 Context”。
 Provider 内部拥有 OpenAPI、幂等执行、资源所有权、revision 校验与错误映射；
 Agent、Core 和 Channel 看不到密钥或厂商响应。删除需由独立 Governance
 确认服务提供并原子消费单次 proof。
@@ -297,6 +302,14 @@ Citizen 或声明而获得执行权限。
 `capability-provider` 返回事实，不生成对话答复；`decision-body` 解释事实并
 独占最终文案；`channel` 只投递 canonical Result。一个进程可以共同托管这些
 Runtime，但不会合并 Citizen 身份、Authority、状态或职责。
+
+Channel 需要外部会话历史时，只依赖中立的
+`ConversationContextMaterializer` 端口；具体 Context Provider 由部署组合根
+注入。Provider 负责读取、过滤、来源、边界和确定性 digest，Exchange 持久化
+Context Bundle，Agent Runtime 通过公共 SDK 按精确引用和 audience 读取，
+Decision Body 才负责语义理解。这样既允许同一飞书部署同时承担 Channel、
+Capability Provider 和 Context Provider，又不会把三个逻辑 Citizen 的身份、
+租约、Authority、状态与职责合并。
 
 ## 9. 新模块接入清单
 

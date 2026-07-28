@@ -24,6 +24,7 @@ const SELF_SUBSCRIPTION_ACTIONS = new Set([
   "workfabric.subscription.stream.v1",
   "workfabric.subscription.ack.v1",
 ]);
+const CONTEXT_CONTENT_ACTION = "workfabric.context.content.read.v1";
 const TARGETED_HANDOFF_ACTIONS = new Set([
   "workfabric.query.handoff.read.v1",
   "workfabric.handoff.accept.v1",
@@ -180,6 +181,12 @@ export class AgentRuntimeAuthorityPolicy implements AuthorityPolicy {
     const resourceId = ownData(request, "resource_id");
     if (selfEndpointAllowed(action, resourceId, grant)) return ALLOW;
     if (typeof action === "string" && SELF_SUBSCRIPTION_ACTIONS.has(action) && resourceId === grant.subscription_id) return ALLOW;
+    // This is only the route-level permission for an exact registered Runtime.
+    // ContextRepository remains the resource-level authority and verifies
+    // tenant, exact reference/digest, Actor, Endpoint and expiry.
+    if (action === CONTEXT_CONTENT_ACTION && boundedIdentifier(resourceId)) {
+      return ALLOW;
+    }
     if (typeof action !== "string" || !boundedIdentifier(resourceId)
       || (
         !TARGETED_HANDOFF_ACTIONS.has(action)

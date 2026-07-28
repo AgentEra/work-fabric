@@ -10,7 +10,7 @@
 |---|---|---|
 | 团队共享助理 | `decision-body` | 理解请求、选择是否调用能力、解释事实、生成最终中文回复 |
 | 飞书动作 Provider | `capability-provider` | 消息发送和简单文档操作、OpenAPI、幂等、所有权、revision、错误映射 |
-| 飞书文档 Context | `context-provider` | 按 Authority 返回有界文档内容与 provenance |
+| 飞书 Context Provider | `context-provider` | 按 Authority 返回有界文档内容或会话历史与 provenance |
 | 确认服务 | `governance-provider` | 发放、确认并单次消费绑定的删除 proof |
 | 飞书协作通道 | `channel` | 入站表示、会话路由和 canonical Result 投递 |
 
@@ -35,8 +35,10 @@ feishu.document.append
 feishu.document.delete
 ```
 
-Context Provider 独立发布 `feishu.document.context`。每个声明含版本、风险、
-确认要求、输入/输出 Schema URI 和不可漂移 digest。YAML 不枚举这些能力；
+Context Provider 独立发布 `feishu.document.context` 和
+`feishu.conversation.context`。前者读取文档，后者读取并筛选触发消息之前的
+有界 chat/thread 历史。每个声明含版本、风险、确认要求、输入/输出 Schema
+URI 和不可漂移 digest。YAML 不枚举这些能力；
 它只启用部署、绑定身份、引用凭据、选择状态实现并设置资源上限。声明成功也
 不产生调用 Authority。
 
@@ -236,6 +238,7 @@ create/read/update/append，保留 Handoff 委托与 operation scope 检查，�
 |---|---|
 | 接收群内 `@机器人` | 订阅 `im.message.receive_v1`；开启“接收群聊中 @ 机器人消息事件” |
 | 接收机器人单聊 | 开启“读取用户发给机器人的单聊消息” |
+| 会话历史 Context | 开启 `im:message` 或 `im:message:readonly`；群历史另需 `im:message.group_msg`；机器人需在目标群内，应用可用范围需覆盖相关用户 |
 | `feishu.message.send` | 开启“以应用的身份发消息”；机器人需在目标群内，用户需在应用可用范围 |
 | 文档 create/read/update/append | 开启对应 Docx 创建、读取和编辑权限；技术调用身份必须能访问资源，同时代理用户必须通过原生 ACL 检查 |
 | 文档 delete | 开启云空间文件删除能力；代码仍额外限制为同租户、同 Citizen/Endpoint 创建且经确认的文档 |
@@ -263,6 +266,8 @@ create/read/update/append，保留 Handoff 委托与 operation scope 检查，�
   revision/Authority 错误不重试。
 - 外部结果不确定时返回 `external_outcome_unknown`，不能猜测成功。
 - Provider Result 是惰性 JSON 事实，不是可执行指令，也不会直接发到聊天。
+- 会话 Context 同样是惰性、不可信的历史证据；Provider 只负责读取、过滤、
+  provenance、确定性 digest 和边界，不总结、不决定、不生成最终回复。
 
 ## 7. 本地整套启动
 
@@ -338,6 +343,17 @@ URL；`offered`、`accepted`、Citizen ID 和 Handoff ID 不作为聊天回复�
 Console 可选，仅用于观察 Handoff/Delivery/Operations，不参与连接、认领、
 调用或回复。
 
+验证会话 Context 与能力调用协同时，可以先发送两条普通消息，再发送：
+
+```text
+@机器人 总结上面的消息，并创建一份“本地联调需求”飞书文档
+```
+
+本地示例默认读取触发前 24 小时、最多 20 条、最多 64 KiB 的历史。当前触发
+消息不会重复进入 Context。预期 Agent 的唯一回复同时包含历史摘要和创建后的
+文档 URL；摘要来自 Agent，文档事实来自 Capability Provider，Channel 只负责
+投递 canonical Result。
+
 若创建失败，依次确认：
 
 1. 飞书应用已发布含 Docx 创建、读取和编辑权限的新版本并完成管理员审批；
@@ -367,7 +383,9 @@ npm run typecheck
 TypeScript SDK、Citizen session、Gateway 和 Host 完成整条参考闭环；飞书
 OpenAPI 只在 Provider 边界替换为测试 backend。
 `local-stack.e2e.test.ts` 进一步启动真实 Agently Python Worker 与飞书长连接
-Channel，验证一次 `@机器人` 消息恰好创建一个文档，第二轮 Agent 只返回一条
-含文档 URL 的语义回复，并拒绝把 Handoff 状态码当作聊天内容。真实飞书
+Channel，验证触发前历史被筛选、持久化并经 Authority 解析给 Agent，一次
+`@机器人` 消息恰好创建一个文档，第二轮 Agent 只返回一条同时包含摘要和文档
+URL 的语义回复，并拒绝把当前触发消息、Handoff 状态码或内部引用当作聊天
+内容。真实飞书
 smoke test 应使用专用测试策略落点，只删除本次测试创建且仍由当前 Provider
 管理的文档。

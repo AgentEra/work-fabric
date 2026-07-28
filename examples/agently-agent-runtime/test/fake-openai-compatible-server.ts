@@ -67,6 +67,25 @@ export async function startFakeOpenAiCompatibleServer(
     const output = options.structuredOutputs?.[
       Math.min(requests.length - 1, options.structuredOutputs.length - 1)
     ] ?? options.structuredOutput;
+    const parsedPayload = JSON.parse(payload) as { stream?: unknown };
+    if (parsedPayload.stream !== true) {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({
+        id: "chatcmpl-work-fabric-test",
+        object: "chat.completion",
+        created: 0,
+        model: "fake-work-fabric-model",
+        choices: [{
+          index: 0,
+          message: {
+            role: "assistant",
+            content: JSON.stringify(output),
+          },
+          finish_reason: "stop",
+        }],
+      }));
+      return;
+    }
     const event = JSON.stringify({
       id: "chatcmpl-work-fabric-test",
       object: "chat.completion",

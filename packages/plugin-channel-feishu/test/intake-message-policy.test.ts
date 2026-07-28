@@ -154,7 +154,7 @@ describe("FeishuIntakeMessagePolicy", () => {
             context_id: expect.stringMatching(/^context_unavailable_/),
             version: 1,
             items: [{
-              kind: "fact",
+              kind: "data",
               data: {
                 fact: "context_unavailable",
                 code: "feishu_history_unavailable",

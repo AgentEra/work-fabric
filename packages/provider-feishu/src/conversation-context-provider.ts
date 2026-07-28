@@ -240,7 +240,7 @@ function bundleWithoutDigest(
     created_at: request.triggered_at,
     items: [
       {
-        kind: "fact",
+        kind: "data",
         schema_ref: "urn:work-fabric:schema:conversation-history-fact:1",
         data: {
           fact,
@@ -396,7 +396,7 @@ export class FeishuConversationContextProvider
         code: "conversation_context_cancelled",
       };
     }
-    const selected = result.items
+    const eligible = result.items
       .flatMap((item) => {
         const value = selectedMessage(item, request, triggerTime);
         return value === null ? [] : [value];
@@ -404,10 +404,10 @@ export class FeishuConversationContextProvider
       .sort((left, right) =>
         Date.parse(left.created_at) - Date.parse(right.created_at) ||
         left.message_id.localeCompare(right.message_id)
-      )
-      .slice(-request.policy.maximum_messages);
+      );
+    const selected = eligible.slice(-request.policy.maximum_messages);
     let retained = [...selected];
-    let truncated = selected.length < result.items.length;
+    let truncated = selected.length < eligible.length;
     let bundle = finalBundle(bundleWithoutDigest(request, retained, truncated));
     while (
       retained.length > 0 &&

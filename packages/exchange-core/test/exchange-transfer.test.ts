@@ -89,7 +89,7 @@ const contextBundle: JsonObject = {
   visibility_scope: {
     actor_ids: ["actor_child"],
     endpoint_ids: ["endpoint_child"],
-    expires_at: "2026-07-16T00:00:00Z",
+    expires_at: "2026-08-16T00:00:00Z",
   },
   digest: { algorithm: "sha-256", value: "child-context-digest" },
   extensions: {},

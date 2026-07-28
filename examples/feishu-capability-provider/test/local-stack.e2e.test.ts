@@ -48,7 +48,7 @@ afterEach(async () => {
 });
 
 describe("local Feishu assistant stack", () => {
-  it("creates one dynamically placed document under delegated native access and returns one Agent-authored semantic reply", async () => {
+  it("materializes prior Feishu messages, creates one document, and returns one Agent-authored semantic reply", async () => {
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-full-stack-"));
     directories.push(directory);
     const model = await startFakeOpenAiCompatibleServer({
@@ -70,8 +70,8 @@ describe("local Feishu assistant stack", () => {
         reason: "用户明确要求创建共享文档",
       }, {
         turn_type: "final",
-        request_summary: "飞书文档已创建",
-        response: "已创建《本地联调需求》：https://feishu.example/docx/doc-local-1",
+        request_summary: "已总结历史并创建飞书文档",
+        response: "你上面提到了项目范围和交付日期；已创建《本地联调需求》：https://feishu.example/docx/doc-local-1",
         invocation_id: "",
         capability_id: "",
         version_constraint: "",
@@ -114,6 +114,11 @@ describe("local Feishu assistant stack", () => {
     });
 
     const sent: Record<string, unknown>[] = [];
+    const historyQueries: string[] = [];
+    const documentAuthorizations: Array<{
+      readonly represented_actor_id: string;
+      readonly operation: string;
+    }> = [];
     const handoffIds: string[] = [];
     const workerObservations: AgentlyProcessDriverObservation[] = [];
     let documentsCreated = 0;
@@ -200,7 +205,75 @@ describe("local Feishu assistant stack", () => {
           data: { document_revision_id: 2 },
         });
       }
-      if (url.pathname === "/open-apis/im/v1/messages") {
+      if (
+        request.method === "GET" &&
+        url.pathname === "/open-apis/im/v1/messages"
+      ) {
+        historyQueries.push(url.toString());
+        return Response.json({
+          code: 0,
+          data: {
+            items: [{
+              message_id: "om-full-stack-1",
+              msg_type: "text",
+              create_time: "1784073600000",
+              update_time: "1784073600000",
+              deleted: false,
+              updated: false,
+              chat_id: "oc-original",
+              sender: {
+                id: "ou-human",
+                id_type: "open_id",
+                sender_type: "user",
+                tenant_key: "tenant-key",
+              },
+              body: {
+                content: JSON.stringify({
+                  text: "@_user_1 总结上面的消息，并创建一份本地联调需求文档",
+                }),
+              },
+            }, {
+              message_id: "om-history-scope",
+              msg_type: "text",
+              create_time: "1784070000000",
+              update_time: "1784070000000",
+              deleted: false,
+              updated: false,
+              chat_id: "oc-original",
+              sender: {
+                id: "ou-human",
+                id_type: "open_id",
+                sender_type: "user",
+                tenant_key: "tenant-key",
+              },
+              body: {
+                content: JSON.stringify({ text: "项目范围是飞书协作接入" }),
+              },
+            }, {
+              message_id: "om-history-delivery",
+              msg_type: "text",
+              create_time: "1784066400000",
+              update_time: "1784066400000",
+              deleted: false,
+              updated: false,
+              chat_id: "oc-original",
+              sender: {
+                id: "ou-human",
+                id_type: "open_id",
+                sender_type: "user",
+                tenant_key: "tenant-key",
+              },
+              body: {
+                content: JSON.stringify({ text: "交付日期定在本周五" }),
+              },
+            }],
+          },
+        });
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname === "/open-apis/im/v1/messages"
+      ) {
         sent.push(JSON.parse(await request.clone().text()) as Record<string, unknown>);
         return Response.json({
           code: 0,
@@ -266,8 +339,10 @@ describe("local Feishu assistant stack", () => {
       }, environment, feishuFetch, {
         document_access: {
           async authorize(input) {
-            expect(input.represented_actor_id).toBe("actor-feishu-user");
-            expect(input.operation).toBe("create");
+            documentAuthorizations.push({
+              represented_actor_id: input.represented_actor_id,
+              operation: input.operation,
+            });
             return {
               decision: "allow",
               evidence_ref: "native-acl-e2e-1",
@@ -356,7 +431,7 @@ describe("local Feishu assistant stack", () => {
             chat_type: "group",
             message_type: "text",
             content: JSON.stringify({
-              text: "@_user_1 创建一份本地联调需求文档",
+              text: "@_user_1 总结上面的消息，并创建一份本地联调需求文档",
             }),
             mentions: [{
               key: "@_user_1",
@@ -441,6 +516,47 @@ describe("local Feishu assistant stack", () => {
           /handoff-|State:|offered|accepted/,
         );
       }, 20_000);
+      expect(historyQueries).toHaveLength(1);
+      expect(documentAuthorizations).toHaveLength(1);
+      expect(documentAuthorizations[0]).toEqual({
+        represented_actor_id: expect.stringMatching(/^actor_admission_/),
+        operation: "create",
+      });
+      const historyQuery = new URL(historyQueries[0]!);
+      expect(Object.fromEntries(historyQuery.searchParams)).toMatchObject({
+        container_id_type: "chat",
+        container_id: "oc-original",
+        sort_type: "ByCreateTimeDesc",
+        page_size: "20",
+      });
+      const originalHandoff = await agentClient.queries.getHandoff(
+        handoffIds[0]!,
+      );
+      const contextReference = originalHandoff.state.package.context;
+      expect(contextReference).not.toBeNull();
+      if (contextReference === null) throw new Error("expected ContextReference");
+      const resolvedContext = await agentClient.queries.getContextBundle({
+        contextId: contextReference.context_id,
+        version: contextReference.version,
+        digest: contextReference.digest,
+      });
+      const messageIds = (resolvedContext.items as readonly JsonObject[])
+        .flatMap((item) => {
+          const data = item.data;
+          if (data === null || typeof data !== "object" || Array.isArray(data)) {
+            return [];
+          }
+          return typeof data.message_id === "string"
+            ? [data.message_id]
+            : [];
+        });
+      expect(messageIds).toEqual([
+        "om-history-delivery",
+        "om-history-scope",
+      ]);
+      expect(messageIds).not.toContain("om-full-stack-1");
+      expect(JSON.stringify(resolvedContext)).toContain("项目范围是飞书协作接入");
+      expect(JSON.stringify(resolvedContext)).toContain("交付日期定在本周五");
     } finally {
       await agent?.host.close().catch(() => undefined);
       await provider?.close().catch(() => undefined);

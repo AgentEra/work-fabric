@@ -155,6 +155,68 @@ Feishu transport trust -> durable ingress -> Admission -> representation grant
 
 外部 Intake Agent 使用正常 Work Fabric SDK/Agent Gateway 接受 Handoff，理解文本，向需求系统写入需求，并通过 `reportStatus`、`returnResult` 等公共操作回报状态。需求系统调用和 Agent 推理始终在 Work Fabric 外部。
 
+### 6.1 为 Agent 提供有界会话上下文
+
+需要支持“总结上面的消息”时，可以在 Channel 实例中启用会话 Context：
+
+```yaml
+conversation_context:
+  enabled: true
+  lookback_seconds: 86400
+  maximum_messages: 20
+  maximum_bytes: 65536
+
+inbound:
+  delegation:
+    scopes:
+      - work:read
+      - conversation:read
+```
+
+群聊使用触发消息之前的最近一段 chat history；飞书话题消息优先使用该
+thread 的历史。当前触发消息、未来消息、已删除消息、跨会话记录、不支持的
+消息类型和非法内容都不会进入 Context。结果按时间正序排列，并同时受时间、
+条数、序列化字节数和原 Handoff 委托期限约束。配置项缺省时保持禁用，以兼容
+已有部署；显式启用但省略三个上限时采用上面的默认值。
+
+实现边界保持为三个独立职责：
+
+```text
+Feishu Channel -> ConversationContextMaterializer（中立端口）
+               -> Feishu Context Provider（读取、筛选、来源和摘要事实）
+               -> Exchange Context Bundle / Reference
+               -> Agent Runtime（按引用、digest、Actor、Endpoint、期限读取）
+               -> Decision Body（理解上下文并独占最终答复）
+```
+
+Channel 只请求 Context，不导入具体 Provider 实现；具体装配仅发生在
+`service-node` 组合根。Context Provider 返回的是不可信历史证据，不是
+Prompt、指令或长期记忆，不能改变 Agent 角色、Authority、可用能力、验收条件
+或输出协议。Agent Runtime 无法按精确引用读取、digest 不一致、访问者不在
+audience 中或 Context 已过期时，整个执行失败关闭，不会把引用当作内容。
+
+飞书历史读取临时失败会让 durable ingress 进入原有有界重试；永久不可用会
+生成明确的 `context_unavailable` 数据事实，Agent 可以据此向用户说明上下文
+不可用，但 Channel 不代写语义答复。Context 内容通过统一
+`GET /v1/contexts/{context_id}/versions/{version}?digest=...` 和 TypeScript
+SDK `queries.getContextBundle(...)` 读取，不为 UI、Agent 或其他调用方设置
+私有旁路。
+
+除原有消息事件权限外，应用身份还必须开通 `im:message` 或
+`im:message:readonly`；读取群聊历史还需要
+`im:message.group_msg`。机器人必须在目标群中，应用可用范围必须覆盖相关
+用户。权限变更后需要发布新应用版本并完成管理员审批。可以用下面的消息验证
+语义：
+
+```text
+第一条：项目范围是飞书协作接入
+第二条：交付日期定在本周五
+@机器人 总结上面的消息
+```
+
+预期机器人只回复一条由助理 Agent 生成的摘要；聊天中不应出现 Context ID、
+Handoff ID、`offered` 或 `accepted` 等内部状态。
+
 ## 7. 从 `identities` 迁移
 
 现有 `identities` 仍是兼容 Adapter，适合小型、固定映射部署，但它把 allowlist 和 Actor/Endpoint 分配耦合在插件配置中。迁移步骤：

@@ -21,6 +21,37 @@ and repository verification are implemented.
 | 9 | Source-neutral Collaboration Admission and participant representation | Complete |
 | 10 | Network Citizen catalog, leased declarations and runtime foundation | Complete |
 | 11 | Agent capability invocation and Feishu Capability/Context Provider | Complete |
+| 12 | Authorized bounded conversation context for Agent handoffs | Complete |
+
+## Phase 12 completion boundary
+
+Phase 12 lets an external Channel attach bounded, provider-owned conversation
+evidence to a Handoff without moving semantic reasoning, memory, or work
+execution into Work Fabric. The Feishu reference reads either the current
+thread or a bounded pre-trigger chat window, excludes the triggering message,
+future/deleted/cross-conversation/unsupported records, orders retained evidence
+chronologically, and enforces time, count, byte and delegation-expiry limits.
+
+The Channel depends only on a neutral `ConversationContextMaterializer` port.
+The Feishu Context Citizen dynamically declares both document and conversation
+contexts; concrete wiring exists only in the deployment composition root.
+Exchange stores an immutable Context Bundle and exposes it through the common
+HTTP/TypeScript SDK query surface. Agent Runtime resolution verifies tenant,
+exact version and digest, Actor/Endpoint audience and expiry before passing the
+bundle as untrusted historical evidence to the external decision body.
+
+Temporary provider failures retain durable ingress for bounded retry. Permanent
+unavailability produces an explicit inert data fact rather than fabricated
+history. Context cannot change role, Authority, available capabilities,
+acceptance criteria or output schema. The Agent remains the only source of
+semantic replies; Capability Providers return typed facts and the Channel only
+delivers the canonical Result.
+
+The full-stack release gate proves: prior Feishu messages -> Context Bundle ->
+authorized Agent read -> Agent summary -> one dynamically discovered document
+capability call -> one created document -> one Agent-authored reply containing
+both the summary and document URL. The current trigger is absent from Context,
+and no Handoff state code or internal reference is sent to chat.
 
 ## Phase 11 completion boundary
 

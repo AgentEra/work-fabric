@@ -116,6 +116,7 @@ async def test_runner_safely_reports_execution_errors_without_secret_or_prompt()
     assert secret not in stdout.getvalue()
     assert secret not in stderr.getvalue()
     assert "private prompt" not in stderr.getvalue()
+    assert "RuntimeError" in stderr.getvalue()
 
 
 @pytest.mark.asyncio

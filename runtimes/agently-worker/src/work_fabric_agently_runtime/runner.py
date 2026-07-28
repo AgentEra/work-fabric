@@ -123,8 +123,10 @@ async def run(
         return 0
     except asyncio.CancelledError:
         raise
-    except Exception:
-        safe_message = "Agently worker execution failed"
+    except Exception as error:
+        # Preserve a bounded, data-free failure class for operations without
+        # copying exception messages, prompts, model output, or credentials.
+        safe_message = f"Agently worker execution failed ({type(error).__name__})"
         for secret in secrets:
             safe_message = safe_message.replace(secret, "[REDACTED]")
         _diagnostic(stderr, safe_message)

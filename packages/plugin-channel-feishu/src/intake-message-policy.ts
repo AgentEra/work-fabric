@@ -86,7 +86,7 @@ function unavailableBundle(input: {
     version: 1,
     created_at: input.created_at,
     items: [{
-      kind: "fact",
+      kind: "data",
       schema_ref: "urn:work-fabric:schema:context-availability-fact:1",
       data: {
         fact: "context_unavailable",

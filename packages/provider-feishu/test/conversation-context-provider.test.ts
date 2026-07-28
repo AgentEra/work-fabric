@@ -128,11 +128,12 @@ describe("FeishuConversationContextProvider", () => {
         },
         items: [
           {
-            kind: "fact",
+            kind: "data",
             data: {
               fact: "conversation_history",
               source_mode: "chat",
               selected_message_count: 2,
+              truncated: false,
             },
           },
           {
@@ -269,7 +270,7 @@ describe("FeishuConversationContextProvider", () => {
       kind: "materialized",
       bundle: {
         items: [{
-          kind: "fact",
+          kind: "data",
           data: {
             fact: "empty_history",
             selected_message_count: 0,

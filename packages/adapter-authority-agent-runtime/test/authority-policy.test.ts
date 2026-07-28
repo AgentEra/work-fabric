@@ -243,6 +243,29 @@ describe("AgentRuntimeAuthorityPolicy", () => {
     }))).resolves.toMatchObject({ kind: "deny" });
   });
 
+  it("permits a registered Runtime to request bounded Context content while repository audience remains authoritative", async () => {
+    const policy = new AgentRuntimeAuthorityPolicy([grant], store());
+
+    await expect(policy.authorize(request({
+      action: "workfabric.context.content.read.v1",
+      resource_id: "context_feishu_01",
+    }))).resolves.toEqual({ kind: "allow" });
+    await expect(policy.authorize(request({
+      action: "workfabric.context.content.read.v1",
+      resource_id: "",
+    }))).resolves.toMatchObject({ kind: "deny" });
+    await expect(policy.authorize(request({
+      action: "workfabric.context.content.read.v1",
+      resource_id: "context_feishu_01",
+      delegation_id: "forged-delegation",
+    }))).resolves.toMatchObject({ kind: "deny" });
+    await expect(policy.authorize(request({
+      action: "workfabric.context.content.read.v1",
+      resource_id: "context_feishu_01",
+      principal: { ...principal, actor_claims: [] },
+    }))).resolves.toMatchObject({ kind: "deny" });
+  });
+
   it("allows an Agent to resolve and track only its own auxiliary Capability Handoff", async () => {
     const pending = initiatedCapabilitySnapshot("handoff-aux-pending");
     const offered = initiatedCapabilitySnapshot("handoff-aux-offered", "offered");
