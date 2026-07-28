@@ -431,6 +431,8 @@ git commit -m "feat(feishu): add bounded conversation history client"
 ### Task 5: Feishu Conversation Context Provider
 
 **Files:**
+- Create: `packages/channel-spi/src/conversation-context-materializer.ts`
+- Modify: `packages/channel-spi/src/index.ts`
 - Create: `packages/provider-feishu/src/conversation-context-provider.ts`
 - Create: `packages/provider-feishu/test/conversation-context-provider.test.ts`
 - Modify: `packages/provider-feishu/src/declarations.ts`
@@ -441,6 +443,8 @@ git commit -m "feat(feishu): add bounded conversation history client"
 
 **Interfaces:**
 - Consumes: `FeishuConversationApi`.
+- The provider-neutral materializer port lives in `channel-spi`; this keeps the
+  Channel from depending on the concrete Feishu Provider package.
 - Produces:
 
 ```ts

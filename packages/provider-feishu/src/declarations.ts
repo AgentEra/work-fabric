@@ -161,6 +161,71 @@ const DEFINITIONS = Object.freeze({
     document_token: documentToken,
     deleted_at: { type: "string", minLength: 1 },
   }),
+  messageConversationContextInput: objectSchema([
+    "tenant_id",
+    "provider_family",
+    "external_tenant_id",
+    "conversation_id",
+    "trigger_message_id",
+    "triggered_at",
+    "represented_actor_id",
+    "recipient_actor_id",
+    "recipient_endpoint_id",
+    "delegation_id",
+    "delegation_scopes",
+    "delegation_expires_at",
+    "policy",
+  ], {
+    tenant_id: { type: "string", minLength: 1, maxLength: 128 },
+    provider_family: { const: "feishu" },
+    external_tenant_id: { type: "string", minLength: 1, maxLength: 255 },
+    conversation_id: { type: "string", minLength: 1, maxLength: 255 },
+    trigger_message_id: { type: "string", minLength: 1, maxLength: 255 },
+    thread_id: { type: "string", minLength: 1, maxLength: 255 },
+    root_message_id: { type: "string", minLength: 1, maxLength: 255 },
+    triggered_at: { type: "string", format: "date-time" },
+    represented_actor_id: { type: "string", minLength: 1, maxLength: 128 },
+    recipient_actor_id: { type: "string", minLength: 1, maxLength: 128 },
+    recipient_endpoint_id: { type: "string", minLength: 1, maxLength: 128 },
+    delegation_id: { type: "string", minLength: 1, maxLength: 128 },
+    delegation_scopes: {
+      type: "array",
+      maxItems: 100,
+      items: { type: "string", minLength: 1, maxLength: 512 },
+    },
+    delegation_expires_at: { type: "string", format: "date-time" },
+    policy: objectSchema([
+      "lookback_seconds", "maximum_messages", "maximum_bytes",
+    ], {
+      lookback_seconds: {
+        type: "integer", minimum: 60, maximum: 604_800,
+      },
+      maximum_messages: { type: "integer", minimum: 1, maximum: 50 },
+      maximum_bytes: {
+        type: "integer", minimum: 1_024, maximum: 131_072,
+      },
+    }),
+  }),
+  messageConversationContextOutput: objectSchema([
+    "context_id",
+    "version",
+    "created_at",
+    "items",
+    "visibility_scope",
+    "extensions",
+    "digest",
+  ], {
+    context_id: { type: "string", minLength: 1, maxLength: 128 },
+    version: { const: 1 },
+    created_at: { type: "string", format: "date-time" },
+    items: { type: "array", maxItems: 51, items: { type: "object" } },
+    visibility_scope: { type: "object" },
+    extensions: { type: "object" },
+    digest: objectSchema(["algorithm", "value"], {
+      algorithm: { const: "sha-256" },
+      value: { type: "string", pattern: "^[a-f0-9]{64}$" },
+    }),
+  }),
 });
 
 function capability(input: {
@@ -249,20 +314,47 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
 }
 
 export function feishuContextDeclarations(): readonly CitizenDeclaration[] {
-  return Object.freeze([Object.freeze({
-    declaration_id: "feishu.document.context",
-    declaration_kind: "context",
-    version: "2.0.0",
-    name: "Feishu document context",
-    description: "Resolve one authorized Docx as bounded simple content.",
-    input_schema: schema("documentReadInput", DEFINITIONS.documentReadInput),
-    output_schema: schema("documentReadOutput", DEFINITIONS.documentReadOutput),
-    interaction_modes: ["synchronous"] as const,
-    risk: "low",
-    confirmation: "none",
-    constraints: { maximum_content_bytes: 131_072 },
-    extensions: {},
-  })]);
+  return Object.freeze([
+    Object.freeze({
+      declaration_id: "feishu.document.context",
+      declaration_kind: "context",
+      version: "2.0.0",
+      name: "Feishu document context",
+      description: "Resolve one authorized Docx as bounded simple content.",
+      input_schema: schema("documentReadInput", DEFINITIONS.documentReadInput),
+      output_schema: schema("documentReadOutput", DEFINITIONS.documentReadOutput),
+      interaction_modes: ["synchronous"] as const,
+      risk: "low",
+      confirmation: "none",
+      constraints: { maximum_content_bytes: 131_072 },
+      extensions: {},
+    }),
+    Object.freeze({
+      declaration_id: "feishu.conversation.context",
+      declaration_kind: "context",
+      version: "1.0.0",
+      name: "Feishu conversation context",
+      description:
+        "Resolve authorized bounded Feishu conversation history as immutable context.",
+      input_schema: schema(
+        "messageConversationContextInput",
+        DEFINITIONS.messageConversationContextInput,
+      ),
+      output_schema: schema(
+        "messageConversationContextOutput",
+        DEFINITIONS.messageConversationContextOutput,
+      ),
+      interaction_modes: ["synchronous"] as const,
+      risk: "low",
+      confirmation: "none",
+      constraints: {
+        maximum_content_bytes: 131_072,
+        maximum_messages: 50,
+        provider_output: "typed_context_only",
+      },
+      extensions: {},
+    }),
+  ]);
 }
 
 export function feishuSchemaDocuments(): ReadonlyMap<string, unknown> {

@@ -209,6 +209,13 @@ describe("Feishu Capability Provider", () => {
         declaration_id: "feishu.document.context",
         declaration_kind: "context",
       },
+      {
+        declaration_id: "feishu.conversation.context",
+        declaration_kind: "context",
+        version: "1.0.0",
+        risk: "low",
+        confirmation: "none",
+      },
     ]);
   });
 

@@ -104,6 +104,6 @@ describe("Feishu Network Citizen runtimes", () => {
       { document: { document_token: "doc-1" } },
       new AbortController().signal,
     )).toMatchObject({ document_token: "doc-1" });
-    expect(client.openSession.mock.calls[0]?.[1].declarations).toHaveLength(1);
+    expect(client.openSession.mock.calls[0]?.[1].declarations).toHaveLength(2);
   });
 });

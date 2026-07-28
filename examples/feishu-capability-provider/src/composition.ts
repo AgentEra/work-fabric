@@ -14,6 +14,10 @@ import type {
   DocumentAccessAuthorizer,
   DocumentPlacementResolver,
 } from "@work-fabric/document-provider-spi";
+import type {
+  ConversationContextMaterializer,
+  ConversationContextRequest,
+} from "@work-fabric/channel-spi";
 import {
   FeishuOpenApiClient,
   FeishuTenantAccessTokenProvider,
@@ -28,6 +32,7 @@ import {
   FeishuCapabilityCitizenRuntime,
   FeishuCapabilityExecutor,
   FeishuCapabilityExecutorPortAdapter,
+  FeishuConversationContextProvider,
   FeishuContextCitizenRuntime,
   FeishuDocumentContextProvider,
   FeishuOpenApiCapabilityBackend,
@@ -266,11 +271,39 @@ function runtimeContext(
   };
 }
 
-function contextRequest(
-  provider: FeishuDocumentContextProvider,
+interface FeishuContextProviders {
+  readonly document: {
+    read(
+      input: Parameters<FeishuDocumentContextProvider["read"]>[0],
+    ): ReturnType<FeishuDocumentContextProvider["read"]>;
+  };
+  readonly conversation: ConversationContextMaterializer;
+}
+
+export async function resolveFeishuContextRequest(
+  providers: FeishuContextProviders,
   request: CitizenJsonObject,
   signal: AbortSignal,
 ): Promise<CitizenJsonObject> {
+  if (request.declaration_id === "feishu.conversation.context") {
+    const input =
+      request.input !== null &&
+      typeof request.input === "object" &&
+      !Array.isArray(request.input)
+        ? request.input
+        : null;
+    if (input === null) {
+      throw new TypeError("Feishu conversation context request is invalid");
+    }
+    const result = await providers.conversation.materialize(
+      input as unknown as ConversationContextRequest,
+      signal,
+    );
+    if (result.kind !== "materialized") {
+      throw new Error(result.code);
+    }
+    return result.bundle as CitizenJsonObject;
+  }
   const authority =
     request.authority !== null &&
     typeof request.authority === "object" &&
@@ -289,7 +322,7 @@ function contextRequest(
     authority.delegation_scopes.some((item) => typeof item !== "string") ||
     typeof authority.delegation_expires_at !== "string"
   ) throw new TypeError("Feishu context request is invalid");
-  return provider.read({
+  return providers.document.read({
     tenant_id: request.tenant_id,
     document: request.document as { readonly resource_uri: string },
     max_bytes: request.max_bytes as number,
@@ -374,6 +407,10 @@ export async function composeFeishuProvider(
     backend,
     document_access: resolvedDocumentServices.document_access,
   });
+  const conversationContext = new FeishuConversationContextProvider({
+    api: messages,
+    credential_ref: loaded.provider.credential_ref,
+  });
   const client = new WorkFabricClient({
     baseUrl: loaded.service.work_fabric.base_url,
     tenantId: loaded.service.work_fabric.tenant_id,
@@ -405,7 +442,10 @@ export async function composeFeishuProvider(
       loaded.provider.context_citizen.registration_version,
     declarations: feishuContextDeclarations,
     resolve: (request, signal) =>
-      contextRequest(documentContext, request, signal),
+      resolveFeishuContextRequest({
+        document: documentContext,
+        conversation: conversationContext,
+      }, request, signal),
   });
   const capabilities = feishuCapabilityDeclarations().map((declaration) =>
     capabilityDescriptor(

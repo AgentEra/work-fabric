@@ -66,7 +66,14 @@ describe("Feishu document Contract v2", () => {
     expect(declarations.find((item) =>
       item.declaration_id === "feishu.message.send"
     )?.version).toBe("1.0.0");
-    const schemas = JSON.stringify([...feishuSchemaDocuments().values()]);
+    const documents = feishuSchemaDocuments();
+    const documentSchemaUris = declarations
+      .filter((item) => item.declaration_id.startsWith("feishu.document."))
+      .flatMap((item) => [item.input_schema?.uri, item.output_schema?.uri])
+      .filter((uri): uri is string => uri !== undefined);
+    const schemas = JSON.stringify(
+      documentSchemaUris.map((uri) => documents.get(uri)),
+    );
     expect(schemas).toContain("resource_uri");
     expect(schemas).toContain("policy_ref");
     expect(schemas).not.toMatch(

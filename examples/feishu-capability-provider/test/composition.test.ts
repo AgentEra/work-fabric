@@ -1,8 +1,62 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { ManagedFeishuProviderComposition } from "../src/composition.js";
+import {
+  ManagedFeishuProviderComposition,
+  resolveFeishuContextRequest,
+} from "../src/composition.js";
 
 describe("ManagedFeishuProviderComposition", () => {
+  it("routes the conversation declaration to the conversation provider without changing document context", async () => {
+    const bundle = {
+      context_id: "context-feishu-1",
+      version: 1,
+      items: [],
+      visibility_scope: {
+        actor_ids: ["actor-assistant-1"],
+        endpoint_ids: ["endpoint-assistant-1"],
+        expires_at: "2026-07-28T13:00:00.000Z",
+      },
+      digest: { algorithm: "sha-256", value: "abc" },
+      extensions: {},
+    };
+    const materialize = vi.fn(async () => ({
+      kind: "materialized" as const,
+      bundle,
+    }));
+    const documentRead = vi.fn();
+    const input = {
+      tenant_id: "tenant-1",
+      provider_family: "feishu",
+      external_tenant_id: "tenant-key-1",
+      conversation_id: "oc-chat-1",
+      trigger_message_id: "om-trigger",
+      triggered_at: "2026-07-28T12:00:00.000Z",
+      represented_actor_id: "actor-human-1",
+      recipient_actor_id: "actor-assistant-1",
+      recipient_endpoint_id: "endpoint-assistant-1",
+      delegation_id: "delegation-1",
+      delegation_scopes: ["conversation:read"],
+      delegation_expires_at: "2026-07-28T13:00:00.000Z",
+      policy: {
+        lookback_seconds: 86_400,
+        maximum_messages: 20,
+        maximum_bytes: 65_536,
+      },
+    };
+    const signal = new AbortController().signal;
+
+    await expect(resolveFeishuContextRequest({
+      document: { read: documentRead },
+      conversation: { materialize },
+    }, {
+      declaration_id: "feishu.conversation.context",
+      input,
+    }, signal)).resolves.toEqual(bundle);
+
+    expect(materialize).toHaveBeenCalledWith(input, signal);
+    expect(documentRead).not.toHaveBeenCalled();
+  });
+
   it("starts Citizens and Handoff Host without a configured document container", async () => {
     const calls: string[] = [];
     const composition = new ManagedFeishuProviderComposition({
