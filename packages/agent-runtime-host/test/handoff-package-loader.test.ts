@@ -12,7 +12,7 @@ const snapshot: HandoffReadModel = {
     verifier: { actor_id: "human-1", actor_type: "human" }, current_responsible_actor: null,
     target_binding: null, active_claim: null, claim_fencing_token: 0,
     package: {
-      work_reference: { uri: "work://1" }, target: { actor_id: "actor-1" }, intent: [{ type: "text", text: "Summarize" }], context: { context_id: "context-1", version: 1, digest: "sha256:abc" },
+      work_reference: { uri: "work://1" }, target: { actor_id: "actor-1" }, intent: [{ type: "text", text: "Summarize" }], context: null,
       authority_scope: { delegation_id: "delegation-1", scopes: ["handoff.read"], resource_refs: ["handoff-1"], expires_at: "2026-07-27T00:00:00.000Z", may_redelegate: false },
       acceptance_criteria: [], verifier: { actor_id: "human-1", actor_type: "human" }, priority: "normal", accept_by: "2026-07-27T00:00:00.000Z", result_due_at: "2026-07-28T00:00:00.000Z",
     }, result: null, parent_handoff_id: null, child_handoff_id: null, created_at: "2026-07-26T00:00:00.000Z", updated_at: "2026-07-26T00:00:00.000Z",
@@ -24,6 +24,40 @@ const snapshotPackage = snapshot.state as unknown as {
 
 function event(sequence: number): ProtocolEvent {
   return { specversion: "1.0", id: `event-${sequence}`, source: "urn:test", type: "workfabric.handoff.offered.v1", subject: "handoff-1", time: "2026-07-26T00:00:00.000Z", datacontenttype: "application/json", dataschema: "urn:test", wftenant: "tenant-1", wfexchange: "exchange-1", wfthread: "thread-1", wfhandoff: "handoff-1", wfactor: "actor-1", wfendpoint: "endpoint-1", wfsequence: sequence, wfvisibility: "participants", data: { arbitrary: "provenance only" } };
+}
+
+const contextBundle = {
+  context_id: "context-1",
+  version: 1,
+  created_at: "2026-07-26T00:00:00.000Z",
+  items: [{
+    kind: "data",
+    schema_ref: "urn:work-fabric:schema:conversation-message:1",
+    data: { message_id: "message-prior", text: "Prior message" },
+  }],
+  visibility_scope: {
+    actor_ids: ["actor-1"],
+    endpoint_ids: ["endpoint-1"],
+    expires_at: "2026-07-27T00:00:00.000Z",
+  },
+  digest: { algorithm: "sha-256", value: "abc" },
+  extensions: {},
+};
+
+function withContext(digest: string | null = "sha-256:abc"): HandoffReadModel {
+  const value = structuredClone(snapshot) as unknown as {
+    state: { package: { context: {
+      context_id: string;
+      version: number;
+      digest: string | null;
+    } } };
+  };
+  value.state.package.context = {
+    context_id: "context-1",
+    version: 1,
+    digest,
+  };
+  return value as unknown as HandoffReadModel;
 }
 
 describe("HandoffPackageLoader", () => {
@@ -100,18 +134,90 @@ describe("HandoffPackageLoader", () => {
     await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).rejects.toThrow("event_sequence");
   });
 
-  it("keeps an authorized absent Context as metadata without materializing it", async () => {
-    const withoutContext = structuredClone(snapshot) as unknown as { state: { package: { context: null } } };
-    withoutContext.state.package.context = null;
-    const client = { getHandoff: vi.fn(async () => withoutContext as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
-    await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).resolves.toMatchObject({ task: { context_reference: null } });
+  it("keeps an absent Context explicit without querying for a body", async () => {
+    const client = {
+      getHandoff: vi.fn(async () => structuredClone(snapshot)),
+      getContextBundle: vi.fn(),
+      listHandoffEvents: vi.fn(async () => [event(1), event(2)]),
+    };
+    await expect(
+      new HandoffPackageLoader(
+        client,
+        "tenant-1",
+        role,
+        () => "2026-07-26T12:00:00.000Z",
+      ).load("handoff-1", "/workspace/t1/h1"),
+    ).resolves.toMatchObject({
+      task: { context_reference: null, resolved_context: null },
+    });
+    expect(client.getContextBundle).not.toHaveBeenCalled();
   });
 
-  it("accepts a public Context reference whose digest is unavailable", async () => {
-    const unavailableDigest = structuredClone(snapshot) as unknown as { state: { package: { context: { digest: null } } } };
-    unavailableDigest.state.package.context.digest = null;
-    const client = { getHandoff: vi.fn(async () => unavailableDigest as unknown as HandoffReadModel), listHandoffEvents: vi.fn(async () => [event(1), event(2)]) };
-    await expect(new HandoffPackageLoader(client, "tenant-1", role, () => "2026-07-26T12:00:00.000Z").load("handoff-1", "/workspace/t1/h1")).resolves.toMatchObject({ task: { context_reference: { digest: null } } });
+  it("resolves and freezes the exact referenced Context body", async () => {
+    const source = structuredClone(contextBundle);
+    const client = {
+      getHandoff: vi.fn(async () => withContext()),
+      getContextBundle: vi.fn(async () => source),
+      listHandoffEvents: vi.fn(async () => [event(1), event(2)]),
+    };
+    const loaded = await new HandoffPackageLoader(
+      client,
+      "tenant-1",
+      role,
+      () => "2026-07-26T12:00:00.000Z",
+    ).load("handoff-1", "/workspace/t1/h1");
+
+    expect(client.getContextBundle).toHaveBeenCalledWith({
+      contextId: "context-1",
+      version: 1,
+      digest: "sha-256:abc",
+    }, {});
+    expect(loaded.task).toMatchObject({
+      context_reference: {
+        context_id: "context-1",
+        version: 1,
+        digest: "sha-256:abc",
+      },
+      resolved_context: contextBundle,
+    });
+    source.items.length = 0;
+    expect((loaded.task.resolved_context as { items: unknown[] }).items).toHaveLength(1);
+    expect(Object.isFrozen(loaded.task.resolved_context)).toBe(true);
+  });
+
+  it("rejects unavailable or mismatched referenced Context before execution", async () => {
+    const unavailable = {
+      getHandoff: vi.fn(async () => withContext()),
+      getContextBundle: vi.fn(async () => {
+        throw new Error("404 context_unavailable");
+      }),
+      listHandoffEvents: vi.fn(async () => [event(1), event(2)]),
+    };
+    await expect(
+      new HandoffPackageLoader(
+        unavailable,
+        "tenant-1",
+        role,
+        () => "2026-07-26T12:00:00.000Z",
+      ).load("handoff-1", "/workspace/t1/h1"),
+    ).rejects.toThrow("context_unavailable");
+
+    const mismatched = {
+      getHandoff: vi.fn(async () => withContext()),
+      getContextBundle: vi.fn(async () => ({
+        ...structuredClone(contextBundle),
+        context_id: "context-other",
+      })),
+      listHandoffEvents: vi.fn(async () => [event(1), event(2)]),
+    };
+    await expect(
+      new HandoffPackageLoader(
+        mismatched,
+        "tenant-1",
+        role,
+        () => "2026-07-26T12:00:00.000Z",
+      ).load("handoff-1", "/workspace/t1/h1"),
+    ).rejects.toThrow("context_unavailable");
   });
 
   it("rejects non-JSON values and returns detached frozen public values", async () => {

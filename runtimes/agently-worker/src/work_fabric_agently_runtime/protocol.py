@@ -156,7 +156,7 @@ def _validate_role(value: object) -> dict[str, JsonValue]:
 def _validate_task(value: object) -> dict[str, JsonValue]:
     fields = (
         "tenant_id", "handoff_id", "thread_id", "stream_version", "role", "capability_id",
-        "intent", "context_reference", "authority_scope", "acceptance_criteria", "priority",
+        "intent", "context_reference", "resolved_context", "authority_scope", "acceptance_criteria", "priority",
         "accept_by", "result_due_at", "workspace_path",
     )
     task = _exact_object(value, fields, "task")
@@ -174,6 +174,8 @@ def _validate_task(value: object) -> dict[str, JsonValue]:
             _fail(f"task.{key} is invalid")
     if task["context_reference"] is not None and not isinstance(task["context_reference"], dict):
         _fail("task.context_reference is invalid")
+    if task["resolved_context"] is not None and not isinstance(task["resolved_context"], dict):
+        _fail("task.resolved_context is invalid")
     if not isinstance(task["authority_scope"], dict):
         _fail("task.authority_scope is invalid")
     safe_task = _json_object(task, "task")

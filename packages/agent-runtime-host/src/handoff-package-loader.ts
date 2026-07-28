@@ -1,5 +1,12 @@
 import type { AgentRoleProfile, RuntimeJsonObject, RuntimeTaskPackage } from "@work-fabric/agent-runtime-spi";
-import type { HandoffEventQuery, HandoffReadModel, ProtocolEvent, RequestOptions } from "@work-fabric/sdk-typescript";
+import type {
+  ContextReferenceInput,
+  HandoffEventQuery,
+  HandoffReadModel,
+  JsonObject,
+  ProtocolEvent,
+  RequestOptions,
+} from "@work-fabric/sdk-typescript";
 
 import { invalid } from "./errors.js";
 import { compareRfc3339, normalizeRfc3339, parseRfc3339 } from "./rfc3339.js";
@@ -7,6 +14,10 @@ import { cloneFrozenJson } from "./safe-json.js";
 
 export interface RuntimeHandoffQueries {
   getHandoff(id: string, options?: RequestOptions): Promise<HandoffReadModel>;
+  getContextBundle?(
+    reference: ContextReferenceInput,
+    options?: RequestOptions,
+  ): Promise<JsonObject>;
   listHandoffEvents(id: string, options?: HandoffEventQuery): Promise<readonly ProtocolEvent[]>;
 }
 
@@ -148,6 +159,39 @@ function context(value: unknown, path: string): RuntimeJsonObject | null {
   return item as RuntimeJsonObject;
 }
 
+function normalizedBundleDigest(value: unknown, path: string): string | null {
+  if (value === null) return null;
+  const item = record(value, path);
+  exact(item, ["algorithm", "value"], path);
+  if (
+    typeof item.algorithm !== "string" ||
+    !["sha-256", "sha-384", "sha-512"].includes(item.algorithm) ||
+    typeof item.value !== "string" ||
+    item.value.length === 0
+  ) invalid("context_unavailable", path);
+  return `${item.algorithm}:${item.value}`;
+}
+
+function resolvedContext(
+  value: unknown,
+  reference: RuntimeJsonObject,
+): RuntimeJsonObject {
+  const item = record(value, "resolved_context");
+  if (
+    item.context_id !== reference.context_id ||
+    item.version !== reference.version
+  ) invalid("context_unavailable", "resolved_context");
+  const actualDigest = normalizedBundleDigest(
+    item.digest,
+    "resolved_context.digest",
+  );
+  if (
+    reference.digest !== null &&
+    reference.digest !== actualDigest
+  ) invalid("context_unavailable", "resolved_context.digest");
+  return jsonObject(item, "resolved_context");
+}
+
 function authority(value: unknown, path: string, now: string): RuntimeJsonObject {
   const item = record(value, path);
   const allowed = ["delegation_id", "scopes", "resource_refs", "expires_at", "may_redelegate", "extensions"];
@@ -224,6 +268,19 @@ export class HandoffPackageLoader {
     jsonObject(handoffPackage.work_reference, "state.package.work_reference");
     const intent = objectArray(handoffPackage.intent, "state.package.intent", 128);
     const contextReference = context(handoffPackage.context, "state.package.context");
+    let resolvedContextValue: RuntimeJsonObject | null = null;
+    if (contextReference !== null) {
+      try {
+        const bundle = await this.queries.getContextBundle?.({
+          contextId: contextReference.context_id as string,
+          version: contextReference.version as number,
+          digest: contextReference.digest as string | null,
+        }, options.signal === undefined ? {} : { signal: options.signal });
+        resolvedContextValue = resolvedContext(bundle, contextReference);
+      } catch {
+        invalid("context_unavailable", "state.package.context");
+      }
+    }
     const authorityScope = authority(handoffPackage.authority_scope, "state.package.authority_scope", this.now());
     const acceptanceCriteria = criteria(handoffPackage.acceptance_criteria, "state.package.acceptance_criteria");
     actor(handoffPackage.verifier, "state.package.verifier");
@@ -233,7 +290,7 @@ export class HandoffPackageLoader {
       : timestamp(handoffPackage.accept_by, "state.package.accept_by");
     const resultDueAt = futureTimestamp(handoffPackage.result_due_at, "state.package.result_due_at", this.now());
     const events = await this.readEvents(handoffId, snapshot.stream_version, options.signal);
-    const task = cloneFrozenJson({ tenant_id: this.tenantId, handoff_id: handoffId, thread_id: threadId, stream_version: snapshot.stream_version, role: this.role, capability_id: this.capabilityId(handoffPackage.target), intent, context_reference: contextReference, authority_scope: authorityScope, acceptance_criteria: acceptanceCriteria, priority: handoffPackage.priority, accept_by: acceptBy, result_due_at: resultDueAt, workspace_path: workspacePath }, "task") as RuntimeTaskPackage;
+    const task = cloneFrozenJson({ tenant_id: this.tenantId, handoff_id: handoffId, thread_id: threadId, stream_version: snapshot.stream_version, role: this.role, capability_id: this.capabilityId(handoffPackage.target), intent, context_reference: contextReference, resolved_context: resolvedContextValue, authority_scope: authorityScope, acceptance_criteria: acceptanceCriteria, priority: handoffPackage.priority, accept_by: acceptBy, result_due_at: resultDueAt, workspace_path: workspacePath }, "task") as RuntimeTaskPackage;
     return Object.freeze({ snapshot, events, task });
   }
 

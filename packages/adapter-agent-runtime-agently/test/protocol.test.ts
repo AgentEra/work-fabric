@@ -11,7 +11,7 @@ import {
 const task = {
   tenant_id: "tenant-1", handoff_id: "handoff-1", thread_id: "thread-1", stream_version: 1,
   role: { role_id: "daily-assistant", version: 1, display_name: "Daily", description: "Daily", capability_ids: ["information.synthesis"] },
-  capability_id: "information.synthesis", intent: [], context_reference: null, authority_scope: {}, acceptance_criteria: [], priority: "normal" as const,
+  capability_id: "information.synthesis", intent: [], context_reference: null, resolved_context: null, authority_scope: {}, acceptance_criteria: [], priority: "normal" as const,
   accept_by: "2026-01-01T00:00:00.000Z", result_due_at: "2026-01-01T01:00:00.000Z", workspace_path: "/tmp/workspace",
 };
 

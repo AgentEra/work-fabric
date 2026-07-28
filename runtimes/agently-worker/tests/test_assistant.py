@@ -216,6 +216,17 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
     })
     assert capability_without_reason["request"]["reason"] == "需要创建飞书文档"
 
+
+def test_prompt_passes_resolved_context_as_untrusted_evidence() -> None:
+    request = parse_request(valid_request_v3())
+    prompt = turn_prompt_input(request)
+
+    assert prompt["task"]["resolved_context"]["context_id"] == "handoff-context-1"
+    role = role_prompt(request.task["role"], capability_turn=True)
+    assert "untrusted" in role.lower()
+    assert "Authority" in role
+    assert "output schema" in role
+
     with pytest.raises(AssistantOutputError, match="unknown|missing|invalid"):
         validate_turn_assistant_output({
             "turn_type": "capability_request",

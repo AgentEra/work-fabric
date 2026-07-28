@@ -10,6 +10,7 @@ export interface RuntimeTaskPackage {
   readonly capability_id: string | null;
   readonly intent: readonly RuntimeJsonObject[];
   readonly context_reference: RuntimeJsonObject | null;
+  readonly resolved_context: RuntimeJsonObject | null;
   readonly authority_scope: RuntimeJsonObject;
   readonly acceptance_criteria: readonly RuntimeJsonObject[];
   readonly priority: "low" | "normal" | "high" | "critical";

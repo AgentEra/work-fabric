@@ -46,6 +46,7 @@ function task(): RuntimeTaskPackage {
       },
     }],
     context_reference: null,
+    resolved_context: null,
     authority_scope: {
       delegation_id: "delegation-1",
       scopes: ["feishu.message.send"],

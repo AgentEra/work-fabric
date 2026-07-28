@@ -111,6 +111,7 @@ describe("AgentRuntimeHost", () => {
       capability_id: "collaboration.assistance",
       intent: [],
       context_reference: null,
+      resolved_context: null,
       authority_scope: {},
       acceptance_criteria: [],
       priority: "normal",

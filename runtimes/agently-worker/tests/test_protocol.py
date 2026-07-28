@@ -126,6 +126,20 @@ def test_rejects_secret_inside_task_json() -> None:
     with pytest.raises(ProtocolError, match="unknown"):
         parse_request(value)
 
+def test_request_requires_bounded_resolved_context() -> None:
+    value = valid_request()
+    parsed = parse_request(value)
+    assert parsed.task["resolved_context"]["context_id"] == "handoff-context-1"
+
+    del value["task"]["resolved_context"]
+    with pytest.raises(ProtocolError, match="unknown|missing"):
+        parse_request(value)
+
+    value = valid_request()
+    value["task"]["resolved_context"] = {"text": "x" * 131_073}
+    with pytest.raises(ProtocolError, match="bound"):
+        parse_request(value)
+
 
 def test_completed_record_requires_non_empty_summary() -> None:
     with pytest.raises(ProtocolError, match="summary"):

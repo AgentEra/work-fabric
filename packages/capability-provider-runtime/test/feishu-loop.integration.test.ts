@@ -189,6 +189,7 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
             capability_id: candidate.capability_id,
             intent: payload.intent,
             context_reference: null,
+            resolved_context: null,
             authority_scope: payload.authority_scope,
             acceptance_criteria: [],
             priority: "normal",
