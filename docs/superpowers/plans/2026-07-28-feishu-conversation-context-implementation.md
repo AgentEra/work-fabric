@@ -92,6 +92,9 @@ git commit -m "fix: stabilize citizen and Agently runtime sessions"
 - Modify: `packages/adapter-context-memory/src/memory-context-repository.ts`
 - Modify: `packages/adapter-context-memory/test/memory-context-repository.test.ts`
 - Modify: `packages/adapter-storage-sqlite/test/sqlite-supporting-stores.test.ts`
+- Modify: `packages/adapter-context-postgres/src/postgres-context-repository.ts`
+- Modify: `packages/adapter-context-postgres/test/postgres-context-repository.test.ts`
+- Modify: `packages/exchange-conformance/test/adapter-profiles.test.ts`
 
 **Interfaces:**
 - Consumes: existing `ContextReference`, `ContextAccessRequest`, immutable `putBundle`.
@@ -109,7 +112,7 @@ interface ContextRepository {
 
 - [ ] **Step 1: Write failing memory-repository tests**
 
-Add tests proving `readBundle`:
+Add Memory and PostgreSQL tests proving `readBundle`:
 
 ```ts
 await expect(repository.readBundle({
@@ -154,7 +157,8 @@ Run:
 ```bash
 npx vitest run \
   packages/adapter-context-memory/test/memory-context-repository.test.ts \
-  packages/adapter-storage-sqlite/test/sqlite-supporting-stores.test.ts
+  packages/adapter-storage-sqlite/test/sqlite-supporting-stores.test.ts \
+  packages/adapter-context-postgres/test/postgres-context-repository.test.ts
 ```
 
 Expected: all focused tests pass.
@@ -165,7 +169,10 @@ Expected: all focused tests pass.
 git add packages/exchange-spi/src/context.ts \
   packages/adapter-context-memory/src/memory-context-repository.ts \
   packages/adapter-context-memory/test/memory-context-repository.test.ts \
-  packages/adapter-storage-sqlite/test/sqlite-supporting-stores.test.ts
+  packages/adapter-storage-sqlite/test/sqlite-supporting-stores.test.ts \
+  packages/adapter-context-postgres \
+  packages/exchange-conformance/test/adapter-profiles.test.ts \
+  docs/superpowers/plans/2026-07-28-feishu-conversation-context-implementation.md
 git commit -m "feat(context): add authorized bundle reads"
 ```
 

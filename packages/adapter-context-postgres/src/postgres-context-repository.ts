@@ -5,6 +5,7 @@ import type {
   CapabilityManifest,
   ContextAccessRequest,
   ContextAvailability,
+  ContextReadResult,
   ContextReference,
   ContextRepository,
   JsonObject,
@@ -65,6 +66,73 @@ export class PostgresContextRepository implements ContextRepository {
       const row = result.rows[0]; if (row === undefined) return { kind: "unavailable", reason: "Context version was not found" };
       const storedDigest = row.digest == null ? null : String(row.digest); if (candidate.reference?.digest !== null && candidate.reference?.digest !== storedDigest) return { kind: "unavailable", reason: "Context digest does not match" }; const expiresAt = row.expires_at == null ? null : String(row.expires_at); if (expiresAt !== null && compareUtcTimestamps(expiresAt, new Date().toISOString()) <= 0) return { kind: "unavailable", reason: "Context has expired" };
       const actorIds = rowJson<readonly string[]>(row.actor_ids); const endpointIds = rowJson<readonly string[]>(row.endpoint_ids); if (actorIds.length === 0 && endpointIds.length === 0) return { kind: "unavailable", reason: "Context declares no audience" }; if (actorIds.length > 0 && !actorIds.includes(candidate.actor_id)) return { kind: "unavailable", reason: "Actor is outside the Context audience" }; if (endpointIds.length > 0 && !endpointIds.includes(candidate.endpoint_id)) return { kind: "unavailable", reason: "Endpoint is outside the Context audience" }; return { kind: "available" };
+    });
+  }
+
+  async readBundle(request: ContextAccessRequest): Promise<ContextReadResult> {
+    const candidate = clone(request);
+    id(candidate.tenant_id, "tenant_id");
+    id(candidate.actor_id, "actor_id");
+    id(candidate.endpoint_id, "endpoint_id");
+    if (candidate.reference === null) {
+      return { kind: "unavailable", reason: "Context reference is required" };
+    }
+    id(candidate.reference.context_id, "context_id");
+    version(candidate.reference.version);
+    return this.run(candidate.tenant_id, async (client) => {
+      const result = await client.query<Record<string, unknown>>(
+        "SELECT bundle,digest,expires_at,actor_ids,endpoint_ids FROM work_fabric_context_bundles WHERE tenant_id=$1 AND context_id=$2 AND version=$3",
+        [
+          candidate.tenant_id,
+          candidate.reference?.context_id,
+          candidate.reference?.version,
+        ],
+      );
+      const row = result.rows[0];
+      if (row === undefined) {
+        return { kind: "unavailable", reason: "Context version was not found" };
+      }
+      const storedDigest = row.digest == null ? null : String(row.digest);
+      if (
+        candidate.reference?.digest !== null &&
+        candidate.reference?.digest !== storedDigest
+      ) {
+        return { kind: "unavailable", reason: "Context digest does not match" };
+      }
+      const expiresAt = row.expires_at == null ? null : String(row.expires_at);
+      if (
+        expiresAt !== null &&
+        compareUtcTimestamps(expiresAt, new Date().toISOString()) <= 0
+      ) {
+        return { kind: "unavailable", reason: "Context has expired" };
+      }
+      const actorIds = rowJson<readonly string[]>(row.actor_ids);
+      const endpointIds = rowJson<readonly string[]>(row.endpoint_ids);
+      if (actorIds.length === 0 && endpointIds.length === 0) {
+        return { kind: "unavailable", reason: "Context declares no audience" };
+      }
+      if (
+        actorIds.length > 0 &&
+        !actorIds.includes(candidate.actor_id)
+      ) {
+        return {
+          kind: "unavailable",
+          reason: "Actor is outside the Context audience",
+        };
+      }
+      if (
+        endpointIds.length > 0 &&
+        !endpointIds.includes(candidate.endpoint_id)
+      ) {
+        return {
+          kind: "unavailable",
+          reason: "Endpoint is outside the Context audience",
+        };
+      }
+      return {
+        kind: "available",
+        bundle: rowJson<JsonObject>(row.bundle),
+      };
     });
   }
 }

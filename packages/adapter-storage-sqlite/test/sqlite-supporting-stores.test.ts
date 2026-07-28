@@ -145,12 +145,32 @@ describe("SQLite supporting stores", () => {
 
     const secondSession = new SqliteSession({ location });
     migrateSqlite(secondSession);
-    await expect(createSqliteContextStore(secondSession, "tenant-local").checkAvailability({
+    const reopenedContext = createSqliteContextStore(
+      secondSession,
+      "tenant-local",
+    );
+    const contextAccess = {
       tenant_id: "tenant-local",
       actor_id: "actor-local",
       endpoint_id: "endpoint-local",
       reference: { context_id: "context-local", version: 1, digest: null },
-    })).resolves.toEqual({ kind: "available" });
+    };
+    await expect(reopenedContext.checkAvailability(contextAccess)).resolves.toEqual({
+      kind: "available",
+    });
+    await expect(reopenedContext.readBundle(contextAccess)).resolves.toEqual({
+      kind: "available",
+      bundle: {
+        context_id: "context-local",
+        version: 1,
+        digest: null,
+        visibility_scope: {
+          actor_ids: ["actor-local"],
+          endpoint_ids: ["endpoint-local"],
+        },
+        chunks: [],
+      },
+    });
     await expect(createSqliteConnectorIngressStore(
       secondSession,
       "tenant-local",

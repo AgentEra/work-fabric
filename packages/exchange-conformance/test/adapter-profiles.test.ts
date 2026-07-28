@@ -204,6 +204,20 @@ class ContextTestAdapter implements ContextRepository {
     }
     return { kind: "available" };
   }
+
+  async readBundle(
+    request: ContextAccessRequest,
+  ): Promise<
+    | { readonly kind: "available"; readonly bundle: JsonObject }
+    | { readonly kind: "unavailable"; readonly reason: string }
+  > {
+    const availability = await this.checkAvailability(request);
+    if (availability.kind === "unavailable") return availability;
+    if (request.reference === null || this.bundle === null) {
+      return { kind: "unavailable", reason: "missing Context" };
+    }
+    return { kind: "available", bundle: structuredClone(this.bundle) };
+  }
 }
 
 function signalAdapter(

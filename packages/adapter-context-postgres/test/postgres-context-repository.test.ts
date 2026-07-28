@@ -35,4 +35,49 @@ describe("PostgresContextRepository", () => {
     client.responses = [{ rows: [{ digest: "sha-256:abc", actor_ids: ["actor_01"], endpoint_ids: ["endpoint_01"] }], rowCount: 1 }];
     await expect(repository.checkAvailability({ tenant_id: "tenant_01", actor_id: "actor_01", endpoint_id: "endpoint_01", reference: { context_id: "context_01", version: 1, digest: "sha-384:wrong" } })).resolves.toMatchObject({ kind: "unavailable" });
   });
+
+  it("returns the stored body only after exact digest and audience checks", async () => {
+    const client = new FakeClient();
+    const repository = new PostgresContextRepository(() => new Session(client));
+    const request = {
+      tenant_id: "tenant_01",
+      actor_id: "actor_01",
+      endpoint_id: "endpoint_01",
+      reference: {
+        context_id: "context_01",
+        version: 1,
+        digest: "sha-256:abc",
+      },
+    };
+    client.responses = [{
+      rows: [{
+        bundle,
+        digest: "sha-256:abc",
+        expires_at: null,
+        actor_ids: ["actor_01"],
+        endpoint_ids: ["endpoint_01"],
+      }],
+      rowCount: 1,
+    }];
+
+    const result = await repository.readBundle(request);
+    expect(result).toEqual({ kind: "available", bundle });
+    if (result.kind !== "available") throw new Error("expected bundle");
+    (result.bundle.extensions as { state: string }).state = "mutated-output";
+
+    client.responses = [{
+      rows: [{
+        bundle,
+        digest: "sha-256:abc",
+        expires_at: null,
+        actor_ids: ["actor_01"],
+        endpoint_ids: ["endpoint_01"],
+      }],
+      rowCount: 1,
+    }];
+    await expect(repository.readBundle(request)).resolves.toEqual({
+      kind: "available",
+      bundle,
+    });
+  });
 });
