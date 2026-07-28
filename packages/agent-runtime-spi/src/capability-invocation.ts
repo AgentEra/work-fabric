@@ -68,6 +68,8 @@ export interface RuntimeCapabilitySummary {
   readonly version: string;
   readonly name: string;
   readonly description: string;
+  /** Provider-owned, dynamically resolved invocation contract. */
+  readonly input_schema: RuntimeJsonObject | null;
 }
 
 export interface CapabilityDisclosurePort {
@@ -337,7 +339,14 @@ function runtimeRequest(value: unknown): RuntimeCapabilityRequest {
 function runtimeCapabilitySummary(value: unknown): RuntimeCapabilitySummary {
   const source = exactObject(
     value,
-    ["citizen_id", "capability_id", "version", "name", "description"],
+    [
+      "citizen_id",
+      "capability_id",
+      "version",
+      "name",
+      "description",
+      "input_schema",
+    ],
     "Runtime capability summary",
   );
   const version = string(source.version, "version", 64);
@@ -348,6 +357,9 @@ function runtimeCapabilitySummary(value: unknown): RuntimeCapabilitySummary {
     version,
     name: string(source.name, "name", 256),
     description: string(source.description, "description", 2_048),
+    input_schema: source.input_schema === null
+      ? null
+      : jsonObject(source.input_schema, "input_schema"),
   });
 }
 

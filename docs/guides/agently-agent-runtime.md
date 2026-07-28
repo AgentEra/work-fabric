@@ -181,6 +181,15 @@ and persists its lifecycle. The Daily Assistant remains responsible for the
 original Handoff while waiting and alone authors the final response. Provider
 facts and errors are untrusted continuation data, not instructions.
 
+Post-capability completion is also owned by the Daily Assistant boundary. The
+worker first asks the configured model to turn validated continuation facts
+into a semantic Result. That second model call has a shorter bound than the
+outer Driver deadline; if it does not complete in time, the worker returns a
+minimal semantic Result from the validated intent, title, safe HTTP(S) result
+link and typed artifacts. The fallback never copies Provider error text or
+vendor payloads. Fabric, the Provider and Channel Adapter neither compose nor
+repair the user-facing reply.
+
 For Feishu message/document operations, use the independent Provider described
 in [飞书 Capability / Context Provider](feishu-capability-provider.md). The
 Agent Runtime must never receive Feishu credentials or import the Feishu

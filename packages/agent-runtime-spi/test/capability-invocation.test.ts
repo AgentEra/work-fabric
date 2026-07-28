@@ -127,6 +127,10 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create document",
       description: "Create one simple Docx document.",
+      input_schema: {
+        type: "object",
+        required: ["title", "content"],
+      },
     }]);
 
     expect(summaries).toEqual([{
@@ -135,6 +139,10 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create document",
       description: "Create one simple Docx document.",
+      input_schema: {
+        type: "object",
+        required: ["title", "content"],
+      },
     }]);
     expect(Object.isFrozen(summaries)).toBe(true);
     expect(Object.isFrozen(summaries[0])).toBe(true);
@@ -147,6 +155,7 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create",
       description: "Create.",
+      input_schema: null,
       folder_token: "secret",
     }], /fields/i],
     [Array.from({ length: 33 }, (_, index) => ({
@@ -155,6 +164,7 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create",
       description: "Create.",
+      input_schema: null,
     })), /bounded/i],
     [[{
       citizen_id: "provider",
@@ -162,6 +172,7 @@ describe("Agent capability invocation contracts", () => {
       version: "latest",
       name: "Create",
       description: "Create.",
+      input_schema: null,
     }], /version/i],
   ])("rejects unsafe capability summaries", (value, message) => {
     expect(() => validateRuntimeCapabilitySummaries(value)).toThrow(message);

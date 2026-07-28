@@ -76,6 +76,7 @@ export async function composeAgentRuntime(
         "A capability-aware Driver is required",
       );
     }
+    const schemaRegistry = new FeishuCapabilitySchemaRegistry();
     const capability = dependencies.capability ?? {
       authority: new LocalInvocationAuthorityProvider({
         tenant_id: loaded.service.work_fabric.tenant_id,
@@ -85,7 +86,7 @@ export async function composeAgentRuntime(
           loaded.service.capability_invocation.allowed_namespaces,
       }),
       schemas: new JsonSchemaInvocationValidator(
-        new FeishuCapabilitySchemaRegistry(),
+        schemaRegistry,
       ),
       waiter: new PollingAuxiliaryHandoffWaiter({
         queries: client.queries,
@@ -115,6 +116,7 @@ export async function composeAgentRuntime(
       turn_driver: dependencies.driver,
       capability_disclosure: new CatalogCapabilityDisclosure(
         client.citizens,
+        schemaRegistry,
       ),
       capability_invocations: invocations,
       capability_limits: {

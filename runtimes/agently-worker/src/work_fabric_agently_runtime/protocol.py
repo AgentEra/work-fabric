@@ -274,7 +274,14 @@ def _validate_available_capabilities(
     for index, candidate in enumerate(value):
         summary = _exact_object(
             candidate,
-            ("citizen_id", "capability_id", "version", "name", "description"),
+            (
+                "citizen_id",
+                "capability_id",
+                "version",
+                "name",
+                "description",
+                "input_schema",
+            ),
             f"available_capabilities[{index}]",
         )
         citizen_id = _string(
@@ -309,6 +316,14 @@ def _validate_available_capabilities(
                 summary["description"],
                 f"available_capabilities[{index}].description",
                 2_048,
+            ),
+            "input_schema": (
+                None
+                if summary["input_schema"] is None
+                else _json_object(
+                    summary["input_schema"],
+                    f"available_capabilities[{index}].input_schema",
+                )
             ),
         }
         identity = (citizen_id, capability_id, version)

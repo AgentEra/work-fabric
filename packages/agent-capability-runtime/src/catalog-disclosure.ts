@@ -5,6 +5,7 @@ import {
 } from "@work-fabric/agent-runtime-spi";
 
 import type { CapabilityDisclosureCatalogClient } from "./contracts.js";
+import type { InvocationSchemaRegistry } from "./contracts.js";
 
 const MAX_SUMMARIES = 32;
 const MAX_PAGES = 32;
@@ -33,7 +34,10 @@ function allowed(capabilityId: string, namespaces: readonly string[]): boolean {
 }
 
 export class CatalogCapabilityDisclosure implements CapabilityDisclosurePort {
-  constructor(private readonly catalog: CapabilityDisclosureCatalogClient) {}
+  constructor(
+    private readonly catalog: CapabilityDisclosureCatalogClient,
+    private readonly schemas?: InvocationSchemaRegistry,
+  ) {}
 
   async list(
     namespaces: readonly string[],
@@ -88,12 +92,32 @@ export class CatalogCapabilityDisclosure implements CapabilityDisclosurePort {
           throw new TypeError("Capability disclosure contains a duplicate");
         }
         identities.add(identity);
+        const contract = await this.catalog.getDeclaration(
+          descriptor.citizen_id,
+          declaration.declaration_id,
+          { signal },
+        );
+        if (
+          contract.declaration.declaration_kind !== "capability"
+          || contract.declaration.declaration_id !== declaration.declaration_id
+          || contract.declaration.version !== declaration.version
+        ) {
+          throw new TypeError("Capability disclosure contract changed");
+        }
+        const inputSchema = contract.declaration.input_schema === undefined
+          ? null
+          : this.schemas === undefined
+            ? null
+            : await this.schemas.load(contract.declaration.input_schema, signal);
         summaries.push({
           citizen_id: descriptor.citizen_id,
           capability_id: declaration.declaration_id,
           version: declaration.version,
           name: declaration.name,
           description: declaration.description,
+          input_schema: inputSchema === null
+            ? null
+            : inputSchema as RuntimeCapabilitySummary["input_schema"],
         });
         if (summaries.length > MAX_SUMMARIES) {
           throw new RangeError("Capability disclosure summary bound exceeded");

@@ -401,7 +401,7 @@ applications:
               executable: ./runtimes/agently-worker/.venv/bin/python
               module: work_fabric_agently_runtime
             workspace_root: ./var/agently-workspaces
-            execution_timeout_seconds: 900
+            execution_timeout_seconds: 300
             cancellation_grace_seconds: 10
             provider:
               type: OpenAICompatible

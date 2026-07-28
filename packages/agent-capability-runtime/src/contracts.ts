@@ -43,6 +43,11 @@ export interface CapabilityDisclosureCatalogClient {
     citizenId: string,
     options?: RequestOptions,
   ): Promise<CitizenDeclarationSummaryPage>;
+  getDeclaration(
+    citizenId: string,
+    declarationId: string,
+    options?: RequestOptions,
+  ): Promise<CitizenDeclarationContract>;
 }
 
 export interface BoundCapabilityContract {

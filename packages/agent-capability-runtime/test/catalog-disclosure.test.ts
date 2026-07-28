@@ -19,6 +19,37 @@ function descriptor(citizenId: string) {
   };
 }
 
+function contract(
+  citizenId: string,
+  declarationId = "feishu.document.create",
+  version = citizenId === "provider-a" ? "1.0.0" : "1.1.0",
+) {
+  return {
+    citizen_id: citizenId,
+    citizen_kind: "capability-provider" as const,
+    availability: "available" as const,
+    declaration: {
+      declaration_id: declarationId,
+      declaration_kind: "capability" as const,
+      version,
+      name: "Create document",
+      description: "Create one simple Docx document.",
+      input_schema: {
+        uri: "urn:test:document-create",
+        digest:
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" as const,
+      },
+      interaction_modes: ["asynchronous" as const],
+      risk: "medium" as const,
+      confirmation: "none" as const,
+      constraints: {},
+      extensions: {},
+    },
+    declaration_version: 1,
+    fencing_token: 1,
+  };
+}
+
 describe("CatalogCapabilityDisclosure", () => {
   it("returns only allowed capability summaries in deterministic order", async () => {
     const list = vi.fn(async () => ({
@@ -45,6 +76,8 @@ describe("CatalogCapabilityDisclosure", () => {
     const disclosure = new CatalogCapabilityDisclosure({
       list,
       listDeclarations,
+      getDeclaration: async (citizenId, declarationId) =>
+        contract(citizenId, declarationId),
     });
 
     const summaries = await disclosure.list(
@@ -65,6 +98,7 @@ describe("CatalogCapabilityDisclosure", () => {
         version: "1.0.0",
         name: "Create document",
         description: "Create one simple Docx document.",
+        input_schema: null,
       },
       {
         citizen_id: "provider-z",
@@ -72,11 +106,12 @@ describe("CatalogCapabilityDisclosure", () => {
         version: "1.1.0",
         name: "Create document",
         description: "Create one simple Docx document.",
+        input_schema: null,
       },
     ]);
     expect(Object.isFrozen(summaries)).toBe(true);
     expect(summaries[0]).not.toHaveProperty("endpoint_id");
-    expect(summaries[0]).not.toHaveProperty("input_schema");
+    expect(summaries[0]).toHaveProperty("input_schema", null);
     expect(summaries[0]).not.toHaveProperty("risk");
     expect(summaries[0]).not.toHaveProperty("folder_token");
   });
@@ -96,6 +131,9 @@ describe("CatalogCapabilityDisclosure", () => {
         };
         return { items: [item, item] };
       },
+      async getDeclaration(citizenId, declarationId) {
+        return contract(citizenId, declarationId, "1.0.0");
+      },
     });
     await expect(duplicate.list(
       ["feishu."],
@@ -113,6 +151,9 @@ describe("CatalogCapabilityDisclosure", () => {
       async listDeclarations() {
         return { items: [] };
       },
+      async getDeclaration(citizenId, declarationId) {
+        return contract(citizenId, declarationId);
+      },
     });
     await expect(overflow.list(
       ["feishu."],
@@ -129,11 +170,57 @@ describe("CatalogCapabilityDisclosure", () => {
       async listDeclarations() {
         return { items: [] };
       },
+      async getDeclaration(citizenId, declarationId) {
+        return contract(citizenId, declarationId);
+      },
     });
 
     await expect(disclosure.list(
       ["feishu."],
       new AbortController().signal,
     )).rejects.toBe(unavailable);
+  });
+
+  it("dynamically resolves the Provider-owned input schema", async () => {
+    const inputSchema = {
+      type: "object",
+      required: ["title", "content"],
+      properties: {
+        title: { type: "string" },
+        content: { type: "object" },
+      },
+    };
+    const disclosure = new CatalogCapabilityDisclosure({
+      async list() {
+        return { items: [descriptor("provider-a")] };
+      },
+      async listDeclarations() {
+        return {
+          items: [{
+            declaration_id: "feishu.document.create",
+            declaration_kind: "capability" as const,
+            version: "1.0.0",
+            name: "Create document",
+            description: "Create one simple Docx document.",
+          }],
+        };
+      },
+      async getDeclaration(citizenId, declarationId) {
+        return contract(citizenId, declarationId, "1.0.0");
+      },
+    }, {
+      async load(reference) {
+        expect(reference.uri).toBe("urn:test:document-create");
+        return inputSchema;
+      },
+    });
+
+    await expect(disclosure.list(
+      ["feishu."],
+      new AbortController().signal,
+    )).resolves.toMatchObject([{
+      capability_id: "feishu.document.create",
+      input_schema: inputSchema,
+    }]);
   });
 });

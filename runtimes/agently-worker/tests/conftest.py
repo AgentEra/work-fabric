@@ -58,6 +58,24 @@ def valid_request_v3() -> dict[str, Any]:
             "version": "1.0.0",
             "name": "Create document",
             "description": "Create one simple Docx document.",
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["title", "content"],
+                "properties": {
+                    "title": {"type": "string"},
+                    "content": {
+                        "type": "object",
+                        "required": ["media_type", "text"],
+                        "properties": {
+                            "media_type": {
+                                "enum": ["text/plain", "text/markdown"]
+                            },
+                            "text": {"type": "string"},
+                        },
+                    },
+                },
+            },
         }
     ]
     value["continuation"] = None

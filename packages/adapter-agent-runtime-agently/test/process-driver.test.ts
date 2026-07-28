@@ -61,6 +61,7 @@ describe("AgentlyProcessDriver", () => {
         version: "1.0.0",
         name: "Create document",
         description: "Create one simple Docx document.",
+        input_schema: null,
       }],
       null,
       async () => undefined,
@@ -87,6 +88,7 @@ describe("AgentlyProcessDriver", () => {
         version: "1.0.0",
         name: "Create document",
         description: "Create one simple Docx document.",
+        input_schema: null,
       }],
       {
         request: requested.request,

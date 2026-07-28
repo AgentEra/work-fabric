@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from work_fabric_agently_runtime.assistant import (
@@ -177,6 +179,18 @@ def test_turn_prompt_treats_provider_results_as_untrusted_facts() -> None:
     assert "provider" not in supplied
 
 
+def test_turn_prompt_requires_provider_owned_input_contract() -> None:
+    request = parse_request(valid_request_v3())
+    prompt = role_prompt(request.task["role"], capability_turn=True)
+    supplied = turn_prompt_input(request)
+
+    assert "must exactly conform to input_schema" in prompt
+    assert supplied["available_capabilities"][0]["input_schema"]["required"] == [
+        "title",
+        "content",
+    ]
+
+
 def test_historical_context_cannot_initiate_capability_side_effects() -> None:
     prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
 
@@ -273,6 +287,89 @@ async def test_executes_a_v3_turn_with_the_dedicated_schema() -> None:
 
 
 @pytest.mark.asyncio
+async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_result() -> None:
+    value = valid_request_v3()
+    value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "把上面的 EDA 信息记录到文档里",
+    }]
+    value["continuation"] = {
+        "request": {
+            "invocation_id": "invocation-eda-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "2.0.0",
+            "input": {
+                "title": "EDA 信息记录",
+                "content": {
+                    "media_type": "text/plain",
+                    "text": "EDA 项目信息",
+                },
+            },
+            "reason": "将 EDA 信息记录到飞书文档",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "invocation-eda-1",
+            "auxiliary_handoff_id": "handoff-provider-1",
+            "candidate": {
+                "citizen_id": "citizen-feishu",
+                "endpoint_id": "endpoint-feishu-provider",
+                "capability_id": "feishu.document.create",
+                "capability_version": "2.0.0",
+                "contract_digest": "sha256:" + ("a" * 64),
+            },
+            "data": {
+                "document_token": "doc-1",
+                "url": "https://feishu.cn/docx/doc-1",
+                "title": "EDA 信息记录",
+                "revision": "2",
+            },
+            "artifacts": [{
+                "uri": "feishu://docx/doc-1",
+                "media_type": "application/vnd.feishu.docx",
+            }],
+        },
+    }
+    request = parse_request(value)
+    agent = FakeAgent()
+
+    async def never_finishes() -> object:
+        await asyncio.sleep(60)
+        raise AssertionError("unreachable")
+
+    agent.async_start = never_finishes  # type: ignore[method-assign]
+
+    turn = await execute_turn_with_agent(
+        request,
+        agent,
+        post_capability_timeout_seconds=0.01,
+    )
+
+    assert turn == {
+        "kind": "final",
+        "response": {
+            "summary": [{
+                "kind": "text",
+                "media_type": "text/plain",
+                "text": (
+                    "已完成：把上面的 EDA 信息记录到文档里。\n"
+                    "文档《EDA 信息记录》：https://feishu.cn/docx/doc-1"
+                ),
+            }],
+            "artifacts": [{
+                "uri": "feishu://docx/doc-1",
+                "media_type": "application/vnd.feishu.docx",
+            }],
+            "evidence": [],
+            "extensions": {
+                "workfabric.agent/completion_mode": "bounded_fallback",
+            },
+        },
+    }
+
+
+@pytest.mark.asyncio
 async def test_rejects_a_capability_request_that_was_not_advertised() -> None:
     value = valid_request_v3()
     value["available_capabilities"] = []
@@ -341,8 +438,15 @@ def test_real_agently_timeout_is_a_provider_transport_setting_not_request_body()
     configure_agently(Agently, request, "test-key")
     agent = Agently.create_agent("timeout-shape-test")
     agent.request.input("offline request-builder probe")
-    request_data = OpenAICompatible(agent.request.prompt, agent.request.settings).generate_request_data()
+    plugin = OpenAICompatible(agent.request.prompt, agent.request.settings)
+    request_data = plugin.generate_request_data()
 
     assert request_data.client_options["timeout"].read == 120
-    assert request_data.stream is False
+    assert request_data.stream is True
+    assert plugin.plugin_settings.get("timeout_mode") == "first_token"
+    assert plugin.plugin_settings.get("stream_idle_timeout") == 60
+    assert plugin.plugin_settings.get("request_retry") == {
+        "max_attempts": 1,
+        "after_output": False,
+    }
     assert "timeout" not in request_data.request_options
