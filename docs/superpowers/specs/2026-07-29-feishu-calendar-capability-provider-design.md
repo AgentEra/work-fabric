@@ -442,6 +442,25 @@ The initial participant resolution policy supports:
 3. explicit Feishu user references already present in authorized structured
    context.
 
+The second case is an evidence chain, not a trust-by-copy rule. The Agent must
+pass the prior members-query auxiliary Handoff ID in the next capability
+request's `authority_evidence.capability_result_handoff_ids`. The local
+invocation Authority provider loads that Handoff through the public Query
+port and verifies all of the following before adding any returned user
+reference to `allowed_target_refs`:
+
+- it belongs to the same tenant and names the current original Handoff in its
+  canonical capability work-reference extension;
+- it invoked `feishu.conversation.members.list` through a bound declaration;
+- it reached a successful Capability Result; and
+- every requested user reference is present in that typed Result.
+
+An arbitrary user reference copied into model output or natural language
+therefore grants nothing. The evidence rule lives in the Agent-side Authority
+policy, while Message remains solely responsible for producing membership
+facts and Calendar remains solely responsible for calendar operations. No
+Message-to-Calendar dependency is introduced.
+
 Resolving arbitrary names such as “张三” into users belongs to a Directory
 Provider and is outside this phase.
 
