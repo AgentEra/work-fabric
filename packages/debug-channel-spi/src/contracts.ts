@@ -1,6 +1,7 @@
 import type {
   CapabilityManifest,
   ExchangeAdapter,
+  JsonObject,
   ProtocolEvent,
 } from "@work-fabric/exchange-spi";
 
@@ -57,6 +58,7 @@ export interface DebugCapture {
   readonly event_id: string;
   readonly destination_id: string;
   readonly event: ProtocolEvent;
+  readonly handoff_snapshot?: JsonObject;
   readonly captured_at: string;
   readonly expires_at: string;
 }

@@ -213,7 +213,7 @@ export function assertDebugCapture(
       "captured_at",
       "expires_at",
     ],
-    [],
+    ["handoff_snapshot"],
     "Debug capture",
   );
   boundedString(capture.tenant_id, "tenant_id", 128);
@@ -225,6 +225,16 @@ export function assertDebugCapture(
   assertProtocolEvent(capture.event);
   if (capture.event.id !== capture.event_id) {
     throw new TypeError("event_id does not match event.id");
+  }
+  if (capture.handoff_snapshot !== undefined) {
+    assertJsonValue(capture.handoff_snapshot, "handoff_snapshot");
+    if (
+      typeof capture.handoff_snapshot !== "object"
+      || capture.handoff_snapshot === null
+      || Array.isArray(capture.handoff_snapshot)
+    ) {
+      throw new TypeError("handoff_snapshot must be a JSON object");
+    }
   }
   timestamp(capture.captured_at, "captured_at");
   timestamp(capture.expires_at, "expires_at");
