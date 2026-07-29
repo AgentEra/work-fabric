@@ -33,16 +33,18 @@ export type FeishuProviderConfig = FeishuProviderBaseConfig & (
       readonly capability_citizen: FeishuProviderCitizenConfig;
       readonly message_citizen?: never;
       readonly document_citizen?: never;
+      readonly calendar_citizen?: never;
     }
   | {
       readonly capability_citizen?: never;
       readonly message_citizen: FeishuProviderFacetConfig;
       readonly document_citizen: FeishuProviderFacetConfig;
+      readonly calendar_citizen?: FeishuProviderFacetConfig;
     }
 );
 
 export interface EnabledFeishuProviderFacet {
-  readonly facet: "aggregate" | "message" | "document";
+  readonly facet: "aggregate" | "message" | "document" | "calendar";
   readonly citizen: FeishuProviderCitizenConfig;
 }
 
@@ -66,6 +68,12 @@ export function enabledFeishuProviderFacets(
       ? [Object.freeze({
           facet: "document" as const,
           citizen: config.document_citizen,
+        })]
+      : []),
+    ...(config.calendar_citizen?.enabled
+      ? [Object.freeze({
+          facet: "calendar" as const,
+          citizen: config.calendar_citizen,
         })]
       : []),
   ]);
@@ -165,12 +173,14 @@ export function validateFeishuProviderConfig(
     "capability_citizen",
     "message_citizen",
     "document_citizen",
+    "calendar_citizen",
     "context_citizen",
   ]);
   const hasLegacy = source.capability_citizen !== undefined;
   const hasMessageFacet = source.message_citizen !== undefined;
   const hasDocumentFacet = source.document_citizen !== undefined;
-  if (hasLegacy && (hasMessageFacet || hasDocumentFacet)) {
+  const hasCalendarFacet = source.calendar_citizen !== undefined;
+  if (hasLegacy && (hasMessageFacet || hasDocumentFacet || hasCalendarFacet)) {
     throw new TypeError(
       "legacy capability_citizen cannot be combined with Provider facets",
     );
@@ -251,21 +261,28 @@ export function validateFeishuProviderConfig(
   }
   const message = facet(source.message_citizen, "message_citizen");
   const document = facet(source.document_citizen, "document_citizen");
-  if (!message.enabled && !document.enabled) {
+  const calendar = source.calendar_citizen === undefined
+    ? undefined
+    : facet(source.calendar_citizen, "calendar_citizen");
+  if (!message.enabled && !document.enabled && !calendar?.enabled) {
     throw new TypeError("at least one Feishu Provider facet must be enabled");
   }
+  const enabledFacets = [message, document, calendar].filter(
+    (candidate): candidate is Extract<
+      FeishuProviderFacetConfig,
+      { readonly enabled: true }
+    > => candidate?.enabled === true,
+  );
   if (
-    message.enabled &&
-    document.enabled &&
-    message.citizen_id === document.citizen_id
+    new Set(enabledFacets.map((candidate) => candidate.citizen_id)).size !==
+      enabledFacets.length
   ) {
     throw new TypeError("enabled Feishu Provider facets have duplicate Citizen IDs");
   }
   const context = shared.context_citizen;
-  if (
-    (message.enabled && message.citizen_id === context.citizen_id) ||
-    (document.enabled && document.citizen_id === context.citizen_id)
-  ) {
+  if (enabledFacets.some((candidate) =>
+    candidate.citizen_id === context.citizen_id
+  )) {
     throw new TypeError("Feishu Provider Citizen IDs are duplicate");
   }
   if (message.enabled && shared.cursor_signing_key === undefined) {
@@ -277,5 +294,6 @@ export function validateFeishuProviderConfig(
     ...shared,
     message_citizen: message,
     document_citizen: document,
+    ...(calendar === undefined ? {} : { calendar_citizen: calendar }),
   });
 }

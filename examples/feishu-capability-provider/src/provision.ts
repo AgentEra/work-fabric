@@ -1,5 +1,6 @@
 import {
   enabledFeishuProviderFacets,
+  feishuCalendarCapabilityDeclarations,
   feishuCapabilityDeclarations,
   feishuContextDeclarations,
   feishuDocumentCapabilityDeclarations,
@@ -160,6 +161,8 @@ export async function provisionFeishuProvider(
           ? feishuMessageCapabilityDeclarations()
           : facet.facet === "document"
             ? feishuDocumentCapabilityDeclarations()
+            : facet.facet === "calendar"
+              ? feishuCalendarCapabilityDeclarations()
             : feishuCapabilityDeclarations(),
       }),
     ),

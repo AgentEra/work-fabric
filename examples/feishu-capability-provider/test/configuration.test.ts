@@ -128,6 +128,14 @@ describe("Feishu Provider configuration", () => {
       registration_version: 1,
     };
     provider.document_citizen = { enabled: false };
+    provider.calendar_citizen = {
+      enabled: true,
+      citizen_id: "citizen-feishu-calendar",
+      principal_id: "principal-feishu-provider",
+      actor_id: "actor-feishu-provider",
+      endpoint_id: "endpoint-feishu-provider",
+      registration_version: 1,
+    };
 
     const loaded = await loadFeishuProviderConfiguration({
       document: changed as never,
@@ -145,6 +153,10 @@ describe("Feishu Provider configuration", () => {
       citizen_id: "citizen-feishu-message",
     });
     expect(loaded.provider.document_citizen).toEqual({ enabled: false });
+    expect(loaded.provider.calendar_citizen).toMatchObject({
+      enabled: true,
+      citizen_id: "citizen-feishu-calendar",
+    });
   });
 
   it("requires exactly one enabled Feishu Provider instance", async () => {

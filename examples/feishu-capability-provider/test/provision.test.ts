@@ -38,6 +38,18 @@ describe("Feishu Provider provisioning", () => {
           declaration_id: "feishu.document.create",
           risk: "medium",
         }],
+      }, {
+        citizen: {
+          citizen_id: "citizen-calendar",
+          principal_id: "principal-provider",
+          actor_id: "actor-provider",
+          endpoint_id: "endpoint-provider",
+          registration_version: 3,
+        },
+        declarations: [{
+          declaration_id: "feishu.calendar.event.delete",
+          risk: "destructive",
+        }],
       }],
       context_citizen: {
         citizen_id: "citizen-context",
@@ -55,12 +67,13 @@ describe("Feishu Provider provisioning", () => {
       "endpoint-provider",
       expect.objectContaining({
         allowed_capability_ids: [
+          "feishu.calendar.event.delete",
           "feishu.document.create",
           "feishu.message.send",
         ],
       }),
     );
-    expect(citizens.provision).toHaveBeenCalledTimes(3);
+    expect(citizens.provision).toHaveBeenCalledTimes(4);
     expect(citizens.provision).toHaveBeenNthCalledWith(
       1,
       "citizen-message",
@@ -79,6 +92,14 @@ describe("Feishu Provider provisioning", () => {
     );
     expect(citizens.provision).toHaveBeenNthCalledWith(
       3,
+      "citizen-calendar",
+      expect.objectContaining({
+        citizen_kind: "capability-provider",
+        maximum_risk: "destructive",
+      }),
+    );
+    expect(citizens.provision).toHaveBeenNthCalledWith(
+      4,
       "citizen-context",
       expect.objectContaining({
         citizen_kind: "context-provider",

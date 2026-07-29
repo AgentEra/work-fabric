@@ -74,6 +74,13 @@ describe("ManagedFeishuProviderComposition", () => {
           health: vi.fn(async () => ({ status: "available" as const })),
           close: vi.fn(async () => { calls.push("document:close"); }),
         },
+      }, {
+        citizen_id: "citizen-calendar",
+        lifecycle: {
+          start: vi.fn(async () => { calls.push("calendar:start"); }),
+          health: vi.fn(async () => ({ status: "available" as const })),
+          close: vi.fn(async () => { calls.push("calendar:close"); }),
+        },
       }],
       context_citizen_id: "citizen-context",
       context_citizen: {
@@ -91,18 +98,24 @@ describe("ManagedFeishuProviderComposition", () => {
     expect(calls).toEqual([
       "message:start",
       "document:start",
+      "calendar:start",
       "context:start",
       "host:start",
     ]);
     await expect(composition.health()).resolves.toEqual({
       provider: "ready",
-      capability_citizens: ["citizen-message", "citizen-document"],
+      capability_citizens: [
+        "citizen-message",
+        "citizen-document",
+        "citizen-calendar",
+      ],
       context_citizen: "citizen-context",
     });
     await composition.close();
-    expect(calls.slice(4)).toEqual([
+    expect(calls.slice(5)).toEqual([
       "host:close",
       "context:close",
+      "calendar:close",
       "document:close",
       "message:close",
       "provider-store:close",

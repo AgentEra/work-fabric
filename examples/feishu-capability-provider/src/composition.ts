@@ -23,6 +23,7 @@ import {
   FeishuTenantAccessTokenProvider,
 } from "@work-fabric/connector-feishu";
 import type {
+  CitizenDeclaration,
   CitizenHealth,
   CitizenJsonObject,
   CitizenRuntimeContext,
@@ -31,6 +32,8 @@ import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 import {
   enabledFeishuProviderFacets,
   FeishuCapabilityCitizenRuntime,
+  FeishuCalendarCapabilityExecutor,
+  FeishuCalendarOpenApiBackend,
   FeishuCapabilityExecutor,
   FeishuCapabilityExecutorRouter,
   FeishuCapabilityExecutorPortAdapter,
@@ -44,7 +47,10 @@ import {
   FeishuOpenApiRequestClient,
   HmacConversationCursorCodec,
   MemoryFeishuProviderStore,
+  MemoryFeishuCalendarStore,
+  SqliteFeishuCalendarStore,
   SqliteFeishuProviderStore,
+  feishuCalendarCapabilityDeclarations,
   feishuCapabilityDeclarations,
   feishuContextDeclarations,
   feishuDocumentCapabilityDeclarations,
@@ -196,7 +202,7 @@ export class ManagedFeishuProviderComposition
 }
 
 function capabilityDescriptor(
-  declaration: ReturnType<typeof feishuCapabilityDeclarations>[number],
+  declaration: CitizenDeclaration,
   citizenId: string,
 ): CapabilityDescriptor {
   return {
@@ -410,6 +416,9 @@ export async function composeFeishuProvider(
     ? new SqliteFeishuProviderStore(loaded.provider.state)
     : new MemoryFeishuProviderStore();
   const configuredFacets = enabledFeishuProviderFacets(loaded.provider);
+  const calendarEnabled = configuredFacets.some((facet) =>
+    facet.facet === "calendar"
+  );
   const cursorKey = loaded.provider.cursor_signing_key === undefined
     ? randomBytes(32)
     : Buffer.from(loaded.provider.cursor_signing_key, "utf8");
@@ -431,7 +440,38 @@ export async function composeFeishuProvider(
     client: new FeishuOpenApiConversationMembersClient(requestClient),
     cursors: cursorCodec,
   });
+  const calendarStore = !calendarEnabled
+    ? null
+    : loaded.provider.state.type === "sqlite"
+    ? new SqliteFeishuCalendarStore(loaded.provider.state)
+    : new MemoryFeishuCalendarStore();
+  const calendarBackend = calendarEnabled
+    ? new FeishuCalendarOpenApiBackend({ requests: requestClient })
+    : null;
   const facetPorts = configuredFacets.map((facet) => {
+    if (facet.facet === "calendar") {
+      if (calendarStore === null || calendarBackend === null) {
+        throw new Error("Feishu Calendar facet dependencies are unavailable");
+      }
+      const declarations = feishuCalendarCapabilityDeclarations;
+      const capabilityIds = declarations().map((item) => item.declaration_id);
+      const executor = new FeishuCalendarCapabilityExecutor({
+        citizen_id: facet.citizen.citizen_id,
+        endpoint_id: facet.citizen.endpoint_id,
+        backend: calendarBackend,
+        store: calendarStore,
+        confirmation: { consume: async () => false },
+      });
+      return Object.freeze({
+        facet,
+        declarations,
+        capability_ids: Object.freeze(capabilityIds),
+        port: new FeishuCapabilityExecutorPortAdapter(
+          executor,
+          { declarations },
+        ),
+      });
+    }
     const standardExecutor = new FeishuCapabilityExecutor({
       citizen_id: facet.citizen.citizen_id,
       endpoint_id: facet.citizen.endpoint_id,
@@ -642,7 +682,11 @@ export async function composeFeishuProvider(
       },
     },
     close_provider_store: async () => {
-      if ("close" in providerStore) await providerStore.close();
+      try {
+        if ("close" in providerStore) await providerStore.close();
+      } finally {
+        await calendarStore?.close();
+      }
     },
   });
 }
