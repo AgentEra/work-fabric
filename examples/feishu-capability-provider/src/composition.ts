@@ -35,10 +35,13 @@ import {
   FeishuCapabilityExecutorRouter,
   FeishuCapabilityExecutorPortAdapter,
   FeishuConversationContextProvider,
+  FeishuConversationMembersExecutor,
   FeishuContextCitizenRuntime,
   FeishuDocumentContextProvider,
   FeishuMessageQueryExecutor,
   FeishuOpenApiCapabilityBackend,
+  FeishuOpenApiConversationMembersClient,
+  FeishuOpenApiRequestClient,
   HmacConversationCursorCodec,
   MemoryFeishuProviderStore,
   SqliteFeishuProviderStore,
@@ -410,10 +413,23 @@ export async function composeFeishuProvider(
   const cursorKey = loaded.provider.cursor_signing_key === undefined
     ? randomBytes(32)
     : Buffer.from(loaded.provider.cursor_signing_key, "utf8");
+  const cursorCodec = new HmacConversationCursorCodec({ key: cursorKey });
   const queryExecutor = new FeishuMessageQueryExecutor({
     api: messages,
     credential_ref: loaded.provider.credential_ref,
-    cursors: new HmacConversationCursorCodec({ key: cursorKey }),
+    cursors: cursorCodec,
+  });
+  const requestClient = new FeishuOpenApiRequestClient({
+    credential_ref: loaded.provider.credential_ref,
+    token_provider: tokenProvider,
+    fetch: fetchImplementation,
+    base_url: loaded.provider.open_api.base_url,
+    request_timeout_ms: loaded.provider.open_api.request_timeout_ms,
+    max_response_bytes: loaded.provider.open_api.max_response_bytes,
+  });
+  const membersExecutor = new FeishuConversationMembersExecutor({
+    client: new FeishuOpenApiConversationMembersClient(requestClient),
+    cursors: cursorCodec,
   });
   const facetPorts = configuredFacets.map((facet) => {
     const standardExecutor = new FeishuCapabilityExecutor({
@@ -447,6 +463,10 @@ export async function composeFeishuProvider(
           {
             capability_ids: ["feishu.conversation.history.read"],
             executor: queryExecutor,
+          },
+          {
+            capability_ids: ["feishu.conversation.members.list"],
+            executor: membersExecutor,
           },
           ...(facet.facet === "aggregate"
             ? [{

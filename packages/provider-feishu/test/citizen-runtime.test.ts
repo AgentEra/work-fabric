@@ -69,7 +69,7 @@ describe("Feishu Network Citizen runtimes", () => {
     });
 
     expect(runtime.citizen_kind).toBe("capability-provider");
-    expect(runtime.executor.describeCapabilities()).toHaveLength(7);
+    expect(runtime.executor.describeCapabilities()).toHaveLength(8);
     const opened = client.openSession.mock.calls[0]?.[1];
     expect(opened?.descriptor.citizen_kind).toBe("capability-provider");
     expect(opened?.declarations).toEqual(feishuCapabilityDeclarations());

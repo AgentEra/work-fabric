@@ -431,7 +431,7 @@ describe("local Feishu assistant stack", () => {
             environment.INTAKE_AGENT_ACCESS_TOKEN!,
           ),
         }).citizens,
-      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(7);
+      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(8);
       client.snapshot = {
         ...client.snapshot,
         state: "connected",

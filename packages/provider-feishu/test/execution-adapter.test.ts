@@ -118,6 +118,7 @@ describe("FeishuCapabilityExecutorPortAdapter", () => {
     expect(adapter.describeCapabilities().map((item) =>
       item.declaration_id
     )).toEqual([
+      "feishu.conversation.members.list",
       "feishu.conversation.history.read",
       "feishu.message.send",
     ]);

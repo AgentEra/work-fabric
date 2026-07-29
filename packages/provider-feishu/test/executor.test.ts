@@ -182,6 +182,7 @@ describe("Feishu Capability Provider", () => {
     const declarations = feishuCapabilityDeclarations();
 
     expect(declarations.map((item) => item.declaration_id)).toEqual([
+      "feishu.conversation.members.list",
       "feishu.conversation.history.read",
       "feishu.document.append",
       "feishu.document.create",

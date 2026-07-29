@@ -310,6 +310,13 @@ applications:
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
           resource_id: citizen-feishu-message/feishu.conversation.history.read
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-feishu-message/feishu.conversation.members.list
     agent_runtime_authority:
       grants:
         daily-assistant:

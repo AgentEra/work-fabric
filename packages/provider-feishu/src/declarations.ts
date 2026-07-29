@@ -78,6 +78,56 @@ const documentToken = { type: "string", minLength: 1, maxLength: 512 };
 const revision = { type: "string", minLength: 1, maxLength: 128 };
 
 const DEFINITIONS = Object.freeze({
+  conversationMembersInput: objectSchema([
+    "conversation",
+    "page_size",
+  ], {
+    conversation: {
+      oneOf: [
+        objectSchema(["kind"], {
+          kind: { const: "current_conversation" },
+        }),
+        objectSchema(["kind", "resource_uri"], {
+          kind: { const: "resource_reference" },
+          resource_uri: {
+            type: "string",
+            pattern: "^feishu://chat/[^/]+$",
+            maxLength: 2_048,
+          },
+        }),
+      ],
+    },
+    page_size: { type: "integer", minimum: 1, maximum: 100 },
+    cursor: { type: "string", minLength: 1, maxLength: 4_096 },
+  }),
+  conversationMembersOutput: objectSchema([
+    "members",
+    "has_more",
+    "provenance",
+  ], {
+    members: {
+      type: "array",
+      maxItems: 100,
+      items: objectSchema(["resource_uri"], {
+        resource_uri: {
+          type: "string",
+          pattern: "^feishu://user/open-id/[^/]+$",
+        },
+        display_name: { type: "string", maxLength: 255 },
+      }),
+    },
+    has_more: { type: "boolean" },
+    next_cursor: { type: "string", minLength: 1, maxLength: 4_096 },
+    provenance: objectSchema([
+      "provider_family",
+      "source",
+      "source_reference",
+    ], {
+      provider_family: { const: "feishu" },
+      source: { const: "im.chat.members" },
+      source_reference: { type: "string", format: "uri" },
+    }),
+  }),
   conversationHistoryInput: objectSchema([
     "conversation",
     "maximum_messages",
@@ -354,6 +404,17 @@ function capability(input: {
 function allCapabilityDeclarations(): readonly CitizenDeclaration[] {
   return Object.freeze([
     capability({
+      id: "feishu.conversation.members.list",
+      name: "List Feishu conversation members",
+      description:
+        "Read one bounded page of authorized conversation members as typed facts.",
+      input: "conversationMembersInput",
+      output: "conversationMembersOutput",
+      risk: "low",
+      operation_kind: "query",
+      version: "1.0.0",
+    }),
+    capability({
       id: "feishu.conversation.history.read",
       name: "Read Feishu conversation history",
       description:
@@ -428,6 +489,7 @@ export function feishuMessageCapabilityDeclarations():
   return Object.freeze(
     allCapabilityDeclarations().filter((declaration) =>
       declaration.declaration_id === "feishu.conversation.history.read" ||
+      declaration.declaration_id === "feishu.conversation.members.list" ||
       declaration.declaration_id === "feishu.message.send"
     ),
   );

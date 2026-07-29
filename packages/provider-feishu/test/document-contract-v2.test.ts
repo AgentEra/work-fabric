@@ -74,6 +74,7 @@ describe("Feishu document Contract v2", () => {
       item.constraints.operation_kind,
     ]))).toEqual({
       "feishu.conversation.history.read": "query",
+      "feishu.conversation.members.list": "query",
       "feishu.document.append": "command",
       "feishu.document.create": "command",
       "feishu.document.delete": "destructive",
