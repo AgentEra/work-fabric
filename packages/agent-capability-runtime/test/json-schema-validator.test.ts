@@ -36,6 +36,7 @@ const contract: BoundCapabilityContract = {
   },
   confirmation: "none",
   risk: "medium",
+  operation_kind: "command",
 };
 
 describe("JsonSchemaInvocationValidator", () => {

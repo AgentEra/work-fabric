@@ -235,6 +235,7 @@ function capability(input: {
   readonly input: keyof typeof DEFINITIONS;
   readonly output: keyof typeof DEFINITIONS;
   readonly risk: CitizenDeclaration["risk"];
+  readonly operation_kind: "query" | "command" | "destructive";
   readonly confirmation?: CitizenDeclaration["confirmation"];
   readonly version?: string;
 }): CitizenDeclaration {
@@ -253,6 +254,7 @@ function capability(input: {
       single_target: true,
       maximum_content_bytes: 131_072,
       provider_output: "typed_facts_only",
+      operation_kind: input.operation_kind,
     },
     extensions: {},
   });
@@ -267,6 +269,7 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       input: "documentAppendInput",
       output: "documentUpdateOutput",
       risk: "medium",
+      operation_kind: "command",
     }),
     capability({
       id: "feishu.document.create",
@@ -275,6 +278,7 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       input: "documentCreateInput",
       output: "documentCreateOutput",
       risk: "medium",
+      operation_kind: "command",
     }),
     capability({
       id: "feishu.document.delete",
@@ -283,6 +287,7 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       input: "documentDeleteInput",
       output: "documentDeleteOutput",
       risk: "destructive",
+      operation_kind: "destructive",
       confirmation: "explicit",
     }),
     capability({
@@ -292,6 +297,7 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       input: "documentReadInput",
       output: "documentReadOutput",
       risk: "low",
+      operation_kind: "query",
     }),
     capability({
       id: "feishu.document.update",
@@ -300,6 +306,7 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       input: "documentUpdateInput",
       output: "documentUpdateOutput",
       risk: "medium",
+      operation_kind: "command",
     }),
     capability({
       id: "feishu.message.send",
@@ -308,6 +315,7 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       input: "messageSendInput",
       output: "messageSendOutput",
       risk: "medium",
+      operation_kind: "command",
       version: "1.0.0",
     }),
   ]);

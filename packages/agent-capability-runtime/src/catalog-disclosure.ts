@@ -6,6 +6,7 @@ import {
 
 import type { CapabilityDisclosureCatalogClient } from "./contracts.js";
 import type { InvocationSchemaRegistry } from "./contracts.js";
+import { capabilityOperationKind } from "./operation-kind.js";
 
 const MAX_SUMMARIES = 32;
 const MAX_PAGES = 32;
@@ -115,6 +116,9 @@ export class CatalogCapabilityDisclosure implements CapabilityDisclosurePort {
           version: declaration.version,
           name: declaration.name,
           description: declaration.description,
+          operation_kind: capabilityOperationKind(
+            contract.declaration.constraints,
+          ),
           input_schema: inputSchema === null
             ? null
             : inputSchema as RuntimeCapabilitySummary["input_schema"],

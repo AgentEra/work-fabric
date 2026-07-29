@@ -2,6 +2,7 @@ import type {
   CapabilityCandidate,
   CapabilityInvocationRequest,
   CapabilityRequirement,
+  CapabilityOperationKind,
   RuntimeJsonObject,
 } from "@work-fabric/agent-runtime-spi";
 import type {
@@ -56,6 +57,7 @@ export interface BoundCapabilityContract {
   readonly output_schema?: CitizenSchemaReference;
   readonly confirmation: "none" | "explicit";
   readonly risk: CitizenRisk;
+  readonly operation_kind: CapabilityOperationKind;
 }
 
 export interface CapabilityContractResolver {

@@ -32,6 +32,7 @@ describe("Agently worker protocol", () => {
         version: "1.0.0",
         name: "Create document",
         description: "Create one simple Docx document.",
+        operation_kind: "command",
         input_schema: null,
       }],
       continuation: {

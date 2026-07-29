@@ -24,6 +24,7 @@ const bound = {
     },
     confirmation: "none" as const,
     risk: "medium" as const,
+    operation_kind: "command" as const,
   },
   deadline: "2026-07-27T10:01:00.000Z",
 };

@@ -62,12 +62,18 @@ export interface CapabilityInvocationPort {
   ): Promise<CapabilityInvocationResult>;
 }
 
+export type CapabilityOperationKind =
+  | "query"
+  | "command"
+  | "destructive";
+
 export interface RuntimeCapabilitySummary {
   readonly citizen_id: string;
   readonly capability_id: string;
   readonly version: string;
   readonly name: string;
   readonly description: string;
+  readonly operation_kind: CapabilityOperationKind;
   /** Provider-owned, dynamically resolved invocation contract. */
   readonly input_schema: RuntimeJsonObject | null;
 }
@@ -345,18 +351,28 @@ function runtimeCapabilitySummary(value: unknown): RuntimeCapabilitySummary {
       "version",
       "name",
       "description",
+      "operation_kind",
       "input_schema",
     ],
     "Runtime capability summary",
   );
   const version = string(source.version, "version", 64);
   if (!SEMVER.test(version)) throw new TypeError("version is invalid");
+  const operationKind = source.operation_kind;
+  if (
+    operationKind !== "query" &&
+    operationKind !== "command" &&
+    operationKind !== "destructive"
+  ) {
+    throw new TypeError("operation_kind is invalid");
+  }
   return deepFreeze({
     citizen_id: opaqueId(source.citizen_id, "citizen_id"),
     capability_id: capabilityId(source.capability_id),
     version,
     name: string(source.name, "name", 256),
     description: string(source.description, "description", 2_048),
+    operation_kind: operationKind,
     input_schema: source.input_schema === null
       ? null
       : jsonObject(source.input_schema, "input_schema"),

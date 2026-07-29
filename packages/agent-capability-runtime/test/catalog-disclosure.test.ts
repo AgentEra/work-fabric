@@ -98,6 +98,7 @@ describe("CatalogCapabilityDisclosure", () => {
         version: "1.0.0",
         name: "Create document",
         description: "Create one simple Docx document.",
+        operation_kind: "command",
         input_schema: null,
       },
       {
@@ -106,6 +107,7 @@ describe("CatalogCapabilityDisclosure", () => {
         version: "1.1.0",
         name: "Create document",
         description: "Create one simple Docx document.",
+        operation_kind: "command",
         input_schema: null,
       },
     ]);
@@ -114,6 +116,82 @@ describe("CatalogCapabilityDisclosure", () => {
     expect(summaries[0]).toHaveProperty("input_schema", null);
     expect(summaries[0]).not.toHaveProperty("risk");
     expect(summaries[0]).not.toHaveProperty("folder_token");
+  });
+
+  it("discloses Provider-owned query semantics", async () => {
+    const disclosure = new CatalogCapabilityDisclosure({
+      async list() {
+        return { items: [descriptor("provider-a")] };
+      },
+      async listDeclarations() {
+        return {
+          items: [{
+            declaration_id: "feishu.conversation.history.read",
+            declaration_kind: "capability",
+            version: "1.0.0",
+            name: "Read Feishu conversation history",
+            description: "Read one bounded page of conversation history.",
+          }],
+        };
+      },
+      async getDeclaration(citizenId, declarationId) {
+        return {
+          ...contract(citizenId, declarationId, "1.0.0"),
+          declaration: {
+            ...contract(citizenId, declarationId, "1.0.0").declaration,
+            name: "Read Feishu conversation history",
+            description: "Read one bounded page of conversation history.",
+            constraints: { operation_kind: "query" },
+          },
+        };
+      },
+    });
+
+    await expect(disclosure.list(
+      ["feishu."],
+      new AbortController().signal,
+    )).resolves.toEqual([{
+      citizen_id: "provider-a",
+      capability_id: "feishu.conversation.history.read",
+      version: "1.0.0",
+      name: "Read Feishu conversation history",
+      description: "Read one bounded page of conversation history.",
+      operation_kind: "query",
+      input_schema: null,
+    }]);
+  });
+
+  it("rejects an invalid Provider-owned operation kind", async () => {
+    const disclosure = new CatalogCapabilityDisclosure({
+      async list() {
+        return { items: [descriptor("provider-a")] };
+      },
+      async listDeclarations() {
+        return {
+          items: [{
+            declaration_id: "feishu.document.create",
+            declaration_kind: "capability",
+            version: "1.0.0",
+            name: "Create document",
+            description: "Create one simple Docx document.",
+          }],
+        };
+      },
+      async getDeclaration(citizenId, declarationId) {
+        return {
+          ...contract(citizenId, declarationId, "1.0.0"),
+          declaration: {
+            ...contract(citizenId, declarationId, "1.0.0").declaration,
+            constraints: { operation_kind: "mutation" },
+          },
+        };
+      },
+    });
+
+    await expect(disclosure.list(
+      ["feishu."],
+      new AbortController().signal,
+    )).rejects.toThrow(/operation_kind/i);
   });
 
   it("rejects duplicate summaries and bounded-pagination overflow", async () => {

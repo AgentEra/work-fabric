@@ -127,6 +127,7 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create document",
       description: "Create one simple Docx document.",
+      operation_kind: "command",
       input_schema: {
         type: "object",
         required: ["title", "content"],
@@ -139,6 +140,7 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create document",
       description: "Create one simple Docx document.",
+      operation_kind: "command",
       input_schema: {
         type: "object",
         required: ["title", "content"],
@@ -155,6 +157,7 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create",
       description: "Create.",
+      operation_kind: "command",
       input_schema: null,
       folder_token: "secret",
     }], /fields/i],
@@ -164,6 +167,7 @@ describe("Agent capability invocation contracts", () => {
       version: "1.0.0",
       name: "Create",
       description: "Create.",
+      operation_kind: "command",
       input_schema: null,
     })), /bounded/i],
     [[{
@@ -172,8 +176,18 @@ describe("Agent capability invocation contracts", () => {
       version: "latest",
       name: "Create",
       description: "Create.",
+      operation_kind: "command",
       input_schema: null,
     }], /version/i],
+    [[{
+      citizen_id: "provider",
+      capability_id: "feishu.document.create",
+      version: "1.0.0",
+      name: "Create",
+      description: "Create.",
+      operation_kind: "mutation",
+      input_schema: null,
+    }], /operation_kind/i],
   ])("rejects unsafe capability summaries", (value, message) => {
     expect(() => validateRuntimeCapabilitySummaries(value)).toThrow(message);
   });

@@ -146,6 +146,7 @@ describe("AgentRuntimeHost", () => {
             version: "1.0.0",
             name: "Create document",
             description: "Create one simple Docx document.",
+            operation_kind: "command" as const,
             input_schema: null,
           }];
         },

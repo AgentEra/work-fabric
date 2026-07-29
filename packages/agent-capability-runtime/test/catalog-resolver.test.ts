@@ -187,6 +187,7 @@ describe("CatalogCapabilityResolver", () => {
       input_schema: boundDeclaration.input_schema,
       confirmation: "none",
       risk: "medium",
+      operation_kind: "command",
     });
     await expect(resolver.getBoundContract({
       citizen_id: "provider-a",
@@ -196,6 +197,70 @@ describe("CatalogCapabilityResolver", () => {
       contract_digest:
         "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
     })).rejects.toThrow(/binding changed/i);
+  });
+
+  it("returns and validates Provider-owned operation semantics", async () => {
+    const resolver = new CatalogCapabilityResolver({
+      async list() {
+        return { items: [] };
+      },
+      async getDeclaration(citizenId: string) {
+        return {
+          citizen_id: citizenId,
+          citizen_kind: "capability-provider",
+          availability: "available",
+          declaration: {
+            ...declaration,
+            constraints: { operation_kind: "query" },
+          },
+          declaration_version: 1,
+          fencing_token: 1,
+        };
+      },
+    });
+    const queryDeclaration = {
+      ...declaration,
+      constraints: { operation_kind: "query" },
+    };
+    await expect(resolver.getBoundContract({
+      citizen_id: "provider-a",
+      endpoint_id: "endpoint-a",
+      capability_id: declaration.declaration_id,
+      capability_version: declaration.version,
+      contract_digest: canonicalCitizenDigest(queryDeclaration),
+    })).resolves.toMatchObject({
+      operation_kind: "query",
+    });
+
+    const invalidResolver = new CatalogCapabilityResolver({
+      async list() {
+        return { items: [] };
+      },
+      async getDeclaration(citizenId: string) {
+        return {
+          citizen_id: citizenId,
+          citizen_kind: "capability-provider",
+          availability: "available",
+          declaration: {
+            ...declaration,
+            constraints: { operation_kind: "mutation" },
+          },
+          declaration_version: 1,
+          fencing_token: 1,
+        };
+      },
+    });
+    const invalidDeclaration = {
+      ...declaration,
+      constraints: { operation_kind: "mutation" },
+    };
+    await expect(invalidResolver.getBoundContract({
+      citizen_id: "provider-a",
+      endpoint_id: "endpoint-a",
+      capability_id: declaration.declaration_id,
+      capability_version: declaration.version,
+      contract_digest: canonicalCitizenDigest(invalidDeclaration),
+    })).rejects.toThrow(/operation_kind/i);
   });
 
   it.each(["latest", "^1", "1.2", ""])(

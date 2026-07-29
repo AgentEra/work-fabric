@@ -66,6 +66,17 @@ describe("Feishu document Contract v2", () => {
     expect(declarations.find((item) =>
       item.declaration_id === "feishu.message.send"
     )?.version).toBe("1.0.0");
+    expect(Object.fromEntries(declarations.map((item) => [
+      item.declaration_id,
+      item.constraints.operation_kind,
+    ]))).toEqual({
+      "feishu.document.append": "command",
+      "feishu.document.create": "command",
+      "feishu.document.delete": "destructive",
+      "feishu.document.read": "query",
+      "feishu.document.update": "command",
+      "feishu.message.send": "command",
+    });
     const documents = feishuSchemaDocuments();
     const documentSchemaUris = declarations
       .filter((item) => item.declaration_id.startsWith("feishu.document."))

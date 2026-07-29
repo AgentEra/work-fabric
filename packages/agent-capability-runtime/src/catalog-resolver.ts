@@ -9,6 +9,7 @@ import type {
   BoundCapabilityContract,
   CapabilityCatalogClient,
 } from "./contracts.js";
+import { capabilityOperationKind } from "./operation-kind.js";
 
 const CAPABILITY_ID = /^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$/;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
@@ -142,6 +143,7 @@ export class CatalogCapabilityResolver {
         : { output_schema: Object.freeze({ ...declaration.output_schema }) }),
       confirmation: declaration.confirmation,
       risk: declaration.risk,
+      operation_kind: capabilityOperationKind(declaration.constraints),
     });
   }
 }

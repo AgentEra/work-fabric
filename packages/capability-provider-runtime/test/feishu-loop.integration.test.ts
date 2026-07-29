@@ -40,6 +40,7 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
       output_schema: declaration.output_schema!,
       confirmation: declaration.confirmation,
       risk: declaration.risk,
+      operation_kind: "command",
     };
     const backend: FeishuCapabilityBackend = {
       createDocument: vi.fn(async (input) => ({
