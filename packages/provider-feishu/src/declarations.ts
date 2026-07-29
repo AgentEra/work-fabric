@@ -8,7 +8,7 @@ const schema = (
   body: Record<string, unknown>,
 ): { readonly uri: string; readonly digest: `sha256:${string}` } => ({
   uri: `urn:work-fabric:schema:feishu:${name}:${
-    name.startsWith("message") ? "1" : "2"
+    name.startsWith("document") ? "2" : "1"
   }`,
   digest: canonicalCitizenDigest(body),
 });
@@ -78,6 +78,97 @@ const documentToken = { type: "string", minLength: 1, maxLength: 512 };
 const revision = { type: "string", minLength: 1, maxLength: 128 };
 
 const DEFINITIONS = Object.freeze({
+  conversationHistoryInput: objectSchema([
+    "conversation",
+    "maximum_messages",
+  ], {
+    conversation: {
+      oneOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind"],
+          properties: {
+            kind: { const: "current_conversation" },
+          },
+        },
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["kind", "resource_uri"],
+          properties: {
+            kind: { const: "resource_reference" },
+            resource_uri: {
+              type: "string",
+              minLength: 1,
+              maxLength: 2_048,
+              format: "uri",
+            },
+          },
+        },
+      ],
+    },
+    cursor: { type: "string", minLength: 1, maxLength: 4_096 },
+    maximum_messages: { type: "integer", minimum: 1, maximum: 50 },
+  }),
+  conversationHistoryOutput: objectSchema([
+    "messages",
+    "has_more",
+    "coverage",
+    "provenance",
+  ], {
+    messages: {
+      type: "array",
+      maxItems: 50,
+      items: objectSchema([
+        "message_id",
+        "sender",
+        "created_at",
+        "content",
+        "provenance",
+      ], {
+        message_id: { type: "string", minLength: 1, maxLength: 255 },
+        sender: objectSchema(["external_id", "sender_type"], {
+          external_id: { type: "string", minLength: 1, maxLength: 255 },
+          sender_type: { type: "string", minLength: 1, maxLength: 64 },
+        }),
+        created_at: { type: "string", format: "date-time" },
+        content: objectSchema(["media_type", "text"], {
+          media_type: { const: "text/plain" },
+          text: { type: "string", minLength: 1, maxLength: 131_072 },
+        }),
+        provenance: objectSchema([
+          "provider_family",
+          "source",
+          "updated",
+        ], {
+          provider_family: { const: "feishu" },
+          source: { const: "im.message" },
+          updated: { type: "boolean" },
+        }),
+      }),
+    },
+    has_more: { type: "boolean" },
+    next_cursor: { type: "string", minLength: 1, maxLength: 4_096 },
+    coverage: objectSchema([], {
+      newest_at: { type: "string", format: "date-time" },
+      oldest_at: { type: "string", format: "date-time" },
+    }),
+    provenance: objectSchema([
+      "provider_family",
+      "source",
+      "source_reference",
+    ], {
+      provider_family: { const: "feishu" },
+      source: { const: "im.message" },
+      source_reference: {
+        type: "string",
+        minLength: 1,
+        maxLength: 2_048,
+        format: "uri",
+      },
+    }),
+  }),
   messageSendInput: objectSchema(["target", "content"], {
     target: {
       oneOf: [
@@ -262,6 +353,17 @@ function capability(input: {
 
 export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
   return Object.freeze([
+    capability({
+      id: "feishu.conversation.history.read",
+      name: "Read Feishu conversation history",
+      description:
+        "Read one bounded page of authorized conversation messages as typed evidence.",
+      input: "conversationHistoryInput",
+      output: "conversationHistoryOutput",
+      risk: "low",
+      operation_kind: "query",
+      version: "1.0.0",
+    }),
     capability({
       id: "feishu.document.append",
       name: "Append simple Feishu document content",

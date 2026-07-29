@@ -1,4 +1,5 @@
 export * from "./context-provider.js";
+export * from "./conversation-cursor.js";
 export * from "./conversation-context-provider.js";
 export * from "./citizen-runtime.js";
 export * from "./config.js";
@@ -8,6 +9,7 @@ export * from "./document-resource-adapter.js";
 export * from "./executor.js";
 export * from "./execution-adapter.js";
 export * from "./memory-store.js";
+export * from "./message-query-executor.js";
 export * from "./openapi-backend.js";
 export * from "./schema-registry.js";
 export * from "./shared-folder-policy.js";

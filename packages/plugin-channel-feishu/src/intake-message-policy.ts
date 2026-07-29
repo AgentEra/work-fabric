@@ -272,6 +272,7 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
           255,
         ),
         "workfabric.dev/message_id": messageId,
+        "workfabric.dev/occurred_at": claim.envelope.occurred_at,
         ...(typeof payload.root_id === "string" ? { "workfabric.dev/root_id": payload.root_id } : {}),
         ...(typeof payload.parent_id === "string" ? { "workfabric.dev/parent_id": payload.parent_id } : {}),
         ...(typeof payload.thread_id === "string" ? { "workfabric.dev/thread_id": payload.thread_id } : {}),

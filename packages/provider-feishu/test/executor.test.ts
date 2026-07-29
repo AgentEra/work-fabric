@@ -178,10 +178,11 @@ function request(
 }
 
 describe("Feishu Capability Provider", () => {
-  it("dynamically declares six bounded capabilities without credentials", () => {
+  it("dynamically declares bounded capabilities without credentials", () => {
     const declarations = feishuCapabilityDeclarations();
 
     expect(declarations.map((item) => item.declaration_id)).toEqual([
+      "feishu.conversation.history.read",
       "feishu.document.append",
       "feishu.document.create",
       "feishu.document.delete",
