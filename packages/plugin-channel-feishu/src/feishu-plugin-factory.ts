@@ -303,7 +303,10 @@ export class FeishuPluginFactory implements PluginFactory {
     const tokenProvider = sharedTenantTokenProvider(context, instance.instance_id)
       ?? new FeishuTenantAccessTokenProvider({ credential_provider: { async loadAppCredentials(reference) { if (reference !== credentialRef) throw new TypeError("credential scope mismatch"); return { app_id: config.credentials.app_id, app_secret: config.credentials.app_secret }; } }, fetch, base_url: "https://open.feishu.cn", clock, expiry_skew_seconds: 60, request_timeout_ms: 10_000, max_cache_entries: 1 });
     const messages = new FeishuOpenApiClient({ token_provider: tokenProvider, fetch, base_url: "https://open.feishu.cn", request_timeout_ms: 10_000, max_response_bytes: 64_000 });
-    const conversationContext = config.conversation_context.enabled
+    const bootstrapContext = config.conversation_context.mode === "bootstrap"
+      ? config.conversation_context
+      : undefined;
+    const conversationContext = bootstrapContext !== undefined
       ? validatedConversationContextFactory(
           context.service.get<unknown>(
             "feishu.conversation_context_provider_factory",
@@ -315,7 +318,7 @@ export class FeishuPluginFactory implements PluginFactory {
         })
       : undefined;
     const actionCodec = new FeishuActionReferenceCodec({ encryption_key: createHash("sha256").update(config.credentials.app_secret).digest() });
-    const mapper = new FeishuEventMapper({ participant_resolver: participantResolver, action_codec: actionCodec, clock, message_policy: new FeishuIntakeMessagePolicy({ bot_open_id: config.bot_open_id, participant_resolver: participantResolver, target: config.inbound.intake_target, clock, accept_within_seconds: config.inbound.accept_within_seconds, result_due_within_seconds: config.inbound.result_due_within_seconds, max_intent_length: 4_000, delegation: config.inbound.delegation, ...(conversationContext === undefined ? {} : { conversation_context: { materializer: conversationContext, policy: { lookback_seconds: config.conversation_context.lookback_seconds, maximum_messages: config.conversation_context.maximum_messages, maximum_bytes: config.conversation_context.maximum_bytes } } }) }) });
+    const mapper = new FeishuEventMapper({ participant_resolver: participantResolver, action_codec: actionCodec, clock, message_policy: new FeishuIntakeMessagePolicy({ bot_open_id: config.bot_open_id, participant_resolver: participantResolver, target: config.inbound.intake_target, clock, accept_within_seconds: config.inbound.accept_within_seconds, result_due_within_seconds: config.inbound.result_due_within_seconds, max_intent_length: 4_000, delegation: config.inbound.delegation, ...(conversationContext === undefined || bootstrapContext === undefined ? {} : { conversation_context: { materializer: conversationContext, policy: { lookback_seconds: bootstrapContext.lookback_seconds, maximum_messages: bootstrapContext.maximum_messages, maximum_bytes: bootstrapContext.maximum_bytes } } }) }) });
     const receipt = new FeishuIntakeReceiptHandler({ plugin_instance_id: instance.instance_id, routes, subscriptions, max_delivery_attempts: config.worker.max_attempts, on_handoff_ready: wakeHandoff });
     const observation: ConnectorObservationSink = { manifest: { profile: "connector.observation-sink.v1", adapter: "feishu-inert", capabilities: {} }, async record(input) { return { kind: "accepted", receipt_id: `ignored:${input.ingress_id}`, event_ids: [] }; } };
     const worker = new ConnectorWorker({ store: ingress, mapper, command_sink: commandSink, observation_sink: observation, accepted_receipt_handler: receipt, clock, retry_policy: { nextAvailableAt(attempt, _code, now) { return addSeconds(now, Math.min(300, 2 ** Math.min(attempt, 8))); } }, scope: { tenant_id: tenantId, connector_id: config.connector_id, worker_id: `plugin:${instance.instance_id}`, lease_seconds: config.worker.lease_seconds, batch_limit: config.worker.batch_limit, max_attempts: config.worker.max_attempts, max_error_detail_length: 256 } });

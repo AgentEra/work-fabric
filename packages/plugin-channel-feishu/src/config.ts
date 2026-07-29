@@ -80,12 +80,14 @@ export interface FeishuPluginWorkerConfig {
   readonly max_attempts: number;
 }
 
-export interface FeishuConversationContextConfig {
-  readonly enabled: boolean;
-  readonly lookback_seconds: number;
-  readonly maximum_messages: number;
-  readonly maximum_bytes: number;
-}
+export type FeishuConversationContextConfig =
+  | { readonly mode: "disabled" | "agent_managed" }
+  | {
+      readonly mode: "bootstrap";
+      readonly lookback_seconds: number;
+      readonly maximum_messages: number;
+      readonly maximum_bytes: number;
+    };
 
 interface FeishuPluginConfigBase {
   readonly connector_id: string;
@@ -247,16 +249,54 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
   const conversationContext = object(
     root.conversation_context ?? {},
     "conversation_context",
-    ["enabled", "lookback_seconds", "maximum_messages", "maximum_bytes"],
+    ["mode", "enabled", "lookback_seconds", "maximum_messages", "maximum_bytes"],
   );
+  if (
+    conversationContext.mode !== undefined &&
+    conversationContext.enabled !== undefined
+  ) {
+    throw new TypeError(
+      "conversation_context cannot combine mode with legacy enabled",
+    );
+  }
+  let conversationContextMode: FeishuConversationContextConfig["mode"];
+  if (conversationContext.mode === undefined) {
+    conversationContextMode = conversationContext.enabled === undefined
+      ? "disabled"
+      : bool(conversationContext.enabled, "conversation_context.enabled")
+        ? "bootstrap"
+        : "disabled";
+  } else if (
+    conversationContext.mode === "disabled" ||
+    conversationContext.mode === "bootstrap" ||
+    conversationContext.mode === "agent_managed"
+  ) {
+    conversationContextMode = conversationContext.mode;
+  } else {
+    throw new TypeError("conversation_context.mode is invalid");
+  }
+  if (
+    conversationContextMode !== "bootstrap" &&
+    (
+      conversationContext.lookback_seconds !== undefined ||
+      conversationContext.maximum_messages !== undefined ||
+      conversationContext.maximum_bytes !== undefined
+    )
+  ) {
+    throw new TypeError(
+      "conversation_context bounds are available only in bootstrap mode",
+    );
+  }
   const base: FeishuPluginConfigBase = {
     connector_id: id(root.connector_id, "connector_id", 128), external_tenant_id: id(root.external_tenant_id, "external_tenant_id"), bot_open_id: id(root.bot_open_id, "bot_open_id"),
-    conversation_context: {
-      enabled: bool(conversationContext.enabled ?? false, "conversation_context.enabled"),
-      lookback_seconds: rangedInteger(conversationContext.lookback_seconds, "conversation_context.lookback_seconds", 86_400, 60, 604_800),
-      maximum_messages: rangedInteger(conversationContext.maximum_messages, "conversation_context.maximum_messages", 20, 1, 50),
-      maximum_bytes: rangedInteger(conversationContext.maximum_bytes, "conversation_context.maximum_bytes", 65_536, 1_024, 131_072),
-    },
+    conversation_context: conversationContextMode === "bootstrap"
+      ? {
+          mode: "bootstrap",
+          lookback_seconds: rangedInteger(conversationContext.lookback_seconds, "conversation_context.lookback_seconds", 86_400, 60, 604_800),
+          maximum_messages: rangedInteger(conversationContext.maximum_messages, "conversation_context.maximum_messages", 20, 1, 50),
+          maximum_bytes: rangedInteger(conversationContext.maximum_bytes, "conversation_context.maximum_bytes", 65_536, 1_024, 131_072),
+        }
+      : { mode: conversationContextMode },
     outbound: { enabled: bool(outbound.enabled, "outbound.enabled"), default_render_mode: outbound.default_render_mode, channels, subscriptions },
     worker: { poll_interval_ms: integer(worker.poll_interval_ms, "worker.poll_interval_ms", 1000, 60_000), lease_seconds: integer(worker.lease_seconds, "worker.lease_seconds", 30, 3600), batch_limit: integer(worker.batch_limit, "worker.batch_limit", 100, 1000), max_attempts: integer(worker.max_attempts, "worker.max_attempts", 8, 100) },
   };

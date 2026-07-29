@@ -56,10 +56,7 @@ describe("Feishu plugin configuration", () => {
   it("keeps conversation context disabled when absent and applies bounded defaults when enabled", () => {
     expect(validateFeishuPluginConfig(valid())).toMatchObject({
       conversation_context: {
-        enabled: false,
-        lookback_seconds: 86_400,
-        maximum_messages: 20,
-        maximum_bytes: 65_536,
+        mode: "disabled",
       },
     });
     expect(validateFeishuPluginConfig({
@@ -67,12 +64,37 @@ describe("Feishu plugin configuration", () => {
       conversation_context: { enabled: true },
     })).toMatchObject({
       conversation_context: {
-        enabled: true,
+        mode: "bootstrap",
         lookback_seconds: 86_400,
         maximum_messages: 20,
         maximum_bytes: 65_536,
       },
     });
+  });
+
+  it("supports Agent-managed retrieval without bootstrap history bounds", () => {
+    expect(validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { mode: "agent_managed" },
+    })).toMatchObject({
+      conversation_context: {
+        mode: "agent_managed",
+      },
+    });
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: {
+        mode: "agent_managed",
+        maximum_messages: 20,
+      },
+    })).toThrow(/bootstrap/i);
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: {
+        mode: "agent_managed",
+        enabled: true,
+      },
+    })).toThrow(/legacy|combine/i);
   });
 
   it.each([

@@ -51,12 +51,24 @@ afterEach(async () => {
 });
 
 describe("local Feishu assistant stack", () => {
-  it("materializes prior Feishu messages, creates one document, and returns one Agent-authored semantic reply", async () => {
+  it("lets the Agent query prior Feishu messages, create one document, and author one semantic reply", async () => {
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-full-stack-"));
     directories.push(directory);
     const model = await startFakeOpenAiCompatibleServer({
       structuredOutput: {},
       structuredOutputs: [{
+        turn_type: "capability_request",
+        request_summary: "需要读取当前会话的历史消息",
+        response: "",
+        invocation_id: "invocation-history-1",
+        capability_id: "feishu.conversation.history.read",
+        version_constraint: "1.0.0",
+        input: {
+          conversation: { kind: "current_conversation" },
+          maximum_messages: 20,
+        },
+        reason: "当前请求引用了上面的消息，需要读取有界历史证据",
+      }, {
         turn_type: "capability_request",
         request_summary: "需要创建飞书文档",
         response: "",
@@ -519,7 +531,7 @@ describe("local Feishu assistant stack", () => {
           workerObservations,
           run,
           invocation,
-        })).toHaveLength(2);
+        })).toHaveLength(3);
         expect(sent).toHaveLength(1);
         expect(JSON.stringify(sent[0])).toContain(
           "https://feishu.example/docx/doc-local-1",
@@ -544,31 +556,21 @@ describe("local Feishu assistant stack", () => {
       const originalHandoff = await agentClient.queries.getHandoff(
         handoffIds[0]!,
       );
-      const contextReference = originalHandoff.state.package.context;
-      expect(contextReference).not.toBeNull();
-      if (contextReference === null) throw new Error("expected ContextReference");
-      const resolvedContext = await agentClient.queries.getContextBundle({
-        contextId: contextReference.context_id,
-        version: contextReference.version,
-        digest: contextReference.digest,
-      });
-      const messageIds = (resolvedContext.items as readonly JsonObject[])
-        .flatMap((item) => {
-          const data = item.data;
-          if (data === null || typeof data !== "object" || Array.isArray(data)) {
-            return [];
-          }
-          return typeof data.message_id === "string"
-            ? [data.message_id]
-            : [];
-        });
-      expect(messageIds).toEqual([
-        "om-history-delivery",
-        "om-history-scope",
-      ]);
-      expect(messageIds).not.toContain("om-full-stack-1");
-      expect(JSON.stringify(resolvedContext)).toContain("项目范围是飞书协作接入");
-      expect(JSON.stringify(resolvedContext)).toContain("交付日期定在本周五");
+      expect(originalHandoff.state.package.context).toBeNull();
+      if (agentState === undefined) throw new Error("expected Agent state");
+      const historyInvocation = await agentState.getInvocation(
+        "tenant-local",
+        handoffIds[0]!,
+        "invocation-history-1",
+      );
+      const historyEvidence = JSON.stringify(historyInvocation?.result);
+      expect(historyEvidence).toContain("om-history-delivery");
+      expect(historyEvidence).toContain("om-history-scope");
+      expect(historyEvidence).not.toContain(
+        "\"message_id\":\"om-full-stack-1\",\"sender\"",
+      );
+      expect(historyEvidence).toContain("项目范围是飞书协作接入");
+      expect(historyEvidence).toContain("交付日期定在本周五");
     } finally {
       await agent?.host.close().catch(() => undefined);
       await provider?.close().catch(() => undefined);

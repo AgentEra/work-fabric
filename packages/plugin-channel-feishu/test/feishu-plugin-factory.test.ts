@@ -209,6 +209,23 @@ describe("FeishuPluginFactory", () => {
     });
   });
 
+  it("keeps Agent-managed history retrieval out of the Channel composition", async () => {
+    const fixture = createLongConnectionFixture();
+
+    await new FeishuPluginFactory().create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: "collaboration-channel.feishu",
+      config: {
+        ...longConnectionConfig(),
+        conversation_context: { mode: "agent_managed" },
+      },
+    });
+
+    expect(fixture.requested).not.toContain(
+      "feishu.conversation_context_provider_factory",
+    );
+  });
+
   it("keeps legacy exact mapping local and never creates a representation grant", async () => {
     const resolver = new LegacyFeishuParticipantResolver({
       tenant_id: "tenant-1",
