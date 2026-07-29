@@ -33,7 +33,7 @@ describe("FeishuOpenApiClient", () => {
       msg: "must-not-escape",
       data: {
         has_more: true,
-        page_token: "must-not-escape",
+        page_token: "page-2",
         items: [{
           message_id: "om-history-1",
           root_id: "om-root-1",
@@ -77,6 +77,8 @@ describe("FeishuOpenApiClient", () => {
 
     expect(result).toEqual({
       kind: "accepted",
+      has_more: true,
+      next_page_token: "page-2",
       items: [{
         message_id: "om-history-1",
         root_id: "om-root-1",
@@ -125,6 +127,61 @@ describe("FeishuOpenApiClient", () => {
         "content-type": "application/json; charset=utf-8",
       },
     });
+
+    await client.listMessages({
+      credential_ref: "credential-ref-1",
+      container_type: "chat",
+      container_id: "oc-chat-1",
+      start_time: 1783987200,
+      end_time: 1784073600,
+      sort_type: "ByCreateTimeDesc",
+      page_size: 20,
+      page_token: "page-2",
+    });
+    expect(new URL(String(fetch.mock.calls[1]![0])).searchParams.get(
+      "page_token",
+    )).toBe("page-2");
+  });
+
+  it("rejects invalid pagination relationships and overlong request cursors", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({
+      code: 0,
+      data: {
+        has_more: true,
+        items: [],
+      },
+    }), { status: 200 }));
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+
+    await expect(client.listMessages({
+      credential_ref: "credential-ref-1",
+      container_type: "chat",
+      container_id: "oc-chat-1",
+      sort_type: "ByCreateTimeDesc",
+      page_size: 20,
+    })).resolves.toEqual({
+      kind: "retryable_failure",
+      error_code: "invalid_response",
+    });
+
+    await expect(client.listMessages({
+      credential_ref: "credential-ref-1",
+      container_type: "chat",
+      container_id: "oc-chat-1",
+      sort_type: "ByCreateTimeDesc",
+      page_size: 20,
+      page_token: "x".repeat(2_049),
+    })).resolves.toEqual({
+      kind: "permanent_failure",
+      error_code: "invalid_request",
+    });
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 
   it("gets one message from the official message resource and refreshes a rejected token once", async () => {

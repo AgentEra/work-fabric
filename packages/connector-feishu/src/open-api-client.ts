@@ -51,6 +51,7 @@ export interface FeishuListMessagesInput {
   readonly end_time?: number;
   readonly sort_type: "ByCreateTimeDesc";
   readonly page_size: number;
+  readonly page_token?: string;
 }
 
 export interface FeishuHistoryMessage {
@@ -89,10 +90,21 @@ export type FeishuHistoryResult =
       readonly error_code: string;
     };
 
+export type FeishuHistoryPageResult =
+  | {
+      readonly kind: "accepted";
+      readonly items: readonly FeishuHistoryMessage[];
+      readonly has_more: boolean;
+      readonly next_page_token?: string;
+    }
+  | Exclude<FeishuHistoryResult, { readonly kind: "accepted" }>;
+
 /** Narrow read-only boundary for Feishu message history materialization. */
 export interface FeishuConversationApi {
   getMessage(input: FeishuGetMessageInput): Promise<FeishuHistoryResult>;
-  listMessages(input: FeishuListMessagesInput): Promise<FeishuHistoryResult>;
+  listMessages(
+    input: FeishuListMessagesInput,
+  ): Promise<FeishuHistoryPageResult>;
 }
 
 export interface FeishuContactBatchInput {
@@ -316,6 +328,28 @@ function safeHistoryItems(body: unknown): readonly FeishuHistoryMessage[] {
   return Object.freeze(safeItems);
 }
 
+function safeHistoryPage(body: unknown): {
+  readonly has_more: boolean;
+  readonly next_page_token?: string;
+} {
+  const data = ownData(body, "data");
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    throw new TypeError("invalid history pagination");
+  }
+  const hasMore = ownData(data, "has_more");
+  if (typeof hasMore !== "boolean") {
+    throw new TypeError("invalid history pagination");
+  }
+  const pageToken = optionalHistoryString(data, "page_token", 2_048);
+  if (hasMore && pageToken === undefined) {
+    throw new TypeError("invalid history pagination");
+  }
+  return Object.freeze({
+    has_more: hasMore,
+    ...(hasMore ? { next_page_token: pageToken! } : {}),
+  });
+}
+
 function validateHistoryBase(
   input: { readonly credential_ref: string },
 ): void {
@@ -361,6 +395,9 @@ function validateHistoryList(input: FeishuListMessagesInput): void {
     input.start_time > input.end_time
   ) {
     throw new RangeError("history time window is invalid");
+  }
+  if (input.page_token !== undefined) {
+    bounded(input.page_token, "page_token", 2_048);
   }
 }
 
@@ -461,7 +498,7 @@ export class FeishuOpenApiClient
 
   async listMessages(
     input: FeishuListMessagesInput,
-  ): Promise<FeishuHistoryResult> {
+  ): Promise<FeishuHistoryPageResult> {
     try {
       validateHistoryList(input);
     } catch {
@@ -478,16 +515,21 @@ export class FeishuOpenApiClient
     }
     url.searchParams.set("sort_type", input.sort_type);
     url.searchParams.set("page_size", String(input.page_size));
+    if (input.page_token !== undefined) {
+      url.searchParams.set("page_token", input.page_token);
+    }
     return this.historyWithToken(input.credential_ref, (token) =>
-      this.requestHistory(url, token));
+      this.requestHistory(url, token, true));
   }
 
-  private async historyWithToken(
+  private async historyWithToken<
+    TResult extends FeishuHistoryResult | FeishuHistoryPageResult,
+  >(
     credentialRef: string,
     request: (token: string) => Promise<
-      FeishuHistoryResult | { readonly kind: "token_rejected" }
+      TResult | { readonly kind: "token_rejected" }
     >,
-  ): Promise<FeishuHistoryResult> {
+  ): Promise<TResult> {
     let forceRefresh = false;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let token: string;
@@ -506,21 +548,41 @@ export class FeishuOpenApiClient
           return {
             kind: "permanent_failure",
             error_code: `token_${error.code}`,
-          };
+          } as TResult;
         }
-        return { kind: "retryable_failure", error_code: "token_unavailable" };
+        return {
+          kind: "retryable_failure",
+          error_code: "token_unavailable",
+        } as TResult;
       }
       const result = await request(token);
       if (result.kind !== "token_rejected") return result;
       forceRefresh = true;
     }
-    return { kind: "retryable_failure", error_code: "token_rejected" };
+    return {
+      kind: "retryable_failure",
+      error_code: "token_rejected",
+    } as TResult;
   }
 
+  private requestHistory(
+    input: string | URL,
+    token: string,
+  ): Promise<FeishuHistoryResult | { readonly kind: "token_rejected" }>;
+  private requestHistory(
+    input: string | URL,
+    token: string,
+    paginated: true,
+  ): Promise<FeishuHistoryPageResult | { readonly kind: "token_rejected" }>;
   private async requestHistory(
     input: string | URL,
     token: string,
-  ): Promise<FeishuHistoryResult | { readonly kind: "token_rejected" }> {
+    paginated = false,
+  ): Promise<
+    | FeishuHistoryResult
+    | FeishuHistoryPageResult
+    | { readonly kind: "token_rejected" }
+  > {
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -588,7 +650,12 @@ export class FeishuOpenApiClient
       }
       try {
         const items = safeHistoryItems(body);
-        return Object.freeze({ kind: "accepted", items });
+        if (!paginated) return Object.freeze({ kind: "accepted", items });
+        return Object.freeze({
+          kind: "accepted",
+          items,
+          ...safeHistoryPage(body),
+        });
       } catch {
         return { kind: "retryable_failure", error_code: "invalid_response" };
       }

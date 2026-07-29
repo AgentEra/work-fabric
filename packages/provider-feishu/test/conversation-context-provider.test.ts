@@ -62,7 +62,11 @@ function request(
 function api(items: readonly FeishuHistoryMessage[]): FeishuConversationApi {
   return {
     getMessage: vi.fn(async () => ({ kind: "accepted" as const, items: [] })),
-    listMessages: vi.fn(async () => ({ kind: "accepted" as const, items })),
+    listMessages: vi.fn(async () => ({
+      kind: "accepted" as const,
+      items,
+      has_more: false,
+    })),
   };
 }
 
