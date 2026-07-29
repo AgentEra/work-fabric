@@ -259,7 +259,7 @@ export class FeishuCalendarOpenApiBackend
           ...(input.description === undefined
             ? {}
             : { description: input.description }),
-          permissions: "private",
+          permissions: input.permissions ?? "private",
         },
         input.signal,
       ))

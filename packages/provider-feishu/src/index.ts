@@ -1,5 +1,6 @@
 export * from "./context-provider.js";
 export * from "./calendar-contracts.js";
+export * from "./calendar-administration.js";
 export * from "./calendar-declarations.js";
 export * from "./calendar-executor.js";
 export * from "./calendar-memory-store.js";

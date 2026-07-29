@@ -293,6 +293,7 @@ export interface FeishuCalendarBackend {
   createSharedCalendar(input: {
     readonly summary: string;
     readonly description?: string;
+    readonly permissions?: "private" | "show_only_free_busy" | "public";
     readonly signal?: AbortSignal;
   }): Promise<FeishuCalendarFacts>;
   queryFreeBusy(input: {
