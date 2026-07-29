@@ -242,7 +242,7 @@ Memory 和 SQLite 已进入 `service-node` 组合层，统一 HTTP 与 TypeScrip
 的一个来源，不是动态能力事实库。完整规则、API 和 SDK 示例见
 [Network Citizen 架构与接入](docs/architecture/network-citizens.md)。
 
-## Agent 能力调用与 Feishu Provider
+## Agent 能力调用与 Feishu Provider Facets
 
 阶段 11 已把 Agent 的能力请求接入同一条 Handoff 网络，而没有把工具调用
 塞进 Fabric Core。能力感知 Agent 从 Citizen Catalog 渐进发现声明并读取
@@ -254,17 +254,26 @@ Memory 和 SQLite 已进入 `service-node` 组合层，统一 HTTP 与 TypeScrip
 Daily Assistant（decision-body）
   -> Catalog + Contract + Authority
   -> auxiliary Capability Handoff
-  -> Feishu Provider（capability-provider）
+  -> Feishu Message / Document Provider（independent capability-provider citizens）
   -> typed facts / stable error
-  -> Agent continuation
+  -> bounded Agent capability transcript
   -> Agent-authored original Result
   -> Feishu Channel
 ```
 
 `@work-fabric/capability-provider-runtime` 把通用 Capability Executor 接到
-Handoff Host；`@work-fabric/provider-feishu` 独立拥有飞书消息和简单文档
-CRUD/追加、OpenAPI、幂等、资源所有权与稳定错误；文档上下文作为另一个
-`context-provider` 注册。删除只允许同租户 Provider 自己创建的文档，并通过
+Handoff Host；`@work-fabric/provider-feishu` 提供可独立注册的 Message 与
+Document Facet，分别拥有会话查询/消息投递和简单文档 CRUD/追加能力。
+`Feishu Integration` 只是虚拟分组，不是 Citizen 或 Runtime；各 Facet 即使
+由同一进程托管，也分别持有身份、租约、Authority 和状态。Provider Facet
+不依赖 Channel Facet，因此消息通道可替换而文档能力保持不变。
+
+默认 `agent_managed` 模式下，Channel 只传递当前消息与可信来源锚点。Agent
+自行判断证据是否充分，并按需调用
+`feishu.conversation.history.read` query capability 分页获取更早消息；
+Provider 只返回类型化事实和签名 opaque cursor，Agent 独占相关性判断、查询
+停止条件与最终语义回复。历史查询和全部能力结果保存在有界调用 transcript
+中，不引入中心化 Context Manager。删除只允许同租户 Provider 自己创建的文档，并通过
 `@work-fabric/governance-confirmation` 消费绑定人、文档、输入摘要和过期时间
 的单次确认凭证。
 
@@ -331,7 +340,7 @@ npm run console:build
 ```
 
 完整的本地飞书链路使用同一个多应用 YAML 配置包，同时启动 Exchange/Channel、
-团队共享助理和独立飞书 Capability/Context Provider：
+团队共享助理和独立飞书 Message/Document Provider Facets：
 
 ```bash
 uv sync --project runtimes/agently-worker
@@ -411,7 +420,9 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 - Network Citizen 的配置只 Provision 信任与安全上限；当前能力以 Runtime session 为真，并通过 registration version、fencing token 和 declaration CAS 防止旧实例覆盖新实例。
 - Network Citizen 渐进披露按列表、描述、声明摘要和完整 Contract 分别授权；数据库、Broker、transport、SDK、YAML 和缓存等基础设施本身不注册为 Citizen。
 - Agent 能力调用以辅助 Handoff 表达并持久恢复；原 Handoff 不 Transfer，Provider 只返回类型化事实，最终用户文案只由原 Agent 产生。
-- Feishu Capability/Context Provider 分别注册独立 Citizen；OpenAPI、凭据、幂等、文档所有权、revision 和确认消费均封装在各自模块，不进入 Core、Agent Host 或 Channel。
+- Feishu Integration 只是虚拟分组，不注册 Citizen 或 Runtime；Message、Document、Channel 等 Facet 分别注册独立 Citizen，并可独立启停、授权、扩缩和审计。
+- Provider Facet 不依赖 Channel Facet；OpenAPI、凭据、幂等、文档所有权、revision 和确认消费均封装在各自 Provider，不进入 Core、Agent Host 或 Channel。
+- `agent_managed` 上下文模式由 Agent 判断信息是否充分并调用 Message Provider query capability；Channel 只提供可信来源锚点，Context Store 只被动持久化显式事实。
 - Agent Gateway 只依赖公开 TypeScript SDK，处理 Session 续租、Inbox Partition 刷新、SSE 汇聚和有界背压；Agent Runtime、Resolver、模型、工具与执行回调都在包外。
 - Endpoint Inbox 是可重建的路由投影，不复制 Context、Prompt、结果正文、凭据或外部执行状态；Delivery Ack 与 Handoff Accept 保持独立。
 - Connector ingress 是有界、可保留清理的操作缓冲，不是新的业务真相库；Webhook/长连接只 durable accept，映射 worker 才通过公开 SDK 提交命令。
@@ -437,7 +448,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-阶段 1–11 的当前架构闭环已经完成，包括技术中立的 Agent `CapabilityInvocationPort` 和独立 Feishu Capability/Context Provider；具体厂商调用仍未进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Connector 或 A2A/MCP Binding 可以独立扩展，但不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+阶段 1–11 的当前架构闭环已经完成，包括技术中立的 Agent `CapabilityInvocationPort`、独立 Feishu Provider Facets 与 Agent 驱动的按需上下文查询；具体厂商调用仍未进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Connector 或 A2A/MCP Binding 可以独立扩展，但不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 

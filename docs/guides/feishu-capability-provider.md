@@ -9,7 +9,8 @@
 | 模块 | Citizen kind | 闭环职责 |
 |---|---|---|
 | 团队共享助理 | `decision-body` | 理解请求、选择是否调用能力、解释事实、生成最终中文回复 |
-| 飞书动作 Provider | `capability-provider` | 消息发送和简单文档操作、OpenAPI、幂等、所有权、revision、错误映射 |
+| Feishu Message Provider | `capability-provider` | 消息发送、会话分页读取、来源、签名游标和稳定错误 |
+| Feishu Document Provider | `capability-provider` | 简单文档操作、OpenAPI、幂等、所有权、revision、错误映射 |
 | 飞书 Context Provider | `context-provider` | 按 Authority 返回有界文档内容或会话历史与 provenance |
 | 确认服务 | `governance-provider` | 发放、确认并单次消费绑定的删除 proof |
 | 飞书协作通道 | `channel` | 入站表示、会话路由和 canonical Result 投递 |
@@ -24,10 +25,16 @@ Handoff 的责任。Agent 不持有 `app_secret`、tenant token、Feishu SDK 或
 
 ## 2. 动态声明
 
-动作 Provider 在 Runtime session 中动态发布：
+两个独立 Provider facet 在各自 Runtime session 中动态发布。Message facet：
 
 ```text
+feishu.conversation.history.read  # query capability
 feishu.message.send
+```
+
+Document facet：
+
+```text
 feishu.document.create
 feishu.document.read
 feishu.document.update
@@ -56,6 +63,7 @@ URI 和不可漂移 digest。YAML 不枚举这些能力；
 
 ```yaml
 credential_ref: feishu-primary
+cursor_signing_key: ${WORK_FABRIC_FEISHU_CURSOR_SECRET}
 open_api:
   base_url: https://open.feishu.cn
   request_timeout_ms: 10000
@@ -64,19 +72,32 @@ state:
   type: sqlite
   location: ./var/feishu-provider.db
   busy_timeout_ms: 5000
-capability_citizen:
-  citizen_id: feishu-actions
-  principal_id: principal-feishu-actions
-  actor_id: actor-feishu-actions
-  endpoint_id: endpoint-feishu-actions
+message_citizen:
+  enabled: true
+  citizen_id: citizen-feishu-message
+  principal_id: principal-feishu-provider
+  actor_id: actor-feishu-provider
+  endpoint_id: endpoint-feishu-provider
+  registration_version: 1
+document_citizen:
+  enabled: true
+  citizen_id: citizen-feishu-document
+  principal_id: principal-feishu-provider
+  actor_id: actor-feishu-provider
+  endpoint_id: endpoint-feishu-provider
   registration_version: 1
 context_citizen:
-  citizen_id: feishu-context
-  principal_id: principal-feishu-context
-  actor_id: actor-feishu-context
-  endpoint_id: endpoint-feishu-context
+  citizen_id: citizen-feishu-context
+  principal_id: principal-feishu-provider
+  actor_id: actor-feishu-provider
+  endpoint_id: endpoint-feishu-provider
   registration_version: 1
 ```
+
+`message_citizen` 与 `document_citizen` 可独立启停、注册、续租、授权和扩缩；
+一个进程可以共享底层 HTTP client，但这不会把它们合并成一个 Citizen。旧
+`capability_citizen` 配置仍作为聚合兼容形式加载，不能和新 facet 配置混用。
+`cursor_signing_key` 只通过 Secret Resolver 解析，不进入声明、健康状态或日志。
 
 `validateFeishuProviderConfig()` 严格拒绝未知字段和内嵌 secret。开发可用
 Memory Store；长期本地运行使用 SQLite。多实例生产部署应通过同一 Store SPI
@@ -285,6 +306,7 @@ Application View：
 
 ```dotenv
 WORK_FABRIC_CURSOR_SECRET=<至少 32 字节随机值>
+WORK_FABRIC_FEISHU_CURSOR_SECRET=<另一个至少 32 字节随机值>
 WORK_FABRIC_ADMIN_TOKEN=<随机值>
 WORK_FABRIC_ADMISSION_FINGERPRINT_KEY=<随机值>
 WORK_FABRIC_ADMISSION_GRANT_KEY=<随机值>
@@ -343,16 +365,18 @@ URL；`offered`、`accepted`、Citizen ID 和 Handoff ID 不作为聊天回复�
 Console 可选，仅用于观察 Handoff/Delivery/Operations，不参与连接、认领、
 调用或回复。
 
-验证会话 Context 与能力调用协同时，可以先发送两条普通消息，再发送：
+验证 Agent 按需查询与能力调用协同时，可以先发送两条普通消息，再发送：
 
 ```text
 @机器人 总结上面的消息，并创建一份“本地联调需求”飞书文档
 ```
 
-本地示例默认读取触发前 24 小时、最多 20 条、最多 64 KiB 的历史。当前触发
-消息不会重复进入 Context。预期 Agent 的唯一回复同时包含历史摘要和创建后的
-文档 URL；摘要来自 Agent，文档事实来自 Capability Provider，Channel 只负责
-投递 canonical Result。
+本地示例使用 `conversation_context.mode: agent_managed`。Channel 不预取
+历史；Agent 先调用 `feishu.conversation.history.read`，依据 `has_more` 和
+当前证据判断是否继续分页，再调用文档能力。当前触发消息、未来消息、删除
+消息和跨会话消息不会进入 Provider 结果。预期 Agent 的唯一回复同时包含历史
+摘要和创建后的文档 URL；摘要来自 Agent，事实来自两个独立 Provider facet，
+Channel 只负责投递 canonical Result。
 
 若创建失败，依次确认：
 

@@ -157,6 +157,22 @@ Catalog 依次披露列表、描述、声明摘要和完整 Contract，每层单
 声明是发现事实，不是调用授权，也不会触发自动选择或执行。完整规范与接入
 示例见 [Network Citizen 架构与接入](architecture/network-citizens.md)。
 
+模块边界、Citizen 身份与部署进程是三个独立维度。`Feishu Integration`
+只是把同一厂商下的 Channel、Message Provider、Document Provider 和
+Directory Provider 归档在一起的虚拟分组；它不拥有身份、租约、状态或执行
+循环。**Integration is not a Citizen or runtime.** 每个对外承担责任的
+Facet 都以独立 Citizen 注册、声明、授权、扩缩和审计，即使多个 Facet
+暂时由同一进程托管。**Provider facets do not depend on Channel facets.**
+因此飞书可以只作为文档 Provider，消息入口也可以替换为邮件、企业微信或
+其他 Channel，而无需修改 Fabric Core。
+
+Channel 只把当前消息、可信来源锚点和派发身份送入 Handoff。推荐的
+`agent_managed` 模式不在 Channel 内预取或理解历史；Decision Body 判断证据
+是否充分，并通过有权访问的 Message Provider query capability 分页读取、
+过滤和继续推理。Provider 只返回类型化事实和 opaque cursor，Context Store
+只被动保存显式提交的上下文。旧的 bootstrap materializer 仅作为兼容模式，
+不是新的默认架构，也不形成中心化 Context Manager。
+
 ### Legacy & AI-native Systems
 
 外部系统通过 Connector Adapter 接入。Connector 映射资源、事件、状态和动作结果，并负责外部状态对账。外部系统继续持有原始内容和权威业务事实。

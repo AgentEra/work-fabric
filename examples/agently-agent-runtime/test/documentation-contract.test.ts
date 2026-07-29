@@ -8,6 +8,19 @@ import { loadNodeConfiguration } from "@work-fabric/service-node";
 const guide = new URL("../../../docs/guides/agently-agent-runtime.md", import.meta.url);
 const runtimeYaml = new URL("../../config/agent-runtime-agently.yaml", import.meta.url);
 const serviceYaml = new URL("../../config/service-feishu-long-connection.yaml", import.meta.url);
+const architecture = new URL("../../../docs/architecture.md", import.meta.url);
+const citizenArchitecture = new URL(
+  "../../../docs/architecture/network-citizens.md",
+  import.meta.url,
+);
+const channelGuide = new URL(
+  "../../../docs/guides/feishu-collaboration-channel.md",
+  import.meta.url,
+);
+const providerGuide = new URL(
+  "../../../docs/guides/feishu-capability-provider.md",
+  import.meta.url,
+);
 
 describe("Agently Runtime operator guide", () => {
   it("documents the supported absolute environment contract and separate process startup", async () => {
@@ -79,5 +92,31 @@ describe("Agently Runtime operator guide", () => {
 
     expect(source).toContain("Console **Operations → Deliveries**");
     expect(source).toContain("does **not** expose raw subscription cursors or Delivery/Status/Result payload bodies");
+  });
+
+  it("documents independent Provider facets and Agent-driven context retrieval", async () => {
+    const [root, citizens, channel, provider] = await Promise.all([
+      readFile(architecture, "utf8"),
+      readFile(citizenArchitecture, "utf8"),
+      readFile(channelGuide, "utf8"),
+      readFile(providerGuide, "utf8"),
+    ]);
+    const guides = `${channel}\n${provider}`;
+    for (const term of [
+      "feishu.conversation.history.read",
+      "agent_managed",
+      "WORK_FABRIC_FEISHU_CURSOR_SECRET",
+      "query capability",
+      "Feishu Message Provider",
+      "Feishu Document Provider",
+    ]) {
+      expect(guides).toContain(term);
+    }
+    expect(`${root}\n${citizens}`).toContain(
+      "Integration is not a Citizen or runtime",
+    );
+    expect(`${root}\n${citizens}`).toContain(
+      "Provider facets do not depend on Channel facets",
+    );
   });
 });

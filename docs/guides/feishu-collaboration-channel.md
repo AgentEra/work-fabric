@@ -155,9 +155,10 @@ Feishu transport trust -> durable ingress -> Admission -> representation grant
 
 外部 Intake Agent 使用正常 Work Fabric SDK/Agent Gateway 接受 Handoff，理解文本，向需求系统写入需求，并通过 `reportStatus`、`returnResult` 等公共操作回报状态。需求系统调用和 Agent 推理始终在 Work Fabric 外部。
 
-### 6.1 为 Agent 提供有界会话上下文
+### 6.1 兼容模式：Channel 启动时预取会话上下文
 
-需要支持“总结上面的消息”时，可以在 Channel 实例中启用会话 Context：
+旧部署仍可用下面的 `enabled: true` 配置启用 bootstrap 预取；该写法会归一化
+为 `mode: bootstrap`，用于迁移兼容，不是新部署的推荐模式：
 
 ```yaml
 conversation_context:
@@ -218,6 +219,41 @@ SDK `queries.getContextBundle(...)` 读取，不为 UI、Agent 或其他调用�
 
 预期机器人只回复一条由助理 Agent 生成的摘要；聊天中不应出现 Context ID、
 Handoff ID、`offered` 或 `accepted` 等内部状态。
+
+### 6.2 推荐模式：Agent 按需读取
+
+新部署使用：
+
+```yaml
+conversation_context:
+  mode: agent_managed
+```
+
+`agent_managed` 下 Channel 不读取历史、不创建 Context Bundle，也不请求
+`feishu.conversation_context_provider_factory`。它只把当前文本和可信
+SourceReference 放入 Handoff。助理 Agent 判断证据不足时，再调用独立
+Feishu Message Provider 暴露的 query capability
+`feishu.conversation.history.read`；Provider 负责飞书分页、格式解码、来源和
+边界，Agent 负责相关性、充分性、是否继续翻页以及最终措辞。
+
+Capability 返回 `has_more` 和不透明 `next_cursor`。Agent 只有在缺失信息对
+当前请求确实重要时才继续翻页；总调用次数、查询次数、累计结果字节数和原始
+委托期限同时生效。游标以
+`WORK_FABRIC_FEISHU_CURSOR_SECRET` 签名并绑定租户、触发消息与来源 URI，
+不得记录游标内容或消息正文：
+
+```bash
+export WORK_FABRIC_FEISHU_CURSOR_SECRET="$(openssl rand -hex 32)"
+```
+
+应用仍需 `im:message:readonly`（或等价读权限）和群历史读取权限
+`im:message.group_msg`。排障时只检查 Authority denial、查询次数、
+`has_more`、结果字节数和 Provider 稳定错误码，不打印消息正文或原生
+`page_token`。
+
+这种边界同样支持“邮件/企业微信作为 Channel、飞书只作为文档系统”：
+Channel 只提供自己的来源引用；Agent 可按 Authority 调用其他 Provider。
+Provider facets do not depend on Channel facets。
 
 ## 7. 从 `identities` 迁移
 

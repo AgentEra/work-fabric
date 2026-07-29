@@ -284,11 +284,17 @@ Catalog、租约、渐进披露、HTTP/SDK、Runtime 基类和技术中立的
 digest 和 Schema digest 对本次调用冻结。原始 Agent 不 Transfer 自己的
 Handoff，只等待辅助 Handoff 的类型化终态后继续推理。
 
-首个实现是独立 Feishu Capability Provider，动态声明
-`feishu.message.send` 与 `feishu.document.create/read/update/append/delete`。
-同一部署把 `feishu.document.context` 作为另一个 `context-provider` 发布。
-同一个 Context Citizen 还可以动态声明 `feishu.conversation.context`；
-“一个 Citizen 只有一个 kind”不等于“一个 Citizen 只能声明一种 Context”。
+首个实现以 Feishu Integration 作为虚拟分组，分别注册 Feishu Message
+Provider 与 Feishu Document Provider。Message Provider 动态声明
+`feishu.message.send` 和 `feishu.conversation.history.read`；Document
+Provider 动态声明
+`feishu.document.create/read/update/append/delete`。**Integration is not a
+Citizen or runtime.** 它不拥有身份、租约、状态或执行循环；Channel 与各
+Provider Facet 即使共用部署进程，仍分别注册、授权、扩缩和审计。
+**Provider facets do not depend on Channel facets.** 因此只启用飞书文档
+Provider、同时从邮件或企业微信 Channel 接收任务，不需要修改任何 Core
+契约。
+
 Provider 内部拥有 OpenAPI、幂等执行、资源所有权、revision 校验与错误映射；
 Agent、Core 和 Channel 看不到密钥或厂商响应。删除需由独立 Governance
 确认服务提供并原子消费单次 proof。
@@ -304,13 +310,17 @@ Citizen 或声明而获得执行权限。
 独占最终文案；`channel` 只投递 canonical Result。一个进程可以共同托管这些
 Runtime，但不会合并 Citizen 身份、Authority、状态或职责。
 
-Channel 需要外部会话历史时，只依赖中立的
-`ConversationContextMaterializer` 端口；具体 Context Provider 由部署组合根
-注入。Provider 负责读取、过滤、来源、边界和确定性 digest，Exchange 持久化
-Context Bundle，Agent Runtime 通过公共 SDK 按精确引用和 audience 读取，
-Decision Body 才负责语义理解。这样既允许同一飞书部署同时承担 Channel、
-Capability Provider 和 Context Provider，又不会把三个逻辑 Citizen 的身份、
-租约、Authority、状态与职责合并。
+推荐的 `agent_managed` 模式下，Channel 只提交当前消息和可信
+WorkReference 来源锚点，不主动读取或理解历史。Decision Body 判断信息是否
+足够；不足时通过标准辅助 Handoff 调用 Message Provider 的 query capability，
+使用签名 opaque cursor 有界分页，并把类型化查询结果保存在本次调用的有界
+transcript 中继续推理。Message Provider 负责供应商读取、来源校验、过滤、
+分页和稳定错误，Agent 独占相关性判断、是否继续查询以及最终语义输出。
+
+`ConversationContextMaterializer` 与 Context Bundle 仅保留为 `bootstrap`
+兼容模式，适合必须在进入 Agent 前固定快照的部署；它不是中心化 Context
+Manager。Context Store 始终是被动事实存储，不替 Agent 决定取什么、取多少或
+哪些内容相关。
 
 ## 9. 新模块接入清单
 

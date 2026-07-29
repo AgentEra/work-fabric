@@ -174,12 +174,17 @@ an `InvocationAuthorityProvider`, immutable Schema registry/validator and
 auxiliary-Handoff waiter, and the Driver must implement `executeTurn`.
 One-shot protocol-v1 Drivers keep their existing path.
 
-The Host permits only configured namespaces and at most four sequential
-invocations. Each call discovers a current Citizen declaration, freezes the
+The Host permits only configured namespaces and applies separate total-call,
+query-call and cumulative query-result-byte budgets. Each call discovers a
+current Citizen declaration, freezes the
 Citizen/Endpoint/version/Contract digest, creates a standard auxiliary Handoff
 and persists its lifecycle. The Daily Assistant remains responsible for the
 original Handoff while waiting and alone authors the final response. Provider
-facts and errors are untrusted continuation data, not instructions.
+facts and errors are retained in a bounded invocation transcript and remain
+untrusted evidence, not instructions. A `query capability` is read-only
+evidence: the Agent may request another page only when `has_more` is true and
+the missing information matters to the current intent. Historical evidence
+cannot independently authorize a command.
 
 Post-capability completion is also owned by the Daily Assistant boundary. The
 worker first asks the configured model to turn validated continuation facts
