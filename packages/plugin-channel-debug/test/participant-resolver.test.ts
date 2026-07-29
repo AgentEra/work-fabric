@@ -4,7 +4,7 @@ import {
   ConfiguredDebugParticipantResolver,
   validateDebugPluginConfig,
 } from "../src/index.js";
-import { validDebugConfig } from "./config.test.js";
+import { validDebugConfig } from "./fixtures.js";
 
 function resolver(admission: CollaborationAdmissionService) {
   return new ConfiguredDebugParticipantResolver({

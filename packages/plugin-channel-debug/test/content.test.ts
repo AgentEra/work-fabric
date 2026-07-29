@@ -3,7 +3,7 @@ import {
   debugMessageDigest,
   normalizeDebugMessage,
 } from "../src/index.js";
-import { validDebugConfig } from "./config.test.js";
+import { validDebugConfig } from "./fixtures.js";
 
 const limits = validDebugConfig().limits;
 
