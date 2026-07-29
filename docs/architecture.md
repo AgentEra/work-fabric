@@ -860,6 +860,25 @@ flowchart LR
 
 运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，Exchange 间交接见 [Federation 文档](federation.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md) 与 [Phase 6B](performance-nats-wakeup-baseline.md) 基线。
 
+### 渠道中立的消息内容
+
+用户可见回复的业务语义仍由 Agent 或其它内容生产模块闭环负责。生产方通过
+既有 `media_type` 声明表示形式：普通富文本默认使用 `text/markdown`，
+明确无格式内容使用 `text/plain`。Fabric 只验证、持久化和路由，不把内容
+转换成任何厂商私有语法，也不在投递失败时重新编写答复。
+
+Channel Adapter 动态声明自己可呈现的媒体类型，并负责目标渠道的原生转换、
+长度限制和安全链接策略。飞书当前把 `text/plain` 映射为 `text`，把
+`text/markdown` 映射为 `post` 中的 `md` 富文本；只有结构化交互才使用
+`interactive` 卡片。未知媒体类型和不安全链接显式失败，不能猜测格式、
+静默丢失交互语义或把消息正文与 URL 写入可观测数据。
+
+Result 权威正文不复制进全局协议事件。原会话回复路径通过
+`ChannelHandoffSnapshotSource` 按租户、Handoff 和最低版本装配规范快照，
+再由渠道 Renderer 呈现。这保持了事件总线的有界事实边界，同时避免
+Channel 从生命周期码制造业务答复。完整规则见
+[渠道中立消息内容设计](superpowers/specs/2026-07-29-channel-neutral-message-content-design.md)。
+
 ## 20. 阶段路线与执行状态
 
 | 阶段 | 范围 | 状态 |
@@ -879,5 +898,7 @@ flowchart LR
 | 9 | Collaboration Admission、稳定参与方绑定与短时表示 | 已完成 |
 | 10 | Network Citizen 动态目录、租约、渐进披露与 Runtime 基础 | 已完成 |
 | 11 | Agent 能力调用与 Feishu Capability/Context Provider | 已完成 |
+| 12 | Agent Handoff 的受权有界会话上下文 | 已完成 |
+| 13 | 渠道中立消息表示与飞书原生富文本呈现 | 已完成 |
 
-阶段 1–11 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 建立模块公民分类、动态声明、租约目录和渐进披露基础；11 通过辅助 Handoff 完成 Agent 到独立 Capability Provider 的类型化调用闭环。具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–13 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 建立模块公民分类、动态声明、租约目录和渐进披露基础；11 通过辅助 Handoff 完成 Agent 到独立 Capability Provider 的类型化调用闭环；12 允许 Channel 向 Handoff 附加受权、有界且不参与决策的历史证据；13 保留生产方媒体类型并由 Channel 转换为目标渠道原生格式。具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。

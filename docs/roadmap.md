@@ -22,6 +22,32 @@ and repository verification are implemented.
 | 10 | Network Citizen catalog, leased declarations and runtime foundation | Complete |
 | 11 | Agent capability invocation and Feishu Capability/Context Provider | Complete |
 | 12 | Authorized bounded conversation context for Agent handoffs | Complete |
+| 13 | Channel-neutral message representations and Feishu native rich text | Complete |
+
+## Phase 13 completion boundary
+
+Phase 13 preserves the content producer's existing `media_type` through the
+canonical Result and makes the destination Channel responsible for native
+presentation. The initial portable set is `text/markdown` and `text/plain`.
+Signal Adapter manifests disclose both accepted representations through the
+common media capability key; YAML does not become the dynamic source of
+rendering truth.
+
+The Feishu Channel maps plain text to `msg_type: text` and Markdown to
+`msg_type: post` with the native `md` tag, so labeled HTTPS links remain
+clickable. A token-based link validator rejects malformed, relative and
+dangerous destinations before OpenAPI delivery without fetching URLs or
+placing message content in observations. Unknown media types, unsafe links and
+oversize serialized content fail with stable reasons rather than being guessed,
+truncated or rewritten.
+
+The Agent remains the sole owner of business semantics; Fabric routes the
+representation unchanged; the Channel only validates and renders it.
+Interactive cards remain reserved for structured actions and status layouts.
+The canonical event journal remains bounded and does not copy Result bodies:
+the original-conversation route obtains the authorized Handoff snapshot before
+rendering. See
+[channel-neutral message content](superpowers/specs/2026-07-29-channel-neutral-message-content-design.md).
 
 ## Phase 12 completion boundary
 

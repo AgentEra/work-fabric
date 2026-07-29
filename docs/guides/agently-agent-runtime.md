@@ -128,6 +128,14 @@ Provisioning creates `actor-intake-agent` / `endpoint-intake-agent` and its SSE 
 
 To send a request from Feishu, mention the configured bot in an enabled group chat (for example, `@Work Fabric create a requirement`). Admission must accept the external identity, then the collaboration-channel configuration creates the explicitly targeted Intake Handoff. Expect one Delivery Ack, explicit Accept and queryable Status events. The original conversation receives only the Agent-authored text from the canonical Result; it does not receive Offered, Accepted or Status cards. Static operational subscriptions remain independently configurable.
 
+The Daily Assistant emits ordinary rich replies as `text/markdown`. The
+Feishu Channel preserves that media type and renders it as native `post/md`
+instead of putting Markdown source inside a `plain_text` card. Labeled HTTPS
+links such as `[需求文档](https://example.com/doc)` are therefore clickable.
+Plain Result content uses `text/plain` and becomes a Feishu `text` message.
+Unknown formats and unsafe link schemes fail closed; the Channel never asks the
+Agent to emit Feishu-private markup.
+
 ## Verification and smoke test
 
 The deterministic release check uses only SQLite, public HTTP/SSE, the real Python worker, and a loopback OpenAI-compatible streaming fake—never Feishu or a model network:
@@ -152,6 +160,15 @@ npm run agent-runtime:start
 ```
 
 Submit one `information.synthesis` Handoff, confirm Status and Result, then remove the credential. This path is not CI and must not enable Actions or external mutations.
+
+For a real rich-text smoke test, send:
+
+```text
+@AI助理 请回复一句“飞书富文本链接测试”，并附上名为“飞书开放平台”的链接：https://open.feishu.cn
+```
+
+Expect exactly one semantic reply. “飞书开放平台” should be visible and
+clickable, and raw Markdown markers should not be shown.
 
 ## Troubleshooting
 

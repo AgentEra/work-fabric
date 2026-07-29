@@ -402,17 +402,19 @@ git commit -m "feat(channel): disclose rich message representations"
 - Modify: `docs/architecture.md`
 - Modify: `docs/roadmap.md`
 - Modify: `docs/guides/agently-agent-runtime.md`
-- Test: `packages/connector-feishu/test/feishu-roundtrip.integration.test.ts`
+- Test: `packages/plugin-channel-feishu/test/route-aware-signal-adapter.test.ts`
 
 **Interfaces:**
 - Consumes: completed renderer and OpenAPI behavior from Tasks 1–3.
 - Produces: documented channel-neutral media rule and an end-to-end Feishu payload regression.
 
-- [ ] **Step 1: Add a failing roundtrip integration assertion**
+- [ ] **Step 1: Add a production-topology integration assertion**
 
-Extend the existing Feishu roundtrip integration fixture with a canonical Agent
-Result containing `text/markdown` and a labeled HTTPS link. Assert exactly one
-outbound input with:
+Compose `FeishuRouteAwareSignalAdapter` with the real `FeishuSignalAdapter`,
+an authorized Handoff snapshot source, and a recording message client. Deliver
+a canonical Result event that contains only versioned event facts; let the
+Route Adapter obtain the `text/markdown` Result and labeled HTTPS link from the
+snapshot. Assert exactly one outbound input with:
 
 ```ts
 expect(messages.inputs).toHaveLength(1);
@@ -427,11 +429,12 @@ expect(messages.inputs[0]?.content).toContain(
 Run:
 
 ```bash
-npx vitest run packages/connector-feishu/test/feishu-roundtrip.integration.test.ts
+npx vitest run packages/plugin-channel-feishu/test/route-aware-signal-adapter.test.ts
 ```
 
-Expected: PASS. If it fails, stop and diagnose the exact contract boundary
-before making another implementation change.
+Expected: PASS. This proves the production path obtains Result content through
+`ChannelHandoffSnapshotSource`; it must not copy Result content into the
+canonical event journal.
 
 - [ ] **Step 3: Update durable architecture and operating documentation**
 
@@ -499,7 +502,7 @@ markers are absent.
 - [ ] **Step 7: Commit the regression and documentation**
 
 ```bash
-git add packages/connector-feishu/test/feishu-roundtrip.integration.test.ts docs/architecture.md docs/roadmap.md docs/guides/agently-agent-runtime.md
+git add packages/plugin-channel-feishu/test/route-aware-signal-adapter.test.ts docs/architecture.md docs/roadmap.md docs/guides/agently-agent-runtime.md docs/superpowers/plans/2026-07-29-channel-neutral-message-content.md
 git commit -m "docs: define channel-native message rendering"
 ```
 
