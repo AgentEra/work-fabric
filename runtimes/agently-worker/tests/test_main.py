@@ -97,6 +97,7 @@ async def test_runner_keeps_diagnostics_off_stdout_and_emits_completed_record() 
     assert '"type":"progress"' in records[0]
     assert '"type":"progress"' in records[1]
     assert '"type":"completed"' in records[2]
+    assert json.loads(records[2])["result"]["summary"][0]["media_type"] == "text/markdown"
     assert stderr.getvalue() == ""
 
 

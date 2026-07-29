@@ -211,6 +211,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "reason": "",
     })
     assert final["kind"] == "final"
+    assert final["response"]["summary"][0]["media_type"] == "text/markdown"
     assert final["response"]["summary"][0]["text"] == "当前飞书服务不可用，请稍后重试。"
 
     capability = validate_turn_assistant_output({
@@ -351,7 +352,7 @@ async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_res
         "response": {
             "summary": [{
                 "kind": "text",
-                "media_type": "text/plain",
+                "media_type": "text/markdown",
                 "text": (
                     "已完成：把上面的 EDA 信息记录到文档里。\n"
                     "文档《EDA 信息记录》：https://feishu.cn/docx/doc-1"

@@ -114,7 +114,7 @@ async def run(
                 raise ValueError("Agently worker returned an invalid turn")
             return 0
         result: dict[str, JsonValue] = {
-            "summary": [{"kind": "text", "media_type": "text/plain", "text": output["response"]}],
+            "summary": [{"kind": "text", "media_type": "text/markdown", "text": output["response"]}],
             "artifacts": [],
             "evidence": [],
             "extensions": {"workfabric.agent/assistant_output": output},

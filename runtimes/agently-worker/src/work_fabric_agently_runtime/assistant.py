@@ -243,7 +243,7 @@ def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValu
         "response": {
             "summary": [{
                 "kind": "text",
-                "media_type": "text/plain",
+                "media_type": "text/markdown",
                 "text": text,
             }],
             "artifacts": artifacts,
@@ -316,7 +316,7 @@ def validate_turn_assistant_output(
             "response": {
                 "summary": [{
                     "kind": "text",
-                    "media_type": "text/plain",
+                    "media_type": "text/markdown",
                     "text": response,
                 }],
                 "artifacts": [],
