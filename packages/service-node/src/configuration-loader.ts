@@ -11,6 +11,11 @@ import {
   resolveDeclaredSecrets,
 } from "@work-fabric/configuration-runtime";
 import { FeishuPluginFactory, feishuSecretPaths, validateFeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import {
+  DebugPluginFactory,
+  debugSecretPaths,
+  validateDebugPluginConfig,
+} from "@work-fabric/plugin-channel-debug";
 import type { PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 import { parseServiceConfig, serviceAdmissionSecretPaths, type NodeServiceConfig } from "./config.js";
 
@@ -53,9 +58,16 @@ export function collectDeclaredSecretPaths(root: Record<string, unknown>): reado
   for (const [instanceId, candidate] of Object.entries(instances)) {
     const instance = object(candidate, `plugins.instances.${instanceId}`);
     if (instance.enabled !== true) continue;
-    if (instance.type !== "collaboration-channel.feishu") continue;
-    const config = validateFeishuPluginConfig(instance.config);
-    paths.push(...feishuSecretPaths(`plugins.instances.${instanceId}.config`, config));
+    if (instance.type === "collaboration-channel.feishu") {
+      const config = validateFeishuPluginConfig(instance.config);
+      paths.push(...feishuSecretPaths(`plugins.instances.${instanceId}.config`, config));
+    } else if (instance.type === "collaboration-channel.debug") {
+      const config = validateDebugPluginConfig(instance.config);
+      paths.push(...debugSecretPaths(
+        `plugins.instances.${instanceId}.config`,
+        config,
+      ));
+    }
   }
   return paths;
 }
@@ -75,11 +87,15 @@ export async function loadNodeConfiguration(environment: Readonly<Record<string,
     allow_literals: serviceRaw.development_mode === true,
   });
   const feishu = new FeishuPluginFactory();
+  const debug = new DebugPluginFactory();
   const configuration = new ConfigurationService({
     provider: { async load() { return { revision: document.revision, value: resolved }; } },
     clock: { now: () => new Date().toISOString() },
     validate_service: (value) => parseServiceConfig(value),
-    plugin_validators: [{ type: feishu.type, validate: (value) => feishu.validate(value) }],
+    plugin_validators: [
+      { type: feishu.type, validate: (value) => feishu.validate(value) },
+      { type: debug.type, validate: (value) => debug.validate(value) },
+    ],
     section_validators: [admissionConfigurationValidator, agentRuntimeAuthorityConfigurationValidator],
   });
   const snapshot = await configuration.load();

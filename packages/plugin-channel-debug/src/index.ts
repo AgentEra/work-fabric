@@ -1,5 +1,6 @@
 export * from "./config.js";
 export * from "./content.js";
+export * from "./debug-plugin-factory.js";
 export * from "./event-mapper.js";
 export * from "./http-errors.js";
 export * from "./http-server.js";

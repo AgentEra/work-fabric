@@ -1,6 +1,11 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
+import { MemoryDebugChannelStore } from "@work-fabric/adapter-debug-channel-memory";
+import {
+  SqliteDebugChannelStore,
+  migrateDebugChannelSqlite,
+} from "@work-fabric/adapter-debug-channel-sqlite";
 import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
 import {
   ConfigurationAdmissionPolicyProvider,
@@ -127,6 +132,7 @@ import type {
 } from "@work-fabric/exchange-spi";
 import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 import type { ConnectorIngressStore } from "@work-fabric/connector-spi";
+import type { DebugChannelStore } from "@work-fabric/debug-channel-spi";
 import type { ConnectorCommandExecution, ConnectorCommandResult, ConnectorCommandSink } from "@work-fabric/connector-spi";
 import type {
   ChannelHandoffSnapshotSource,
@@ -167,6 +173,11 @@ import { BearerTokenProvider, ConnectorSdkCommandSink, WorkFabricClient } from "
 import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
 import type { FeishuLongConnectionClientFactory } from "@work-fabric/connector-feishu";
 import { FeishuPluginFactory, FeishuWebhookRegistry, validateFeishuPluginConfig, type FeishuConversationContextProviderFactory, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import {
+  DebugPluginFactory,
+  validateDebugPluginConfig,
+  type DebugPluginConfig,
+} from "@work-fabric/plugin-channel-debug";
 import { FeishuConversationContextProvider } from "@work-fabric/provider-feishu";
 import { FeishuOpenApiClient, FeishuTenantAccessTokenProvider, type FeishuTenantTokenProvider } from "@work-fabric/connector-feishu";
 import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
@@ -190,6 +201,8 @@ export interface NodeStorageComposition {
   readonly endpointDirectory: EndpointDirectoryStore;
   readonly endpointInbox: EndpointInboxStore;
   readonly connectorIngress: ConnectorIngressStore;
+  /** Required only when a Debug Channel plugin is enabled. */
+  readonly debugChannel?: DebugChannelStore;
   readonly admissionBindings: ParticipantBindingStore;
   readonly admissionDecisions: AdmissionDecisionStore;
   readonly channelRoutes?: ChannelRouteStore;
@@ -263,6 +276,7 @@ function memoryStorage(): NodeStorageComposition {
     endpointDirectory: new MemoryEndpointDirectoryStore(),
     endpointInbox: new MemoryEndpointInboxStore(),
     connectorIngress: new MemoryConnectorIngressStore(),
+    debugChannel: new MemoryDebugChannelStore(),
     admissionBindings: new MemoryParticipantBindingStore(),
     admissionDecisions: new MemoryAdmissionDecisionStore(),
     channelRoutes: new MemoryChannelRouteStore(),
@@ -286,6 +300,7 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
       ? SQLITE_MIGRATIONS
       : [...SQLITE_MIGRATIONS, SQLITE_ADMISSION_MIGRATION],
   );
+  migrateDebugChannelSqlite(session);
   const persistence = new SqliteExchangePersistence(session, config.tenant_id);
   const operations = createSqliteOperationsStores(
     session,
@@ -302,6 +317,7 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     endpointDirectory: createSqliteEndpointDirectoryStore(session, config.tenant_id),
     endpointInbox: createSqliteEndpointInboxStore(session, config.tenant_id),
     connectorIngress: createSqliteConnectorIngressStore(session, config.tenant_id),
+    debugChannel: new SqliteDebugChannelStore(session),
     admissionBindings: new SqliteParticipantBindingStore(session, config.tenant_id),
     admissionDecisions: new SqliteAdmissionDecisionStore(session, config.tenant_id),
     channelRoutes: new SqliteChannelRouteStore(session),
@@ -409,11 +425,20 @@ class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
   ) {}
   activate(origin: string): void {
     for (const [instanceId, instance] of Object.entries(this.plugins)) {
-      if (!instance.enabled || instance.type !== "collaboration-channel.feishu") continue;
-      const plugin = instance.config as FeishuPluginConfig;
+      if (!instance.enabled) continue;
+      let accessToken: string;
+      if (instance.type === "collaboration-channel.feishu") {
+        accessToken = validateFeishuPluginConfig(instance.config)
+          .credentials.work_fabric_access_token;
+      } else if (instance.type === "collaboration-channel.debug") {
+        accessToken = validateDebugPluginConfig(instance.config)
+          .credentials.bearer_token;
+      } else {
+        continue;
+      }
       const client = new WorkFabricClient({
         baseUrl: origin,
-        authentication: new BearerTokenProvider(plugin.credentials.work_fabric_access_token),
+        authentication: new BearerTokenProvider(accessToken),
         representation: { actorId: "connector-bootstrap", endpointId: `connector:${instanceId}` },
         tenantId: this.config.tenant_id,
         exchangeId: this.config.exchange_id,
@@ -481,6 +506,31 @@ function enabledFeishuAdmissionPlugins(configuration: PluginHostConfiguration): 
   return result;
 }
 
+function enabledDebugAdmissionPlugins(
+  configuration: PluginHostConfiguration,
+): ReadonlyMap<string, {
+  readonly config: DebugPluginConfig;
+  readonly policy_ids: readonly string[];
+}> {
+  const result = new Map<string, {
+    readonly config: DebugPluginConfig;
+    readonly policy_ids: readonly string[];
+  }>();
+  for (const [instanceId, instance] of Object.entries(configuration)) {
+    if (!instance.enabled || instance.type !== "collaboration-channel.debug") {
+      continue;
+    }
+    const debug = validateDebugPluginConfig(instance.config);
+    const policyIds = [...new Set(Object.values(debug.participants)
+      .filter((participant) => participant.mode === "admission")
+      .map((participant) => participant.policy_id))].sort();
+    if (policyIds.length > 0) {
+      result.set(instanceId, { config: debug, policy_ids: policyIds });
+    }
+  }
+  return result;
+}
+
 function composeAdmission(
   config: NodeServiceConfig,
   storage: NodeStorageComposition,
@@ -490,7 +540,12 @@ function composeAdmission(
   clock: Clock,
 ): AdmissionComposition | undefined {
   const plugins = enabledFeishuAdmissionPlugins(pluginConfiguration);
-  if (plugins.size === 0 && config.admission === undefined) return undefined;
+  const debugPlugins = enabledDebugAdmissionPlugins(pluginConfiguration);
+  if (
+    plugins.size === 0
+    && debugPlugins.size === 0
+    && config.admission === undefined
+  ) return undefined;
   if (config.admission === undefined) {
     return compositionError("service_admission_missing", "service.admission");
   }
@@ -619,6 +674,49 @@ function composeAdmission(
       action: "workfabric.handoff.offer.v1",
     });
   }
+  for (const [, debug] of debugPlugins) {
+    for (const policyId of debug.policy_ids) {
+      const policyPath = `admission.policies.${policyId}`;
+      const policy = Object.hasOwn(admissionSection.policies, policyId)
+        ? admissionSection.policies[policyId]
+        : undefined;
+      if (policy === undefined) {
+        return compositionError("admission_policy_missing", policyPath);
+      }
+      const checks = [
+        ["tenant_id", policy.tenant_id, config.tenant_id],
+        ["connector_id", policy.connector_id, debug.config.connector_id],
+        ["source_system", policy.source_system, "workfabric-debug"],
+        [
+          "external_tenant_id",
+          policy.external_tenant_id,
+          debug.config.external_tenant_id,
+        ],
+      ] as const;
+      const mismatch = checks.find(([, actual, expected]) => actual !== expected);
+      if (mismatch !== undefined) {
+        return compositionError(
+          "admission_policy_scope_mismatch",
+          `${policyPath}.${mismatch[0]}`,
+        );
+      }
+      if (policy.allow.all_internal_members) {
+        const providerRef = policy.internal_membership?.evidence_provider_ref;
+        if (providerRef === undefined || !evidenceProviders.has(providerRef)) {
+          return compositionError(
+            "admission_evidence_provider_missing",
+            `admission.evidence_providers.${providerRef ?? "missing"}`,
+          );
+        }
+      }
+    }
+    authorityRules.push({
+      tenant_id: config.tenant_id,
+      connector_id: debug.config.connector_id,
+      principal_id: `admission:${debug.config.connector_id}`,
+      action: "workfabric.handoff.offer.v1",
+    });
+  }
 
   const grants = new HmacRepresentationGrants({
     active_key_id: config.admission.grant_active_key_id,
@@ -715,6 +813,14 @@ export async function composeNodeService(
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
   if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
     throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
+  }
+  const debugEnabled = enabledPlugins.some(
+    (item) => item.type === "collaboration-channel.debug",
+  );
+  if (debugEnabled && storage.debugChannel === undefined) {
+    throw new Error(
+      "enabled Debug Channel plugins require a deployment-owned DebugChannelStore",
+    );
   }
   const channelRoutes = storage.channelRoutes ?? new MemoryChannelRouteStore();
   const channelSignalRouter = options.channel_signal_router ?? new ChannelSignalRouter();
@@ -944,6 +1050,7 @@ export async function composeNodeService(
   });
   const pluginServices = new Map<string, unknown>([
     ["workfabric.tenant_id", config.tenant_id],
+    ["workfabric.development_mode", config.development_mode],
     ["channel.routes", channelRoutes],
     [
       "channel.handoff_snapshot_source",
@@ -956,6 +1063,9 @@ export async function composeNodeService(
     ["connector.ingress", storage.connectorIngress],
     ["connector.command_sink", connectorCommandSink],
     ["channel.signal_registry", channelSignalRouter],
+    ...(storage.debugChannel === undefined
+      ? []
+      : [["debug.channel_store", storage.debugChannel] as const]),
     ["feishu.webhook_registry", webhookRegistry],
     [
       "feishu.conversation_context_provider_factory",
@@ -977,11 +1087,22 @@ export async function composeNodeService(
         ?? new NodeFeishuLongConnectionClientFactory(),
     ],
     ["runtime.clock", { now: clock.now, nowEpochSeconds: () => Math.floor(Date.parse(clock.now()) / 1000) }],
+    [
+      "runtime.debug_ids",
+      {
+        requestId: () => `debug_request_${randomUUID()}`,
+        submissionId: () => `debug_submission_${randomUUID()}`,
+      },
+    ],
+    ["runtime.debug_cursor", operationsCursor(config.cursor_secret)],
     ["runtime.fetch", runtimeFetch],
     ["runtime.handoff_wakeup", (handoffId: string) => localPump?.wake(handoffPartitionId(config.tenant_id, handoffId))],
   ]);
   const pluginHost = new PluginHost({
-    registry: new PluginRegistry([new FeishuPluginFactory()]),
+    registry: new PluginRegistry([
+      new FeishuPluginFactory(),
+      new DebugPluginFactory(),
+    ]),
     context: {
       configuration_revision: options.configuration_revision ?? "direct-composition",
       service: { get<T>(capability: string): T { if (!pluginServices.has(capability)) throw new Error(`plugin service unavailable: ${capability}`); return pluginServices.get(capability) as T; } },
