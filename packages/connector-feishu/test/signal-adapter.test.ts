@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { verifySignalProfile } from "@work-fabric/exchange-conformance";
 import type {
+  JsonObject,
   ProtocolEvent,
   SignalDestination,
 } from "@work-fabric/exchange-spi";
@@ -59,6 +60,34 @@ const agentResultEvent: ProtocolEvent = {
     },
   },
 };
+
+function resultEvent(
+  id: string,
+  summary: readonly JsonObject[],
+): ProtocolEvent {
+  return {
+    ...agentResultEvent,
+    id,
+    data: {
+      ...agentResultEvent.data,
+      snapshot: {
+        ...(agentResultEvent.data.snapshot as Record<string, unknown>),
+        result: {
+          summary,
+          artifacts: [],
+          evidence: [],
+          extensions: {},
+        },
+      },
+    },
+  };
+}
+
+const markdownResultEvent = resultEvent("event-agent-markdown-result", [{
+  kind: "text",
+  media_type: "text/markdown",
+  text: "## 已完成\n\n请查看[需求文档](https://example.com/doc)。",
+}]);
 
 function destination(
   id: string,
@@ -166,7 +195,7 @@ describe("FeishuSignalAdapter", () => {
     expect(messages.inputs).toHaveLength(2);
   });
 
-  it("renders only the Agent-owned Result summary in text and card modes", async () => {
+  it("renders Agent-owned plain text as text regardless of presentation mode", async () => {
     const messages = new ControlledMessages();
     const adapter = new FeishuSignalAdapter({
       messages,
@@ -191,6 +220,7 @@ describe("FeishuSignalAdapter", () => {
 
     expect(messages.inputs).toHaveLength(2);
     for (const input of messages.inputs) {
+      expect(input.msg_type).toBe("text");
       expect(input.content).toContain(
         "已整理需求目标、缺失信息和验收条件。",
       );
@@ -198,6 +228,92 @@ describe("FeishuSignalAdapter", () => {
         /handoff-1|result_returned|accepted|State:/,
       );
     }
+  });
+
+  it("renders Agent-owned Markdown as a native Feishu post with clickable link syntax", async () => {
+    const messages = new ControlledMessages();
+    const adapter = new FeishuSignalAdapter({
+      messages,
+      renderer: new FeishuEventRenderer({
+        action_codec: new FeishuActionReferenceCodec({
+          encryption_key: new Uint8Array(32).fill(7),
+        }),
+        clock: { now: () => "2026-07-16T00:00:00Z" },
+        max_text_bytes: 150_000,
+        max_card_bytes: 30_000,
+      }),
+    });
+
+    await expect(adapter.deliver(
+      markdownResultEvent,
+      destination("agent-markdown", "ou-accepted", "card"),
+    )).resolves.toEqual({ kind: "accepted" });
+
+    expect(messages.inputs).toHaveLength(1);
+    expect(messages.inputs[0]?.msg_type).toBe("post");
+    expect(JSON.parse(messages.inputs[0]!.content)).toEqual({
+      zh_cn: {
+        title: "",
+        content: [[{
+          tag: "md",
+          text: "## 已完成\n\n请查看[需求文档](https://example.com/doc)。",
+        }]],
+      },
+    });
+  });
+
+  it("fails closed for unsupported or unsafe Agent-owned content", async () => {
+    const messages = new ControlledMessages();
+    const adapter = new FeishuSignalAdapter({
+      messages,
+      renderer: new FeishuEventRenderer({
+        action_codec: new FeishuActionReferenceCodec({
+          encryption_key: new Uint8Array(32).fill(7),
+        }),
+        clock: { now: () => "2026-07-16T00:00:00Z" },
+        max_text_bytes: 150_000,
+        max_card_bytes: 30_000,
+      }),
+    });
+
+    await expect(adapter.deliver(
+      resultEvent("event-agent-html", [{
+        kind: "text",
+        media_type: "text/html",
+        text: "<strong>unsafe</strong>",
+      }]),
+      destination("agent-html", "ou-accepted"),
+    )).resolves.toEqual({
+      kind: "permanent_failure",
+      detail: "unsupported_media_type",
+    });
+    await expect(adapter.deliver(
+      resultEvent("event-agent-unsafe-link", [{
+        kind: "text",
+        media_type: "text/markdown",
+        text: "[危险](javascript:alert(1))",
+      }]),
+      destination("agent-unsafe-link", "ou-accepted"),
+    )).resolves.toEqual({
+      kind: "permanent_failure",
+      detail: "unsafe_link",
+    });
+    await expect(adapter.deliver(
+      resultEvent("event-agent-mixed", [{
+        kind: "text",
+        media_type: "text/plain",
+        text: "plain",
+      }, {
+        kind: "text",
+        media_type: "text/markdown",
+        text: "**markdown**",
+      }]),
+      destination("agent-mixed", "ou-accepted"),
+    )).resolves.toEqual({
+      kind: "permanent_failure",
+      detail: "unsupported_media_type",
+    });
+    expect(messages.inputs).toHaveLength(0);
   });
 
   it("does not synthesize a reply when a Result has no text summary", async () => {

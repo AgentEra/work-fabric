@@ -9,6 +9,7 @@ import {
 } from "@work-fabric/exchange-spi";
 
 import {
+  FeishuRenderError,
   parseFeishuDestination,
   type FeishuEventRenderer,
 } from "./event-renderer.js";
@@ -69,6 +70,9 @@ export class FeishuSignalAdapter implements SignalAdapter {
       if (result.kind === "accepted") return { kind: "accepted" };
       return { kind: result.kind, detail: result.error_code.slice(0, 512) };
     } catch (error) {
+      if (error instanceof FeishuRenderError) {
+        return { kind: "permanent_failure", detail: error.code };
+      }
       return error instanceof TypeError || error instanceof RangeError
         ? { kind: "permanent_failure", detail: "invalid_feishu_destination" }
         : { kind: "retryable_failure", detail: "feishu_adapter_failure" };

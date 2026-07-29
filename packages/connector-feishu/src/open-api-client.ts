@@ -18,7 +18,7 @@ export interface FeishuSendMessageInput {
   readonly credential_ref: string;
   readonly receive_id_type: FeishuReceiveIdType;
   readonly receive_id: string;
-  readonly msg_type: "text" | "interactive";
+  readonly msg_type: "text" | "post" | "interactive";
   readonly content: string;
   readonly uuid: string;
 }
@@ -180,7 +180,11 @@ function validateMessage(input: FeishuSendMessageInput): void {
   if (!RECEIVE_ID_TYPES.has(input.receive_id_type)) {
     throw new TypeError("receive_id_type is invalid");
   }
-  if (input.msg_type !== "text" && input.msg_type !== "interactive") {
+  if (
+    input.msg_type !== "text" &&
+    input.msg_type !== "post" &&
+    input.msg_type !== "interactive"
+  ) {
     throw new TypeError("msg_type is invalid");
   }
   const bytes = new TextEncoder().encode(input.content).byteLength;

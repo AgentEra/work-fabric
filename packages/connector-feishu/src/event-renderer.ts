@@ -2,6 +2,10 @@ import type { ProtocolEvent } from "@work-fabric/exchange-spi";
 import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 
 import type { FeishuActionReferenceCodec } from "./action-token.js";
+import {
+  assertSafeMarkdownLinks,
+  FeishuMarkdownError,
+} from "./markdown-content.js";
 import type { FeishuReceiveIdType } from "./open-api-client.js";
 
 const ALLOWED_DESTINATION_KEYS = new Set([
@@ -34,8 +38,20 @@ export interface FeishuDestinationConfiguration {
 }
 
 export interface FeishuRenderedMessage {
-  readonly msg_type: "text" | "interactive";
+  readonly msg_type: "text" | "post" | "interactive";
   readonly content: string;
+}
+
+export class FeishuRenderError extends Error {
+  constructor(
+    readonly code:
+      | "unsupported_media_type"
+      | "unsafe_link"
+      | "rendering_failed",
+  ) {
+    super(code);
+    this.name = "FeishuRenderError";
+  }
 }
 
 export interface FeishuEventRendererOptions {
@@ -116,13 +132,19 @@ function object(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function agentResultText(event: ProtocolEvent): string {
+interface AgentResultContent {
+  readonly media_type: string;
+  readonly text: string;
+}
+
+function agentResultContent(event: ProtocolEvent): AgentResultContent {
   const snapshot = object(event.data.snapshot, "result snapshot");
   const result = object(snapshot.result, "result snapshot result");
   if (!Array.isArray(result.summary)) {
     throw new TypeError("result summary is invalid");
   }
   const texts: string[] = [];
+  let mediaType: string | undefined;
   for (const [index, value] of result.summary.entries()) {
     const part = object(value, `result summary ${index}`);
     if (part.kind !== "text") continue;
@@ -132,12 +154,19 @@ function agentResultText(event: ProtocolEvent): string {
       typeof part.text !== "string" ||
       part.text.length === 0
     ) throw new TypeError(`result summary ${index} is invalid`);
+    if (mediaType !== undefined && part.media_type !== mediaType) {
+      throw new FeishuRenderError("unsupported_media_type");
+    }
+    mediaType = part.media_type;
     texts.push(part.text);
   }
-  if (texts.length === 0) {
+  if (texts.length === 0 || mediaType === undefined) {
     throw new TypeError("result summary has no text content");
   }
-  return texts.join("\n");
+  if (mediaType !== "text/plain" && mediaType !== "text/markdown") {
+    throw new FeishuRenderError("unsupported_media_type");
+  }
+  return { media_type: mediaType, text: texts.join("\n") };
 }
 
 export class FeishuEventRenderer {
@@ -155,28 +184,32 @@ export class FeishuEventRenderer {
     destination: FeishuDestinationConfiguration,
   ): FeishuRenderedMessage {
     if (event.type === "workfabric.handoff.result_returned.v1") {
-      const reply = agentResultText(event);
-      if (destination.render_mode === "text") {
-        const content = JSON.stringify({ text: reply });
+      const reply = agentResultContent(event);
+      if (reply.media_type === "text/plain") {
+        const content = JSON.stringify({ text: reply.text });
         if (encodedSize(content) > this.options.max_text_bytes) {
-          throw new RangeError("Feishu text exceeds its configured limit");
+          throw new FeishuRenderError("rendering_failed");
         }
         return { msg_type: "text", content };
       }
+      try {
+        assertSafeMarkdownLinks(reply.text);
+      } catch (error) {
+        if (error instanceof FeishuMarkdownError) {
+          throw new FeishuRenderError("unsafe_link");
+        }
+        throw error;
+      }
       const content = JSON.stringify({
-        schema: "2.0",
-        config: { update_multi: true },
-        body: {
-          elements: [{
-            tag: "div",
-            text: { tag: "plain_text", content: reply },
-          }],
+        zh_cn: {
+          title: "",
+          content: [[{ tag: "md", text: reply.text }]],
         },
       });
       if (encodedSize(content) > this.options.max_card_bytes) {
-        throw new RangeError("Feishu card exceeds its configured limit");
+        throw new FeishuRenderError("rendering_failed");
       }
-      return { msg_type: "interactive", content };
+      return { msg_type: "post", content };
     }
     const handoffId = bounded(event.wfhandoff ?? event.subject, "handoff_id");
     const change = event.data.change as
