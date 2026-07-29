@@ -1,0 +1,20 @@
+{
+  "idempotency_key": "data-example-1",
+  "participant_ref": "internal-user",
+  "content": [
+    {
+      "kind": "text",
+      "media_type": "text/plain",
+      "text": "请解释随附结构化数据的状态。"
+    },
+    {
+      "kind": "data",
+      "schema_ref": "https://schemas.example.com/eda-status/v1",
+      "data": {
+        "topic": "event-driven-architecture",
+        "status": "draft",
+        "reviewers": 2
+      }
+    }
+  ]
+}

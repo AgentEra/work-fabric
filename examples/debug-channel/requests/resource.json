@@ -1,0 +1,21 @@
+{
+  "idempotency_key": "resource-example-1",
+  "participant_ref": "internal-user",
+  "content": [
+    {
+      "kind": "text",
+      "media_type": "text/plain",
+      "text": "请说明这个公开资源适合用于什么场景。"
+    },
+    {
+      "kind": "resource",
+      "resource": {
+        "uri": "https://example.com/eda",
+        "name": "EDA 资料",
+        "media_type": "text/html",
+        "access_hint": "public",
+        "extensions": {}
+      }
+    }
+  ]
+}

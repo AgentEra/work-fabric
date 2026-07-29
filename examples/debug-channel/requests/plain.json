@@ -1,0 +1,11 @@
+{
+  "idempotency_key": "plain-example-1",
+  "participant_ref": "internal-user",
+  "content": [
+    {
+      "kind": "text",
+      "media_type": "text/plain",
+      "text": "请用一句话确认你收到了这条本地联调消息。"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "idempotency_key": "markdown-example-1",
+  "participant_ref": "internal-user",
+  "content": [
+    {
+      "kind": "text",
+      "media_type": "text/markdown",
+      "text": "请总结 **EDA**，并保留这个链接：[资料](https://example.com/eda)。",
+      "language": "zh-CN"
+    }
+  ]
+}
