@@ -199,6 +199,16 @@ def test_historical_context_cannot_initiate_capability_side_effects() -> None:
     assert "summary or extraction request" in prompt
 
 
+def test_turn_prompt_teaches_the_disclosed_current_group_calendar_flow() -> None:
+    prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
+
+    assert "feishu.conversation.members.list" in prompt
+    assert "feishu.calendar.freebusy.query" in prompt
+    assert "authority_evidence.capability_result_handoff_ids" in prompt
+    assert "feishu.calendar.event.create" in prompt
+    assert "missing date, duration, or time zone" in prompt
+
+
 def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
     final = validate_turn_assistant_output({
         "turn_type": "final",
@@ -368,6 +378,66 @@ async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_res
             },
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_calendar_partial_fallback_is_agent_owned_and_linked() -> None:
+    value = valid_request_v3()
+    value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "给项目组安排明天上午的评审日程",
+    }]
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-calendar-1",
+            "capability_id": "feishu.calendar.event.create",
+            "version_constraint": "1.0.0",
+            "input": {
+                "title": "项目评审",
+                "start_at": "2026-07-30T09:00:00+08:00",
+                "end_at": "2026-07-30T10:00:00+08:00",
+                "time_zone": "Asia/Shanghai",
+            },
+            "reason": "创建团队评审日程",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "invocation-calendar-1",
+            "auxiliary_handoff_id": "handoff-calendar-1",
+            "candidate": {
+                "citizen_id": "citizen-feishu-calendar",
+                "endpoint_id": "endpoint-feishu-provider",
+                "capability_id": "feishu.calendar.event.create",
+                "capability_version": "1.0.0",
+                "contract_digest": "sha256:" + ("a" * 64),
+            },
+            "data": {
+                "title": "项目评审",
+                "url": "https://feishu.cn/calendar/event/event-1",
+                "completion_state": "partial",
+            },
+            "artifacts": [],
+        },
+    }]}
+    request = parse_request(value)
+    agent = FakeAgent()
+
+    async def never_finishes() -> object:
+        await asyncio.sleep(60)
+        raise AssertionError("unreachable")
+
+    agent.async_start = never_finishes  # type: ignore[method-assign]
+    turn = await execute_turn_with_agent(
+        request,
+        agent,
+        post_capability_timeout_seconds=0.01,
+    )
+
+    text = turn["response"]["summary"][0]["text"]
+    assert text.startswith("已部分完成：")
+    assert "日程《项目评审》" in text
+    assert "https://feishu.cn/calendar/event/event-1" in text
 
 
 @pytest.mark.asyncio

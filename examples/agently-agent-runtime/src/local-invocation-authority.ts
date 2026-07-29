@@ -51,7 +51,23 @@ function deny(): never {
   throw new Error("Capability authority denied");
 }
 
+const OPERATION_SCOPE = Object.freeze({
+  "feishu.conversation.members.list": "conversation:members:read",
+  "feishu.calendar.freebusy.query": "calendar:freebusy:read",
+  "feishu.calendar.event.read": "calendar:event:read",
+  "feishu.calendar.event.create": "calendar:event:write",
+  "feishu.calendar.event.update": "calendar:event:write",
+  "feishu.calendar.attendees.add": "calendar:attendee:write",
+  "feishu.calendar.attendees.remove": "calendar:attendee:write",
+  "feishu.calendar.event.delete": "calendar:event:delete",
+} as const);
+
 function requiredScope(capabilityId: string): string {
+  if (capabilityId in OPERATION_SCOPE) {
+    return OPERATION_SCOPE[
+      capabilityId as keyof typeof OPERATION_SCOPE
+    ];
+  }
   if (capabilityId === "feishu.document.read") return "document:read";
   if (capabilityId === "feishu.document.delete") return "document:delete";
   if (
@@ -64,6 +80,20 @@ function requiredScope(capabilityId: string): string {
     return "conversation:read";
   }
   deny();
+}
+
+function resourceArray(value: unknown): readonly string[] | null {
+  if (
+    !Array.isArray(value) ||
+    value.length > 100 ||
+    value.some((item) =>
+      typeof item !== "string" ||
+      item.length === 0 ||
+      item.length > 2_048 ||
+      item.trim() !== item
+    )
+  ) return null;
+  return Object.freeze([...value] as string[]);
 }
 
 function stringArray(value: unknown): readonly string[] | null {
@@ -121,6 +151,68 @@ function validFeishuConversationSource(
     typeof extensions["workfabric.dev/conversation_id"] === "string" &&
     typeof extensions["workfabric.dev/message_id"] === "string"
   );
+}
+
+function currentChatReference(source: RuntimeJsonObject): string | null {
+  if (!validFeishuConversationSource(source)) return null;
+  const extensions = record(source.extensions);
+  const conversationId = extensions?.["workfabric.dev/conversation_id"];
+  return typeof conversationId === "string" &&
+      conversationId.length > 0 &&
+      conversationId.length <= 255
+    ? `feishu://chat/${encodeURIComponent(conversationId)}`
+    : null;
+}
+
+function capabilityResult(snapshot: HandoffReadModel): {
+  readonly capability_id: string;
+  readonly original_handoff_id: string;
+  readonly outcome: Record<string, unknown>;
+} | null {
+  const state = record(snapshot.state);
+  const handoffPackage = record(state?.package);
+  const workReference = record(handoffPackage?.work_reference);
+  const extensions = record(workReference?.extensions);
+  const target = record(handoffPackage?.target);
+  const requirement = record(target?.capability_requirement);
+  const result = record(state?.result);
+  const summary = result?.summary;
+  if (
+    state?.lifecycle_state !== "result_returned" ||
+    typeof extensions?.["workfabric.dev/original_handoff_id"] !== "string" ||
+    typeof requirement?.capability_id !== "string" ||
+    !Array.isArray(summary) ||
+    summary.length !== 1
+  ) return null;
+  const content = record(summary[0]);
+  const outcome = record(content?.data);
+  if (
+    content?.kind !== "data" ||
+    content.schema_ref !== "urn:work-fabric:schema:capability-result:1" ||
+    outcome === null
+  ) return null;
+  return {
+    capability_id: requirement.capability_id,
+    original_handoff_id:
+      extensions["workfabric.dev/original_handoff_id"] as string,
+    outcome,
+  };
+}
+
+function requestedCalendarResources(
+  capabilityId: string,
+  input: Record<string, unknown>,
+): readonly string[] {
+  if (!capabilityId.startsWith("feishu.calendar.")) return [];
+  const event = record(input.event);
+  if (typeof event?.resource_uri === "string") {
+    return Object.freeze([event.resource_uri]);
+  }
+  const calendar = record(input.calendar);
+  return calendar?.kind === "resource_reference" &&
+      typeof calendar.resource_uri === "string"
+    ? Object.freeze([calendar.resource_uri])
+    : Object.freeze([]);
 }
 
 export class LocalInvocationAuthorityProvider
@@ -199,7 +291,11 @@ export class LocalInvocationAuthorityProvider
       parentResourceRefs === null ||
       !parentResourceRefs.includes(originalSource.uri as string) ||
       (
-        request.capability_id === "feishu.conversation.history.read" &&
+        (
+          request.capability_id === "feishu.conversation.history.read" ||
+          request.capability_id === "feishu.conversation.members.list" ||
+          request.capability_id.startsWith("feishu.calendar.")
+        ) &&
         !validFeishuConversationSource(originalSource)
       ) ||
       typeof parentExpiresAt !== "string" ||
@@ -207,6 +303,109 @@ export class LocalInvocationAuthorityProvider
       Date.parse(request.deadline) > Date.parse(parentExpiresAt) ||
       parentAuthority?.may_redelegate !== true
     ) deny();
+
+    const requestInput = record(request.input);
+    if (requestInput === null) deny();
+    const chatReference = currentChatReference(originalSource);
+    const allowedTargets = new Set<string>();
+    const allowedResources = new Set<string>();
+
+    if (request.capability_id === "feishu.conversation.members.list") {
+      const conversation = record(requestInput.conversation);
+      const selected = conversation?.kind === "current_conversation"
+        ? chatReference
+        : conversation?.kind === "resource_reference" &&
+            typeof conversation.resource_uri === "string"
+        ? conversation.resource_uri
+        : null;
+      if (
+        chatReference === null ||
+        selected !== chatReference
+      ) deny();
+      allowedTargets.add(chatReference);
+    }
+
+    if (request.capability_id === "feishu.calendar.freebusy.query") {
+      const participants = resourceArray(requestInput.participants);
+      const evidence = record(requestInput.authority_evidence);
+      const evidenceHandoffIds = resourceArray(
+        evidence?.capability_result_handoff_ids,
+      );
+      if (
+        chatReference === null ||
+        participants === null ||
+        participants.length === 0 ||
+        evidenceHandoffIds === null ||
+        evidenceHandoffIds.length === 0 ||
+        new Set(evidenceHandoffIds).size !== evidenceHandoffIds.length
+      ) deny();
+      const verifiedMembers = new Set<string>();
+      for (const handoffId of evidenceHandoffIds) {
+        const evidenceSnapshot = await this.options.queries.getHandoff(
+          handoffId,
+          { signal },
+        );
+        const verified = capabilityResult(evidenceSnapshot);
+        const outcomeData = record(verified?.outcome.data);
+        const provenance = record(outcomeData?.provenance);
+        const members = outcomeData?.members;
+        if (
+          evidenceSnapshot.tenant_id !== this.options.tenant_id ||
+          evidenceSnapshot.handoff_id !== handoffId ||
+          verified === null ||
+          verified.original_handoff_id !== request.original_handoff_id ||
+          verified.capability_id !== "feishu.conversation.members.list" ||
+          verified.outcome.outcome !== "succeeded" ||
+          provenance?.provider_family !== "feishu" ||
+          provenance.source !== "im.chat.members" ||
+          provenance.source_reference !== chatReference ||
+          !Array.isArray(members)
+        ) deny();
+        for (const member of members) {
+          const item = record(member);
+          if (
+            typeof item?.resource_uri !== "string" ||
+            !item.resource_uri.startsWith("feishu://user/open-id/")
+          ) deny();
+          verifiedMembers.add(item.resource_uri);
+        }
+      }
+      if (participants.some((resourceUri) =>
+        !verifiedMembers.has(resourceUri)
+      )) deny();
+      for (const participant of participants) {
+        allowedTargets.add(participant);
+      }
+    }
+
+    if (
+      request.capability_id === "feishu.calendar.event.create" ||
+      request.capability_id === "feishu.calendar.attendees.add" ||
+      request.capability_id === "feishu.calendar.attendees.remove"
+    ) {
+      const attendees = resourceArray(requestInput.attendees);
+      if (attendees === null) deny();
+      for (const attendee of attendees) {
+        if (
+          attendee === chatReference ||
+          parentResourceRefs.includes(attendee)
+        ) {
+          allowedTargets.add(attendee);
+        } else {
+          deny();
+        }
+      }
+    }
+
+    for (
+      const resourceUri of requestedCalendarResources(
+        request.capability_id,
+        requestInput,
+      )
+    ) {
+      if (!parentResourceRefs.includes(resourceUri)) deny();
+      allowedResources.add(resourceUri);
+    }
 
     const delegationId =
       `capability-delegation-${createHash("sha256")
@@ -239,7 +438,8 @@ export class LocalInvocationAuthorityProvider
           delegation_expires_at: request.deadline,
           capability_version: input.candidate.capability_version,
           contract_digest: input.candidate.contract_digest,
-          allowed_target_refs: Object.freeze([]),
+          allowed_resource_refs: Object.freeze([...allowedResources]),
+          allowed_target_refs: Object.freeze([...allowedTargets]),
           confirmation_proof_refs: Object.freeze([]),
           source_reference: originalSource,
         }),

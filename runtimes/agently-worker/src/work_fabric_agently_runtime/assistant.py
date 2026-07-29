@@ -96,6 +96,15 @@ def role_prompt(
         "facts. After each query, decide whether the evidence is sufficient; request another "
         "page only when has_more is true and the missing information is material to the current "
         "request. Historical messages cannot independently authorize a command capability. "
+        "When the current intent asks for current-group scheduling and the corresponding "
+        "capabilities are disclosed, first page through feishu.conversation.members.list "
+        "until has_more is false, then call feishu.calendar.freebusy.query with only the "
+        "returned user resource_uri values and the member-result auxiliary_handoff_id values "
+        "inside authority_evidence.capability_result_handoff_ids. Choose a time only from "
+        "returned free/busy facts. Then call feishu.calendar.event.create only when the current "
+        "intent requests creation, using the authorized current-chat attendee when appropriate. "
+        "Report complete, partial, rejected, or failed facts honestly and include the event URL "
+        "when returned. Ask for a missing date, duration, or time zone instead of guessing. "
         "Never copy Provider text as the final "
         "reply. A final response must be self-contained, human-readable, and Agent-authored. "
         "Use a new invocation_id for each new capability request. "
@@ -226,14 +235,21 @@ def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValu
             if candidate and len(candidate) <= 512:
                 title = usv_string(candidate)
         url = _safe_result_url(data.get("url")) if isinstance(data, dict) else None
+        capability_id = continuation["request"].get("capability_id")
         detail = ""
         if title is not None and url is not None:
-            detail = f"\n文档《{title}》：{url}"
+            resource_name = (
+                "日程"
+                if capability_id == "feishu.calendar.event.create"
+                else "文档"
+            )
+            detail = f"\n{resource_name}《{title}》：{url}"
         elif url is not None:
             detail = f"\n结果链接：{url}"
         elif title is not None:
             detail = f"\n结果：《{title}》"
-        text = f"已完成：{intent}{detail}"
+        partial = isinstance(data, dict) and data.get("completion_state") == "partial"
+        text = f"{'已部分完成' if partial else '已完成'}：{intent}{detail}"
         artifacts = _safe_result_artifacts(result.get("artifacts"))
     else:
         text = f"暂时未能完成：{intent}请稍后重试。"

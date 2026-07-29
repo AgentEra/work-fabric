@@ -99,6 +99,87 @@ function authority(read = snapshot()) {
   };
 }
 
+function capabilityInput(
+  capabilityId: string,
+  requestInput: Record<string, unknown>,
+): NormalizedInvocationAuthorityRequest {
+  const candidate = {
+    citizen_id: capabilityId.startsWith("feishu.calendar.")
+      ? "citizen-feishu-calendar"
+      : "citizen-feishu-message",
+    endpoint_id: "endpoint-feishu-actions",
+    capability_id: capabilityId,
+    capability_version: "1.0.0",
+    contract_digest: digest,
+  };
+  return input({
+    request: {
+      ...input().request,
+      capability_id: capabilityId,
+      input: requestInput,
+    },
+    candidate,
+    contract: {
+      candidate,
+      confirmation: "none",
+      risk: "low",
+      operation_kind: "query",
+    },
+  });
+}
+
+function membersResult(): HandoffReadModel {
+  return {
+    tenant_id: "tenant-local",
+    partition_id: "handoff:handoff-members-result-1",
+    handoff_id: "handoff-members-result-1",
+    stream_version: 4,
+    state: {
+      lifecycle_state: "result_returned",
+      package: {
+        work_reference: {
+          uri: "urn:work-fabric:capability-invocation:handoff-original:members-1",
+          extensions: {
+            "workfabric.dev/original_handoff_id": "handoff-original",
+            "workfabric.dev/invocation_id": "members-1",
+          },
+        },
+        target: {
+          capability_requirement: {
+            capability_id: "feishu.conversation.members.list",
+          },
+        },
+      },
+      result: {
+        summary: [{
+          kind: "data",
+          schema_ref: "urn:work-fabric:schema:capability-result:1",
+          data: {
+            outcome: "succeeded",
+            data: {
+              members: [
+                { resource_uri: "feishu://user/open-id/ou_1" },
+                { resource_uri: "feishu://user/open-id/ou_2" },
+              ],
+              has_more: false,
+              provenance: {
+                provider_family: "feishu",
+                source: "im.chat.members",
+                source_reference: "feishu://chat/oc-chat-1",
+              },
+            },
+            artifacts: [],
+          },
+        }],
+        artifacts: [],
+        evidence: [],
+        extensions: {},
+      },
+    },
+    latest_status: null,
+  } as HandoffReadModel;
+}
+
 describe("LocalInvocationAuthorityProvider", () => {
   it("derives bounded capability Authority from canonical original Handoff facts", async () => {
     const fixture = authority();
@@ -221,6 +302,166 @@ describe("LocalInvocationAuthorityProvider", () => {
         new AbortController().signal,
       )).rejects.toThrow(/authority denied/i);
     }
+  });
+
+  it("derives the current chat for member lookup only from the trusted source", async () => {
+    const read = snapshot({
+      package: {
+        ...(snapshot().state.package as Record<string, unknown>),
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["conversation:members:read"],
+          resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: true,
+        },
+      },
+    });
+    const result = await authority(read).authority.authorize(
+      capabilityInput("feishu.conversation.members.list", {
+        conversation: { kind: "current_conversation" },
+        page_size: 100,
+      }),
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      scopes: ["capability:invoke", "conversation:members:read"],
+      extensions: {
+        "workfabric.dev/capability_authority": {
+          delegation_scopes: ["conversation:members:read"],
+          allowed_target_refs: ["feishu://chat/oc-chat-1"],
+        },
+      },
+    });
+  });
+
+  it("carries member user refs only through a verified Capability Result chain", async () => {
+    const original = snapshot({
+      package: {
+        ...(snapshot().state.package as Record<string, unknown>),
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["calendar:freebusy:read"],
+          resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: true,
+        },
+      },
+    });
+    const getHandoff = vi.fn(async (handoffId: string) =>
+      handoffId === "handoff-original" ? original : membersResult()
+    );
+    const policy = new LocalInvocationAuthorityProvider({
+      tenant_id: "tenant-local",
+      agent_actor_id: "actor-intake-agent",
+      queries: { getHandoff },
+      allowed_namespaces: ["feishu."],
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
+    const result = await policy.authorize(
+      capabilityInput("feishu.calendar.freebusy.query", {
+        start_at: "2026-07-28T09:00:00+08:00",
+        end_at: "2026-07-28T18:00:00+08:00",
+        participants: [
+          "feishu://user/open-id/ou_1",
+          "feishu://user/open-id/ou_2",
+        ],
+        include_external_calendars: true,
+        busy_only: true,
+        authority_evidence: {
+          capability_result_handoff_ids: ["handoff-members-result-1"],
+        },
+      }),
+      new AbortController().signal,
+    );
+    expect(result).toMatchObject({
+      scopes: ["capability:invoke", "calendar:freebusy:read"],
+      extensions: {
+        "workfabric.dev/capability_authority": {
+          delegation_scopes: ["calendar:freebusy:read"],
+          allowed_target_refs: [
+            "feishu://user/open-id/ou_1",
+            "feishu://user/open-id/ou_2",
+          ],
+        },
+      },
+    });
+
+    const tampered = membersResult();
+    (tampered.state.package as Record<string, unknown>).work_reference = {
+      uri: "urn:work-fabric:capability-invocation:handoff-other:members-1",
+      extensions: {
+        "workfabric.dev/original_handoff_id": "handoff-other",
+      },
+    };
+    const deniedQueries = vi.fn(async (handoffId: string) =>
+      handoffId === "handoff-original" ? original : tampered
+    );
+    await expect(new LocalInvocationAuthorityProvider({
+      tenant_id: "tenant-local",
+      agent_actor_id: "actor-intake-agent",
+      queries: { getHandoff: deniedQueries },
+      allowed_namespaces: ["feishu."],
+      now: () => "2026-07-27T10:00:00.000Z",
+    }).authorize(
+      capabilityInput("feishu.calendar.freebusy.query", {
+        start_at: "2026-07-28T09:00:00+08:00",
+        end_at: "2026-07-28T18:00:00+08:00",
+        participants: ["feishu://user/open-id/ou_1"],
+        include_external_calendars: true,
+        busy_only: true,
+        authority_evidence: {
+          capability_result_handoff_ids: ["handoff-members-result-1"],
+        },
+      }),
+      new AbortController().signal,
+    )).rejects.toThrow(/authority denied/i);
+  });
+
+  it("authorizes only the trusted current chat as a Calendar create attendee", async () => {
+    const original = snapshot({
+      package: {
+        ...(snapshot().state.package as Record<string, unknown>),
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["calendar:event:write"],
+          resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: true,
+        },
+      },
+    });
+    const request = capabilityInput("feishu.calendar.event.create", {
+      calendar: { kind: "default_calendar" },
+      title: "项目评审",
+      start_at: "2026-07-28T09:00:00+08:00",
+      end_at: "2026-07-28T10:00:00+08:00",
+      time_zone: "Asia/Shanghai",
+      attendees: ["feishu://chat/oc-chat-1"],
+    });
+    await expect(authority(original).authority.authorize(
+      request,
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      extensions: {
+        "workfabric.dev/capability_authority": {
+          allowed_target_refs: ["feishu://chat/oc-chat-1"],
+        },
+      },
+    });
+    await expect(authority(original).authority.authorize(
+      {
+        ...request,
+        request: {
+          ...request.request,
+          input: {
+            ...request.request.input,
+            attendees: ["feishu://chat/model-invented"],
+          },
+        },
+      },
+      new AbortController().signal,
+    )).rejects.toThrow(/authority denied/i);
   });
 
   it.each([
