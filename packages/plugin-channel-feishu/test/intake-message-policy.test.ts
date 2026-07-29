@@ -113,6 +113,11 @@ describe("FeishuIntakeMessagePolicy", () => {
           context_bundle: bundle,
           work_reference: {
             extensions: {
+              "workfabric.dev/provider_family": "feishu",
+              "workfabric.dev/resource_kind": "conversation_message",
+              "workfabric.dev/external_tenant_id": "tenant-key-1",
+              "workfabric.dev/conversation_id": "oc-1",
+              "workfabric.dev/message_id": "om-1",
               "workfabric.dev/thread_id": "omt-thread-1",
             },
           },
@@ -204,7 +209,16 @@ describe("FeishuIntakeMessagePolicy", () => {
         operation: "handoff.offer",
         identity: { actor_id: "actor-human", actor_type: "agent", endpoint_id: "endpoint-human" },
         input: {
-          work_reference: { uri: "feishu://tenant-key-1/message/om-1" },
+          work_reference: {
+            uri: "feishu://tenant-key-1/message/om-1",
+            extensions: {
+              "workfabric.dev/provider_family": "feishu",
+              "workfabric.dev/resource_kind": "conversation_message",
+              "workfabric.dev/external_tenant_id": "tenant-key-1",
+              "workfabric.dev/conversation_id": "oc-1",
+              "workfabric.dev/message_id": "om-1",
+            },
+          },
           target: { actor_id: "actor-agent" },
           intent: [{ kind: "text", media_type: "text/plain", text: "create a requirement" }],
           authority_scope: {

@@ -103,6 +103,7 @@ export type FeishuCapabilityOutcome =
 export interface FeishuInvocationAuthority {
   readonly allowed_target_refs: readonly string[];
   readonly confirmation_proof_refs: readonly string[];
+  readonly source_reference?: RuntimeJsonObject;
 }
 
 export interface FeishuCapabilityExecutionRequest {

@@ -26,11 +26,21 @@ function snapshot(overrides: Record<string, unknown> = {}): HandoffReadModel {
         actor_type: "agent",
       },
       package: {
+        work_reference: {
+          uri: "feishu://tenant-key-1/message/om-trigger",
+          extensions: {
+            "workfabric.dev/provider_family": "feishu",
+            "workfabric.dev/resource_kind": "conversation_message",
+            "workfabric.dev/external_tenant_id": "tenant-key-1",
+            "workfabric.dev/conversation_id": "oc-chat-1",
+            "workfabric.dev/message_id": "om-trigger",
+          },
+        },
         result_due_at: "2026-07-27T12:00:00.000Z",
         authority_scope: {
           delegation_id: "delegation-human-agent",
-          scopes: ["document:write"],
-          resource_refs: ["feishu://tenant/message/message-1"],
+          scopes: ["document:write", "conversation:read"],
+          resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
           expires_at: "2026-07-27T12:00:00.000Z",
           may_redelegate: true,
         },
@@ -107,6 +117,7 @@ describe("LocalInvocationAuthorityProvider", () => {
       scopes: ["capability:invoke", "document:write"],
       resource_refs: [
         "urn:work-fabric:capability-invocation:handoff-original:invocation-1",
+        "feishu://tenant-key-1/message/om-trigger",
       ],
       expires_at: "2026-07-27T11:00:00.000Z",
       may_redelegate: false,
@@ -125,9 +136,91 @@ describe("LocalInvocationAuthorityProvider", () => {
           contract_digest: digest,
           allowed_target_refs: [],
           confirmation_proof_refs: [],
+          source_reference: {
+            uri: "feishu://tenant-key-1/message/om-trigger",
+            extensions: {
+              "workfabric.dev/provider_family": "feishu",
+              "workfabric.dev/resource_kind": "conversation_message",
+              "workfabric.dev/external_tenant_id": "tenant-key-1",
+              "workfabric.dev/conversation_id": "oc-chat-1",
+              "workfabric.dev/message_id": "om-trigger",
+            },
+          },
         },
       },
     });
+  });
+
+  it("authorizes current-conversation reads only from the trusted Feishu source", async () => {
+    const candidate = {
+      citizen_id: "feishu-message-provider",
+      endpoint_id: "endpoint-feishu-actions",
+      capability_id: "feishu.conversation.history.read",
+      capability_version: "1.0.0",
+      contract_digest: digest,
+    };
+    const request = input({
+      request: {
+        ...input().request,
+        capability_id: candidate.capability_id,
+        input: {
+          conversation: { kind: "current_conversation" },
+          maximum_messages: 20,
+        },
+      },
+      candidate,
+      contract: {
+        candidate,
+        confirmation: "none",
+        risk: "low",
+        operation_kind: "query",
+      },
+    });
+
+    await expect(authority().authority.authorize(
+      request,
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      scopes: ["capability:invoke", "conversation:read"],
+      extensions: {
+        "workfabric.dev/capability_authority": {
+          represented_actor_id: "actor-human",
+          delegation_scopes: ["conversation:read"],
+          source_reference: {
+            uri: "feishu://tenant-key-1/message/om-trigger",
+            extensions: {
+              "workfabric.dev/provider_family": "feishu",
+              "workfabric.dev/conversation_id": "oc-chat-1",
+              "workfabric.dev/message_id": "om-trigger",
+            },
+          },
+        },
+      },
+    });
+
+    for (const source of [
+      {},
+      {
+        uri: "email://tenant/thread/thread-1",
+        extensions: {
+          "workfabric.dev/provider_family": "email",
+          "workfabric.dev/resource_kind": "conversation_message",
+          "workfabric.dev/external_tenant_id": "tenant-key-1",
+          "workfabric.dev/conversation_id": "thread-1",
+          "workfabric.dev/message_id": "mail-1",
+        },
+      },
+    ]) {
+      await expect(authority(snapshot({
+        package: {
+          ...(snapshot().state.package as Record<string, unknown>),
+          work_reference: source,
+        },
+      })).authority.authorize(
+        request,
+        new AbortController().signal,
+      )).rejects.toThrow(/authority denied/i);
+    }
   });
 
   it.each([

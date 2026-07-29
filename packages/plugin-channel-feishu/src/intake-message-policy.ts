@@ -263,6 +263,15 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
       work_reference: { uri: reference, extensions: {
         "workfabric.dev/connector_id": claim.envelope.connector_id,
         "workfabric.dev/external_event_id": claim.envelope.external_event_id,
+        "workfabric.dev/provider_family": "feishu",
+        "workfabric.dev/resource_kind": "conversation_message",
+        "workfabric.dev/external_tenant_id": claim.envelope.external_tenant_id,
+        "workfabric.dev/conversation_id": bounded(
+          payload.chat_id,
+          "chat_id",
+          255,
+        ),
+        "workfabric.dev/message_id": messageId,
         ...(typeof payload.root_id === "string" ? { "workfabric.dev/root_id": payload.root_id } : {}),
         ...(typeof payload.parent_id === "string" ? { "workfabric.dev/parent_id": payload.parent_id } : {}),
         ...(typeof payload.thread_id === "string" ? { "workfabric.dev/thread_id": payload.thread_id } : {}),

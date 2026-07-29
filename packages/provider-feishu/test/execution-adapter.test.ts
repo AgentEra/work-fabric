@@ -38,6 +38,16 @@ describe("FeishuCapabilityExecutorPortAdapter", () => {
         delegation_expires_at: "2026-07-27T11:00:00.000Z",
         allowed_target_refs: ["feishu://chat/chat-1"],
         confirmation_proof_refs: [],
+        source_reference: {
+          uri: "feishu://tenant-key-1/message/om-trigger",
+          extensions: {
+            "workfabric.dev/provider_family": "feishu",
+            "workfabric.dev/resource_kind": "conversation_message",
+            "workfabric.dev/external_tenant_id": "tenant-key-1",
+            "workfabric.dev/conversation_id": "oc-chat-1",
+            "workfabric.dev/message_id": "om-trigger",
+          },
+        },
       },
       signal,
     });
@@ -57,6 +67,16 @@ describe("FeishuCapabilityExecutorPortAdapter", () => {
       authority: {
         allowed_target_refs: ["feishu://chat/chat-1"],
         confirmation_proof_refs: [],
+        source_reference: {
+          uri: "feishu://tenant-key-1/message/om-trigger",
+          extensions: {
+            "workfabric.dev/provider_family": "feishu",
+            "workfabric.dev/resource_kind": "conversation_message",
+            "workfabric.dev/external_tenant_id": "tenant-key-1",
+            "workfabric.dev/conversation_id": "oc-chat-1",
+            "workfabric.dev/message_id": "om-trigger",
+          },
+        },
       },
       signal,
     });

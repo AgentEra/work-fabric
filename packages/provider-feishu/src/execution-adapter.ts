@@ -34,6 +34,21 @@ function strings(value: unknown): readonly string[] {
   return Object.freeze([...value] as string[]);
 }
 
+function sourceReference(value: unknown): CitizenJsonObject {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof (value as Record<string, unknown>).uri !== "string" ||
+    (value as Record<string, unknown>).extensions === null ||
+    typeof (value as Record<string, unknown>).extensions !== "object" ||
+    Array.isArray((value as Record<string, unknown>).extensions)
+  ) {
+    throw new TypeError("invalid authority evidence");
+  }
+  return structuredClone(value) as CitizenJsonObject;
+}
+
 function authority(value: CitizenJsonObject): {
   readonly original_handoff_id: string;
   readonly represented_actor_id: string;
@@ -42,6 +57,7 @@ function authority(value: CitizenJsonObject): {
   readonly delegation_expires_at: string;
   readonly allowed_target_refs: readonly string[];
   readonly confirmation_proof_refs: readonly string[];
+  readonly source_reference?: CitizenJsonObject;
 } {
   return {
     original_handoff_id: nonEmpty(value.original_handoff_id),
@@ -51,6 +67,9 @@ function authority(value: CitizenJsonObject): {
     delegation_expires_at: nonEmpty(value.delegation_expires_at),
     allowed_target_refs: strings(value.allowed_target_refs),
     confirmation_proof_refs: strings(value.confirmation_proof_refs),
+    ...(value.source_reference === undefined
+      ? {}
+      : { source_reference: sourceReference(value.source_reference) }),
   };
 }
 
@@ -91,6 +110,9 @@ export class FeishuCapabilityExecutorPortAdapter
       authority: {
         allowed_target_refs: evidence.allowed_target_refs,
         confirmation_proof_refs: evidence.confirmation_proof_refs,
+        ...(evidence.source_reference === undefined
+          ? {}
+          : { source_reference: evidence.source_reference }),
       },
       signal: context.signal,
     });

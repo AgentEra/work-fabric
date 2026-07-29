@@ -60,6 +60,9 @@ function requiredScope(capabilityId: string): string {
     capabilityId === "feishu.document.append"
   ) return "document:write";
   if (capabilityId === "feishu.message.send") return "message:send";
+  if (capabilityId === "feishu.conversation.history.read") {
+    return "conversation:read";
+  }
   deny();
 }
 
@@ -75,6 +78,49 @@ function stringArray(value: unknown): readonly string[] | null {
     )
   ) return null;
   return value as string[];
+}
+
+function sourceReference(value: unknown): RuntimeJsonObject | null {
+  const source = record(value);
+  const extensions = record(source?.extensions);
+  if (
+    typeof source?.uri !== "string" ||
+    source.uri.length === 0 ||
+    source.uri.length > 2_048 ||
+    source.uri.trim() !== source.uri ||
+    extensions === null ||
+    Object.keys(extensions).length > 32
+  ) return null;
+  const safeExtensions: Record<string, string> = {};
+  for (const [key, item] of Object.entries(extensions)) {
+    if (
+      key.length === 0 ||
+      key.length > 256 ||
+      typeof item !== "string" ||
+      item.length === 0 ||
+      item.length > 2_048
+    ) return null;
+    safeExtensions[key] = item;
+  }
+  return Object.freeze({
+    uri: source.uri,
+    extensions: Object.freeze(safeExtensions),
+  });
+}
+
+function validFeishuConversationSource(
+  value: RuntimeJsonObject,
+): boolean {
+  const extensions = record(value.extensions);
+  return (
+    typeof value.uri === "string" &&
+    value.uri.startsWith("feishu://") &&
+    extensions?.["workfabric.dev/provider_family"] === "feishu" &&
+    extensions["workfabric.dev/resource_kind"] === "conversation_message" &&
+    typeof extensions["workfabric.dev/external_tenant_id"] === "string" &&
+    typeof extensions["workfabric.dev/conversation_id"] === "string" &&
+    typeof extensions["workfabric.dev/message_id"] === "string"
+  );
 }
 
 export class LocalInvocationAuthorityProvider
@@ -125,9 +171,11 @@ export class LocalInvocationAuthorityProvider
     const responsible = record(state?.current_responsible_actor);
     const handoffPackage = record(state?.package);
     const parentAuthority = record(handoffPackage?.authority_scope);
+    const originalSource = sourceReference(handoffPackage?.work_reference);
     const originalDeadline = handoffPackage?.result_due_at;
     const parentDelegationId = parentAuthority?.delegation_id;
     const parentScopes = stringArray(parentAuthority?.scopes);
+    const parentResourceRefs = stringArray(parentAuthority?.resource_refs);
     const parentExpiresAt = parentAuthority?.expires_at;
     const operationScope = requiredScope(request.capability_id);
     if (
@@ -147,6 +195,13 @@ export class LocalInvocationAuthorityProvider
       parentDelegationId.length > 128 ||
       parentScopes === null ||
       !parentScopes.includes(operationScope) ||
+      originalSource === null ||
+      parentResourceRefs === null ||
+      !parentResourceRefs.includes(originalSource.uri as string) ||
+      (
+        request.capability_id === "feishu.conversation.history.read" &&
+        !validFeishuConversationSource(originalSource)
+      ) ||
       typeof parentExpiresAt !== "string" ||
       !Number.isFinite(Date.parse(parentExpiresAt)) ||
       Date.parse(request.deadline) > Date.parse(parentExpiresAt) ||
@@ -167,7 +222,10 @@ export class LocalInvocationAuthorityProvider
     return Object.freeze({
       delegation_id: delegationId,
       scopes: Object.freeze(["capability:invoke", operationScope]),
-      resource_refs: Object.freeze([input.work_reference_uri]),
+      resource_refs: Object.freeze([
+        input.work_reference_uri,
+        originalSource.uri as string,
+      ]),
       expires_at: request.deadline,
       may_redelegate: false,
       extensions: Object.freeze({
@@ -183,6 +241,7 @@ export class LocalInvocationAuthorityProvider
           contract_digest: input.candidate.contract_digest,
           allowed_target_refs: Object.freeze([]),
           confirmation_proof_refs: Object.freeze([]),
+          source_reference: originalSource,
         }),
       }),
     }) as RuntimeJsonObject;
