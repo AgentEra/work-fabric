@@ -66,6 +66,7 @@ describe("FeishuCapabilityExecutorPortAdapter", () => {
       capability_id: "feishu.message.send",
       input: expect.objectContaining({ target: { kind: "current_conversation" } }),
       authority: {
+        allowed_resource_refs: [],
         allowed_target_refs: ["feishu://chat/chat-1"],
         confirmation_proof_refs: [],
         source_reference: {

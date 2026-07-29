@@ -61,6 +61,7 @@ function authority(value: CitizenJsonObject): {
   readonly delegation_id: string;
   readonly delegation_scopes: readonly string[];
   readonly delegation_expires_at: string;
+  readonly allowed_resource_refs: readonly string[];
   readonly allowed_target_refs: readonly string[];
   readonly confirmation_proof_refs: readonly string[];
   readonly source_reference?: CitizenJsonObject;
@@ -71,6 +72,9 @@ function authority(value: CitizenJsonObject): {
     delegation_id: nonEmpty(value.delegation_id),
     delegation_scopes: strings(value.delegation_scopes),
     delegation_expires_at: nonEmpty(value.delegation_expires_at),
+    allowed_resource_refs: value.allowed_resource_refs === undefined
+      ? Object.freeze([])
+      : strings(value.allowed_resource_refs),
     allowed_target_refs: strings(value.allowed_target_refs),
     confirmation_proof_refs: strings(value.confirmation_proof_refs),
     ...(value.source_reference === undefined
@@ -117,6 +121,7 @@ export class FeishuCapabilityExecutorPortAdapter
       capability_id: request.capability_id,
       input: request.input,
       authority: {
+        allowed_resource_refs: evidence.allowed_resource_refs,
         allowed_target_refs: evidence.allowed_target_refs,
         confirmation_proof_refs: evidence.confirmation_proof_refs,
         ...(evidence.source_reference === undefined

@@ -126,6 +126,35 @@ function eventFacts(
   const updatedAt = event.update_time === undefined
     ? undefined
     : epoch(event.update_time);
+  const attendees = event.attendees === undefined
+    ? []
+    : (() => {
+        if (!Array.isArray(event.attendees) || event.attendees.length > 100) {
+          invalid();
+        }
+        return event.attendees.map((raw) => {
+          const attendee = record(raw);
+          if (attendee.type === "user") {
+            return {
+              kind: "user" as const,
+              open_id: string(
+                attendee.user_id ?? attendee.attendee_id,
+                255,
+              ),
+            };
+          }
+          if (attendee.type === "chat") {
+            return {
+              kind: "chat" as const,
+              chat_id: string(
+                attendee.chat_id ?? attendee.attendee_id,
+                255,
+              ),
+            };
+          }
+          invalid();
+        });
+      })();
   return {
     calendar_id: calendarId,
     event_id: string(event.event_id, 512),
@@ -141,6 +170,7 @@ function eventFacts(
     ...(organizerOpenId === undefined
       ? {}
       : { organizer_open_id: organizerOpenId }),
+    attendees,
     ...(url === undefined ? {} : { url }),
     ...(createdAt === undefined ? {} : { created_at: createdAt }),
     ...(updatedAt === undefined ? {} : { updated_at: updatedAt }),

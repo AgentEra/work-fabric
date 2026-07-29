@@ -19,6 +19,10 @@ export type CalendarStore = {
   bind(input: Omit<Binding, "version">, expectedVersion: number):
     Promise<Binding>;
   getBinding(tenantId: string, alias: string): Promise<Binding | null>;
+  getBindingByResource(
+    tenantId: string,
+    resourceUri: string,
+  ): Promise<Binding | null>;
   getDefault(tenantId: string): Promise<Binding | null>;
   listBindings(input: {
     readonly tenant_id: string;
@@ -200,6 +204,12 @@ export function calendarStoreContract(
           "alpha",
         )).resolves.toMatchObject({
           external_calendar_id: "cal-alpha",
+        });
+        await expect(store.getBindingByResource(
+          "tenant-1",
+          "feishu://calendar/cal-alpha",
+        )).resolves.toMatchObject({
+          alias: "alpha",
         });
         await expect(store.getBinding(
           "tenant-1",

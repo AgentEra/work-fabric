@@ -145,6 +145,10 @@ export interface FeishuCalendarRegistry {
     tenantId: string,
     alias: string,
   ): Promise<CalendarBinding | null>;
+  getBindingByResource(
+    tenantId: string,
+    resourceUri: string,
+  ): Promise<CalendarBinding | null>;
   getDefault(tenantId: string): Promise<CalendarBinding | null>;
   listBindings(input: {
     readonly tenant_id: string;
@@ -256,6 +260,7 @@ export interface FeishuCalendarEventFacts {
   readonly visibility?: string;
   readonly attendee_ability?: string;
   readonly organizer_open_id?: string;
+  readonly attendees: readonly FeishuCalendarAttendeeTarget[];
   readonly url?: string;
   readonly created_at?: string;
   readonly updated_at?: string;
@@ -342,6 +347,17 @@ export interface FeishuCalendarBackend {
     readonly need_notification: boolean;
     readonly signal?: AbortSignal;
   }): Promise<FeishuDeleteEventFacts>;
+}
+
+export interface FeishuCalendarConfirmationVerifier {
+  consume(input: {
+    readonly tenant_id: string;
+    readonly human_actor_id: string;
+    readonly capability_id: "feishu.calendar.event.delete";
+    readonly event_resource_uri: string;
+    readonly normalized_input_digest: `sha256:${string}`;
+    readonly proof_reference: string;
+  }): Promise<boolean>;
 }
 import type {
   FeishuCapabilityOutcome,

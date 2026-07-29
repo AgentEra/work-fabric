@@ -233,7 +233,6 @@ const DEFINITIONS = Object.freeze({
     "start_at",
     "end_at",
     "time_zone",
-    "provider_version",
     "attendees",
     "provenance",
   ], {

@@ -117,6 +117,20 @@ export class MemoryFeishuCalendarStore implements FeishuCalendarStore {
     });
   }
 
+  getBindingByResource(
+    tenantId: string,
+    resourceUri: string,
+  ): Promise<CalendarBinding | null> {
+    return this.enqueue(() => {
+      const storageKey = this.bindingResources.get(
+        key(tenantId, resourceUri),
+      );
+      if (storageKey === undefined) return null;
+      const value = this.bindings.get(storageKey);
+      return value === undefined ? null : clone(value);
+    });
+  }
+
   getDefault(tenantId: string): Promise<CalendarBinding | null> {
     return this.enqueue(() => {
       const value = [...this.bindings.values()].find((binding) =>

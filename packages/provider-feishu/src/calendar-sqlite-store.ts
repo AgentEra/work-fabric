@@ -254,6 +254,19 @@ export class SqliteFeishuCalendarStore implements FeishuCalendarStore {
     return this.binding(tenantId, alias);
   }
 
+  async getBindingByResource(
+    tenantId: string,
+    resourceUri: string,
+  ): Promise<CalendarBinding | null> {
+    this.open();
+    const row = this.database.prepare(`
+      SELECT *
+      FROM feishu_calendar_bindings
+      WHERE tenant_id = ? AND resource_uri = ?
+    `).get(tenantId, resourceUri) as BindingRow | undefined;
+    return row === undefined ? null : parseBinding(row);
+  }
+
   async getDefault(tenantId: string): Promise<CalendarBinding | null> {
     this.open();
     const row = this.database.prepare(`
