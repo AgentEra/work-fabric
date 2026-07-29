@@ -182,6 +182,8 @@ describe("Debug Channel complete collaboration", () => {
             lifecycle_state: "result_returned",
             result: {
               summary: [{
+                kind: "text",
+                media_type: "text/markdown",
                 text: "已完成 EDA 摘要：[查看资料](https://example.com/eda)",
               }],
             },
