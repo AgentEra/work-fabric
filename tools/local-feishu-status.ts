@@ -14,6 +14,7 @@ import {
 export const LOCAL_FEISHU_CITIZEN_IDS = Object.freeze({
   message: "citizen-feishu-message",
   document: "citizen-feishu-document",
+  calendar: "citizen-feishu-calendar",
   context: "citizen-feishu-context",
 });
 
@@ -76,6 +77,7 @@ export async function localFeishuStatus(
     providerEndpoint,
     messageCitizen,
     documentCitizen,
+    calendarCitizen,
     contextCitizen,
   ] =
     await Promise.all([
@@ -83,6 +85,7 @@ export async function localFeishuStatus(
       query(() => client.endpoints.get("endpoint-feishu-provider")),
       query(() => client.citizens.get(LOCAL_FEISHU_CITIZEN_IDS.message)),
       query(() => client.citizens.get(LOCAL_FEISHU_CITIZEN_IDS.document)),
+      query(() => client.citizens.get(LOCAL_FEISHU_CITIZEN_IDS.calendar)),
       query(() => client.citizens.get(LOCAL_FEISHU_CITIZEN_IDS.context)),
     ]);
   return Object.freeze({
@@ -101,6 +104,7 @@ export async function localFeishuStatus(
     citizen_registration: {
       message: messageCitizen,
       document: documentCitizen,
+      calendar: calendarCitizen,
       context: contextCitizen,
     },
   });
@@ -118,6 +122,7 @@ if (
       !status.endpoint_registration.feishu_provider ||
       !status.citizen_registration.message ||
       !status.citizen_registration.document ||
+      !status.citizen_registration.calendar ||
       !status.citizen_registration.context
     ) process.exitCode = 1;
   }).catch((error: unknown) => {

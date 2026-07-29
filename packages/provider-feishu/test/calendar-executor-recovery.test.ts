@@ -68,7 +68,7 @@ function request(): FeishuCapabilityExecutionRequest {
     original_handoff_id: "handoff-1",
     represented_actor_id: "actor-human-1",
     delegation_id: "delegation-calendar-1",
-    delegation_scopes: ["calendar:event:write"],
+    delegation_scopes: ["calendar_event:write"],
     delegation_expires_at: "2026-07-29T13:00:00.000Z",
     invocation_id: "invocation-create-1",
     idempotency_key: "calendar-create-1",

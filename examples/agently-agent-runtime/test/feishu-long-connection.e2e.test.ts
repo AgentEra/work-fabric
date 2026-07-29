@@ -193,7 +193,7 @@ describe("Feishu long connection collaboration channel E2E", () => {
       header: {
         event_id: "event-1",
         event_type: "im.message.receive_v1",
-        create_time: "1784073600000",
+        create_time: String(Date.now()),
         tenant_key: "tenant-key",
       },
       event: {
@@ -359,7 +359,7 @@ describe("Feishu long connection collaboration channel E2E", () => {
       client.snapshot = { ...client.snapshot, state: "connected", code: "connected" };
       const mention: JsonObject = {
         schema: "2.0",
-        header: { event_id: "event-daily-1", event_type: "im.message.receive_v1", create_time: "1784073600000", tenant_key: "tenant-key" },
+        header: { event_id: "event-daily-1", event_type: "im.message.receive_v1", create_time: String(Date.now()), tenant_key: "tenant-key" },
         event: {
           sender: { sender_id: { open_id: "ou-human" }, sender_type: "user" },
           message: {

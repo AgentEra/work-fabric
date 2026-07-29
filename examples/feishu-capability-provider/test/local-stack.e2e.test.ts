@@ -35,10 +35,13 @@ import { loadFeishuProviderConfiguration } from "../src/configuration.js";
 import { provisionFeishuProviderRecords } from "../src/provision.js";
 import {
   enabledFeishuProviderFacets,
+  FeishuCapabilitySchemaRegistry,
+  feishuCalendarCapabilityDeclarations,
   feishuCapabilityDeclarations,
   feishuContextDeclarations,
   feishuDocumentCapabilityDeclarations,
   feishuMessageCapabilityDeclarations,
+  SqliteFeishuCalendarStore,
 } from "@work-fabric/provider-feishu";
 import { prepareLocalFeishuEnvironment } from "../../../tools/local-feishu-common.js";
 
@@ -51,48 +54,115 @@ afterEach(async () => {
 });
 
 describe("local Feishu assistant stack", () => {
-  it("lets the Agent query prior Feishu messages, create one document, and author one semantic reply", async () => {
+  it("schedules a group event through members, free/busy, Calendar and one semantic reply", async () => {
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-full-stack-"));
     directories.push(directory);
+    const capabilitySequence: string[] = [];
+    const auxiliaryHandoffIds = (value: unknown): string[] => {
+      const found = new Set<string>();
+      const pending: unknown[] = [value];
+      while (pending.length > 0) {
+        const current = pending.pop();
+        if (typeof current === "string") {
+          for (
+            const match of current.matchAll(
+              /(?:["']?auxiliary_handoff_id["']?\s*:\s*["']?)([A-Za-z0-9._:-]+)/g,
+            )
+          ) found.add(match[1]!);
+        } else if (Array.isArray(current)) {
+          pending.push(...current);
+        } else if (current !== null && typeof current === "object") {
+          const record = current as Record<string, unknown>;
+          if (typeof record.auxiliary_handoff_id === "string") {
+            found.add(record.auxiliary_handoff_id);
+          }
+          pending.push(...Object.values(record));
+        }
+      }
+      return [...found];
+    };
     const model = await startFakeOpenAiCompatibleServer({
       structuredOutput: {},
-      structuredOutputs: [{
-        turn_type: "capability_request",
-        request_summary: "需要读取当前会话的历史消息",
-        response: "",
-        invocation_id: "invocation-history-1",
-        capability_id: "feishu.conversation.history.read",
-        version_constraint: "1.0.0",
-        input: {
-          conversation: { kind: "current_conversation" },
-          maximum_messages: 20,
-        },
-        reason: "当前请求引用了上面的消息，需要读取有界历史证据",
-      }, {
-        turn_type: "capability_request",
-        request_summary: "需要创建飞书文档",
-        response: "",
-        invocation_id: "invocation-create-doc-1",
-        capability_id: "feishu.document.create",
-        version_constraint: "2.0.0",
-        input: {
-          title: "本地联调需求",
-          content: {
-            media_type: "text/markdown",
-            text: "# 本地联调需求\n这是端到端测试",
-          },
-        },
-        reason: "用户明确要求创建共享文档",
-      }, {
-        turn_type: "final",
-        request_summary: "已总结历史并创建飞书文档",
-        response: "你上面提到了项目范围和交付日期；已创建《本地联调需求》：https://feishu.example/docx/doc-local-1",
-        invocation_id: "",
-        capability_id: "",
-        version_constraint: "",
-        input: {},
-        reason: "",
-      }],
+      structuredOutputFactory: (request, index) => {
+        if (index === 0) {
+          capabilitySequence.push("feishu.conversation.members.list");
+          return {
+            turn_type: "capability_request",
+            request_summary: "读取当前群成员",
+            response: "",
+            invocation_id: "invocation-members-1",
+            capability_id: "feishu.conversation.members.list",
+            version_constraint: "1.0.0",
+            input: {
+              conversation: { kind: "current_conversation" },
+              page_size: 50,
+            },
+            reason: "需要获得当前群内的受信成员事实",
+          };
+        }
+        if (index === 1) {
+          const evidence = auxiliaryHandoffIds(request);
+          if (evidence.length === 0) {
+            throw new Error("members capability evidence was not disclosed");
+          }
+          capabilitySequence.push("feishu.calendar.freebusy.query");
+          return {
+            turn_type: "capability_request",
+            request_summary: "查询三位群成员的忙闲",
+            response: "",
+            invocation_id: "invocation-freebusy-1",
+            capability_id: "feishu.calendar.freebusy.query",
+            version_constraint: "1.0.0",
+            input: {
+              start_at: "2026-07-30T14:00:00+08:00",
+              end_at: "2026-07-30T17:00:00+08:00",
+              participants: [
+                "feishu://user/open-id/ou_1",
+                "feishu://user/open-id/ou_2",
+                "feishu://user/open-id/ou_3",
+              ],
+              include_external_calendars: false,
+              busy_only: true,
+              authority_evidence: {
+                capability_result_handoff_ids: [evidence.at(-1)!],
+              },
+            },
+            reason: "需要用成员能力的结果作为用户目标权限证据",
+          };
+        }
+        if (index === 2) {
+          capabilitySequence.push("feishu.calendar.event.create");
+          return {
+            turn_type: "capability_request",
+            request_summary: "创建共同空闲的一小时日程",
+            response: "",
+            invocation_id: "invocation-calendar-create-1",
+            capability_id: "feishu.calendar.event.create",
+            version_constraint: "1.0.0",
+            input: {
+              calendar: { kind: "default_calendar" },
+              title: "Work Fabric 日历联调",
+              start_at: "2026-07-30T15:00:00+08:00",
+              end_at: "2026-07-30T16:00:00+08:00",
+              time_zone: "Asia/Shanghai",
+              attendees: ["feishu://chat/oc-original"],
+              notify_attendees: true,
+            },
+            reason: "15:00 到 16:00 是三位成员共同空闲时间",
+          };
+        }
+        return {
+          turn_type: "final",
+          request_summary: "日程已创建并邀请当前群",
+          response:
+            "已创建日程：[Work Fabric 日历联调](https://feishu.example/calendar/event-local-1)，时间为 2026-07-30 15:00–16:00。",
+          invocation_id: "",
+          capability_id: "",
+          version_constraint: "",
+          input: {},
+          reason: "",
+        };
+      },
     });
     const source = join(directory, "bundle.yaml");
     const resolvedConfig = join(directory, "resolved.yaml");
@@ -130,14 +200,12 @@ describe("local Feishu assistant stack", () => {
     });
 
     const sent: Record<string, unknown>[] = [];
-    const historyQueries: string[] = [];
-    const documentAuthorizations: Array<{
-      readonly represented_actor_id: string;
-      readonly operation: string;
-    }> = [];
+    const eventEpoch = Date.now();
+    const commandResponses: unknown[] = [];
     const handoffIds: string[] = [];
     const workerObservations: AgentlyProcessDriverObservation[] = [];
-    let documentsCreated = 0;
+    let externalEventCreates = 0;
+    let attendeeMutations = 0;
     const systemFetch = globalThis.fetch.bind(globalThis);
     const feishuFetch = (async (
       input: string | URL | Request,
@@ -158,6 +226,7 @@ describe("local Feishu assistant stack", () => {
           if (typeof id === "string" && !handoffIds.includes(id)) {
             handoffIds.push(id);
           }
+          commandResponses.push(body);
         }
         return response;
       }
@@ -181,109 +250,96 @@ describe("local Feishu assistant stack", () => {
       }
       if (
         request.method === "GET" &&
-        url.pathname === "/open-apis/drive/v1/files"
+        url.pathname === "/open-apis/im/v1/chats/oc-original/members"
       ) {
         return Response.json({
           code: 0,
-          data: { files: [], has_more: false },
-        });
-      }
-      if (url.pathname.includes("/permissions/")) {
-        return Response.json({
-          code: 0,
           data: {
-            permission_public: { link_share_entity: "tenant_readable" },
+            items: [
+              { member_id: "ou_1", member_id_type: "open_id", name: "甲" },
+              { member_id: "ou_2", member_id_type: "open_id", name: "乙" },
+              { member_id: "ou_3", member_id_type: "open_id", name: "丙" },
+            ],
+            has_more: false,
           },
         });
       }
       if (
         request.method === "POST" &&
-        url.pathname === "/open-apis/docx/v1/documents"
+        url.pathname === "/open-apis/calendar/v4/freebusy/batch"
       ) {
-        documentsCreated += 1;
-        const body = JSON.parse(await request.clone().text()) as {
-          title: string;
-        };
         return Response.json({
           code: 0,
           data: {
-            document: {
-              document_id: "doc-local-1",
-              title: body.title,
-              url: "https://feishu.example/docx/doc-local-1",
+            freebusy_list: [
+              {
+                user_id: "ou_1",
+                freebusy_list: [{
+                  start_time: "2026-07-30T14:00:00+08:00",
+                  end_time: "2026-07-30T15:00:00+08:00",
+                }],
+              },
+              {
+                user_id: "ou_2",
+                freebusy_list: [{
+                  start_time: "2026-07-30T16:00:00+08:00",
+                  end_time: "2026-07-30T17:00:00+08:00",
+                }],
+              },
+              { user_id: "ou_3", freebusy_list: [] },
+            ],
+          },
+        });
+      }
+      if (
+        request.method === "POST" &&
+        /^\/open-apis\/calendar\/v4\/calendars\/cal-local\/events$/.test(
+          url.pathname,
+        )
+      ) {
+        externalEventCreates += 1;
+        return Response.json({
+          code: 0,
+          data: {
+            event: {
+              event_id: "event-local-1",
+              summary: "Work Fabric 日历联调",
+              start_time: {
+                timestamp: String(
+                  Math.floor(
+                    Date.parse("2026-07-30T15:00:00+08:00") / 1_000,
+                  ),
+                ),
+                timezone: "Asia/Shanghai",
+              },
+              end_time: {
+                timestamp: String(
+                  Math.floor(
+                    Date.parse("2026-07-30T16:00:00+08:00") / 1_000,
+                  ),
+                ),
+                timezone: "Asia/Shanghai",
+              },
+              app_link: "https://feishu.example/calendar/event-local-1",
+              create_time: String(Math.floor(eventEpoch / 1_000)),
+              update_time: String(Math.floor(eventEpoch / 1_000)),
             },
           },
         });
       }
-      if (url.pathname.endsWith("/children")) {
-        return Response.json({
-          code: 0,
-          data: { document_revision_id: 2 },
-        });
-      }
       if (
-        request.method === "GET" &&
-        url.pathname === "/open-apis/im/v1/messages"
+        request.method === "POST" &&
+        url.pathname ===
+          "/open-apis/calendar/v4/calendars/cal-local/events/event-local-1/attendees"
       ) {
-        historyQueries.push(url.toString());
+        attendeeMutations += 1;
         return Response.json({
           code: 0,
           data: {
-            items: [{
-              message_id: "om-full-stack-1",
-              msg_type: "text",
-              create_time: "1784073600000",
-              update_time: "1784073600000",
-              deleted: false,
-              updated: false,
-              chat_id: "oc-original",
-              sender: {
-                id: "ou-human",
-                id_type: "open_id",
-                sender_type: "user",
-                tenant_key: "tenant-key",
-              },
-              body: {
-                content: JSON.stringify({
-                  text: "@_user_1 总结上面的消息，并创建一份本地联调需求文档",
-                }),
-              },
-            }, {
-              message_id: "om-history-scope",
-              msg_type: "text",
-              create_time: "1784070000000",
-              update_time: "1784070000000",
-              deleted: false,
-              updated: false,
-              chat_id: "oc-original",
-              sender: {
-                id: "ou-human",
-                id_type: "open_id",
-                sender_type: "user",
-                tenant_key: "tenant-key",
-              },
-              body: {
-                content: JSON.stringify({ text: "项目范围是飞书协作接入" }),
-              },
-            }, {
-              message_id: "om-history-delivery",
-              msg_type: "text",
-              create_time: "1784066400000",
-              update_time: "1784066400000",
-              deleted: false,
-              updated: false,
-              chat_id: "oc-original",
-              sender: {
-                id: "ou-human",
-                id_type: "open_id",
-                sender_type: "user",
-                tenant_key: "tenant-key",
-              },
-              body: {
-                content: JSON.stringify({ text: "交付日期定在本周五" }),
-              },
+            attendees: [{
+              type: "chat",
+              attendee_id: "oc-original",
             }],
-            has_more: false,
           },
         });
       }
@@ -335,6 +391,26 @@ describe("local Feishu assistant stack", () => {
       const providerConfig = await loadFeishuProviderConfiguration({
         environment,
       });
+      if (providerConfig.provider.state.type !== "sqlite") {
+        throw new Error("calendar E2E requires SQLite Provider state");
+      }
+      const calendarStore = new SqliteFeishuCalendarStore(
+        providerConfig.provider.state,
+      );
+      await calendarStore.bind({
+        tenant_id: "tenant-local",
+        alias: "calendar-e2e",
+        resource_uri: "feishu://calendar/cal-local",
+        external_calendar_id: "cal-local",
+        calendar_type: "shared",
+        access_role: "owner",
+        is_default: true,
+        active: true,
+        bound_by_principal_id: "principal-work-fabric-admin",
+        created_at: new Date(eventEpoch).toISOString(),
+        updated_at: new Date(eventEpoch).toISOString(),
+      }, 0);
+      await calendarStore.close();
       await provisionFeishuProviderRecords({
         endpoints: admin.endpoints,
         citizens: admin.citizens,
@@ -347,6 +423,8 @@ describe("local Feishu assistant stack", () => {
             ? feishuMessageCapabilityDeclarations()
             : facet.facet === "document"
               ? feishuDocumentCapabilityDeclarations()
+              : facet.facet === "calendar"
+                ? feishuCalendarCapabilityDeclarations()
               : feishuCapabilityDeclarations(),
         })),
         context_citizen: providerConfig.provider.context_citizen,
@@ -364,10 +442,6 @@ describe("local Feishu assistant stack", () => {
       }, environment, feishuFetch, {
         document_access: {
           async authorize(input) {
-            documentAuthorizations.push({
-              represented_actor_id: input.represented_actor_id,
-              operation: input.operation,
-            });
             return {
               decision: "allow",
               evidence_ref: "native-acl-e2e-1",
@@ -431,18 +505,19 @@ describe("local Feishu assistant stack", () => {
             environment.INTAKE_AGENT_ACCESS_TOKEN!,
           ),
         }).citizens,
-      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(8);
+        new FeishuCapabilitySchemaRegistry(),
+      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(15);
       client.snapshot = {
         ...client.snapshot,
         state: "connected",
         code: "connected",
       };
-      await expect(client.emit({
+      const inboundEvent = {
         schema: "2.0",
         header: {
           event_id: "event-full-stack-1",
           event_type: "im.message.receive_v1",
-          create_time: "1784073600000",
+          create_time: String(eventEpoch),
           tenant_key: "tenant-key",
         },
         event: {
@@ -456,7 +531,8 @@ describe("local Feishu assistant stack", () => {
             chat_type: "group",
             message_type: "text",
             content: JSON.stringify({
-              text: "@_user_1 总结上面的消息，并创建一份本地联调需求文档",
+              text:
+                "@_user_1 请在明天下午 14:00–17:00 找出群内三位成员共同空闲的一小时，创建 Work Fabric 日历联调并邀请当前群",
             }),
             mentions: [{
               key: "@_user_1",
@@ -465,7 +541,15 @@ describe("local Feishu assistant stack", () => {
             }],
           },
         },
-      })).resolves.toMatchObject({ accepted: true, duplicate: false });
+      } as const;
+      await expect(client.emit(inboundEvent)).resolves.toMatchObject({
+        accepted: true,
+        duplicate: false,
+      });
+      await expect(client.emit(inboundEvent)).resolves.toMatchObject({
+        accepted: true,
+        duplicate: true,
+      });
       const connector = new WorkFabricClient({
         baseUrl: origin,
         tenantId: "tenant-local",
@@ -510,10 +594,11 @@ describe("local Feishu assistant stack", () => {
             : await agentState.getInvocation(
                 "tenant-local",
                 handoffIds[0],
-                "invocation-create-doc-1",
+                "invocation-calendar-create-1",
               );
-        expect(documentsCreated, JSON.stringify({
+        expect(externalEventCreates, JSON.stringify({
           model_requests: model.requests,
+          commandResponses,
           sent,
           handoffIds,
           workerObservations,
@@ -526,52 +611,62 @@ describe("local Feishu assistant stack", () => {
             capability: provider === undefined ? "missing" : "started",
           },
         })).toBe(1);
+        expect(attendeeMutations).toBe(1);
+        expect(capabilitySequence).toEqual([
+          "feishu.conversation.members.list",
+          "feishu.calendar.freebusy.query",
+          "feishu.calendar.event.create",
+        ]);
         expect(model.requests, JSON.stringify({
           sent,
           handoffIds,
           workerObservations,
           run,
           invocation,
-        })).toHaveLength(3);
+        })).toHaveLength(4);
         expect(sent).toHaveLength(1);
         expect(JSON.stringify(sent[0])).toContain(
-          "https://feishu.example/docx/doc-local-1",
+          "https://feishu.example/calendar/event-local-1",
         );
         expect(JSON.stringify(sent[0])).not.toMatch(
           /handoff-|State:|offered|accepted/,
         );
       }, 20_000);
-      expect(historyQueries).toHaveLength(1);
-      expect(documentAuthorizations).toHaveLength(1);
-      expect(documentAuthorizations[0]).toEqual({
-        represented_actor_id: expect.stringMatching(/^actor_admission_/),
-        operation: "create",
-      });
-      const historyQuery = new URL(historyQueries[0]!);
-      expect(Object.fromEntries(historyQuery.searchParams)).toMatchObject({
-        container_id_type: "chat",
-        container_id: "oc-original",
-        sort_type: "ByCreateTimeDesc",
-        page_size: "20",
-      });
       const originalHandoff = await agentClient.queries.getHandoff(
         handoffIds[0]!,
       );
       expect(originalHandoff.state.package.context).toBeNull();
       if (agentState === undefined) throw new Error("expected Agent state");
-      const historyInvocation = await agentState.getInvocation(
+      const membersInvocation = await agentState.getInvocation(
         "tenant-local",
         handoffIds[0]!,
-        "invocation-history-1",
+        "invocation-members-1",
       );
-      const historyEvidence = JSON.stringify(historyInvocation?.result);
-      expect(historyEvidence).toContain("om-history-delivery");
-      expect(historyEvidence).toContain("om-history-scope");
-      expect(historyEvidence).not.toContain(
-        "\"message_id\":\"om-full-stack-1\",\"sender\"",
+      const freeBusyInvocation = await agentState.getInvocation(
+        "tenant-local",
+        handoffIds[0]!,
+        "invocation-freebusy-1",
       );
-      expect(historyEvidence).toContain("项目范围是飞书协作接入");
-      expect(historyEvidence).toContain("交付日期定在本周五");
+      const createInvocation = await agentState.getInvocation(
+        "tenant-local",
+        handoffIds[0]!,
+        "invocation-calendar-create-1",
+      );
+      expect(JSON.stringify(membersInvocation?.result)).toContain(
+        "feishu://user/open-id/ou_3",
+      );
+      expect(JSON.stringify(freeBusyInvocation?.result)).toContain(
+        "2026-07-30T14:00:00+08:00",
+      );
+      expect(JSON.stringify(createInvocation?.result)).toContain(
+        "feishu://calendar/cal-local/events/event-local-1",
+      );
+      expect(JSON.stringify(originalHandoff.state.result)).toContain(
+        "text/markdown",
+      );
+      expect(JSON.stringify(originalHandoff.state.result)).toContain(
+        "https://feishu.example/calendar/event-local-1",
+      );
     } finally {
       await agent?.host.close().catch(() => undefined);
       await provider?.close().catch(() => undefined);

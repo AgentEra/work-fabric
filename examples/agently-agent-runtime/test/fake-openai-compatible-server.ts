@@ -12,6 +12,10 @@ export interface FakeOpenAiCompatibleServer {
 export interface FakeOpenAiCompatibleServerOptions {
   readonly structuredOutput: Record<string, unknown>;
   readonly structuredOutputs?: readonly Record<string, unknown>[];
+  readonly structuredOutputFactory?: (
+    request: unknown,
+    requestIndex: number,
+  ) => Record<string, unknown>;
   readonly delayMs?: number;
 }
 
@@ -64,10 +68,13 @@ export async function startFakeOpenAiCompatibleServer(
       if (!response.writableEnded) abortedResponses += 1;
     });
     if (options.delayMs !== undefined) await new Promise((resolve) => setTimeout(resolve, options.delayMs));
-    const output = options.structuredOutputs?.[
+    const parsedPayload = JSON.parse(payload) as { stream?: unknown };
+    const output = options.structuredOutputFactory?.(
+      parsedPayload,
+      requests.length - 1,
+    ) ?? options.structuredOutputs?.[
       Math.min(requests.length - 1, options.structuredOutputs.length - 1)
     ] ?? options.structuredOutput;
-    const parsedPayload = JSON.parse(payload) as { stream?: unknown };
     if (parsedPayload.stream !== true) {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({

@@ -215,7 +215,7 @@ GET /open-apis/im/v1/chats/{chat_id}/members
 The executor must:
 
 ```ts
-const requiredScope = "conversation:members:read";
+const requiredScope = "conversation_members:read";
 const targetRef = `feishu://chat/${encodeURIComponent(chatId)}`;
 if (!request.delegation_scopes.includes(requiredScope)) {
   return rejected("scope_not_granted", "Conversation members scope is absent");
@@ -767,7 +767,7 @@ await expect(executor.execute(calendarRequest({
 
 expect(await executor.execute(calendarRequest({
   capability_id: "feishu.calendar.freebusy.query",
-  scopes: ["calendar:freebusy:read"],
+  scopes: ["calendar_freebusy:read"],
   allowed_target_refs: ["feishu://user/open-id/ou_1"],
 }))).toMatchObject({
   outcome: "succeeded",
@@ -809,8 +809,8 @@ Resolve aliases only through the registry. The default selector must fail with
 
 ```ts
 const REQUIRED_SCOPE = {
-  "feishu.calendar.freebusy.query": "calendar:freebusy:read",
-  "feishu.calendar.event.read": "calendar:event:read",
+  "feishu.calendar.freebusy.query": "calendar_freebusy:read",
+  "feishu.calendar.event.read": "calendar_event:read",
 } as const;
 ```
 
@@ -905,10 +905,10 @@ Require Provider ownership, active state, expected Provider version and:
 
 ```ts
 const WRITE_SCOPE = {
-  "feishu.calendar.event.create": "calendar:event:write",
-  "feishu.calendar.event.update": "calendar:event:write",
-  "feishu.calendar.attendees.add": "calendar:attendee:write",
-  "feishu.calendar.attendees.remove": "calendar:attendee:write",
+  "feishu.calendar.event.create": "calendar_event:write",
+  "feishu.calendar.event.update": "calendar_event:write",
+  "feishu.calendar.attendees.add": "calendar_attendee:write",
+  "feishu.calendar.attendees.remove": "calendar_attendee:write",
 } as const;
 ```
 
@@ -1208,7 +1208,7 @@ expect(authority.forCapability({
     },
   },
 })).toMatchObject({
-  delegation_scopes: ["calendar:freebusy:read"],
+  delegation_scopes: ["calendar_freebusy:read"],
   allowed_target_refs: [
     "feishu://user/open-id/ou_1",
     "feishu://user/open-id/ou_2",
@@ -1219,7 +1219,7 @@ expect(authority.forCapability({
   capability_id: "feishu.conversation.members.list",
   original: feishuGroupHandoff(),
 })).toMatchObject({
-  delegation_scopes: ["conversation:members:read"],
+  delegation_scopes: ["conversation_members:read"],
   allowed_target_refs: ["feishu://chat/chat-1"],
 });
 ```
@@ -1241,14 +1241,14 @@ Map:
 
 ```ts
 const OPERATION_SCOPE = {
-  "feishu.conversation.members.list": "conversation:members:read",
-  "feishu.calendar.freebusy.query": "calendar:freebusy:read",
-  "feishu.calendar.event.read": "calendar:event:read",
-  "feishu.calendar.event.create": "calendar:event:write",
-  "feishu.calendar.event.update": "calendar:event:write",
-  "feishu.calendar.attendees.add": "calendar:attendee:write",
-  "feishu.calendar.attendees.remove": "calendar:attendee:write",
-  "feishu.calendar.event.delete": "calendar:event:delete",
+  "feishu.conversation.members.list": "conversation_members:read",
+  "feishu.calendar.freebusy.query": "calendar_freebusy:read",
+  "feishu.calendar.event.read": "calendar_event:read",
+  "feishu.calendar.event.create": "calendar_event:write",
+  "feishu.calendar.event.update": "calendar_event:write",
+  "feishu.calendar.attendees.add": "calendar_attendee:write",
+  "feishu.calendar.attendees.remove": "calendar_attendee:write",
+  "feishu.calendar.event.delete": "calendar_event:delete",
 } as const;
 ```
 
@@ -1365,12 +1365,12 @@ Calendar Facet and add:
 ```yaml
 delegation:
   scopes:
-    - conversation:members:read
-    - calendar:freebusy:read
-    - calendar:event:read
-    - calendar:event:write
-    - calendar:attendee:write
-    - calendar:event:delete
+    - conversation_members:read
+    - calendar_freebusy:read
+    - calendar_event:read
+    - calendar_event:write
+    - calendar_attendee:write
+    - calendar_event:delete
 ```
 
 Deletion still requires independent confirmation proof and therefore remains
@@ -1436,7 +1436,7 @@ git commit -m "docs(feishu): document calendar provider operation"
 - Produces release evidence for one trusted group schedule without real
 external dependencies.
 
-- [ ] **Step 1: Write the end-to-end RED test**
+- [x] **Step 1: Write the end-to-end RED test**
 
 The test must run:
 
@@ -1454,7 +1454,7 @@ Feishu group ingress
 The fake Feishu server returns 3 human group members, busy intervals leaving
 one common hour and an accepted event/group-attendee result.
 
-- [ ] **Step 2: Run the E2E test and verify RED**
+- [x] **Step 2: Run the E2E test and verify RED**
 
 ```bash
 npx vitest run \
@@ -1463,7 +1463,7 @@ npx vitest run \
 
 Expected: FAIL at the first missing Calendar composition/Agent behavior.
 
-- [ ] **Step 3: Complete deterministic fixture wiring**
+- [x] **Step 3: Complete deterministic fixture wiring**
 
 Use real SQLite adapters, Connector worker, Exchange, Capability Handoffs,
 Network Citizen sessions, Agent Runtime Host and Signal dispatcher. Replace
@@ -1483,13 +1483,13 @@ expect(finalResult).toMatchObject({
 expect(finalResult.text).toContain("https://");
 ```
 
-- [ ] **Step 4: Prove replay and recovery**
+- [x] **Step 4: Prove replay and recovery**
 
 Replay the same ingress and invocation keys. Stop/restart after event creation
 but before attendees, then resume. Assert one external event, one effective
 attendee mutation, one canonical final result and no duplicated notification.
 
-- [ ] **Step 5: Run targeted feature suites**
+- [x] **Step 5: Run targeted feature suites**
 
 ```bash
 npx vitest run \
@@ -1500,7 +1500,7 @@ npx vitest run \
 npm run agent-runtime:test-python
 ```
 
-- [ ] **Step 6: Run repository release gates**
+- [x] **Step 6: Run repository release gates**
 
 ```bash
 npm run typecheck
@@ -1514,7 +1514,7 @@ git diff --check
 Expected: every command exits 0, no skipped Calendar acceptance test, no
 boundary or sensitive-observability violation.
 
-- [ ] **Step 7: Update completion status and commit**
+- [x] **Step 7: Update completion status and commit**
 
 Only after Step 6 passes, mark the Calendar phase complete in
 `docs/roadmap.md`, record deterministic E2E evidence and commit:

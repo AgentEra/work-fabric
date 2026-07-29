@@ -43,13 +43,13 @@ export interface FeishuCalendarCapabilityExecutorOptions {
 }
 
 const REQUIRED_SCOPE = Object.freeze({
-  "feishu.calendar.attendees.add": "calendar:attendee:write",
-  "feishu.calendar.attendees.remove": "calendar:attendee:write",
-  "feishu.calendar.event.create": "calendar:event:write",
-  "feishu.calendar.event.delete": "calendar:event:delete",
-  "feishu.calendar.event.read": "calendar:event:read",
-  "feishu.calendar.event.update": "calendar:event:write",
-  "feishu.calendar.freebusy.query": "calendar:freebusy:read",
+  "feishu.calendar.attendees.add": "calendar_attendee:write",
+  "feishu.calendar.attendees.remove": "calendar_attendee:write",
+  "feishu.calendar.event.create": "calendar_event:write",
+  "feishu.calendar.event.delete": "calendar_event:delete",
+  "feishu.calendar.event.read": "calendar_event:read",
+  "feishu.calendar.event.update": "calendar_event:write",
+  "feishu.calendar.freebusy.query": "calendar_freebusy:read",
 } as const);
 
 function rejected(code: string, message: string): FeishuCapabilityOutcome {

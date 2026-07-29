@@ -310,7 +310,7 @@ describe("LocalInvocationAuthorityProvider", () => {
         ...(snapshot().state.package as Record<string, unknown>),
         authority_scope: {
           delegation_id: "delegation-human-agent",
-          scopes: ["conversation:members:read"],
+          scopes: ["conversation_members:read"],
           resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
           expires_at: "2026-07-27T12:00:00.000Z",
           may_redelegate: true,
@@ -325,10 +325,10 @@ describe("LocalInvocationAuthorityProvider", () => {
       new AbortController().signal,
     );
     expect(result).toMatchObject({
-      scopes: ["capability:invoke", "conversation:members:read"],
+      scopes: ["capability:invoke", "conversation_members:read"],
       extensions: {
         "workfabric.dev/capability_authority": {
-          delegation_scopes: ["conversation:members:read"],
+          delegation_scopes: ["conversation_members:read"],
           allowed_target_refs: ["feishu://chat/oc-chat-1"],
         },
       },
@@ -341,7 +341,7 @@ describe("LocalInvocationAuthorityProvider", () => {
         ...(snapshot().state.package as Record<string, unknown>),
         authority_scope: {
           delegation_id: "delegation-human-agent",
-          scopes: ["calendar:freebusy:read"],
+          scopes: ["calendar_freebusy:read"],
           resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
           expires_at: "2026-07-27T12:00:00.000Z",
           may_redelegate: true,
@@ -375,10 +375,10 @@ describe("LocalInvocationAuthorityProvider", () => {
       new AbortController().signal,
     );
     expect(result).toMatchObject({
-      scopes: ["capability:invoke", "calendar:freebusy:read"],
+      scopes: ["capability:invoke", "calendar_freebusy:read"],
       extensions: {
         "workfabric.dev/capability_authority": {
-          delegation_scopes: ["calendar:freebusy:read"],
+          delegation_scopes: ["calendar_freebusy:read"],
           allowed_target_refs: [
             "feishu://user/open-id/ou_1",
             "feishu://user/open-id/ou_2",
@@ -424,7 +424,7 @@ describe("LocalInvocationAuthorityProvider", () => {
         ...(snapshot().state.package as Record<string, unknown>),
         authority_scope: {
           delegation_id: "delegation-human-agent",
-          scopes: ["calendar:event:write"],
+          scopes: ["calendar_event:write"],
           resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
           expires_at: "2026-07-27T12:00:00.000Z",
           may_redelegate: true,

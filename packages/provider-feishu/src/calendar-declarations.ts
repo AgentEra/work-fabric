@@ -208,12 +208,14 @@ const DEFINITIONS = Object.freeze({
     "end_at",
     "time_zone",
     "provider_version",
+    "attendees",
     "attendee_outcomes",
     "completion_state",
     "provenance",
   ], {
     ...eventFacts,
     organizer_mode: { const: "application" },
+    attendees: attendeeRefs,
     attendee_outcomes: {
       type: "array",
       maxItems: 100,
@@ -470,6 +472,9 @@ export function feishuCalendarSchemaDocuments():
   ReadonlyMap<string, unknown> {
   return new Map(Object.entries(DEFINITIONS).map(([name, body]) => [
     schema(name as keyof typeof DEFINITIONS).uri,
-    structuredClone(body),
+    // A published JSON Schema is a value tree. JSON round-tripping removes
+    // in-memory object aliases (for example a shared date-time fragment) so
+    // consumers never mistake a repeated fragment for a cyclic structure.
+    JSON.parse(JSON.stringify(body)) as unknown,
   ]));
 }

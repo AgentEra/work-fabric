@@ -193,7 +193,7 @@ export class FeishuConversationMembersExecutor {
       return rejected("invalid_input", "Conversation member input is invalid");
     }
     if (
-      !request.delegation_scopes.includes("conversation:members:read") ||
+      !request.delegation_scopes.includes("conversation_members:read") ||
       Date.parse(request.delegation_expires_at) <= Date.parse(this.now())
     ) {
       return rejected(

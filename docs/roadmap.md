@@ -24,6 +24,36 @@ and repository verification are implemented.
 | 12 | Authorized bounded conversation context for Agent handoffs | Complete |
 | 13 | Channel-neutral message representations and Feishu native rich text | Complete |
 | 14 | Long-lived local Debug Channel and deterministic Agent E2E | Complete |
+| 15 | Feishu Message/Calendar capabilities and Agent-authored group scheduling | Complete |
+
+## Phase 15 completion boundary
+
+Phase 15 adds an independently registered Feishu Calendar capability Citizen
+and extends the Message Citizen with bounded conversation-member facts.
+Calendar discovery, aliases/default binding, free/busy queries, event
+create/read/update/delete and attendee mutations remain inside the Provider.
+The deployment may replace its state adapter without changing capability
+contracts; YAML selects modules and bootstrap policy but does not contain
+dynamic calendar or event identifiers.
+
+The Calendar Provider is application-organized and fail-closed. It accepts only
+protocol-valid `resource:action` delegation scopes, explicit authorized
+resource references, verified member-result evidence for user targets and
+current-conversation provenance for group targets. SQLite persists bindings,
+event ownership, provider versions, idempotency and recovery checkpoints.
+External-outcome-unknown writes are never retried blindly, destructive deletes
+require a single-use confirmation, and raw organizer identifiers do not enter
+Provider results or observability.
+
+The Agent—not Fabric or the Provider—decides whether to read group members,
+query more evidence, choose a common time, request event creation and author
+the final reply. The deterministic full-stack release gate uses the real
+Connector worker, Exchange, leased Citizens, auxiliary Handoffs, Agent Runtime,
+SQLite state and Feishu renderer while replacing only Feishu/OpenAI external
+HTTP. It proves this exact sequence:
+`group ingress -> members -> free/busy -> event create + group attendee ->
+Agent Markdown -> one native Feishu reply`. Duplicate ingress produces one
+external event, one effective attendee mutation and one canonical reply.
 
 ## Phase 14 completion boundary
 

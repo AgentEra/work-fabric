@@ -111,7 +111,7 @@ function createRequest(
     original_handoff_id: "handoff-1",
     represented_actor_id: "actor-human-1",
     delegation_id: "delegation-calendar-1",
-    delegation_scopes: ["calendar:event:write"],
+    delegation_scopes: ["calendar_event:write"],
     delegation_expires_at: "2026-07-29T13:00:00.000Z",
     invocation_id: "invocation-create-1",
     idempotency_key: "calendar-create-1",
@@ -440,7 +440,7 @@ describe("FeishuCalendarCapabilityExecutor commands", () => {
         invocation_id: "invocation-delete-1",
         idempotency_key: "calendar-delete-1",
         capability_id: "feishu.calendar.event.delete",
-        delegation_scopes: ["calendar:event:delete"],
+        delegation_scopes: ["calendar_event:delete"],
         authority: {
           allowed_resource_refs: [eventUri],
           allowed_target_refs: [],
@@ -497,7 +497,7 @@ describe("FeishuCalendarCapabilityExecutor commands", () => {
         invocation_id: "invocation-delete-2",
         idempotency_key: "calendar-delete-2",
         capability_id: "feishu.calendar.event.delete",
-        delegation_scopes: ["calendar:event:delete"],
+        delegation_scopes: ["calendar_event:delete"],
         authority: {
           allowed_resource_refs: [eventUri],
           allowed_target_refs: [],
@@ -565,7 +565,7 @@ describe("FeishuCalendarCapabilityExecutor commands", () => {
         invocation_id: "invocation-delete-retry",
         idempotency_key: "calendar-delete-retry",
         capability_id: "feishu.calendar.event.delete",
-        delegation_scopes: ["calendar:event:delete"],
+        delegation_scopes: ["calendar_event:delete"],
         authority: {
           allowed_resource_refs: [eventUri],
           allowed_target_refs: [],

@@ -484,16 +484,16 @@ applications:
                 scopes:
                   - work:read
                   - conversation:read
-                  - conversation:members:read
+                  - conversation_members:read
                   - document:read
                   - document:write
                   - document:delete
                   - message:send
-                  - calendar:freebusy:read
-                  - calendar:event:read
-                  - calendar:event:write
-                  - calendar:attendee:write
-                  - calendar:event:delete
+                  - calendar_freebusy:read
+                  - calendar_event:read
+                  - calendar_event:write
+                  - calendar_attendee:write
+                  - calendar_event:delete
                 may_redelegate: true
             outbound:
               enabled: true

@@ -260,7 +260,6 @@ export interface FeishuCalendarEventFacts {
   readonly time_zone: string;
   readonly visibility?: string;
   readonly attendee_ability?: string;
-  readonly organizer_open_id?: string;
   readonly attendees: readonly FeishuCalendarAttendeeTarget[];
   readonly url?: string;
   readonly created_at?: string;

@@ -44,7 +44,7 @@ function request(input: {
     original_handoff_id: "handoff-1",
     represented_actor_id: "actor-human-1",
     delegation_id: "delegation-calendar-1",
-    delegation_scopes: input.scopes ?? ["calendar:freebusy:read"],
+    delegation_scopes: input.scopes ?? ["calendar_freebusy:read"],
     delegation_expires_at: "2026-07-29T13:00:00.000Z",
     invocation_id: "invocation-calendar-1",
     idempotency_key: "calendar-1",
@@ -91,7 +91,6 @@ function backend(): FeishuCalendarBackend {
       end_at: "2026-07-30T10:00:00+08:00",
       time_zone: "Asia/Shanghai",
       visibility: "public",
-      organizer_open_id: "ou-bot",
       attendees: [{
         kind: "user" as const,
         open_id: "ou_1",
@@ -205,7 +204,7 @@ describe("FeishuCalendarCapabilityExecutor query boundary", () => {
       const calendar = executor(store, api);
       const read = request({
         capability_id: "feishu.calendar.event.read",
-        scopes: ["calendar:event:read"],
+        scopes: ["calendar_event:read"],
         allowed_resource_refs: [eventUri],
         value: { event: { resource_uri: eventUri } },
       });

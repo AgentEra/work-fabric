@@ -29,6 +29,7 @@ describe("LocalFeishuStackSupervisor", () => {
     expect(LOCAL_FEISHU_CITIZEN_IDS).toEqual({
       message: "citizen-feishu-message",
       document: "citizen-feishu-document",
+      calendar: "citizen-feishu-calendar",
       context: "citizen-feishu-context",
     });
   });

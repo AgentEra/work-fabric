@@ -67,7 +67,7 @@ function epoch(value: unknown): string {
   return new Date(numeric * 1_000).toISOString();
 }
 
-function timeInfo(value: unknown): {
+function parseEventTime(value: unknown): {
   readonly at: string;
   readonly time_zone: string;
 } {
@@ -107,18 +107,12 @@ function eventFacts(
   const data = record(response.data);
   const event = record(data.event);
   if (response.code !== 0) invalid();
-  const start = timeInfo(event.start_time);
-  const end = timeInfo(event.end_time);
+  const start = parseEventTime(event.start_time);
+  const end = parseEventTime(event.end_time);
   if (start.time_zone !== end.time_zone) invalid();
-  const organizer = event.event_organizer === undefined
-    ? undefined
-    : record(event.event_organizer);
   const description = optionalString(event.description);
   const visibility = optionalString(event.visibility, 64);
   const attendeeAbility = optionalString(event.attendee_ability, 64);
-  const organizerOpenId = organizer === undefined
-    ? undefined
-    : optionalString(organizer.organizer_id, 255);
   const url = optionalString(event.app_link, 2_048);
   const createdAt = event.create_time === undefined
     ? undefined
@@ -167,9 +161,6 @@ function eventFacts(
     ...(attendeeAbility === undefined
       ? {}
       : { attendee_ability: attendeeAbility }),
-    ...(organizerOpenId === undefined
-      ? {}
-      : { organizer_open_id: organizerOpenId }),
     attendees,
     ...(url === undefined ? {} : { url }),
     ...(createdAt === undefined ? {} : { created_at: createdAt }),

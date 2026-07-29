@@ -130,12 +130,12 @@ describe("Agently Runtime operator guide", () => {
       "calendar_citizen:",
       "citizen_id: citizen-feishu-calendar",
       "resource_id: citizen-feishu-calendar",
-      "conversation:members:read",
-      "calendar:freebusy:read",
-      "calendar:event:read",
-      "calendar:event:write",
-      "calendar:attendee:write",
-      "calendar:event:delete",
+      "conversation_members:read",
+      "calendar_freebusy:read",
+      "calendar_event:read",
+      "calendar_event:write",
+      "calendar_attendee:write",
+      "calendar_event:delete",
     ]) expect(source).toContain(value);
     expect(source).not.toMatch(/calendar_(?:id|ids):/);
   });

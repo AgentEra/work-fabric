@@ -60,7 +60,7 @@ function request(
     original_handoff_id: "handoff-1",
     represented_actor_id: "actor-human-1",
     delegation_id: "delegation-members-1",
-    delegation_scopes: ["conversation:members:read"],
+    delegation_scopes: ["conversation_members:read"],
     delegation_expires_at: "2026-07-29T10:30:00.000Z",
     invocation_id: "invocation-members-1",
     idempotency_key: "members-1",

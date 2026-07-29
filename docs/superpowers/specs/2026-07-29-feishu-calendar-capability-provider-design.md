@@ -256,7 +256,7 @@ Feishu user resource references plus provenance and a next cursor.
 The capability:
 
 - is a low-risk query with no confirmation;
-- requires `conversation:members:read`;
+- requires `conversation_members:read`;
 - may only query a chat present in Authority evidence;
 - calls Feishu IM chat-members APIs through a Message-owned backend port;
 - filters bot members according to Feishu's API behavior;
@@ -399,7 +399,7 @@ Deletion requires:
 
 - a Provider-owned, same-tenant active event;
 - expected Provider event version;
-- `calendar:event:delete` delegation scope;
+- `calendar_event:delete` delegation scope;
 - an Authority-bound confirmation proof reference; and
 - successful single-use proof consumption by a Governance/confirmation port.
 
@@ -415,13 +415,13 @@ Calendar operations map to delegation scopes:
 
 | Capability | Required scope |
 | --- | --- |
-| Free/busy query | `calendar:freebusy:read` |
-| Event read | `calendar:event:read` |
-| Event create/update | `calendar:event:write` |
-| Attendee add/remove | `calendar:attendee:write` |
-| Event delete | `calendar:event:delete` |
+| Free/busy query | `calendar_freebusy:read` |
+| Event read | `calendar_event:read` |
+| Event create/update | `calendar_event:write` |
+| Attendee add/remove | `calendar_attendee:write` |
+| Event delete | `calendar_event:delete` |
 
-The supporting Message capability requires `conversation:members:read`.
+The supporting Message capability requires `conversation_members:read`.
 
 Capability Authority evidence carries separate bounded collections for:
 
