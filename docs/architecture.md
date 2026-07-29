@@ -58,6 +58,9 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 12. **模块职责闭环**：每个模块必须完整拥有并完成自身职责，只通过稳定协议或 SPI 与其他模块交换事实；不得跨层代偿另一个模块的业务语义、决策或执行。
 13. **依赖面向契约**：Core、Runtime、Agent、Connector 和 Channel 模块不得依赖彼此的具体存储、进程或供应商实现。组合层可以把实现适配到窄接口，但不能把具体实现泄漏到消费模块。
 14. **动态能力是运行事实**：配置只 Provision 可信身份与安全上限；模块通过带租约和 fencing 的 Network Citizen Session 声明当前能力。声明能力不授予调用 Authority。
+15. **调试入口不绕过网络**：开发用 Debug Channel 也必须经过 Connector
+    Ingress、Identity/Admission、Authority、Handoff 和 Signal；它只能模拟
+    Channel 边界，不能直接驱动模型或伪造 Agent Result。
 15. **责任分类与 Actor 正交**：Actor type 表达谁参与，Citizen kind 表达模块对外闭环的责任。一个 Citizen 注册只有一个 kind，一个进程可以托管多个独立注册。
 
 ### 2.1 职责闭环与依赖方向

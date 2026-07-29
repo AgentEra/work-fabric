@@ -37,6 +37,12 @@ Actor 代表的服务可以是 `capability-provider`、`context-provider` 或
 进程内队列是基础设施，不是 Citizen。只有一个模块以独立身份进入网络、公开
 声明并承担网络责任时，才注册为 Citizen。
 
+Debug Channel 是开发环境专用的 `channel` Citizen。它只负责可信测试身份、
+回环 HTTP 表示、Connector Ingress 归一化、Handoff 路由相关性和 Result
+Capture；意图理解、接收决策、模型调用和语义回复仍由外部 Agent Runtime
+闭环。它与飞书、邮件或企业微信 Channel 走同一插件、Connector、Handoff 和
+Signal 抽象，因此不会在 Core 上为测试“打洞”。
+
 ## 2. 项目级不变量
 
 所有 Citizen 和接入模块必须遵守以下规则：

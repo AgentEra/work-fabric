@@ -23,6 +23,25 @@ and repository verification are implemented.
 | 11 | Agent capability invocation and Feishu Capability/Context Provider | Complete |
 | 12 | Authorized bounded conversation context for Agent handoffs | Complete |
 | 13 | Channel-neutral message representations and Feishu native rich text | Complete |
+| 14 | Long-lived local Debug Channel and deterministic Agent E2E | Complete |
+
+## Phase 14 completion boundary
+
+Phase 14 adds a development-only `collaboration-channel.debug` Citizen beside
+the Feishu Channel. Its authenticated loopback HTTP accepts bounded WFPP
+`text`、`data` and `resource` parts, maps trusted participant references through
+static Identity or Collaboration Admission, persists one duplicate-safe
+Connector Ingress, and follows the normal Handoff and Signal path. It never
+understands intent, chooses a receiver, executes work, calls a model or authors
+a reply.
+
+Memory and SQLite implement one vendor-neutral Debug Store port. Submission
+queries combine owning Ingress and Handoff facts; Capture preserves the
+canonical Result Event and stores the authorized semantic Handoff Snapshot
+separately. The local operator surface provides start/status/send/stop commands
+and a deterministic release gate using the real Python Agently Worker with
+only its external model HTTP boundary replaced. See
+[the local Debug Channel guide](guides/local-debug-channel.md).
 
 ## Phase 13 completion boundary
 

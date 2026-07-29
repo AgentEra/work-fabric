@@ -137,7 +137,9 @@ export async function startRealAgentlyRuntime(input: {
     python: { executable: join(process.cwd(), "runtimes/agently-worker/.venv/bin/python"), module: "work_fabric_agently_runtime" },
     workspace_root: workspaceRoot, execution_timeout_seconds: input.timeoutSeconds ?? 20, cancellation_grace_seconds: 1,
     provider: { type: "OpenAICompatible", base_url: input.modelBaseUrl, model: "fake-work-fabric-model", api_key: DAILY_E2E.modelToken }, development_mode: true,
-  }, { observer: input.onWorkerObservation });
+  }, input.onWorkerObservation === undefined
+    ? {}
+    : { observer: input.onWorkerObservation });
   const fabric = e2eClient(input.baseUrl, DAILY_E2E.runtimeToken, DAILY_E2E.runtimeActorId, DAILY_E2E.runtimeEndpointId);
   const gateway = new AgentGateway({ endpoints: fabric.endpoints, subscriptions: fabric.subscriptions, queries: fabric.queries, handoffs: fabric.handoffs }, dailyAssistantGatewayConfig({ actorId: DAILY_E2E.runtimeActorId, endpointId: DAILY_E2E.runtimeEndpointId, subscriptionId: DAILY_E2E.subscriptionId, queueCapacity: 8 }));
   const role = { role_id: "daily-assistant", version: 1, display_name: "Daily Assistant", description: "E2E runtime", capability_ids: ["information.synthesis"] } as const;
