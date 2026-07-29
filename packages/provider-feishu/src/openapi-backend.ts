@@ -19,7 +19,14 @@ export interface FeishuOpenApiRequestClientOptions {
   readonly base_url: string;
   readonly request_timeout_ms: number;
   readonly max_response_bytes: number;
+  readonly error_classifier?: FeishuErrorClassifier;
 }
+
+export type FeishuErrorClassifier = (input: {
+  readonly status: number;
+  readonly code: number | string | null;
+  readonly path: string;
+}) => FeishuProviderBackendError | null;
 
 export interface FeishuOpenApiCapabilityBackendOptions
   extends FeishuOpenApiRequestClientOptions {
@@ -27,8 +34,14 @@ export interface FeishuOpenApiCapabilityBackendOptions
   readonly now?: () => string;
 }
 
-type Json = null | boolean | number | string | Json[] | {
-  readonly [key: string]: Json;
+export type FeishuOpenApiJson =
+  | null
+  | boolean
+  | number
+  | string
+  | FeishuOpenApiJson[]
+  | {
+    readonly [key: string]: FeishuOpenApiJson;
 };
 
 function object(value: unknown, path: string): Record<string, unknown> {
@@ -82,7 +95,7 @@ function textElements(content: string) {
   return [{ text_run: { content } }];
 }
 
-function simpleBlocks(content: SimpleDocumentContent): Json[] {
+function simpleBlocks(content: SimpleDocumentContent): FeishuOpenApiJson[] {
   if (content.media_type === "text/plain") {
     return content.text.split("\n").map((line) => ({
       block_type: 2,
@@ -176,7 +189,7 @@ export class FeishuOpenApiRequestClient {
   async request(
     method: string,
     path: string,
-    body?: Json,
+    body?: FeishuOpenApiJson,
     signal?: AbortSignal,
   ): Promise<unknown> {
     let forceRefresh = false;
@@ -225,6 +238,31 @@ export class FeishuOpenApiRequestClient {
             false,
           );
         }
+        const text = await boundedText(
+          response,
+          this.options.max_response_bytes,
+        );
+        if (text === "" && response.ok) return {};
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          throw new FeishuProviderBackendError(
+            "feishu_response_invalid",
+            true,
+          );
+        }
+        const rawCode = object(parsed, "response").code;
+        const code =
+          typeof rawCode === "number" || typeof rawCode === "string"
+            ? rawCode
+            : null;
+        const classified = this.options.error_classifier?.({
+          status: response.status,
+          code,
+          path,
+        });
+        if (classified !== undefined && classified !== null) throw classified;
         if (response.status === 403) {
           throw new FeishuProviderBackendError(
             "feishu_permission_denied",
@@ -247,21 +285,6 @@ export class FeishuOpenApiRequestClient {
             true,
           );
         }
-        const text = await boundedText(
-          response,
-          this.options.max_response_bytes,
-        );
-        if (text === "" && response.ok) return {};
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(text);
-        } catch {
-          throw new FeishuProviderBackendError(
-            "feishu_response_invalid",
-            true,
-          );
-        }
-        const code = object(parsed, "response").code;
         if (!response.ok || code !== 0) {
           throw new FeishuProviderBackendError(
             response.status >= 500
@@ -525,7 +548,7 @@ export class FeishuOpenApiCapabilityBackend
   private async request(
     method: string,
     path: string,
-    body?: Json,
+    body?: FeishuOpenApiJson,
     signal?: AbortSignal,
   ): Promise<unknown> {
     return this.requests.request(method, path, body, signal);

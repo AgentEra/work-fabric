@@ -2,6 +2,7 @@ export * from "./context-provider.js";
 export * from "./calendar-contracts.js";
 export * from "./calendar-declarations.js";
 export * from "./calendar-memory-store.js";
+export * from "./calendar-openapi-backend.js";
 export * from "./calendar-resource-adapter.js";
 export * from "./calendar-sqlite-store.js";
 export * from "./calendar-validation.js";

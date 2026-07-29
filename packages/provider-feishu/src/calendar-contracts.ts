@@ -218,6 +218,131 @@ export interface FeishuCalendarStore
     FeishuCalendarEventStore {
   close(): Promise<void>;
 }
+
+export interface FeishuCalendarFacts {
+  readonly calendar_id: string;
+  readonly summary: string;
+  readonly description?: string;
+  readonly calendar_type: "primary" | "shared";
+  readonly access_role: "writer" | "owner";
+}
+
+export interface FeishuBusyInterval {
+  readonly start_at: string;
+  readonly end_at: string;
+}
+
+export interface FeishuFreeBusyFacts {
+  readonly start_at: string;
+  readonly end_at: string;
+  readonly participants: readonly {
+    readonly open_id: string;
+    readonly busy_intervals: readonly FeishuBusyInterval[];
+  }[];
+  readonly unresolved: readonly {
+    readonly open_id: string;
+    readonly code: string;
+  }[];
+}
+
+export interface FeishuCalendarEventFacts {
+  readonly calendar_id: string;
+  readonly event_id: string;
+  readonly title: string;
+  readonly description?: string;
+  readonly start_at: string;
+  readonly end_at: string;
+  readonly time_zone: string;
+  readonly visibility?: string;
+  readonly attendee_ability?: string;
+  readonly organizer_open_id?: string;
+  readonly url?: string;
+  readonly created_at?: string;
+  readonly updated_at?: string;
+}
+
+export type FeishuCalendarAttendeeTarget =
+  | { readonly kind: "user"; readonly open_id: string }
+  | { readonly kind: "chat"; readonly chat_id: string };
+
+export interface FeishuAttendeeMutationFacts {
+  readonly attendees: readonly {
+    readonly kind: "user" | "chat";
+    readonly external_id: string;
+    readonly outcome: "added" | "removed";
+  }[];
+}
+
+export interface FeishuDeleteEventFacts {
+  readonly calendar_id: string;
+  readonly event_id: string;
+  readonly deleted_at: string;
+}
+
+export interface FeishuCalendarBackend {
+  getCalendar(input: {
+    readonly calendar_id: string;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuCalendarFacts>;
+  createSharedCalendar(input: {
+    readonly summary: string;
+    readonly description?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuCalendarFacts>;
+  queryFreeBusy(input: {
+    readonly user_open_ids: readonly string[];
+    readonly start_at: string;
+    readonly end_at: string;
+    readonly include_external_calendars: boolean;
+    readonly busy_only: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuFreeBusyFacts>;
+  createEvent(input: {
+    readonly calendar_id: string;
+    readonly title: string;
+    readonly description?: string;
+    readonly start_at: string;
+    readonly end_at: string;
+    readonly time_zone: string;
+    readonly visibility?: CalendarVisibility;
+    readonly attendee_ability?: CalendarAttendeeAbility;
+    readonly reminders?: readonly number[];
+    readonly idempotency_key: string;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuCalendarEventFacts>;
+  readEvent(input: {
+    readonly calendar_id: string;
+    readonly event_id: string;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuCalendarEventFacts>;
+  updateEvent(input: {
+    readonly calendar_id: string;
+    readonly event_id: string;
+    readonly field_mask: readonly string[];
+    readonly changes: Readonly<Record<string, unknown>>;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuCalendarEventFacts>;
+  addAttendees(input: {
+    readonly calendar_id: string;
+    readonly event_id: string;
+    readonly attendees: readonly FeishuCalendarAttendeeTarget[];
+    readonly need_notification: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuAttendeeMutationFacts>;
+  removeAttendees(input: {
+    readonly calendar_id: string;
+    readonly event_id: string;
+    readonly attendees: readonly FeishuCalendarAttendeeTarget[];
+    readonly need_notification: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuAttendeeMutationFacts>;
+  deleteEvent(input: {
+    readonly calendar_id: string;
+    readonly event_id: string;
+    readonly need_notification: boolean;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuDeleteEventFacts>;
+}
 import type {
   FeishuCapabilityOutcome,
 } from "./contracts.js";
