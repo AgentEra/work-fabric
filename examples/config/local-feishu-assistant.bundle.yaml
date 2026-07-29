@@ -501,7 +501,7 @@ applications:
           enabled: true
           config:
             credential_ref: feishu-primary
-            cursor_signing_key: ${WORK_FABRIC_CURSOR_SECRET}
+            cursor_signing_key: ${WORK_FABRIC_FEISHU_CURSOR_SECRET}
             open_api:
               base_url: https://open.feishu.cn
               request_timeout_ms: 10000

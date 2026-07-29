@@ -109,6 +109,7 @@ describe("local Feishu assistant stack", () => {
     );
     await writeFile(envFile, [
       `WORK_FABRIC_CURSOR_SECRET=${"c".repeat(32)}`,
+      `WORK_FABRIC_FEISHU_CURSOR_SECRET=${"h".repeat(32)}`,
       `WORK_FABRIC_ADMIN_TOKEN=${"a".repeat(32)}`,
       `WORK_FABRIC_ADMISSION_FINGERPRINT_KEY=${"f".repeat(32)}`,
       `WORK_FABRIC_ADMISSION_GRANT_KEY=${"g".repeat(32)}`,
