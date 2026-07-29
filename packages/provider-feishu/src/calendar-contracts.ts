@@ -119,6 +119,7 @@ export interface CalendarBinding {
 
 export type CalendarExecutionState =
   | "started"
+  | "confirmation_consumed"
   | "event_created"
   | "attendees_applied"
   | "completed";
