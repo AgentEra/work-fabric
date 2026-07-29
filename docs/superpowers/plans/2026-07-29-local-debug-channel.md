@@ -126,7 +126,7 @@ export interface DebugChannelStore extends ExchangeAdapter {
 }
 ```
 
-- [ ] **Step 1: Write failing validation and store-contract tests**
+- [x] **Step 1: Write failing validation and store-contract tests**
 
 Create table-driven tests that reject unknown fields, empty or overlong IDs,
 invalid timestamps, non-JSON event payloads, cross-scope returns and limits
@@ -143,7 +143,7 @@ it("returns conflict when one idempotency identity is reused with another digest
 });
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -153,7 +153,7 @@ npx vitest run packages/debug-channel-spi/test
 
 Expected: FAIL because the package and exported contracts do not exist.
 
-- [ ] **Step 3: Implement immutable contracts and strict validators**
+- [x] **Step 3: Implement immutable contracts and strict validators**
 
 Implement exact-field validation, bounded identifiers, ISO timestamp checks,
 safe JSON cloning, deterministic manifest creation and typed store errors:
@@ -174,7 +174,7 @@ export class DebugChannelStoreError extends Error {
 
 The SPI contains no Node, SQLite, HTTP, YAML or plugin-runtime imports.
 
-- [ ] **Step 4: Run tests and typecheck**
+- [x] **Step 4: Run tests and typecheck**
 
 Run:
 
@@ -185,7 +185,7 @@ npm run typecheck
 
 Expected: all focused tests PASS and TypeScript exits 0.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add packages/debug-channel-spi package-lock.json
@@ -213,7 +213,7 @@ git commit -m "feat(debug): define channel diagnostic contracts"
 - Consumes: `DebugChannelStore` from Task 1 and `SqliteSession` from `@work-fabric/adapter-storage-sqlite`.
 - Produces: `MemoryDebugChannelStore`, `SqliteDebugChannelStore` and `migrateDebugChannelSqlite(session)`.
 
-- [ ] **Step 1: Bind both adapters to the shared contract suite**
+- [x] **Step 1: Bind both adapters to the shared contract suite**
 
 ```ts
 runDebugChannelStoreContract({
@@ -227,7 +227,7 @@ The SQLite fixture creates a temporary `SqliteSession`, runs
 `migrateDebugChannelSqlite`, closes it after each test, reopens the same file
 for the restart case, and proves records survive.
 
-- [ ] **Step 2: Run adapter tests and verify RED**
+- [x] **Step 2: Run adapter tests and verify RED**
 
 Run:
 
@@ -237,14 +237,14 @@ npx vitest run packages/adapter-debug-channel-memory/test packages/adapter-debug
 
 Expected: FAIL because the adapters and migration do not exist.
 
-- [ ] **Step 3: Implement the memory adapter**
+- [x] **Step 3: Implement the memory adapter**
 
 Use maps keyed by NUL-separated tenant/plugin/id scopes, `structuredClone` on
 every boundary, canonical request digest comparison and deterministic sorting
 by `(captured_at, capture_id)`. `linkIngress` and `linkHandoff` are idempotent
 for the same ID and throw their scoped conflict error for a different ID.
 
-- [ ] **Step 4: Implement the SQLite migration and adapter**
+- [x] **Step 4: Implement the SQLite migration and adapter**
 
 Create normalized submission and capture tables with:
 
@@ -259,7 +259,7 @@ decoded JSON before returning it. Pruning deletes at most `limit` captures
 then submissions whose expiry is at or before the supplied timestamp and
 returns exact counts.
 
-- [ ] **Step 5: Run contract, restart and migration checksum tests**
+- [x] **Step 5: Run contract, restart and migration checksum tests**
 
 Run:
 
@@ -271,7 +271,7 @@ npm run typecheck
 Expected: all focused tests PASS; reopening SQLite returns the same submission
 and capture; rerunning migration applies zero changes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/adapter-debug-channel-memory packages/adapter-debug-channel-sqlite package-lock.json
@@ -314,7 +314,7 @@ export function debugSecretPaths(prefix: string, config: DebugPluginConfig): rea
 export function normalizeDebugMessage(value: unknown, limits: DebugHttpLimits): DebugMessage;
 ```
 
-- [ ] **Step 1: Write strict config and content tests**
+- [x] **Step 1: Write strict config and content tests**
 
 Cover exact fields, `connector_id === instance_id`, literal loopback IP
 validation, port range `1..65535`, token presence, static/admission participant
@@ -328,7 +328,7 @@ expect(() => validateDebugPluginConfig({
 })).toThrow("listen.host must be a loopback IP address");
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -338,7 +338,7 @@ npx vitest run packages/plugin-channel-debug/test/config.test.ts packages/plugin
 
 Expected: FAIL because the validator and resolvers do not exist.
 
-- [ ] **Step 3: Implement config and content normalization**
+- [x] **Step 3: Implement config and content normalization**
 
 Validate `text`, `data` and `resource` parts against the existing protocol
 schema validator or an equivalent strict local validator that uses the exact
@@ -346,7 +346,7 @@ WFPP contract. Canonicalize the request with the repository canonical JSON
 utility and compute SHA-256 for idempotency comparison. Do not coerce unknown
 media types or data schemas.
 
-- [ ] **Step 4: Implement the two participant paths**
+- [x] **Step 4: Implement the two participant paths**
 
 `StaticDebugParticipantResolver` returns only the trusted configured tuple.
 `AdmissionDebugParticipantResolver` calls:
@@ -367,7 +367,7 @@ admission.admit(participant.policy_id, {
 Validate policy/scope/binding/grant exactly as the Feishu resolver does. Deny,
 temporary failure and malformed grants remain distinct outcomes.
 
-- [ ] **Step 5: Run focused tests and typecheck**
+- [x] **Step 5: Run focused tests and typecheck**
 
 Run:
 
@@ -378,7 +378,7 @@ npm run typecheck
 
 Expected: all focused tests PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/plugin-channel-debug package-lock.json
@@ -411,7 +411,7 @@ export class DebugEventMapper implements ConnectorEventMapper {
 }
 ```
 
-- [ ] **Step 1: Write failing normalization and mapping tests**
+- [x] **Step 1: Write failing normalization and mapping tests**
 
 Prove deterministic `source_system: "workfabric-debug"`, event type
 `debug.message.receive_v1`, dedupe identity, preserved mixed content, target
@@ -419,7 +419,7 @@ Actor/Endpoint, stable `handoff.offer` idempotency key, Authority scope and
 static/admission authentication behavior. Prove malformed payload,
 unconfigured participant and denied Admission never produce a command.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -429,7 +429,7 @@ npx vitest run packages/plugin-channel-debug/test/ingress-normalizer.test.ts pac
 
 Expected: FAIL because the normalizer and mapper do not exist.
 
-- [ ] **Step 3: Implement the ingress envelope**
+- [x] **Step 3: Implement the ingress envelope**
 
 The HTTP transport generates a bounded opaque `submission_id`; the envelope
 uses it as `external_event_id` and includes only:
@@ -445,14 +445,14 @@ uses it as `external_event_id` and includes only:
 
 No token, raw Authority claim or resolved Actor is stored in the payload.
 
-- [ ] **Step 4: Implement `DebugEventMapper`**
+- [x] **Step 4: Implement `DebugEventMapper`**
 
 Resolve the configured participant, construct exactly one `handoff.offer`
 command compatible with the existing command sink, target the configured
 decision body and attach a representation grant only for Admission mode.
 Return stable permanent/retryable reason codes owned by the mapper.
 
-- [ ] **Step 5: Run focused and Connector Worker integration tests**
+- [x] **Step 5: Run focused and Connector Worker integration tests**
 
 Run:
 
@@ -463,7 +463,7 @@ npm run typecheck
 
 Expected: all tests PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/plugin-channel-debug
@@ -486,7 +486,7 @@ git commit -m "feat(debug): map local messages into handoffs"
   `ConnectorAcceptedReceiptHandler` and `SignalAdapter`.
 - Produces: `DebugIntakeReceiptHandler` and `DebugRouteAwareSignalAdapter`.
 
-- [ ] **Step 1: Write failing route and capture tests**
+- [x] **Step 1: Write failing route and capture tests**
 
 Prove route-before-subscription ordering, Handoff-to-conversation isolation,
 submission Handoff linking, one subscription for
@@ -498,7 +498,7 @@ expect(await adapter.deliver(event, destination)).toEqual({ kind: "accepted" });
 expect((await store.listCaptures(query)).items).toHaveLength(1);
 ```
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -508,7 +508,7 @@ npx vitest run packages/plugin-channel-debug/test/intake-receipt-handler.test.ts
 
 Expected: FAIL because receipt and Signal adapters do not exist.
 
-- [ ] **Step 3: Implement receipt routing**
+- [x] **Step 3: Implement receipt routing**
 
 Follow the Feishu receipt handler's ordering and idempotency semantics, but
 read `conversation_id` and `submission_id` from the debug ingress payload.
@@ -516,14 +516,14 @@ Persist the `ChannelRoute`, link the submission to the accepted Handoff, then
 put the filtered runtime subscription. Wake the Handoff projection after the
 route is durable.
 
-- [ ] **Step 4: Implement canonical capture**
+- [x] **Step 4: Implement canonical capture**
 
 Resolve the route by tenant/plugin/Handoff, reject destination or event scope
 mismatch, derive a stable capture ID from event and destination identity, and
 append the unmodified event. Map store availability to retryable failure and
 invalid/cross-scope data to permanent failure without logging content.
 
-- [ ] **Step 5: Run tests and typecheck**
+- [x] **Step 5: Run tests and typecheck**
 
 Run:
 
@@ -534,7 +534,7 @@ npm run typecheck
 
 Expected: all focused tests PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/plugin-channel-debug
@@ -578,7 +578,7 @@ export class DebugChannelHttpServer {
 }
 ```
 
-- [ ] **Step 1: Write failing HTTP contract tests**
+- [x] **Step 1: Write failing HTTP contract tests**
 
 Use a real ephemeral loopback port. Cover health, missing/wrong token,
 constant-time credential path, submit `202`, identical replay, conflict `409`,
@@ -586,7 +586,7 @@ invalid request `400`, unknown participant `403`, body limit `413`, submission
 query, capture pagination, capture lookup, method `405`, unknown path `404`,
 JSON content type and no content in error bodies/log probes.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -596,7 +596,7 @@ npx vitest run packages/plugin-channel-debug/test/http-server.test.ts
 
 Expected: FAIL because the HTTP server does not exist.
 
-- [ ] **Step 3: Implement request parsing and authentication**
+- [x] **Step 3: Implement request parsing and authentication**
 
 Use `node:http`, read no more than `max_request_bytes`, require
 `application/json`, compare SHA-256 token digests with `timingSafeEqual`, set
@@ -613,14 +613,14 @@ bounded request timeouts and produce stable JSON errors:
 
 Do not echo input, token or validation details.
 
-- [ ] **Step 4: Implement submit and query handlers**
+- [x] **Step 4: Implement submit and query handlers**
 
 Create the submission before accepting ingress, use the submission ID as the
 external event ID, persist the resulting ingress ID, and return only stable
 correlation/status facts. Query ingress and Handoff state from owning stores;
 do not create a parallel success state.
 
-- [ ] **Step 5: Implement deterministic pagination and graceful stop**
+- [x] **Step 5: Implement deterministic pagination and graceful stop**
 
 Inject `OpaqueCursorCodec` from `@work-fabric/operations-spi`, created by
 service-node from `service.cursor_secret`. Encode the tenant, plugin instance,
@@ -628,7 +628,7 @@ conversation and last `(captured_at, capture_id)` tuple; reject a cursor whose
 scope differs from the request. Stop accepting new requests, drain active
 requests within a fixed timeout, then close the listener.
 
-- [ ] **Step 6: Run tests and typecheck**
+- [x] **Step 6: Run tests and typecheck**
 
 Run:
 
@@ -639,7 +639,7 @@ npm run typecheck
 
 Expected: all focused tests PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/plugin-channel-debug
@@ -671,14 +671,14 @@ git commit -m "feat(debug): expose loopback diagnostic API"
   `runtime.debug_cursor` and `runtime.handoff_wakeup`.
 - Produces: `DebugPluginFactory implements PluginFactory`.
 
-- [ ] **Step 1: Write failing plugin lifecycle tests**
+- [x] **Step 1: Write failing plugin lifecycle tests**
 
 Cover validation, production-mode refusal, connector/instance mismatch,
 prepare-without-listen, start binding, worker health, port conflict,
 registration rollback, stop idempotency, adapter unregistration and resource
 cleanup after partial startup failure.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -688,21 +688,21 @@ npx vitest run packages/plugin-channel-debug/test/debug-plugin-factory.test.ts p
 
 Expected: FAIL because the factory is not registered or composed.
 
-- [ ] **Step 3: Implement `DebugPluginFactory`**
+- [x] **Step 3: Implement `DebugPluginFactory`**
 
 Build the mapper, receipt handler, Connector Worker, route-aware Signal
 Adapter and HTTP server only from injected capabilities. `prepare` registers
 the Signal Adapter; `start` starts worker scheduling and HTTP; `stop` drains
 HTTP, waits for the active worker turn and unregisters deterministically.
 
-- [ ] **Step 4: Compose memory and SQLite stores**
+- [x] **Step 4: Compose memory and SQLite stores**
 
 For `memory-demo`, inject `MemoryDebugChannelStore`. For `sqlite-local`, run
 `migrateDebugChannelSqlite` on the same owned `SqliteSession` and inject
 `SqliteDebugChannelStore`. Add `workfabric.development_mode` and a narrow
 Handoff snapshot source. Do not expose Debug HTTP routes on the primary server.
 
-- [ ] **Step 5: Register configuration and secret paths**
+- [x] **Step 5: Register configuration and secret paths**
 
 Register both Feishu and Debug plugin validators. Collect only:
 
@@ -713,7 +713,7 @@ plugins.instances.<enabled-debug-instance>.config.credentials.bearer_token
 through the existing Configuration Service and Environment Secret Resolver.
 Disabled instances do not require their environment secret.
 
-- [ ] **Step 6: Run lifecycle, configuration and composition tests**
+- [x] **Step 6: Run lifecycle, configuration and composition tests**
 
 Run:
 
@@ -726,7 +726,7 @@ npm run check:sensitive-observability
 
 Expected: all tests and boundary checks PASS with zero violations.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add packages/plugin-channel-debug packages/service-node package-lock.json
@@ -759,14 +759,14 @@ git commit -m "feat(debug): compose development channel plugin"
 Both start and stop use `tools/local-debug-stack.ts`; the stop script passes
 the explicit `--stop` operation.
 
-- [ ] **Step 1: Write failing tool tests**
+- [x] **Step 1: Write failing tool tests**
 
 Test environment-file loading, exact config path handling, secret redaction,
 PID record format, child discovery, health-based status, shutdown escalation,
 JSON-file send, polling timeout and HTTP failure exit codes. Use fake child
 processes and ephemeral HTTP servers; never contact a real model.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -776,28 +776,28 @@ npx vitest run tools/local-debug-stack.test.ts tools/local-debug-send.test.ts
 
 Expected: FAIL because tools and scripts do not exist.
 
-- [ ] **Step 3: Implement common configuration and lifecycle**
+- [x] **Step 3: Implement common configuration and lifecycle**
 
 Reuse the safe `.env` parsing model from `local-feishu-common.ts`, but use
 debug-specific state files and ports. Record process group plus discovered
 real child PIDs. Status must combine liveness with `/health/ready`, Debug
 `/health` and Agent Runtime health rather than trusting an exited npm wrapper.
 
-- [ ] **Step 4: Implement the HTTP client**
+- [x] **Step 4: Implement the HTTP client**
 
 Require `--file`, `--conversation` and token from environment, submit once,
 print IDs and optionally poll `--wait-ms` for Handoff/capture facts. Output
 contains no token and does not print request content unless `--show-content`
 is explicitly supplied.
 
-- [ ] **Step 5: Add safe bundle and request examples**
+- [x] **Step 5: Add safe bundle and request examples**
 
 The bundle uses `${WORK_FABRIC_DEBUG_TOKEN}` and existing model/token
 references; it contains no secret values. Include static test identity,
 Authority rules, assistant endpoint and debug plugin settings. Example
 resource URLs contain no credentials.
 
-- [ ] **Step 6: Run tool tests and a dry local start/status/stop**
+- [x] **Step 6: Run tool tests and a dry local start/status/stop**
 
 Run:
 
@@ -811,7 +811,7 @@ npm run typecheck
 Expected: tests PASS; dry run prints only component names and bounded paths;
 missing status exits nonzero with `not_running`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add tools examples/config/local-debug-assistant.bundle.yaml examples/debug-channel package.json
@@ -835,7 +835,7 @@ git commit -m "feat(debug): add local channel tooling"
 - Produces: one deterministic release-gate command and a machine-readable
   summary containing only safe identifiers/states.
 
-- [ ] **Step 1: Write the failing process-level E2E**
+- [x] **Step 1: Write the failing process-level E2E**
 
 The test submits Markdown plus typed data, waits for exactly one Handoff,
 returns one Agent-authored `text/markdown` Result containing:
@@ -848,7 +848,7 @@ Then assert one captured canonical Result event, restart the service with the
 same SQLite file, query the same IDs, replay the same idempotency key and
 assert no second Handoff or capture.
 
-- [ ] **Step 2: Run E2E and verify RED**
+- [x] **Step 2: Run E2E and verify RED**
 
 Run:
 
@@ -858,20 +858,20 @@ npx vitest run packages/service-node/test/debug-channel.e2e.test.ts tools/local-
 
 Expected: FAIL until the stack client and correlation polling are complete.
 
-- [ ] **Step 3: Implement the deterministic E2E runner**
+- [x] **Step 3: Implement the deterministic E2E runner**
 
 Use bounded deadlines and exponential polling capped at 250 ms. On failure,
 print only component health, submission ID, ingress state, Handoff state,
 capture count and stable failure code. Always close Agent, plugin host, HTTP
 service, model fixture and SQLite session in reverse ownership order.
 
-- [ ] **Step 4: Add negative-path E2E cases**
+- [x] **Step 4: Add negative-path E2E cases**
 
 Prove invalid content creates no ingress, Admission denial creates no Handoff,
 missing Authority fails through the command sink, wrong token receives `401`,
 and production/non-loopback configurations never listen.
 
-- [ ] **Step 5: Run deterministic E2E repeatedly**
+- [x] **Step 5: Run deterministic E2E repeatedly**
 
 Run:
 
@@ -884,7 +884,7 @@ npm run local:debug:e2e
 Expected: all tests PASS twice with different temporary directories and no
 port, process or SQLite lock leak.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/service-node/test/debug-channel.e2e.test.ts tools/local-debug-e2e.ts tools/local-debug-e2e.test.ts package.json
@@ -907,7 +907,7 @@ git commit -m "test(debug): verify complete local collaboration"
 - Consumes: final commands, configuration and error codes from Tasks 1–9.
 - Produces: canonical long-lived local usage and troubleshooting guidance.
 
-- [ ] **Step 1: Write documentation acceptance assertions**
+- [x] **Step 1: Write documentation acceptance assertions**
 
 Extend the appropriate documentation test or add
 `tools/local-debug-documentation.test.ts` to assert the guide contains the
@@ -915,7 +915,7 @@ five commands, loopback/development warning, content-part examples, static and
 Admission identity paths, SQLite restart behavior and the seven-layer
 troubleshooting table.
 
-- [ ] **Step 2: Run documentation test and verify RED**
+- [x] **Step 2: Run documentation test and verify RED**
 
 Run:
 
@@ -925,14 +925,14 @@ npx vitest run tools/local-debug-documentation.test.ts
 
 Expected: FAIL until documentation is complete.
 
-- [ ] **Step 3: Update architecture and Citizen rules**
+- [x] **Step 3: Update architecture and Citizen rules**
 
 Document that Debug Channel is a development-only `channel` Citizen, not an
 observer, decision body or capability provider. Reaffirm that it does not
 change Core and that canonical captures are diagnostic copies, not
 authoritative collaboration state.
 
-- [ ] **Step 4: Write setup and troubleshooting guide**
+- [x] **Step 4: Write setup and troubleshooting guide**
 
 Document token generation, environment/config selection, start, health,
 plain/Markdown/data/resource send, result query, stop, retention and cleanup.
@@ -945,12 +945,12 @@ HTTP -> Ingress -> Identity/Admission -> Authority -> Handoff -> Agent -> Signal
 For each layer give the observable safe state and owning module; do not
 recommend patching another layer to compensate.
 
-- [ ] **Step 5: Update roadmap and README**
+- [x] **Step 5: Update roadmap and README**
 
 Mark the long-lived local debug channel complete only after Task 9 passes.
 Link to the guide and show the shortest safe first-run sequence.
 
-- [ ] **Step 6: Run documentation tests**
+- [x] **Step 6: Run documentation tests**
 
 Run:
 
@@ -961,7 +961,7 @@ git diff --check
 
 Expected: PASS and no whitespace errors.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add docs README.md tools/local-debug-documentation.test.ts
@@ -979,7 +979,7 @@ git commit -m "docs(debug): guide long-lived local testing"
 - Consumes: the complete implementation.
 - Produces: verified branch state and a concise E2E evidence record.
 
-- [ ] **Step 1: Run focused package and E2E suites**
+- [x] **Step 1: Run focused package and E2E suites**
 
 ```bash
 npx vitest run packages/debug-channel-spi/test packages/adapter-debug-channel-memory/test packages/adapter-debug-channel-sqlite/test packages/plugin-channel-debug/test packages/service-node/test/debug-channel.e2e.test.ts tools/local-debug-stack.test.ts tools/local-debug-send.test.ts tools/local-debug-e2e.test.ts tools/local-debug-documentation.test.ts
@@ -987,7 +987,7 @@ npx vitest run packages/debug-channel-spi/test packages/adapter-debug-channel-me
 
 Expected: zero failures.
 
-- [ ] **Step 2: Run project-wide verification**
+- [x] **Step 2: Run project-wide verification**
 
 ```bash
 npm run typecheck
@@ -1003,7 +1003,7 @@ git diff --check
 Expected: all commands PASS; environment-gated PostgreSQL/NATS/live-channel
 tests may remain explicitly skipped, never silently converted to passes.
 
-- [ ] **Step 3: Start the local stack and submit all example formats**
+- [x] **Step 3: Start the local stack and submit all example formats**
 
 Use a fresh temporary SQLite file and token:
 
@@ -1021,7 +1021,7 @@ Expected: every supported target input has one correlated outcome; unsupported
 target input reports the owning failure; status is healthy while running and
 all ports/processes are released after stop.
 
-- [ ] **Step 4: Inspect repository state and security output**
+- [x] **Step 4: Inspect repository state and security output**
 
 ```bash
 git status --short
@@ -1032,7 +1032,7 @@ git diff --check
 Confirm no `.env`, SQLite database, PID/state file, model response, debug
 capture or secret is tracked.
 
-- [ ] **Step 5: Commit only necessary regression fixes**
+- [x] **Step 5: Commit only necessary regression fixes**
 
 If a regression is found, return to the owning task, add a reproducing focused
 test, implement the smallest correction, rerun that task's gate and commit the
@@ -1040,7 +1040,7 @@ exact test and implementation files using that task's commit convention.
 After returning here, rerun Steps 1–4. If no correction is required, do not
 create an empty or catch-all commit.
 
-- [ ] **Step 6: Record final evidence**
+- [x] **Step 6: Record final evidence**
 
 Report:
 
