@@ -1,8 +1,8 @@
 import {
   validateRuntimeCapabilitySummaries,
-  validateRuntimeCapabilityContinuation,
+  validateRuntimeCapabilityTranscript,
   validateRuntimeDriverTurn,
-  type RuntimeCapabilityContinuation,
+  type RuntimeCapabilityTranscript,
   type RuntimeCapabilitySummary,
   type RuntimeDriverResult,
   type RuntimeDriverTurn,
@@ -30,7 +30,7 @@ export interface AgentlyWorkerRequestV3 {
   readonly command_id: string;
   readonly task: RuntimeTaskPackage;
   readonly available_capabilities: readonly RuntimeCapabilitySummary[];
-  readonly continuation: RuntimeCapabilityContinuation | null;
+  readonly capability_transcript: RuntimeCapabilityTranscript | null;
   readonly provider: {
     readonly type: "OpenAICompatible";
     readonly base_url: string;
@@ -322,10 +322,10 @@ export function normalizeAgentlyWorkerRequestV3(
     available_capabilities: validateRuntimeCapabilitySummaries(
       value.available_capabilities,
     ),
-    continuation:
-      value.continuation === null
+    capability_transcript:
+      value.capability_transcript === null
         ? null
-        : validateRuntimeCapabilityContinuation(value.continuation),
+        : validateRuntimeCapabilityTranscript(value.capability_transcript),
     provider: Object.freeze({ ...value.provider }),
   });
 }

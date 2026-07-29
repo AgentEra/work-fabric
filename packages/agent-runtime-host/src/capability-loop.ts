@@ -1,11 +1,12 @@
 import {
   validateCapabilityInvocationRequest,
   validateRuntimeCapabilitySummaries,
-  validateRuntimeCapabilityContinuation,
+  validateRuntimeCapabilityTranscript,
   validateRuntimeDriverTurn,
   type CapabilityAwareAgentRuntimeDriver,
   type CapabilityDisclosurePort,
   type CapabilityInvocationPort,
+  type RuntimeCapabilityContinuation,
   type RuntimeDriverResult,
   type RuntimeProgress,
   type RuntimeTaskPackage,
@@ -15,6 +16,8 @@ import { AgentRuntimeHostError } from "./errors.js";
 
 export interface CapabilityLoopLimits {
   readonly max_invocations_per_handoff: number;
+  readonly max_query_invocations_per_handoff: number;
+  readonly max_query_result_bytes: number;
   readonly allowed_namespaces: readonly string[];
 }
 
@@ -33,11 +36,32 @@ function validateLimits(limits: CapabilityLoopLimits): void {
   if (
     !Number.isSafeInteger(limits.max_invocations_per_handoff) ||
     limits.max_invocations_per_handoff < 1 ||
-    limits.max_invocations_per_handoff > 4
+    limits.max_invocations_per_handoff > 8
   ) {
     throw new AgentRuntimeHostError(
       "invalid_capability_limits",
       "max_invocations_per_handoff",
+    );
+  }
+  if (
+    !Number.isSafeInteger(limits.max_query_invocations_per_handoff) ||
+    limits.max_query_invocations_per_handoff < 1 ||
+    limits.max_query_invocations_per_handoff >
+      limits.max_invocations_per_handoff
+  ) {
+    throw new AgentRuntimeHostError(
+      "invalid_capability_limits",
+      "max_query_invocations_per_handoff",
+    );
+  }
+  if (
+    !Number.isSafeInteger(limits.max_query_result_bytes) ||
+    limits.max_query_result_bytes < 1_024 ||
+    limits.max_query_result_bytes > 131_072
+  ) {
+    throw new AgentRuntimeHostError(
+      "invalid_capability_limits",
+      "max_query_result_bytes",
     );
   }
   if (
@@ -70,8 +94,10 @@ export async function runCapabilityContinuationLoop(
   validateLimits(input.limits);
   const now = input.now ?? (() => new Date().toISOString());
   const invocationIds = new Set<string>();
+  const transcriptEntries: RuntimeCapabilityContinuation[] = [];
+  let queryInvocations = 0;
+  let queryResultBytes = 0;
   let progressSequence = 0;
-  let continuation = null;
   const availableCapabilities = validateRuntimeCapabilitySummaries(
     await input.disclosure.list(
       input.limits.allowed_namespaces,
@@ -107,7 +133,11 @@ export async function runCapabilityContinuationLoop(
     const turn = validateRuntimeDriverTurn(await input.driver.executeTurn(
       input.task,
       availableCapabilities,
-      continuation,
+      transcriptEntries.length === 0
+        ? null
+        : validateRuntimeCapabilityTranscript({
+            entries: transcriptEntries,
+          }),
       publishProgress,
       input.signal,
     ));
@@ -138,6 +168,29 @@ export async function runCapabilityContinuationLoop(
         turn.request.capability_id,
       );
     }
+    const operationKinds = new Set(
+      availableCapabilities
+        .filter((capability) =>
+          capability.capability_id === turn.request.capability_id
+        )
+        .map((capability) => capability.operation_kind),
+    );
+    if (operationKinds.size !== 1) {
+      throw new AgentRuntimeHostError(
+        "ambiguous_capability_operation_kind",
+        turn.request.capability_id,
+      );
+    }
+    const operationKind = [...operationKinds][0]!;
+    if (
+      operationKind === "query" &&
+      queryInvocations >= input.limits.max_query_invocations_per_handoff
+    ) {
+      throw new AgentRuntimeHostError(
+        "maximum_query_invocations_exceeded",
+        input.task.handoff_id,
+      );
+    }
     if (
       !Number.isFinite(Date.parse(input.task.result_due_at)) ||
       Date.parse(input.task.result_due_at) <= Date.parse(now())
@@ -148,6 +201,7 @@ export async function runCapabilityContinuationLoop(
       );
     }
     invocationIds.add(turn.request.invocation_id);
+    if (operationKind === "query") queryInvocations += 1;
     const request = validateCapabilityInvocationRequest({
       ...turn.request,
       original_handoff_id: input.task.handoff_id,
@@ -155,9 +209,23 @@ export async function runCapabilityContinuationLoop(
       deadline: input.task.result_due_at,
     });
     const result = await input.invocations.invoke(request, input.signal);
-    continuation = validateRuntimeCapabilityContinuation({
+    if (operationKind === "query" && result.outcome === "succeeded") {
+      queryResultBytes += new TextEncoder().encode(JSON.stringify({
+        data: result.data,
+        artifacts: result.artifacts,
+      })).byteLength;
+      if (queryResultBytes > input.limits.max_query_result_bytes) {
+        throw new AgentRuntimeHostError(
+          "maximum_query_result_bytes_exceeded",
+          input.task.handoff_id,
+        );
+      }
+    }
+    const entry = {
       request: turn.request,
       result,
-    });
+    };
+    transcriptEntries.push(entry);
+    validateRuntimeCapabilityTranscript({ entries: transcriptEntries });
   }
 }

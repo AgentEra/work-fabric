@@ -18,7 +18,7 @@ process.stdin.on("end", () => {
       if (request.available_capabilities?.[0]?.capability_id !== "feishu.document.create") {
         throw new Error("expected advertised capability");
       }
-      if (request.continuation === null) {
+      if (request.capability_transcript === null) {
         emit(record("capability_request", {
           request: {
             invocation_id: "invocation-fixture-1",

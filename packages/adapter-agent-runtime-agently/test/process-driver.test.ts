@@ -93,15 +93,17 @@ describe("AgentlyProcessDriver", () => {
         input_schema: null,
       }],
       {
-        request: requested.request,
-        result: {
-          outcome: "failed",
-          invocation_id: requested.request.invocation_id,
-          auxiliary_handoff_id: null,
-          code: "provider_unavailable",
-          message: "Provider unavailable",
-          retryable: true,
-        },
+        entries: [{
+          request: requested.request,
+          result: {
+            outcome: "failed",
+            invocation_id: requested.request.invocation_id,
+            auxiliary_handoff_id: null,
+            code: "provider_unavailable",
+            message: "Provider unavailable",
+            retryable: true,
+          },
+        }],
       },
       async () => undefined,
       signal,

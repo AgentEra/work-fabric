@@ -34,7 +34,7 @@ class WorkerRequest:
     command_id: str
     task: Mapping[str, JsonValue]
     available_capabilities: tuple[Mapping[str, JsonValue], ...]
-    continuation: Mapping[str, JsonValue] | None
+    capability_transcript: Mapping[str, JsonValue] | None
     provider_type: Literal["OpenAICompatible"]
     provider_base_url: str
     provider_model: str
@@ -264,6 +264,25 @@ def _validate_continuation(value: object) -> dict[str, JsonValue]:
     return safe
 
 
+def _validate_capability_transcript(value: object) -> dict[str, JsonValue]:
+    transcript = _exact_object(value, ("entries",), "capability_transcript")
+    entries = transcript["entries"]
+    if not isinstance(entries, list) or not 1 <= len(entries) <= 8:
+        _fail("capability_transcript.entries exceeds its bound")
+    safe_entries: list[JsonValue] = []
+    invocation_ids: set[str] = set()
+    for entry in entries:
+        safe = _validate_continuation(entry)
+        invocation_id = safe["request"]["invocation_id"]  # type: ignore[index]
+        if not isinstance(invocation_id, str) or invocation_id in invocation_ids:
+            _fail("capability_transcript contains a duplicate invocation")
+        invocation_ids.add(invocation_id)
+        safe_entries.append(safe)
+    safe: dict[str, JsonValue] = {"entries": safe_entries}
+    _reject_secret_fields(safe)
+    return safe
+
+
 def _validate_available_capabilities(
     value: object,
 ) -> tuple[Mapping[str, JsonValue], ...]:
@@ -280,6 +299,7 @@ def _validate_available_capabilities(
                 "version",
                 "name",
                 "description",
+                "operation_kind",
                 "input_schema",
             ),
             f"available_capabilities[{index}]",
@@ -303,6 +323,11 @@ def _validate_available_capabilities(
         )
         if not SEMVER.fullmatch(version):
             _fail(f"available_capabilities[{index}].version is invalid")
+        operation_kind = summary["operation_kind"]
+        if operation_kind not in ("query", "command", "destructive"):
+            _fail(
+                f"available_capabilities[{index}].operation_kind is invalid"
+            )
         safe = {
             "citizen_id": citizen_id,
             "capability_id": capability_id,
@@ -317,6 +342,7 @@ def _validate_available_capabilities(
                 f"available_capabilities[{index}].description",
                 2_048,
             ),
+            "operation_kind": operation_kind,
             "input_schema": (
                 None
                 if summary["input_schema"] is None
@@ -344,7 +370,7 @@ def parse_request(value: object) -> WorkerRequest:
         if protocol == PROTOCOL
         else (
             "protocol", "command_id", "task", "available_capabilities",
-            "continuation", "provider",
+            "capability_transcript", "provider",
         )
     )
     request = _exact_object(safe, fields, "request")
@@ -366,10 +392,12 @@ def parse_request(value: object) -> WorkerRequest:
                 request["available_capabilities"]
             )
         ),
-        continuation=(
+        capability_transcript=(
             None
-            if protocol == PROTOCOL or request["continuation"] is None
-            else _validate_continuation(request["continuation"])
+            if protocol == PROTOCOL or request["capability_transcript"] is None
+            else _validate_capability_transcript(
+                request["capability_transcript"]
+            )
         ),
         provider_type="OpenAICompatible",
         provider_base_url=_string(provider["base_url"], "provider.base_url", 8_192),

@@ -28,6 +28,8 @@ const fixture = {
     capability_invocation: {
       enabled: false,
       max_invocations_per_handoff: 4,
+      max_query_invocations_per_handoff: 3,
+      max_query_result_bytes: 65_536,
       allowed_namespaces: ["feishu."],
     },
   },
@@ -80,6 +82,8 @@ describe("Daily Assistant Runtime composition", () => {
     expect(loaded.service.capability_invocation).toEqual({
       enabled: false,
       max_invocations_per_handoff: 4,
+      max_query_invocations_per_handoff: 3,
+      max_query_result_bytes: 65_536,
       allowed_namespaces: ["feishu."],
     });
     expect(loaded.service.capability_invocation).not.toHaveProperty(

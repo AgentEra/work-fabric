@@ -6,6 +6,7 @@ import {
   validateCapabilityInvocationResult,
   validateRuntimeCapabilitySummaries,
   validateRuntimeCapabilityContinuation,
+  validateRuntimeCapabilityTranscript,
   validateRuntimeDriverTurn,
 } from "../src/index.js";
 
@@ -97,6 +98,77 @@ describe("Agent capability invocation contracts", () => {
     expect(turn.kind).toBe("capability_request");
     expect(continuation.result).toEqual(result);
     expect(Object.isFrozen(continuation)).toBe(true);
+  });
+
+  it("validates a bounded, ordered capability transcript", () => {
+    const entries = [1, 2].map((index) => ({
+      request: {
+        invocation_id: `invocation-${index}`,
+        capability_id: "feishu.conversation.history.read",
+        version_constraint: "1.0.0",
+        input: { maximum_messages: 20 },
+        reason: "Read another bounded page.",
+      },
+      result: {
+        outcome: "failed" as const,
+        invocation_id: `invocation-${index}`,
+        auxiliary_handoff_id: null,
+        code: "provider_unavailable",
+        message: "Provider unavailable.",
+        retryable: true,
+      },
+    }));
+
+    const transcript = validateRuntimeCapabilityTranscript({ entries });
+
+    expect(transcript.entries).toHaveLength(2);
+    expect(transcript.entries[1]?.request.invocation_id).toBe("invocation-2");
+    expect(Object.isFrozen(transcript.entries)).toBe(true);
+  });
+
+  it("rejects duplicate, oversized and secret-bearing transcripts", () => {
+    const entry = {
+      request: {
+        invocation_id: "invocation-1",
+        capability_id: "feishu.conversation.history.read",
+        version_constraint: "1.0.0",
+        input: { maximum_messages: 20 },
+        reason: "Read another bounded page.",
+      },
+      result: {
+        outcome: "failed",
+        invocation_id: "invocation-1",
+        auxiliary_handoff_id: null,
+        code: "provider_unavailable",
+        message: "Provider unavailable.",
+        retryable: true,
+      },
+    };
+    expect(() => validateRuntimeCapabilityTranscript({
+      entries: [entry, entry],
+    })).toThrow(/duplicate/i);
+    expect(() => validateRuntimeCapabilityTranscript({
+      entries: [{
+        ...entry,
+        request: {
+          ...entry.request,
+          input: { api_key: "forbidden" },
+        },
+      }],
+    })).toThrow(/secret/i);
+    expect(() => validateRuntimeCapabilityTranscript({
+      entries: Array.from({ length: 9 }, (_, index) => ({
+        ...entry,
+        request: {
+          ...entry.request,
+          invocation_id: `invocation-${index}`,
+        },
+        result: {
+          ...entry.result,
+          invocation_id: `invocation-${index}`,
+        },
+      })),
+    })).toThrow(/entries/i);
   });
 
   it("preserves the existing final result shape", () => {

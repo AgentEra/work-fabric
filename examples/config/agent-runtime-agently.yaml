@@ -29,7 +29,9 @@ service:
     busy_timeout_ms: 5000
   capability_invocation:
     enabled: true
-    max_invocations_per_handoff: 4
+    max_invocations_per_handoff: 8
+    max_query_invocations_per_handoff: 6
+    max_query_result_bytes: 131072
     allowed_namespaces:
       - feishu.
 

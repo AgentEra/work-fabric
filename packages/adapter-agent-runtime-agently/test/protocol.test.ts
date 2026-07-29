@@ -35,15 +35,16 @@ describe("Agently worker protocol", () => {
         operation_kind: "command",
         input_schema: null,
       }],
-      continuation: {
-        request: {
+      capability_transcript: {
+        entries: [{
+          request: {
           invocation_id: "invocation-1",
           capability_id: "feishu.document.create",
           version_constraint: "1.0.0",
           input: { title: "项目需求" },
           reason: "创建团队文档",
         },
-        result: {
+          result: {
           outcome: "succeeded",
           invocation_id: "invocation-1",
           auxiliary_handoff_id: "handoff-auxiliary-1",
@@ -57,7 +58,8 @@ describe("Agently worker protocol", () => {
           },
           data: { document_id: "doc-1" },
           artifacts: [],
-        },
+          },
+        }],
       },
       provider: {
         type: "OpenAICompatible",
@@ -69,6 +71,7 @@ describe("Agently worker protocol", () => {
     expect(normalized.available_capabilities).toEqual(
       request.available_capabilities,
     );
+    expect(normalized.capability_transcript?.entries).toHaveLength(1);
     expect(JSON.stringify(normalized)).not.toMatch(/api_key|secret|folder_token/i);
     expect(() => normalizeAgentlyWorkerRequestV3({
       ...request,

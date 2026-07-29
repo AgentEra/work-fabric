@@ -122,6 +122,11 @@ export async function composeAgentRuntime(
       capability_limits: {
         max_invocations_per_handoff:
           loaded.service.capability_invocation.max_invocations_per_handoff,
+        max_query_invocations_per_handoff:
+          loaded.service.capability_invocation
+            .max_query_invocations_per_handoff,
+        max_query_result_bytes:
+          loaded.service.capability_invocation.max_query_result_bytes,
         allowed_namespaces:
           loaded.service.capability_invocation.allowed_namespaces,
       },

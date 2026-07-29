@@ -24,6 +24,8 @@ export interface AgentRuntimeServiceConfiguration {
   readonly capability_invocation: {
     readonly enabled: boolean;
     readonly max_invocations_per_handoff: number;
+    readonly max_query_invocations_per_handoff: number;
+    readonly max_query_result_bytes: number;
     readonly allowed_namespaces: readonly string[];
   };
 }

@@ -108,11 +108,15 @@ export interface RuntimeCapabilityContinuation {
   readonly result: CapabilityInvocationResult;
 }
 
+export interface RuntimeCapabilityTranscript {
+  readonly entries: readonly RuntimeCapabilityContinuation[];
+}
+
 export interface CapabilityAwareAgentRuntimeDriver {
   executeTurn(
     task: RuntimeTaskPackage,
     availableCapabilities: readonly RuntimeCapabilitySummary[],
-    continuation: RuntimeCapabilityContinuation | null,
+    transcript: RuntimeCapabilityTranscript | null,
     progress: (update: RuntimeProgress) => Promise<void>,
     signal: AbortSignal,
   ): Promise<RuntimeDriverTurn>;
@@ -596,6 +600,56 @@ export function validateRuntimeCapabilityContinuation(
     throw new TypeError("continuation invocation_id does not match");
   }
   return deepFreeze({ request, result });
+}
+
+const SECRET_FIELD =
+  /(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|client[_-]?secret|private[_-]?key|api[_-]?key)/i;
+
+function rejectSecretFields(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) rejectSecretFields(item);
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const [key, item] of Object.entries(value)) {
+    if (SECRET_FIELD.test(key)) {
+      throw new TypeError("Capability transcript contains a secret-named field");
+    }
+    rejectSecretFields(item);
+  }
+}
+
+export function validateRuntimeCapabilityTranscript(
+  value: unknown,
+): Readonly<RuntimeCapabilityTranscript> {
+  const source = exactObject(
+    value,
+    ["entries"],
+    "Runtime capability transcript",
+  );
+  if (
+    !Array.isArray(source.entries) ||
+    source.entries.length === 0 ||
+    source.entries.length > 8
+  ) {
+    throw new TypeError("Runtime capability transcript entries are invalid");
+  }
+  const entries = source.entries.map((entry) =>
+    validateRuntimeCapabilityContinuation(entry)
+  );
+  const invocationIds = new Set<string>();
+  for (const entry of entries) {
+    if (invocationIds.has(entry.request.invocation_id)) {
+      throw new TypeError("Runtime capability transcript contains a duplicate");
+    }
+    invocationIds.add(entry.request.invocation_id);
+  }
+  const safe = { entries };
+  rejectSecretFields(safe);
+  if (encoder.encode(JSON.stringify(safe)).byteLength > 131_072) {
+    throw new RangeError("Runtime capability transcript exceeds maximum bytes");
+  }
+  return deepFreeze({ entries });
 }
 
 export function isCapabilityAwareAgentRuntimeDriver(

@@ -7,7 +7,7 @@ import {
   type AgentRuntimeDriver,
   type AgentRuntimeDriverFactory,
   type CapabilityAwareAgentRuntimeDriver,
-  type RuntimeCapabilityContinuation,
+  type RuntimeCapabilityTranscript,
   type RuntimeCapabilitySummary,
   type RuntimeDriverResult,
   type RuntimeDriverTurn,
@@ -80,7 +80,7 @@ function requestFor(task: RuntimeTaskPackage, config: AgentlyRuntimeDriverConfig
 function turnRequestFor(
   task: RuntimeTaskPackage,
   availableCapabilities: readonly RuntimeCapabilitySummary[],
-  continuation: RuntimeCapabilityContinuation | null,
+  transcript: RuntimeCapabilityTranscript | null,
   config: AgentlyRuntimeDriverConfig,
 ): AgentlyWorkerRequestV3 {
   return normalizeAgentlyWorkerRequestV3({
@@ -88,7 +88,7 @@ function turnRequestFor(
     command_id: randomUUID(),
     task,
     available_capabilities: availableCapabilities,
-    continuation,
+    capability_transcript: transcript,
     provider: {
       type: "OpenAICompatible",
       base_url: config.provider.base_url,
@@ -139,50 +139,21 @@ export class AgentlyProcessDriver
   executeTurn(
     task: RuntimeTaskPackage,
     availableCapabilities: readonly RuntimeCapabilitySummary[],
-    continuation: RuntimeCapabilityContinuation | null,
-    progress: (update: RuntimeProgress) => Promise<void>,
-    signal: AbortSignal,
-  ): Promise<RuntimeDriverTurn>;
-  executeTurn(
-    task: RuntimeTaskPackage,
-    continuation: RuntimeCapabilityContinuation | null,
+    transcript: RuntimeCapabilityTranscript | null,
     progress: (update: RuntimeProgress) => Promise<void>,
     signal: AbortSignal,
   ): Promise<RuntimeDriverTurn>;
   async executeTurn(
     task: RuntimeTaskPackage,
-    availableCapabilitiesOrContinuation:
-      | readonly RuntimeCapabilitySummary[]
-      | RuntimeCapabilityContinuation
-      | null,
-    continuationOrProgress:
-      | RuntimeCapabilityContinuation
-      | null
-      | ((update: RuntimeProgress) => Promise<void>),
-    progressOrSignal:
-      | ((update: RuntimeProgress) => Promise<void>)
-      | AbortSignal,
-    optionalSignal?: AbortSignal,
+    availableCapabilities: readonly RuntimeCapabilitySummary[],
+    transcript: RuntimeCapabilityTranscript | null,
+    progress: (update: RuntimeProgress) => Promise<void>,
+    signal: AbortSignal,
   ): Promise<RuntimeDriverTurn> {
-    const modern = Array.isArray(availableCapabilitiesOrContinuation);
-    const availableCapabilities = (
-      modern ? availableCapabilitiesOrContinuation : []
-    ) as readonly RuntimeCapabilitySummary[];
-    const continuation = (
-      modern
-        ? continuationOrProgress
-        : availableCapabilitiesOrContinuation
-    ) as RuntimeCapabilityContinuation | null;
-    const progress = (
-      modern ? progressOrSignal : continuationOrProgress
-    ) as (update: RuntimeProgress) => Promise<void>;
-    const signal = (
-      modern ? optionalSignal : progressOrSignal
-    ) as AbortSignal;
     const request = turnRequestFor(
       task,
       availableCapabilities,
-      continuation,
+      transcript,
       this.config,
     );
     return this.executeWorker(

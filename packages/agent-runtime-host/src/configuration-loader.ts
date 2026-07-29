@@ -107,7 +107,13 @@ function validateService(value: unknown, path: string): AgentRuntimeServiceConfi
   );
   exact(
     capabilityInvocation,
-    ["enabled", "max_invocations_per_handoff", "allowed_namespaces"],
+    [
+      "enabled",
+      "max_invocations_per_handoff",
+      "max_query_invocations_per_handoff",
+      "max_query_result_bytes",
+      "allowed_namespaces",
+    ],
     `${path}.capability_invocation`,
   );
   if (typeof capabilityInvocation.enabled !== "boolean") {
@@ -127,7 +133,17 @@ function validateService(value: unknown, path: string): AgentRuntimeServiceConfi
       max_invocations_per_handoff: positive(
         capabilityInvocation.max_invocations_per_handoff,
         `${path}.capability_invocation.max_invocations_per_handoff`,
-        4,
+        8,
+      ),
+      max_query_invocations_per_handoff: positive(
+        capabilityInvocation.max_query_invocations_per_handoff,
+        `${path}.capability_invocation.max_query_invocations_per_handoff`,
+        8,
+      ),
+      max_query_result_bytes: positive(
+        capabilityInvocation.max_query_result_bytes,
+        `${path}.capability_invocation.max_query_result_bytes`,
+        131_072,
       ),
       allowed_namespaces: namespaceList(
         capabilityInvocation.allowed_namespaces,

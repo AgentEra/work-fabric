@@ -123,6 +123,8 @@ describe("runCapabilityContinuationLoop", () => {
       invocations,
       limits: {
         max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
         allowed_namespaces: ["feishu."],
       },
       progress: async () => undefined,
@@ -147,11 +149,108 @@ describe("runCapabilityContinuationLoop", () => {
       deadline: task.result_due_at,
     }, expect.any(AbortSignal));
     expect(driver.executeTurn.mock.calls[1]?.[2]).toMatchObject({
-      request: { invocation_id: "invocation-1" },
-      result: {
-        outcome: "succeeded",
-        data: { document_id: "doc-1" },
+      entries: [{
+        request: { invocation_id: "invocation-1" },
+        result: {
+          outcome: "succeeded",
+          data: { document_id: "doc-1" },
+        },
+      }],
+    });
+  });
+
+  it("retains both pages of query evidence for the Agent's final turn", async () => {
+    const queryCapability: RuntimeCapabilitySummary = {
+      citizen_id: "citizen-feishu-message",
+      capability_id: "feishu.conversation.history.read",
+      version: "1.0.0",
+      name: "Read conversation history",
+      description: "Read one bounded page.",
+      operation_kind: "query",
+      input_schema: null,
+    };
+    const driver = turnDriver([
+      {
+        kind: "capability_request",
+        request: {
+          invocation_id: "history-1",
+          capability_id: queryCapability.capability_id,
+          version_constraint: "1.0.0",
+          input: {
+            conversation: { kind: "current_conversation" },
+            maximum_messages: 20,
+          },
+          reason: "Need recent evidence.",
+        },
       },
+      {
+        kind: "capability_request",
+        request: {
+          invocation_id: "history-2",
+          capability_id: queryCapability.capability_id,
+          version_constraint: "1.0.0",
+          input: {
+            conversation: { kind: "current_conversation" },
+            maximum_messages: 20,
+            cursor: "opaque-next",
+          },
+          reason: "Material details may be on the next page.",
+        },
+      },
+      { kind: "final", response: finalResponse },
+    ]);
+    let page = 0;
+    const invocations: CapabilityInvocationPort = {
+      discover: async () => [],
+      invoke: vi.fn(async (request) => {
+        page += 1;
+        return {
+          outcome: "succeeded" as const,
+          invocation_id: request.invocation_id,
+          auxiliary_handoff_id: `handoff-history-${page}`,
+          candidate: {
+            citizen_id: queryCapability.citizen_id,
+            endpoint_id: "endpoint-feishu",
+            capability_id: queryCapability.capability_id,
+            capability_version: "1.0.0",
+            contract_digest:
+              `sha256:${"a".repeat(64)}` as `sha256:${string}`,
+          },
+          data: page === 1
+            ? { messages: [{ text: "page one" }], has_more: true }
+            : { messages: [{ text: "page two" }], has_more: false },
+          artifacts: [],
+        };
+      }),
+    };
+
+    await runCapabilityContinuationLoop({
+      task,
+      driver,
+      disclosure: { list: async () => [queryCapability] },
+      invocations,
+      limits: {
+        max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
+        allowed_namespaces: ["feishu."],
+      },
+      progress: async () => undefined,
+      signal: new AbortController().signal,
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
+
+    expect(driver.executeTurn.mock.calls[2]?.[2]).toMatchObject({
+      entries: [
+        {
+          request: { invocation_id: "history-1" },
+          result: { data: { has_more: true } },
+        },
+        {
+          request: { invocation_id: "history-2" },
+          result: { data: { has_more: false } },
+        },
+      ],
     });
   });
 
@@ -219,6 +318,8 @@ describe("runCapabilityContinuationLoop", () => {
       invocations: invocationPort(),
       limits: {
         max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
         allowed_namespaces: ["feishu."],
       },
       progress: async (update) => {
@@ -260,6 +361,8 @@ describe("runCapabilityContinuationLoop", () => {
       invocations,
       limits: {
         max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
         allowed_namespaces: ["feishu."],
       },
       progress: async () => undefined,
@@ -289,6 +392,8 @@ describe("runCapabilityContinuationLoop", () => {
       invocations: duplicatePort,
       limits: {
         max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
         allowed_namespaces: ["feishu."],
       },
       progress: async () => undefined,
@@ -312,6 +417,8 @@ describe("runCapabilityContinuationLoop", () => {
       invocations: disallowedPort,
       limits: {
         max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
         allowed_namespaces: ["feishu."],
       },
       progress: async () => undefined,
@@ -339,6 +446,8 @@ describe("runCapabilityContinuationLoop", () => {
       invocations,
       limits: {
         max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
         allowed_namespaces: ["feishu."],
       },
       progress: async () => undefined,
@@ -363,6 +472,8 @@ describe("runCapabilityContinuationLoop", () => {
       invocations: invocationPort(),
       limits: {
         max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
         allowed_namespaces: ["feishu."],
       },
       progress: async () => undefined,

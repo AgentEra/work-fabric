@@ -20,14 +20,14 @@ from work_fabric_agently_runtime.protocol import (
 from .conftest import valid_request, valid_request_v3
 
 
-def test_v3_request_accepts_only_summaries_and_a_normalized_continuation() -> None:
+def test_v3_request_accepts_only_summaries_and_a_normalized_transcript() -> None:
     value = valid_request_v3()
     parsed = parse_request(value)
     assert parsed.protocol == "workfabric.agent-runtime/3"
     assert parsed.available_capabilities[0]["capability_id"] == "feishu.document.create"
-    assert parsed.continuation is None
+    assert parsed.capability_transcript is None
 
-    value["continuation"] = {
+    value["capability_transcript"] = {"entries": [{
         "request": {
             "invocation_id": "invocation-1",
             "capability_id": "feishu.document.create",
@@ -43,19 +43,19 @@ def test_v3_request_accepts_only_summaries_and_a_normalized_continuation() -> No
             "message": "Provider unavailable",
             "retryable": True,
         },
-    }
+    }]}
     parsed = parse_request(value)
-    assert parsed.continuation is not None
-    assert parsed.continuation["result"]["code"] == "provider_unavailable"
+    assert parsed.capability_transcript is not None
+    assert parsed.capability_transcript["entries"][0]["result"]["code"] == "provider_unavailable"
 
-    value["continuation"]["result"]["api_key"] = "forbidden"
+    value["capability_transcript"]["entries"][0]["result"]["api_key"] = "forbidden"
     with pytest.raises(ProtocolError, match="unknown|secret"):
         parse_request(value)
 
 
-def test_v3_continuation_allows_typed_resource_tokens_but_rejects_credentials() -> None:
+def test_v3_transcript_allows_typed_resource_tokens_but_rejects_credentials() -> None:
     value = valid_request_v3()
-    value["continuation"] = {
+    value["capability_transcript"] = {"entries": [{
         "request": {
             "invocation_id": "invocation-1",
             "capability_id": "feishu.document.create",
@@ -77,9 +77,9 @@ def test_v3_continuation_allows_typed_resource_tokens_but_rejects_credentials() 
             "data": {"document_token": "doc-1"},
             "artifacts": [{"uri": "feishu://docx/doc-1"}],
         },
-    }
-    assert parse_request(value).continuation is not None
-    value["continuation"]["result"]["data"]["access_token"] = "forbidden"
+    }]}
+    assert parse_request(value).capability_transcript is not None
+    value["capability_transcript"]["entries"][0]["result"]["data"]["access_token"] = "forbidden"
     with pytest.raises(ProtocolError, match="secret"):
         parse_request(value)
 

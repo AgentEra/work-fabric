@@ -58,6 +58,7 @@ def valid_request_v3() -> dict[str, Any]:
             "version": "1.0.0",
             "name": "Create document",
             "description": "Create one simple Docx document.",
+            "operation_kind": "command",
             "input_schema": {
                 "type": "object",
                 "additionalProperties": False,
@@ -78,5 +79,5 @@ def valid_request_v3() -> dict[str, Any]:
             },
         }
     ]
-    value["continuation"] = None
+    value["capability_transcript"] = None
     return value
