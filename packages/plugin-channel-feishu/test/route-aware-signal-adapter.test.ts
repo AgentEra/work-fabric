@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
 import type { ChannelHandoffSnapshotSource } from "@work-fabric/channel-spi";
-import type { ProtocolEvent } from "@work-fabric/exchange-spi";
+import {
+  signalMediaTypeCapability,
+  type ProtocolEvent,
+} from "@work-fabric/exchange-spi";
 import { FeishuRouteAwareSignalAdapter } from "../src/index.js";
 
 const event = {
@@ -67,6 +70,10 @@ describe("FeishuRouteAwareSignalAdapter", () => {
       handoff_snapshots: snapshotSource(),
       static_channels: {},
       delegate: { manifest: { profile: "exchange.signal.v1", adapter: "fake", capabilities: {} }, async deliver(_event, destination) { observed.push(destination); return { kind: "accepted" }; } },
+    });
+    expect(adapter.manifest.capabilities).toMatchObject({
+      [signalMediaTypeCapability("text/plain")]: true,
+      [signalMediaTypeCapability("text/markdown")]: true,
     });
     await expect(adapter.deliver(resultEvent, { destination_id: "handoff:handoff-1", binding: "collaboration-channel", configuration: { plugin_instance_id: "feishu-primary", route_mode: "handoff" } })).resolves.toEqual({ kind: "accepted" });
     expect(observed[0]).toMatchObject({ binding: "feishu", configuration: { receive_id_type: "chat_id", receive_id: "oc-1", credential_ref: "private-ref" } });

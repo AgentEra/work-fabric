@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { verifySignalProfile } from "@work-fabric/exchange-conformance";
+import { signalMediaTypeCapability } from "@work-fabric/exchange-spi";
 import type {
   JsonObject,
   ProtocolEvent,
@@ -153,6 +154,10 @@ describe("FeishuSignalAdapter", () => {
           });
         },
       },
+    });
+    expect(adapter.manifest.capabilities).toMatchObject({
+      [signalMediaTypeCapability("text/plain")]: true,
+      [signalMediaTypeCapability("text/markdown")]: true,
     });
     await verifySignalProfile(adapter, {
       event,

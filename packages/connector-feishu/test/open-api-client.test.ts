@@ -24,6 +24,47 @@ const message = {
 };
 
 describe("FeishuOpenApiClient", () => {
+  it("sends native Feishu post content without changing its Markdown payload", async () => {
+    const bodies: unknown[] = [];
+    const client = new FeishuOpenApiClient({
+      token_provider: new Tokens(),
+      fetch: (async (_input, init) => {
+        bodies.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({
+          code: 0,
+          data: { message_id: "om-post-1" },
+        }), { status: 200 });
+      }) as typeof globalThis.fetch,
+      base_url: "https://open.feishu.test",
+      request_timeout_ms: 1_000,
+      max_response_bytes: 64_000,
+    });
+    const content = JSON.stringify({
+      zh_cn: {
+        title: "",
+        content: [[{
+          tag: "md",
+          text: "[文档](https://example.com)",
+        }]],
+      },
+    });
+
+    await expect(client.sendMessage({
+      ...message,
+      msg_type: "post",
+      content,
+    })).resolves.toEqual({
+      kind: "accepted",
+      message_id: "om-post-1",
+    });
+    expect(bodies).toEqual([{
+      receive_id: "ou-human-1",
+      msg_type: "post",
+      content,
+      uuid: "wf_123",
+    }]);
+  });
+
   it("lists a bounded Feishu conversation page and returns only validated history fields", async () => {
     const fetch = vi.fn(async (
       _input: string | URL | Request,

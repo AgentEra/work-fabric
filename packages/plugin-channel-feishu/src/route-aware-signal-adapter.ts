@@ -2,7 +2,7 @@ import type {
   ChannelHandoffSnapshotSource,
   ChannelRouteStore,
 } from "@work-fabric/channel-spi";
-import { SIGNAL_REQUIRED_CAPABILITIES, type ProtocolEvent, type SignalAdapter, type SignalDeliveryResult, type SignalDestination } from "@work-fabric/exchange-spi";
+import { SIGNAL_REQUIRED_CAPABILITIES, signalMediaTypeCapability, type ProtocolEvent, type SignalAdapter, type SignalDeliveryResult, type SignalDestination } from "@work-fabric/exchange-spi";
 
 export interface FeishuStaticChannel { readonly receive_id_type: "chat_id" | "open_id" | "user_id" | "union_id" | "email"; readonly receive_id: string; readonly render_mode?: "text" | "card"; }
 export interface FeishuRouteAwareSignalAdapterOptions {
@@ -15,7 +15,15 @@ export interface FeishuRouteAwareSignalAdapterOptions {
 }
 
 export class FeishuRouteAwareSignalAdapter implements SignalAdapter {
-  readonly manifest = { profile: "exchange.signal.v1", adapter: "feishu-channel-route", capabilities: Object.fromEntries(SIGNAL_REQUIRED_CAPABILITIES.map((item) => [item, true])) } as const;
+  readonly manifest = {
+    profile: "exchange.signal.v1",
+    adapter: "feishu-channel-route",
+    capabilities: Object.fromEntries([
+      ...SIGNAL_REQUIRED_CAPABILITIES,
+      signalMediaTypeCapability("text/plain"),
+      signalMediaTypeCapability("text/markdown"),
+    ].map((item) => [item, true])),
+  } as const;
   constructor(private readonly options: FeishuRouteAwareSignalAdapterOptions) {}
   async deliver(event: ProtocolEvent, destination: SignalDestination): Promise<SignalDeliveryResult> {
     const config = destination.configuration;

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   SIGNAL_REQUIRED_CAPABILITIES,
+  signalMediaTypeCapability,
   type ProtocolEvent,
   type SignalAdapter,
   type SignalDeliveryResult,
@@ -38,7 +39,11 @@ export class FeishuSignalAdapter implements SignalAdapter {
     profile: "exchange.signal.v1",
     adapter: "feishu",
     capabilities: Object.fromEntries(
-      SIGNAL_REQUIRED_CAPABILITIES.map((capability) => [capability, true]),
+      [
+        ...SIGNAL_REQUIRED_CAPABILITIES,
+        signalMediaTypeCapability("text/plain"),
+        signalMediaTypeCapability("text/markdown"),
+      ].map((capability) => [capability, true]),
     ),
   } as const;
 
