@@ -101,3 +101,123 @@ export interface CalendarEventOwnership {
   readonly external_updated_at: string | null;
   readonly deleted_at: string | null;
 }
+
+export interface CalendarBinding {
+  readonly tenant_id: string;
+  readonly alias: string;
+  readonly resource_uri: string;
+  readonly external_calendar_id: string;
+  readonly calendar_type: "primary" | "shared";
+  readonly access_role: "writer" | "owner";
+  readonly is_default: boolean;
+  readonly active: boolean;
+  readonly bound_by_principal_id: string;
+  readonly version: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export type CalendarExecutionState =
+  | "started"
+  | "event_created"
+  | "attendees_applied"
+  | "completed";
+
+export interface CalendarExecutionRecord {
+  readonly tenant_id: string;
+  readonly idempotency_key: string;
+  readonly capability_id: string;
+  readonly input_digest: `sha256:${string}`;
+  readonly state: CalendarExecutionState;
+  readonly event_resource_uri: string | null;
+  readonly outcome: FeishuCapabilityOutcome | null;
+  readonly version: number;
+  readonly created_at: string;
+  readonly updated_at: string;
+}
+
+export interface FeishuCalendarRegistry {
+  bind(
+    input: Omit<CalendarBinding, "version">,
+    expectedVersion: number,
+  ): Promise<CalendarBinding>;
+  getBinding(
+    tenantId: string,
+    alias: string,
+  ): Promise<CalendarBinding | null>;
+  getDefault(tenantId: string): Promise<CalendarBinding | null>;
+  listBindings(input: {
+    readonly tenant_id: string;
+    readonly after_alias?: string;
+    readonly limit: number;
+  }): Promise<{
+    readonly items: readonly CalendarBinding[];
+    readonly next_after_alias: string | null;
+  }>;
+  setDefault(input: {
+    readonly tenant_id: string;
+    readonly alias: string;
+    readonly expected_version: number;
+    readonly updated_at: string;
+  }): Promise<CalendarBinding>;
+}
+
+export interface FeishuCalendarExecutionStore {
+  beginExecution(input: {
+    readonly tenant_id: string;
+    readonly idempotency_key: string;
+    readonly capability_id: string;
+    readonly input_digest: `sha256:${string}`;
+    readonly created_at: string;
+  }): Promise<{
+    readonly created: boolean;
+    readonly record: CalendarExecutionRecord;
+  }>;
+  checkpoint(input: {
+    readonly tenant_id: string;
+    readonly idempotency_key: string;
+    readonly expected_version: number;
+    readonly state: CalendarExecutionState;
+    readonly event_resource_uri?: string;
+    readonly outcome?: FeishuCapabilityOutcome;
+    readonly updated_at: string;
+  }): Promise<CalendarExecutionRecord>;
+  getExecution(
+    tenantId: string,
+    idempotencyKey: string,
+  ): Promise<CalendarExecutionRecord | null>;
+}
+
+export interface FeishuCalendarEventStore {
+  putEventOwnership(input: CalendarEventOwnership): Promise<void>;
+  getEventOwnership(
+    tenantId: string,
+    eventResourceUri: string,
+  ): Promise<CalendarEventOwnership | null>;
+  getEventOwnershipByCreateKey(
+    tenantId: string,
+    createIdempotencyKey: string,
+  ): Promise<CalendarEventOwnership | null>;
+  updateEventVersion(input: {
+    readonly tenant_id: string;
+    readonly event_resource_uri: string;
+    readonly expected_version: number;
+    readonly external_updated_at: string | null;
+  }): Promise<CalendarEventOwnership>;
+  markEventDeleted(input: {
+    readonly tenant_id: string;
+    readonly event_resource_uri: string;
+    readonly expected_version: number;
+    readonly deleted_at: string;
+  }): Promise<CalendarEventOwnership>;
+}
+
+export interface FeishuCalendarStore
+  extends FeishuCalendarRegistry,
+    FeishuCalendarExecutionStore,
+    FeishuCalendarEventStore {
+  close(): Promise<void>;
+}
+import type {
+  FeishuCapabilityOutcome,
+} from "./contracts.js";
