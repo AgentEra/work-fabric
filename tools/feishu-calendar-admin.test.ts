@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { parseFeishuCalendarAdminArguments } from "./feishu-calendar-admin.js";
+import {
+  listCalendarBindings,
+  parseFeishuCalendarAdminArguments,
+} from "./feishu-calendar-admin.js";
 
 describe("Feishu Calendar admin CLI", () => {
   it("strictly parses bind, create and list commands", () => {
@@ -52,5 +55,31 @@ describe("Feishu Calendar admin CLI", () => {
       "list",
       "--default",
     ])).toThrow();
+  });
+
+  it("lists bindings through bounded SPI pages", async () => {
+    const listBindings = vi.fn()
+      .mockResolvedValueOnce({
+        items: [{ alias: "a" }],
+        next_after_alias: "a",
+      })
+      .mockResolvedValueOnce({
+        items: [{ alias: "b" }],
+        next_after_alias: null,
+      });
+
+    await expect(listCalendarBindings(
+      { listBindings } as never,
+      "tenant-1",
+    )).resolves.toEqual([{ alias: "a" }, { alias: "b" }]);
+    expect(listBindings).toHaveBeenNthCalledWith(1, {
+      tenant_id: "tenant-1",
+      limit: 100,
+    });
+    expect(listBindings).toHaveBeenNthCalledWith(2, {
+      tenant_id: "tenant-1",
+      after_alias: "a",
+      limit: 100,
+    });
   });
 });

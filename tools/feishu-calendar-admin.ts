@@ -198,6 +198,25 @@ function safe(binding: CalendarBinding) {
   };
 }
 
+export async function listCalendarBindings(
+  store: Pick<FeishuCalendarStore, "listBindings">,
+  tenantId: string,
+): Promise<readonly CalendarBinding[]> {
+  const items: CalendarBinding[] = [];
+  let afterAlias: string | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const result = await store.listBindings({
+      tenant_id: tenantId,
+      ...(afterAlias === undefined ? {} : { after_alias: afterAlias }),
+      limit: 100,
+    });
+    items.push(...result.items);
+    if (result.next_after_alias === null) return items;
+    afterAlias = result.next_after_alias;
+  }
+  throw new Error("calendar_binding_list_bound_exceeded");
+}
+
 export async function runFeishuCalendarAdmin(
   args: readonly string[] = process.argv.slice(2),
   source: Readonly<Record<string, string | undefined>> = process.env,
@@ -241,11 +260,10 @@ export async function runFeishuCalendarAdmin(
       : new MemoryFeishuCalendarStore();
   try {
     if (parsed.command === "list") {
-      const result = await store.listBindings({
-        tenant_id: loaded.service.work_fabric.tenant_id,
-        limit: 1_000,
-      });
-      return result.items.map(safe);
+      return (await listCalendarBindings(
+        store,
+        loaded.service.work_fabric.tenant_id,
+      )).map(safe);
     }
     const admin = new FeishuCalendarAdministrationService({
       backend,
