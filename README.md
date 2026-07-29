@@ -345,7 +345,7 @@ npm run console:build
 ```
 
 完整的本地飞书链路使用同一个多应用 YAML 配置包，同时启动 Exchange/Channel、
-团队共享助理和独立飞书 Message/Document Provider Facets：
+团队共享助理和独立飞书 Message/Document/Calendar Provider Facets：
 
 ```bash
 uv sync --project runtimes/agently-worker
@@ -355,6 +355,18 @@ export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.ya
 export WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true
 npm run local:feishu:start
 ```
+
+首次使用日历前，另设
+`WORK_FABRIC_ADMIN_PRINCIPAL_ID=principal-work-fabric-admin`，再运行：
+
+```bash
+npm run feishu-calendar:admin -- \
+  create-and-bind --alias team --summary '团队协作日历' \
+  --permissions show_only_free_busy --default
+```
+
+日历 ID 不进入 YAML；Message 负责群成员，Calendar 负责日历事实，Agent 负责
+两者之间的调用顺序和最终回复。
 
 另一个终端用同一组环境执行 `npm run local:feishu:status`。Supervisor 只负责编排
 进程和就绪检查；动态能力仍由 Citizen session 声明，飞书动作仍通过辅助

@@ -129,6 +129,13 @@ v2 密钥的安全轮换顺序是：先把新 key 加入所有验证节点，确
 
 ## 5. 共同的身份、权限与职责边界
 
+飞书 Integration 只是部署和文档中的虚拟分组，不是运行时 Citizen。Channel
+负责入站/出站运输；Message Capability Citizen 负责群成员和历史消息事实；
+Calendar Capability Citizen 负责日历/日程 OpenAPI、幂等和资源状态；Daily
+Assistant 负责跨能力排序、信息充分性判断和最终语义回复。Calendar 不导入
+Message，Message 也不导入 Calendar；二者只通过 Capability Handoff 和经验证
+的结果证据协作。
+
 `FEISHU_CONNECTOR_ACCESS_TOKEN` 是公共 TypeScript SDK 的部署 bootstrap 凭证，不是飞书 App Secret。Admission-backed 消息在单次 command 上使用短时 representation grant 覆盖 bootstrap 身份；HTTP Identity 将它解析为恰好一个 Actor/Endpoint claim，独立 Admission Authority 仅允许该 Connector 的 `workfabric.handoff.offer.v1`。grant 证明“代表谁”，不证明“可以做什么”，也不会绕过 HTTP、Identity、Authority 或 Exchange Core。
 
 `outbound.channels` 声明固定通知目的地，`outbound.subscriptions` 把它们配置成 canonical Subscription。配置属于可信部署启动面；来自飞书的参与方命令仍必须经过 Identity、Representation 和 Authority。每个 Intake Handoff 的回聊 Subscription 是已授权 Offer 的机械后果，归属发起 Actor/Endpoint，并继续受事件 audience policy 约束。任何参与方经公共 API 修改 Subscription 时，仍必须拥有 `workfabric.subscription.manage.v1` 权限。

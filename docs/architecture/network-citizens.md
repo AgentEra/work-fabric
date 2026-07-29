@@ -328,6 +328,15 @@ transcript 中继续推理。Message Provider 负责供应商读取、来源校�
 Manager。Context Store 始终是被动事实存储，不替 Agent 决定取什么、取多少或
 哪些内容相关。
 
+### Feishu Calendar 参考拆分
+
+Feishu Integration 仅是虚拟分组。运行时中的 Channel、Message Capability、
+Document Capability、Calendar Capability 和 Context 是独立 Facet/Citizen。
+Message 拥有群成员展开，Calendar 拥有日历查询与写入，Agent 拥有跨能力排序
+和语义回复。群成员结果通过公共辅助 Handoff 返回；Agent Authority 验证
+tenant、原始 Handoff、目标能力、成功 Result Schema 和资源包含关系后，才能
+把用户引用交给 Calendar。任何 Provider 都不直接调用另一个 Provider。
+
 ## 9. 新模块接入清单
 
 每个进入网络的新模块必须在设计、实现和运维文档中明确：

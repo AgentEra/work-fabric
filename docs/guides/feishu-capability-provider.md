@@ -265,6 +265,10 @@ create/read/update/append，保留 Handoff 委托与 operation scope 检查，�
 | 文档 delete | 开启云空间文件删除能力；代码仍额外限制为同租户、同 Citizen/Endpoint 创建且经确认的文档 |
 | 用户权限判断 | 开启“判断当前用户是否有云文档权限”；身份代理服务需维护或动态取得派发人的用户授权 |
 | 内部员工通配准入 | Contact 用户查询权限、应用通讯录可见范围覆盖目标员工 |
+| 群成员展开 | `im:chat.members:read`；机器人必须在目标群内 |
+| 日历创建/注册 | `calendar:calendar:create`、`calendar:calendar:read` |
+| 日程创建/读取/更新/删除 | `calendar:calendar.event:create`、`calendar:calendar.event:read`、`calendar:calendar.event:update`、`calendar:calendar.event:delete` |
+| 忙闲查询 | `calendar:calendar.free_busy:read` |
 
 飞书的资源协作者权限和 API scope 是两层条件；仅开 API scope 不会让应用
 自动获得任意已有文档。消息权限与事件要求可核对
@@ -274,6 +278,45 @@ create/read/update/append，保留 Handoff 委托与 operation scope 检查，�
 [读取纯文本](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document/raw_content?lang=zh-CN)、
 [创建块](https://open.feishu.cn/document/server-docs/docs/docs/docx-v1/document-block/create?lang=zh-CN)
 及[删除文件](https://open.feishu.cn/document/server-docs/docs/drive-v1/file/delete?lang=zh-CN)。
+
+### 5.1 Calendar Facet、注册与权限
+
+Calendar 是独立 Capability Provider Citizen，不是 Message 或 Channel 内部的
+“日历工具”。YAML 只启用模块身份，不保存 calendar ID、日程或参与人。日历
+绑定属于 Provider 动态状态，通过部署管理端口显式写入：
+
+```bash
+export WORK_FABRIC_ENV_FILE=/absolute/path/to/feishu.env
+export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml"
+export WORK_FABRIC_ADMIN_PRINCIPAL_ID=principal-work-fabric-admin
+
+npm run feishu-calendar:admin -- \
+  create-and-bind --alias team --summary '团队协作日历' \
+  --permissions show_only_free_busy --default
+
+npm run feishu-calendar:admin -- \
+  bind-existing --alias team \
+  --calendar-id 'feishu.cn_x@group.calendar.feishu.cn' --default
+
+npm run feishu-calendar:admin -- list
+```
+
+命令复用同一应用凭据，不要求域名或回调 URL，也不接受 secret CLI 参数。
+应用身份必须对绑定日历拥有 `writer` 或 `owner`；角色和 API scope 缺一不可。
+共享日历创建若出现网络结果未知，命令不会盲目重试，而会提示在飞书侧核对后
+用 `bind-existing` 对账。
+
+群成员由 Message Citizen 提供，Calendar Citizen 只处理日历事实；Daily
+Assistant 根据动态声明依次调用两者并生成最终回复。参与人写入可能返回
+`completion_state: partial`，事件 URI 仍会保留，Agent 必须如实说明未成功
+参与人。删除只允许当前 Provider 代表同一发起 Actor 创建的事件，并要求一次性
+确认 proof；本地应用身份组合没有确认签发/验证器，因此删除默认失败关闭。
+
+本地阶段先用应用身份验证连通性，暂不要求用户 OAuth。以后接入用户 OAuth 或
+企业身份代理时，只替换 Authority/凭据适配器，不改变 Calendar Capability、
+Handoff 或 Agent 流程。飞书字段和公开范围可核对
+[日历资源说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/calendar-v4/calendar/introduction)
+与[应用权限列表](https://open.feishu.cn/document/server-docs/application-scope/scope-list?lang=zh-CN)。
 
 ## 6. 安全与失败语义
 
@@ -298,8 +341,8 @@ Application View：
 
 - `work-fabric`：Exchange、飞书长连接 Channel、Admission 和 Authority；
 - `daily-assistant`：Agently、Agent 身份、能力调用策略；
-- `feishu-provider`：飞书 OpenAPI、身份/ACL 与位置解析适配器、两个 Citizen
-  和独立状态。
+- `feishu-provider`：飞书 OpenAPI、身份/ACL 与位置解析适配器、独立的
+  Message、Document、Calendar Capability Citizens、Context Citizen 和状态。
 
 创建 owner-only 的 env 文件；其中只保存部署值和 secret，不保存动态能力
 声明。若某个 App Secret 曾进入聊天、截图或日志，应先在飞书开放平台轮换：

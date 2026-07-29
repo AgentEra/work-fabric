@@ -21,6 +21,10 @@ const providerGuide = new URL(
   "../../../docs/guides/feishu-capability-provider.md",
   import.meta.url,
 );
+const localBundle = new URL(
+  "../../config/local-feishu-assistant.bundle.yaml",
+  import.meta.url,
+);
 
 describe("Agently Runtime operator guide", () => {
   it("documents the supported absolute environment contract and separate process startup", async () => {
@@ -118,5 +122,21 @@ describe("Agently Runtime operator guide", () => {
     expect(`${root}\n${citizens}`).toContain(
       "Provider facets do not depend on Channel facets",
     );
+  });
+
+  it("configures the Calendar Citizen and least-privilege scheduling delegation", async () => {
+    const source = await readFile(localBundle, "utf8");
+    for (const value of [
+      "calendar_citizen:",
+      "citizen_id: citizen-feishu-calendar",
+      "resource_id: citizen-feishu-calendar",
+      "conversation:members:read",
+      "calendar:freebusy:read",
+      "calendar:event:read",
+      "calendar:event:write",
+      "calendar:attendee:write",
+      "calendar:event:delete",
+    ]) expect(source).toContain(value);
+    expect(source).not.toMatch(/calendar_(?:id|ids):/);
   });
 });
