@@ -13,6 +13,7 @@ import {
   LocalFeishuStackSupervisor,
   type LocalChildProcess,
 } from "./local-feishu-stack.js";
+import { LOCAL_FEISHU_CITIZEN_IDS } from "./local-feishu-status.js";
 
 function child(pid: number): LocalChildProcess {
   const process = new EventEmitter() as LocalChildProcess & EventEmitter;
@@ -24,6 +25,14 @@ function child(pid: number): LocalChildProcess {
 }
 
 describe("LocalFeishuStackSupervisor", () => {
+  it("checks every independently registered Feishu Provider facet", () => {
+    expect(LOCAL_FEISHU_CITIZEN_IDS).toEqual({
+      message: "citizen-feishu-message",
+      document: "citizen-feishu-document",
+      context: "citizen-feishu-context",
+    });
+  });
+
   it("materializes one bundle that all three application loaders accept", async () => {
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-local-bundle-"));
     try {

@@ -126,6 +126,24 @@ async function provision(
 }
 
 describe("NetworkCitizenDirectoryService", () => {
+  it("replays identical provisioning at the same registration version", async () => {
+    const service = directory();
+    const input = provisioning();
+
+    await service.provision(adminContext, input, null);
+
+    await expect(
+      service.provision(adminContext, structuredClone(input), null),
+    ).resolves.toEqual(input);
+    await expect(
+      service.provision(
+        adminContext,
+        { ...input, maximum_risk: "destructive" },
+        null,
+      ),
+    ).rejects.toMatchObject({ code: "version_conflict" });
+  });
+
   it("binds runtime sessions to the provisioned Principal Actor and Endpoint", async () => {
     const service = directory();
     await provision(service);

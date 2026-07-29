@@ -11,6 +11,12 @@ import {
   type LocalFeishuPidState,
 } from "./local-feishu-common.js";
 
+export const LOCAL_FEISHU_CITIZEN_IDS = Object.freeze({
+  message: "citizen-feishu-message",
+  document: "citizen-feishu-document",
+  context: "citizen-feishu-context",
+});
+
 function processAlive(pid: number): boolean {
   if (!Number.isSafeInteger(pid) || pid < 1) return false;
   try {
@@ -65,12 +71,19 @@ export async function localFeishuStatus(
       return false;
     }
   };
-  const [assistantEndpoint, providerEndpoint, capabilityCitizen, contextCitizen] =
+  const [
+    assistantEndpoint,
+    providerEndpoint,
+    messageCitizen,
+    documentCitizen,
+    contextCitizen,
+  ] =
     await Promise.all([
       query(() => client.endpoints.get("endpoint-intake-agent")),
       query(() => client.endpoints.get("endpoint-feishu-provider")),
-      query(() => client.citizens.get("citizen-feishu-capability")),
-      query(() => client.citizens.get("citizen-feishu-context")),
+      query(() => client.citizens.get(LOCAL_FEISHU_CITIZEN_IDS.message)),
+      query(() => client.citizens.get(LOCAL_FEISHU_CITIZEN_IDS.document)),
+      query(() => client.citizens.get(LOCAL_FEISHU_CITIZEN_IDS.context)),
     ]);
   return Object.freeze({
     service_ready: serviceReady,
@@ -86,7 +99,8 @@ export async function localFeishuStatus(
       feishu_provider: providerEndpoint,
     },
     citizen_registration: {
-      capability: capabilityCitizen,
+      message: messageCitizen,
+      document: documentCitizen,
       context: contextCitizen,
     },
   });
@@ -102,7 +116,8 @@ if (
       !status.service_ready ||
       !status.endpoint_registration.daily_assistant ||
       !status.endpoint_registration.feishu_provider ||
-      !status.citizen_registration.capability ||
+      !status.citizen_registration.message ||
+      !status.citizen_registration.document ||
       !status.citizen_registration.context
     ) process.exitCode = 1;
   }).catch((error: unknown) => {

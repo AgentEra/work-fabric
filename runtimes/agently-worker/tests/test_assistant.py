@@ -450,3 +450,26 @@ def test_real_agently_timeout_is_a_provider_transport_setting_not_request_body()
         "after_output": False,
     }
     assert "timeout" not in request_data.request_options
+
+
+def test_capability_turn_prompt_defines_complete_discriminated_json_shapes() -> None:
+    prompt = role_prompt(
+        {
+            "role_id": "daily-assistant",
+            "display_name": "日常助理",
+            "description": "团队共享助理",
+        },
+        capability_turn=True,
+    )
+
+    assert (
+        '{"turn_type":"final","request_summary":"摘要","response":"完整答复",'
+        '"invocation_id":"","capability_id":"","version_constraint":"",'
+        '"input":{},"reason":""}'
+    ) in prompt
+    assert (
+        '{"turn_type":"capability_request","request_summary":"摘要",'
+        '"response":"","invocation_id":"唯一调用 ID",'
+        '"capability_id":"已披露能力 ID","version_constraint":"版本约束",'
+        '"input":{},"reason":"调用理由"}'
+    ) in prompt

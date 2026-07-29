@@ -102,6 +102,23 @@ const openRequest = {
 };
 
 describe("EndpointDirectoryService", () => {
+  it("replays identical provisioning at the same registration version", async () => {
+    const { service } = createFixture();
+
+    await service.provision(adminContext, registration, null);
+
+    await expect(
+      service.provision(adminContext, structuredClone(registration), null),
+    ).resolves.toEqual(registration);
+    await expect(
+      service.provision(
+        adminContext,
+        { ...registration, display_name: "Changed without a new version" },
+        null,
+      ),
+    ).rejects.toMatchObject({ code: "version_conflict" });
+  });
+
   it("provisions an immutable Actor binding with optimistic versioning", async () => {
     const { service } = createFixture();
 

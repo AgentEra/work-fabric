@@ -181,6 +181,17 @@ export class NetworkCitizenDirectoryService {
         "Citizen registration version is invalid",
       );
     }
+    const existing = await this.dependencies.store.getProvisioning(
+      context.tenant_id,
+      validated.citizen_id,
+    );
+    if (
+      existing !== null &&
+      existing.registration_version === validated.registration_version &&
+      isDeepStrictEqual(publicProvisioning(existing), validated)
+    ) {
+      return publicProvisioning(existing);
+    }
     try {
       return publicProvisioning(
         await this.dependencies.store.putProvisioning({

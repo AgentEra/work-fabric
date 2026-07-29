@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   EndpointStoreError,
   addUtcTimestampSeconds,
@@ -158,6 +160,13 @@ export class EndpointDirectoryService {
     const existing = await this.dependencies.store.getRegistration(context.tenant_id, input.endpoint_id);
     if (existing !== null && !sameActor(existing.actor, input.actor)) {
       throw new EndpointDirectoryError("immutable_binding", "Endpoint Actor binding is immutable");
+    }
+    if (
+      existing !== null &&
+      existing.registration_version === input.registration_version &&
+      isDeepStrictEqual(publicRegistration(existing), input)
+    ) {
+      return publicRegistration(existing);
     }
     const now = this.dependencies.clock.now();
     try {
