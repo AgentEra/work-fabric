@@ -103,6 +103,50 @@ describe("Feishu Provider configuration", () => {
     })).rejects.toThrow();
   });
 
+  it("loads independently registered Provider facets and resolves the cursor key", async () => {
+    const changed = structuredClone(bundle) as unknown as {
+      value: {
+        applications: Record<string, {
+          plugins: {
+            instances: Record<string, {
+              config: Record<string, unknown>;
+            }>;
+          };
+        }>;
+      };
+    };
+    const provider = changed.value.applications["feishu-provider"]!
+      .plugins.instances["feishu-primary"]!.config;
+    delete provider.capability_citizen;
+    provider.cursor_signing_key = "${FEISHU_CURSOR_SIGNING_KEY}";
+    provider.message_citizen = {
+      enabled: true,
+      citizen_id: "citizen-feishu-message",
+      principal_id: "principal-feishu-provider",
+      actor_id: "actor-feishu-provider",
+      endpoint_id: "endpoint-feishu-provider",
+      registration_version: 1,
+    };
+    provider.document_citizen = { enabled: false };
+
+    const loaded = await loadFeishuProviderConfiguration({
+      document: changed as never,
+      environment: {
+        FEISHU_PROVIDER_ACCESS_TOKEN: "provider-token",
+        FEISHU_CURSOR_SIGNING_KEY: "0123456789abcdef0123456789abcdef",
+      },
+    });
+
+    expect(loaded.provider.cursor_signing_key).toBe(
+      "0123456789abcdef0123456789abcdef",
+    );
+    expect(loaded.provider.message_citizen).toMatchObject({
+      enabled: true,
+      citizen_id: "citizen-feishu-message",
+    });
+    expect(loaded.provider.document_citizen).toEqual({ enabled: false });
+  });
+
   it("requires exactly one enabled Feishu Provider instance", async () => {
     const changed = structuredClone(bundle);
     changed.value.applications["feishu-provider"].plugins.instances["feishu-primary"].enabled = false;

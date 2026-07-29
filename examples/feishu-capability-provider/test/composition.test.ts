@@ -60,13 +60,22 @@ describe("ManagedFeishuProviderComposition", () => {
   it("starts Citizens and Handoff Host without a configured document container", async () => {
     const calls: string[] = [];
     const composition = new ManagedFeishuProviderComposition({
-      capability_citizen_id: "citizen-capability",
+      capability_citizens: [{
+        citizen_id: "citizen-message",
+        lifecycle: {
+          start: vi.fn(async () => { calls.push("message:start"); }),
+          health: vi.fn(async () => ({ status: "available" as const })),
+          close: vi.fn(async () => { calls.push("message:close"); }),
+        },
+      }, {
+        citizen_id: "citizen-document",
+        lifecycle: {
+          start: vi.fn(async () => { calls.push("document:start"); }),
+          health: vi.fn(async () => ({ status: "available" as const })),
+          close: vi.fn(async () => { calls.push("document:close"); }),
+        },
+      }],
       context_citizen_id: "citizen-context",
-      capability_citizen: {
-        start: vi.fn(async () => { calls.push("capability:start"); }),
-        health: vi.fn(async () => ({ status: "available" as const })),
-        close: vi.fn(async () => { calls.push("capability:close"); }),
-      },
       context_citizen: {
         start: vi.fn(async () => { calls.push("context:start"); }),
         health: vi.fn(async () => ({ status: "available" as const })),
@@ -80,20 +89,22 @@ describe("ManagedFeishuProviderComposition", () => {
     });
     await composition.start();
     expect(calls).toEqual([
-      "capability:start",
+      "message:start",
+      "document:start",
       "context:start",
       "host:start",
     ]);
     await expect(composition.health()).resolves.toEqual({
       provider: "ready",
-      capability_citizen: "citizen-capability",
+      capability_citizens: ["citizen-message", "citizen-document"],
       context_citizen: "citizen-context",
     });
     await composition.close();
-    expect(calls.slice(3)).toEqual([
+    expect(calls.slice(4)).toEqual([
       "host:close",
       "context:close",
-      "capability:close",
+      "document:close",
+      "message:close",
       "provider-store:close",
     ]);
   });
@@ -101,13 +112,15 @@ describe("ManagedFeishuProviderComposition", () => {
   it("rolls back partial startup in reverse order", async () => {
     const calls: string[] = [];
     const composition = new ManagedFeishuProviderComposition({
-      capability_citizen_id: "citizen-capability",
+      capability_citizens: [{
+        citizen_id: "citizen-capability",
+        lifecycle: {
+          start: async () => { calls.push("capability:start"); },
+          health: async () => ({ status: "available" as const }),
+          close: async () => { calls.push("capability:close"); },
+        },
+      }],
       context_citizen_id: "citizen-context",
-      capability_citizen: {
-        start: async () => { calls.push("capability:start"); },
-        health: async () => ({ status: "available" as const }),
-        close: async () => { calls.push("capability:close"); },
-      },
       context_citizen: {
         start: async () => {
           calls.push("context:start");

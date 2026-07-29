@@ -6,8 +6,13 @@ export interface FeishuProviderCitizenConfig {
   readonly registration_version: number;
 }
 
-export interface FeishuProviderConfig {
+export type FeishuProviderFacetConfig =
+  | { readonly enabled: false }
+  | ({ readonly enabled: true } & FeishuProviderCitizenConfig);
+
+interface FeishuProviderBaseConfig {
   readonly credential_ref: string;
+  readonly cursor_signing_key?: string;
   readonly open_api: {
     readonly base_url: string;
     readonly request_timeout_ms: number;
@@ -20,8 +25,50 @@ export interface FeishuProviderConfig {
         readonly location: string;
         readonly busy_timeout_ms: number;
       };
-  readonly capability_citizen: FeishuProviderCitizenConfig;
   readonly context_citizen: FeishuProviderCitizenConfig;
+}
+
+export type FeishuProviderConfig = FeishuProviderBaseConfig & (
+  | {
+      readonly capability_citizen: FeishuProviderCitizenConfig;
+      readonly message_citizen?: never;
+      readonly document_citizen?: never;
+    }
+  | {
+      readonly capability_citizen?: never;
+      readonly message_citizen: FeishuProviderFacetConfig;
+      readonly document_citizen: FeishuProviderFacetConfig;
+    }
+);
+
+export interface EnabledFeishuProviderFacet {
+  readonly facet: "aggregate" | "message" | "document";
+  readonly citizen: FeishuProviderCitizenConfig;
+}
+
+export function enabledFeishuProviderFacets(
+  config: FeishuProviderConfig,
+): readonly EnabledFeishuProviderFacet[] {
+  if (config.capability_citizen !== undefined) {
+    return Object.freeze([Object.freeze({
+      facet: "aggregate" as const,
+      citizen: config.capability_citizen,
+    })]);
+  }
+  return Object.freeze([
+    ...(config.message_citizen.enabled
+      ? [Object.freeze({
+          facet: "message" as const,
+          citizen: config.message_citizen,
+        })]
+      : []),
+    ...(config.document_citizen.enabled
+      ? [Object.freeze({
+          facet: "document" as const,
+          citizen: config.document_citizen,
+        })]
+      : []),
+  ]);
 }
 
 function object(
@@ -82,16 +129,57 @@ function citizen(value: unknown, path: string): FeishuProviderCitizenConfig {
   });
 }
 
+function facet(value: unknown, path: string): FeishuProviderFacetConfig {
+  const source = object(value, path, [
+    "enabled",
+    "citizen_id",
+    "principal_id",
+    "actor_id",
+    "endpoint_id",
+    "registration_version",
+  ]);
+  if (source.enabled === false) {
+    if (Object.keys(source).length !== 1) {
+      throw new TypeError(`${path} disabled facet contains an unsupported field`);
+    }
+    return Object.freeze({ enabled: false });
+  }
+  if (source.enabled !== true) {
+    throw new TypeError(`${path}.enabled is invalid`);
+  }
+  const { enabled: _enabled, ...identity } = source;
+  return Object.freeze({
+    enabled: true,
+    ...citizen(identity, path),
+  });
+}
+
 export function validateFeishuProviderConfig(
   value: unknown,
 ): FeishuProviderConfig {
   const source = object(value, "feishu provider", [
     "credential_ref",
+    "cursor_signing_key",
     "open_api",
     "state",
     "capability_citizen",
+    "message_citizen",
+    "document_citizen",
     "context_citizen",
   ]);
+  const hasLegacy = source.capability_citizen !== undefined;
+  const hasMessageFacet = source.message_citizen !== undefined;
+  const hasDocumentFacet = source.document_citizen !== undefined;
+  if (hasLegacy && (hasMessageFacet || hasDocumentFacet)) {
+    throw new TypeError(
+      "legacy capability_citizen cannot be combined with Provider facets",
+    );
+  }
+  if (!hasLegacy && (!hasMessageFacet || !hasDocumentFacet)) {
+    throw new TypeError(
+      "message_citizen and document_citizen Provider facets are required",
+    );
+  }
   const api = object(source.open_api, "open_api", [
     "base_url",
     "request_timeout_ms",
@@ -125,8 +213,17 @@ export function validateFeishuProviderConfig(
   } else {
     throw new TypeError("state.type is invalid");
   }
-  return Object.freeze({
+  const shared = {
     credential_ref: string(source.credential_ref, "credential_ref", 255),
+    ...(source.cursor_signing_key === undefined
+      ? {}
+      : {
+          cursor_signing_key: string(
+            source.cursor_signing_key,
+            "cursor_signing_key",
+            1_024,
+          ),
+        }),
     open_api: Object.freeze({
       base_url: baseUrl.toString().replace(/\/$/, ""),
       request_timeout_ms: positive(
@@ -141,10 +238,44 @@ export function validateFeishuProviderConfig(
       ),
     }),
     state: normalizedState,
-    capability_citizen: citizen(
-      source.capability_citizen,
-      "capability_citizen",
-    ),
     context_citizen: citizen(source.context_citizen, "context_citizen"),
+  };
+  if (hasLegacy) {
+    return Object.freeze({
+      ...shared,
+      capability_citizen: citizen(
+        source.capability_citizen,
+        "capability_citizen",
+      ),
+    });
+  }
+  const message = facet(source.message_citizen, "message_citizen");
+  const document = facet(source.document_citizen, "document_citizen");
+  if (!message.enabled && !document.enabled) {
+    throw new TypeError("at least one Feishu Provider facet must be enabled");
+  }
+  if (
+    message.enabled &&
+    document.enabled &&
+    message.citizen_id === document.citizen_id
+  ) {
+    throw new TypeError("enabled Feishu Provider facets have duplicate Citizen IDs");
+  }
+  const context = shared.context_citizen;
+  if (
+    (message.enabled && message.citizen_id === context.citizen_id) ||
+    (document.enabled && document.citizen_id === context.citizen_id)
+  ) {
+    throw new TypeError("Feishu Provider Citizen IDs are duplicate");
+  }
+  if (message.enabled && shared.cursor_signing_key === undefined) {
+    throw new TypeError(
+      "cursor_signing_key is required when message_citizen is enabled",
+    );
+  }
+  return Object.freeze({
+    ...shared,
+    message_citizen: message,
+    document_citizen: document,
   });
 }

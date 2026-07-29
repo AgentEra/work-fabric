@@ -113,7 +113,14 @@ applications:
           actor_type: system
           endpoint_id: endpoint-work-fabric-admin
           action: workfabric.citizen.provision.v1
-          resource_id: citizen-feishu-capability
+          resource_id: citizen-feishu-message
+        - tenant_id: tenant-local
+          principal_id: principal-work-fabric-admin
+          actor_id: actor-work-fabric-admin
+          actor_type: system
+          endpoint_id: endpoint-work-fabric-admin
+          action: workfabric.citizen.provision.v1
+          resource_id: citizen-feishu-document
         - tenant_id: tenant-local
           principal_id: principal-work-fabric-admin
           actor_id: actor-work-fabric-admin
@@ -127,7 +134,14 @@ applications:
           actor_type: system
           endpoint_id: endpoint-work-fabric-admin
           action: workfabric.citizen.read.v1
-          resource_id: citizen-feishu-capability
+          resource_id: citizen-feishu-message
+        - tenant_id: tenant-local
+          principal_id: principal-work-fabric-admin
+          actor_id: actor-work-fabric-admin
+          actor_type: system
+          endpoint_id: endpoint-work-fabric-admin
+          action: workfabric.citizen.read.v1
+          resource_id: citizen-feishu-document
         - tenant_id: tenant-local
           principal_id: principal-work-fabric-admin
           actor_id: actor-work-fabric-admin
@@ -141,28 +155,56 @@ applications:
           actor_type: agent
           endpoint_id: endpoint-feishu-provider
           action: workfabric.citizen.session.open.v1
-          resource_id: citizen-feishu-capability
+          resource_id: citizen-feishu-message
         - tenant_id: tenant-local
           principal_id: principal-feishu-provider
           actor_id: actor-feishu-provider
           actor_type: agent
           endpoint_id: endpoint-feishu-provider
           action: workfabric.citizen.session.heartbeat.v1
-          resource_id: citizen-feishu-capability
+          resource_id: citizen-feishu-message
         - tenant_id: tenant-local
           principal_id: principal-feishu-provider
           actor_id: actor-feishu-provider
           actor_type: agent
           endpoint_id: endpoint-feishu-provider
           action: workfabric.citizen.session.declarations.replace.v1
-          resource_id: citizen-feishu-capability
+          resource_id: citizen-feishu-message
         - tenant_id: tenant-local
           principal_id: principal-feishu-provider
           actor_id: actor-feishu-provider
           actor_type: agent
           endpoint_id: endpoint-feishu-provider
           action: workfabric.citizen.session.close.v1
-          resource_id: citizen-feishu-capability
+          resource_id: citizen-feishu-message
+        - tenant_id: tenant-local
+          principal_id: principal-feishu-provider
+          actor_id: actor-feishu-provider
+          actor_type: agent
+          endpoint_id: endpoint-feishu-provider
+          action: workfabric.citizen.session.open.v1
+          resource_id: citizen-feishu-document
+        - tenant_id: tenant-local
+          principal_id: principal-feishu-provider
+          actor_id: actor-feishu-provider
+          actor_type: agent
+          endpoint_id: endpoint-feishu-provider
+          action: workfabric.citizen.session.heartbeat.v1
+          resource_id: citizen-feishu-document
+        - tenant_id: tenant-local
+          principal_id: principal-feishu-provider
+          actor_id: actor-feishu-provider
+          actor_type: agent
+          endpoint_id: endpoint-feishu-provider
+          action: workfabric.citizen.session.declarations.replace.v1
+          resource_id: citizen-feishu-document
+        - tenant_id: tenant-local
+          principal_id: principal-feishu-provider
+          actor_id: actor-feishu-provider
+          actor_type: agent
+          endpoint_id: endpoint-feishu-provider
+          action: workfabric.citizen.session.close.v1
+          resource_id: citizen-feishu-document
         - tenant_id: tenant-local
           principal_id: principal-feishu-provider
           actor_id: actor-feishu-provider
@@ -211,49 +253,63 @@ applications:
           actor_type: agent
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration-summary.read.v1
-          resource_id: citizen-feishu-capability
+          resource_id: citizen-feishu-message
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration-summary.read.v1
+          resource_id: citizen-feishu-document
         - tenant_id: tenant-local
           principal_id: principal-intake-agent
           actor_id: actor-intake-agent
           actor_type: agent
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
-          resource_id: citizen-feishu-capability/feishu.document.append
+          resource_id: citizen-feishu-document/feishu.document.append
         - tenant_id: tenant-local
           principal_id: principal-intake-agent
           actor_id: actor-intake-agent
           actor_type: agent
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
-          resource_id: citizen-feishu-capability/feishu.document.create
+          resource_id: citizen-feishu-document/feishu.document.create
         - tenant_id: tenant-local
           principal_id: principal-intake-agent
           actor_id: actor-intake-agent
           actor_type: agent
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
-          resource_id: citizen-feishu-capability/feishu.document.delete
+          resource_id: citizen-feishu-document/feishu.document.delete
         - tenant_id: tenant-local
           principal_id: principal-intake-agent
           actor_id: actor-intake-agent
           actor_type: agent
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
-          resource_id: citizen-feishu-capability/feishu.document.read
+          resource_id: citizen-feishu-document/feishu.document.read
         - tenant_id: tenant-local
           principal_id: principal-intake-agent
           actor_id: actor-intake-agent
           actor_type: agent
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
-          resource_id: citizen-feishu-capability/feishu.document.update
+          resource_id: citizen-feishu-document/feishu.document.update
         - tenant_id: tenant-local
           principal_id: principal-intake-agent
           actor_id: actor-intake-agent
           actor_type: agent
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
-          resource_id: citizen-feishu-capability/feishu.message.send
+          resource_id: citizen-feishu-message/feishu.message.send
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-feishu-message/feishu.conversation.history.read
     agent_runtime_authority:
       grants:
         daily-assistant:
@@ -446,6 +502,7 @@ applications:
           enabled: true
           config:
             credential_ref: feishu-primary
+            cursor_signing_key: ${WORK_FABRIC_CURSOR_SECRET}
             open_api:
               base_url: https://open.feishu.cn
               request_timeout_ms: 10000
@@ -454,8 +511,16 @@ applications:
               type: sqlite
               location: ./var/feishu-provider.db
               busy_timeout_ms: 5000
-            capability_citizen:
-              citizen_id: citizen-feishu-capability
+            message_citizen:
+              enabled: true
+              citizen_id: citizen-feishu-message
+              principal_id: principal-feishu-provider
+              actor_id: actor-feishu-provider
+              endpoint_id: endpoint-feishu-provider
+              registration_version: 1
+            document_citizen:
+              enabled: true
+              citizen_id: citizen-feishu-document
               principal_id: principal-feishu-provider
               actor_id: actor-feishu-provider
               endpoint_id: endpoint-feishu-provider

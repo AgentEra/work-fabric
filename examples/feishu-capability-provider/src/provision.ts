@@ -1,6 +1,9 @@
 import {
+  enabledFeishuProviderFacets,
   feishuCapabilityDeclarations,
   feishuContextDeclarations,
+  feishuDocumentCapabilityDeclarations,
+  feishuMessageCapabilityDeclarations,
   type FeishuProviderCitizenConfig,
 } from "@work-fabric/provider-feishu";
 import type {
@@ -69,13 +72,19 @@ function citizen(
 export async function provisionFeishuProviderRecords(
   input: FeishuProviderProvisioningPorts & {
     readonly participant: FeishuProviderParticipant;
-    readonly capability_citizen: FeishuProviderCitizenConfig;
+    readonly capability_facets: readonly {
+      readonly citizen: FeishuProviderCitizenConfig;
+      readonly declarations: readonly MinimalDeclaration[];
+    }[];
     readonly context_citizen: FeishuProviderCitizenConfig;
-    readonly capability_declarations: readonly MinimalDeclaration[];
     readonly context_declarations: readonly MinimalDeclaration[];
   },
 ): Promise<void> {
-  const capabilityIds = input.capability_declarations
+  if (input.capability_facets.length === 0) {
+    throw new TypeError("at least one capability facet is required");
+  }
+  const capabilityIds = input.capability_facets
+    .flatMap((facet) => facet.declarations)
     .map((item) => item.declaration_id)
     .sort();
   const registration: EndpointRegistration = {
@@ -102,14 +111,16 @@ export async function provisionFeishuProviderRecords(
     registration_version: 1,
   };
   await input.endpoints.provision(input.participant.endpoint_id, registration);
-  await input.citizens.provision(
-    input.capability_citizen.citizen_id,
-    citizen(
-      input.capability_citizen,
-      "capability-provider",
-      input.capability_declarations,
-    ),
-  );
+  for (const facet of input.capability_facets) {
+    await input.citizens.provision(
+      facet.citizen.citizen_id,
+      citizen(
+        facet.citizen,
+        "capability-provider",
+        facet.declarations,
+      ),
+    );
+  }
   await input.citizens.provision(
     input.context_citizen.citizen_id,
     citizen(
@@ -142,9 +153,17 @@ export async function provisionFeishuProvider(
     endpoints: client.endpoints,
     citizens: client.citizens,
     participant: loaded.participant,
-    capability_citizen: loaded.provider.capability_citizen,
+    capability_facets: enabledFeishuProviderFacets(loaded.provider).map(
+      (facet) => ({
+        citizen: facet.citizen,
+        declarations: facet.facet === "message"
+          ? feishuMessageCapabilityDeclarations()
+          : facet.facet === "document"
+            ? feishuDocumentCapabilityDeclarations()
+            : feishuCapabilityDeclarations(),
+      }),
+    ),
     context_citizen: loaded.provider.context_citizen,
-    capability_declarations: feishuCapabilityDeclarations(),
     context_declarations: feishuContextDeclarations(),
   });
   console.log(

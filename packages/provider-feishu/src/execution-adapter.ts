@@ -16,6 +16,12 @@ export interface FeishuCapabilityExecutorLike {
   execute(request: FeishuCapabilityExecutionRequest): Promise<FeishuCapabilityOutcome>;
 }
 
+export interface FeishuCapabilityExecutorPortAdapterOptions {
+  readonly declarations?: () => readonly ReturnType<
+    typeof feishuCapabilityDeclarations
+  >[number][];
+}
+
 function nonEmpty(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 512) {
     throw new TypeError("invalid authority evidence");
@@ -75,10 +81,13 @@ function authority(value: CitizenJsonObject): {
 
 export class FeishuCapabilityExecutorPortAdapter
   implements CapabilityExecutor {
-  constructor(private readonly executor: FeishuCapabilityExecutorLike) {}
+  constructor(
+    private readonly executor: FeishuCapabilityExecutorLike,
+    private readonly options: FeishuCapabilityExecutorPortAdapterOptions = {},
+  ) {}
 
   describeCapabilities() {
-    return feishuCapabilityDeclarations();
+    return this.options.declarations?.() ?? feishuCapabilityDeclarations();
   }
 
   async execute(

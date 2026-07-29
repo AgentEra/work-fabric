@@ -14,13 +14,31 @@ describe("Feishu Provider provisioning", () => {
         actor_type: "agent",
         endpoint_id: "endpoint-provider",
       },
-      capability_citizen: {
-        citizen_id: "citizen-capability",
-        principal_id: "principal-provider",
-        actor_id: "actor-provider",
-        endpoint_id: "endpoint-provider",
-        registration_version: 3,
-      },
+      capability_facets: [{
+        citizen: {
+          citizen_id: "citizen-message",
+          principal_id: "principal-provider",
+          actor_id: "actor-provider",
+          endpoint_id: "endpoint-provider",
+          registration_version: 3,
+        },
+        declarations: [{
+          declaration_id: "feishu.message.send",
+          risk: "medium",
+        }],
+      }, {
+        citizen: {
+          citizen_id: "citizen-document",
+          principal_id: "principal-provider",
+          actor_id: "actor-provider",
+          endpoint_id: "endpoint-provider",
+          registration_version: 3,
+        },
+        declarations: [{
+          declaration_id: "feishu.document.create",
+          risk: "medium",
+        }],
+      }],
       context_citizen: {
         citizen_id: "citizen-context",
         principal_id: "principal-provider",
@@ -28,10 +46,6 @@ describe("Feishu Provider provisioning", () => {
         endpoint_id: "endpoint-provider",
         registration_version: 4,
       },
-      capability_declarations: [{
-        declaration_id: "feishu.document.create",
-        risk: "medium",
-      }],
       context_declarations: [{
         declaration_id: "feishu.document.context",
         risk: "low",
@@ -40,13 +54,16 @@ describe("Feishu Provider provisioning", () => {
     expect(endpoints.provision).toHaveBeenCalledWith(
       "endpoint-provider",
       expect.objectContaining({
-        allowed_capability_ids: ["feishu.document.create"],
+        allowed_capability_ids: [
+          "feishu.document.create",
+          "feishu.message.send",
+        ],
       }),
     );
-    expect(citizens.provision).toHaveBeenCalledTimes(2);
+    expect(citizens.provision).toHaveBeenCalledTimes(3);
     expect(citizens.provision).toHaveBeenNthCalledWith(
       1,
-      "citizen-capability",
+      "citizen-message",
       expect.objectContaining({
         citizen_kind: "capability-provider",
         maximum_risk: "medium",
@@ -54,6 +71,14 @@ describe("Feishu Provider provisioning", () => {
     );
     expect(citizens.provision).toHaveBeenNthCalledWith(
       2,
+      "citizen-document",
+      expect.objectContaining({
+        citizen_kind: "capability-provider",
+        maximum_risk: "medium",
+      }),
+    );
+    expect(citizens.provision).toHaveBeenNthCalledWith(
+      3,
       "citizen-context",
       expect.objectContaining({
         citizen_kind: "context-provider",

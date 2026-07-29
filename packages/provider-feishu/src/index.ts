@@ -7,6 +7,7 @@ export * from "./contracts.js";
 export * from "./declarations.js";
 export * from "./document-resource-adapter.js";
 export * from "./executor.js";
+export * from "./executor-router.js";
 export * from "./execution-adapter.js";
 export * from "./memory-store.js";
 export * from "./message-query-executor.js";

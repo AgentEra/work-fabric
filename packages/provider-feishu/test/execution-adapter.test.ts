@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   FeishuCapabilityExecutorPortAdapter,
   feishuCapabilityDeclarations,
+  feishuMessageCapabilityDeclarations,
 } from "../src/index.js";
 
 describe("FeishuCapabilityExecutorPortAdapter", () => {
@@ -106,5 +107,19 @@ describe("FeishuCapabilityExecutorPortAdapter", () => {
     });
     expect(execute).not.toHaveBeenCalled();
     expect(adapter.describeCapabilities()).toEqual(feishuCapabilityDeclarations());
+  });
+
+  it("can expose one independently registered Provider facet", () => {
+    const adapter = new FeishuCapabilityExecutorPortAdapter(
+      { execute: vi.fn() },
+      { declarations: feishuMessageCapabilityDeclarations },
+    );
+
+    expect(adapter.describeCapabilities().map((item) =>
+      item.declaration_id
+    )).toEqual([
+      "feishu.conversation.history.read",
+      "feishu.message.send",
+    ]);
   });
 });

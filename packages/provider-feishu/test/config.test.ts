@@ -59,4 +59,63 @@ describe("validateFeishuProviderConfig", () => {
       allowed_document_tokens: ["doc-forbidden"],
     })).toThrow(/field/i);
   });
+
+  it("accepts independently enabled message and document Provider facets", () => {
+    const { capability_citizen: _legacy, ...shared } = config;
+    const result = validateFeishuProviderConfig({
+      ...shared,
+      cursor_signing_key: "${WORK_FABRIC_FEISHU_CURSOR_SECRET}",
+      message_citizen: {
+        enabled: true,
+        citizen_id: "citizen-feishu-message",
+        principal_id: "principal-feishu-provider",
+        actor_id: "actor-feishu-provider",
+        endpoint_id: "endpoint-feishu-provider",
+        registration_version: 1,
+      },
+      document_citizen: {
+        enabled: false,
+      },
+    });
+
+    expect(result).toMatchObject({
+      cursor_signing_key: "${WORK_FABRIC_FEISHU_CURSOR_SECRET}",
+      message_citizen: {
+        enabled: true,
+        citizen_id: "citizen-feishu-message",
+      },
+      document_citizen: { enabled: false },
+    });
+    expect(result).not.toHaveProperty("capability_citizen");
+  });
+
+  it("allows either facet to be disabled but rejects duplicate enabled Citizen IDs", () => {
+    const { capability_citizen: _legacy, ...shared } = config;
+    const citizen = {
+      enabled: true,
+      citizen_id: "citizen-duplicate",
+      principal_id: "principal-feishu-provider",
+      actor_id: "actor-feishu-provider",
+      endpoint_id: "endpoint-feishu-provider",
+      registration_version: 1,
+    };
+    expect(() => validateFeishuProviderConfig({
+      ...shared,
+      cursor_signing_key: "${WORK_FABRIC_FEISHU_CURSOR_SECRET}",
+      message_citizen: citizen,
+      document_citizen: citizen,
+    })).toThrow(/duplicate/i);
+  });
+
+  it("rejects mixing the legacy aggregate and independent facet forms", () => {
+    expect(() => validateFeishuProviderConfig({
+      ...config,
+      message_citizen: {
+        enabled: false,
+      },
+      document_citizen: {
+        enabled: false,
+      },
+    })).toThrow(/legacy|facet/i);
+  });
 });

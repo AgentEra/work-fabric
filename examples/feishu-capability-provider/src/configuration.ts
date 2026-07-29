@@ -11,6 +11,7 @@ import type {
   ConfigurationProvider,
 } from "@work-fabric/configuration-spi";
 import {
+  enabledFeishuProviderFacets,
   validateFeishuProviderConfig,
   type FeishuProviderConfig,
 } from "@work-fabric/provider-feishu";
@@ -261,19 +262,25 @@ export async function loadFeishuProviderConfiguration(
   }
   const [providerInstanceId, instance] = instances[0]!;
   const provider = instance.config as FeishuProviderConfig;
-  if (
-    participant.actor_id !== provider.capability_citizen.actor_id ||
-    participant.endpoint_id !== provider.capability_citizen.endpoint_id ||
-    participant.actor_id !== provider.context_citizen.actor_id ||
-    participant.endpoint_id !== provider.context_citizen.endpoint_id
-  ) {
+  const citizens = [
+    ...enabledFeishuProviderFacets(provider).map((facet) => facet.citizen),
+    provider.context_citizen,
+  ];
+  if (citizens.some((citizen) =>
+    participant.actor_id !== citizen.actor_id ||
+    participant.endpoint_id !== citizen.endpoint_id
+  )) {
     throw new TypeError("participant does not match Provider Citizens");
   }
+  const secretPaths = [
+    "service.work_fabric.access_token",
+    ...(provider.cursor_signing_key === undefined
+      ? []
+      : ["provider.cursor_signing_key"]),
+  ];
   const resolved = await resolveDeclaredSecrets(
     { service: snapshot.value.service, provider },
-    [
-      "service.work_fabric.access_token",
-    ],
+    secretPaths,
     {
       resolver: new EnvironmentSecretResolver(environment),
       allow_literals: false,

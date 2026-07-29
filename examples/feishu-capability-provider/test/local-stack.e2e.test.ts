@@ -34,8 +34,11 @@ import {
 import { loadFeishuProviderConfiguration } from "../src/configuration.js";
 import { provisionFeishuProviderRecords } from "../src/provision.js";
 import {
+  enabledFeishuProviderFacets,
   feishuCapabilityDeclarations,
   feishuContextDeclarations,
+  feishuDocumentCapabilityDeclarations,
+  feishuMessageCapabilityDeclarations,
 } from "@work-fabric/provider-feishu";
 import { prepareLocalFeishuEnvironment } from "../../../tools/local-feishu-common.js";
 
@@ -267,6 +270,7 @@ describe("local Feishu assistant stack", () => {
                 content: JSON.stringify({ text: "交付日期定在本周五" }),
               },
             }],
+            has_more: false,
           },
         });
       }
@@ -322,9 +326,17 @@ describe("local Feishu assistant stack", () => {
         endpoints: admin.endpoints,
         citizens: admin.citizens,
         participant: providerConfig.participant,
-        capability_citizen: providerConfig.provider.capability_citizen,
+        capability_facets: enabledFeishuProviderFacets(
+          providerConfig.provider,
+        ).map((facet) => ({
+          citizen: facet.citizen,
+          declarations: facet.facet === "message"
+            ? feishuMessageCapabilityDeclarations()
+            : facet.facet === "document"
+              ? feishuDocumentCapabilityDeclarations()
+              : feishuCapabilityDeclarations(),
+        })),
         context_citizen: providerConfig.provider.context_citizen,
-        capability_declarations: feishuCapabilityDeclarations(),
         context_declarations: feishuContextDeclarations(),
       });
       provider = await composeFeishuProvider({
@@ -406,7 +418,7 @@ describe("local Feishu assistant stack", () => {
             environment.INTAKE_AGENT_ACCESS_TOKEN!,
           ),
         }).citizens,
-      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(6);
+      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(7);
       client.snapshot = {
         ...client.snapshot,
         state: "connected",

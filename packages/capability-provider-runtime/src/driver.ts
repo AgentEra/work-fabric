@@ -14,6 +14,7 @@ import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 
 export interface CapabilityProviderDriverOptions {
   readonly citizen_id: string;
+  readonly citizen_id_by_capability?: Readonly<Record<string, string>>;
   readonly endpoint_id: string;
   readonly capabilities: readonly string[];
   readonly executor: CapabilityExecutor;
@@ -95,6 +96,19 @@ export class CapabilityProviderDriver implements AgentRuntimeDriver {
     if (options.capabilities.length === 0) {
       throw new TypeError("Capability Provider must expose capabilities");
     }
+    if (
+      options.citizen_id_by_capability !== undefined &&
+      options.capabilities.some((capabilityId) => {
+        const citizenId = options.citizen_id_by_capability?.[capabilityId];
+        return (
+          typeof citizenId !== "string" ||
+          citizenId.length === 0 ||
+          citizenId.length > 128
+        );
+      })
+    ) {
+      throw new TypeError("Capability Provider Citizen routing is invalid");
+    }
     this.manifest = Object.freeze({
       driver_type: "capability-provider",
       protocol_version: "1" as const,
@@ -129,7 +143,9 @@ export class CapabilityProviderDriver implements AgentRuntimeDriver {
     };
     const context: CapabilityExecutionContext = {
       tenant_id: task.tenant_id,
-      citizen_id: this.options.citizen_id,
+      citizen_id:
+        this.options.citizen_id_by_capability?.[task.capability_id] ??
+        this.options.citizen_id,
       endpoint_id: this.options.endpoint_id,
       fencing_token: task.stream_version,
       authority_evidence: bound.evidence,

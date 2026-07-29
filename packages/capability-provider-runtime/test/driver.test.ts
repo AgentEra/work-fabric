@@ -135,6 +135,36 @@ describe("CapabilityProviderDriver", () => {
     expect(JSON.stringify(result)).not.toContain("已");
   });
 
+  it("routes execution identity to the Citizen that declared the capability", async () => {
+    const execute = vi.fn(async () => ({
+      outcome: "succeeded" as const,
+      data: { message_id: "message-1" },
+      artifacts: [],
+    }));
+    const driver = new CapabilityProviderDriver({
+      citizen_id: "legacy-feishu",
+      citizen_id_by_capability: {
+        "feishu.message.send": "citizen-feishu-message",
+      },
+      endpoint_id: "endpoint-feishu-actions",
+      capabilities: ["feishu.message.send"],
+      executor: { describeCapabilities: () => [declaration], execute },
+    });
+
+    await driver.execute(
+      task(),
+      async () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(execute).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        citizen_id: "citizen-feishu-message",
+      }),
+    );
+  });
+
   it("accepts the frozen null-prototype JSON emitted by the Runtime Host", async () => {
     const execute = vi.fn(async (
       _request: CapabilityExecutionRequest,

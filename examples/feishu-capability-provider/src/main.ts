@@ -24,7 +24,7 @@ async function executable(): Promise<void> {
   process.once("SIGINT", () => { void close(); });
   process.once("SIGTERM", () => { void close(); });
   console.log(
-    `Feishu Provider ready: capability=${health.capability_citizen}; context=${health.context_citizen}`,
+    `Feishu Provider ready: capabilities=${health.capability_citizens.join(",")}; context=${health.context_citizen}`,
   );
 }
 

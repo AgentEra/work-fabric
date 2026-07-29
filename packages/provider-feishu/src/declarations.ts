@@ -351,7 +351,7 @@ function capability(input: {
   });
 }
 
-export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
+function allCapabilityDeclarations(): readonly CitizenDeclaration[] {
   return Object.freeze([
     capability({
       id: "feishu.conversation.history.read",
@@ -421,6 +421,33 @@ export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
       version: "1.0.0",
     }),
   ]);
+}
+
+export function feishuMessageCapabilityDeclarations():
+  readonly CitizenDeclaration[] {
+  return Object.freeze(
+    allCapabilityDeclarations().filter((declaration) =>
+      declaration.declaration_id === "feishu.conversation.history.read" ||
+      declaration.declaration_id === "feishu.message.send"
+    ),
+  );
+}
+
+export function feishuDocumentCapabilityDeclarations():
+  readonly CitizenDeclaration[] {
+  return Object.freeze(
+    allCapabilityDeclarations().filter((declaration) =>
+      declaration.declaration_id.startsWith("feishu.document.")
+    ),
+  );
+}
+
+/**
+ * Compatibility declaration set for deployments that still register one
+ * aggregate Feishu capability Citizen.
+ */
+export function feishuCapabilityDeclarations(): readonly CitizenDeclaration[] {
+  return allCapabilityDeclarations();
 }
 
 export function feishuContextDeclarations(): readonly CitizenDeclaration[] {

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 
@@ -29,17 +29,23 @@ import type {
 } from "@work-fabric/network-citizen-spi";
 import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 import {
+  enabledFeishuProviderFacets,
   FeishuCapabilityCitizenRuntime,
   FeishuCapabilityExecutor,
+  FeishuCapabilityExecutorRouter,
   FeishuCapabilityExecutorPortAdapter,
   FeishuConversationContextProvider,
   FeishuContextCitizenRuntime,
   FeishuDocumentContextProvider,
+  FeishuMessageQueryExecutor,
   FeishuOpenApiCapabilityBackend,
+  HmacConversationCursorCodec,
   MemoryFeishuProviderStore,
   SqliteFeishuProviderStore,
   feishuCapabilityDeclarations,
   feishuContextDeclarations,
+  feishuDocumentCapabilityDeclarations,
+  feishuMessageCapabilityDeclarations,
 } from "@work-fabric/provider-feishu";
 import {
   BearerTokenProvider,
@@ -72,16 +78,18 @@ export interface FeishuProviderComposition {
   start(): Promise<void>;
   health(): Promise<{
     readonly provider: "ready" | "starting" | "failed";
-    readonly capability_citizen: string;
+    readonly capability_citizens: readonly string[];
     readonly context_citizen: string;
   }>;
   close(): Promise<void>;
 }
 
 export interface ManagedFeishuProviderCompositionDependencies {
-  readonly capability_citizen_id: string;
+  readonly capability_citizens: readonly {
+    readonly citizen_id: string;
+    readonly lifecycle: LifecycleCitizen;
+  }[];
   readonly context_citizen_id: string;
-  readonly capability_citizen: LifecycleCitizen;
   readonly context_citizen: LifecycleCitizen;
   readonly host: LifecycleHost;
   readonly close_provider_store: () => Promise<void>;
@@ -90,7 +98,7 @@ export interface ManagedFeishuProviderCompositionDependencies {
 export class ManagedFeishuProviderComposition
   implements FeishuProviderComposition {
   private state: "starting" | "ready" | "failed" | "closed" = "starting";
-  private capabilityStarted = false;
+  private capabilityStarted = 0;
   private contextStarted = false;
   private hostStarted = false;
   private providerStoreClosed = false;
@@ -107,8 +115,10 @@ export class ManagedFeishuProviderComposition
       throw new Error("Feishu Provider composition cannot be restarted");
     }
     try {
-      await this.dependencies.capability_citizen.start();
-      this.capabilityStarted = true;
+      for (const citizen of this.dependencies.capability_citizens) {
+        await citizen.lifecycle.start();
+        this.capabilityStarted += 1;
+      }
       await this.dependencies.context_citizen.start();
       this.contextStarted = true;
       await this.dependencies.host.start();
@@ -125,20 +135,28 @@ export class ManagedFeishuProviderComposition
     if (this.state !== "ready") {
       return {
         provider: this.state === "starting" ? "starting" : "failed",
-        capability_citizen: this.dependencies.capability_citizen_id,
+        capability_citizens: this.dependencies.capability_citizens.map(
+          (citizen) => citizen.citizen_id,
+        ),
         context_citizen: this.dependencies.context_citizen_id,
       };
     }
-    const [capability, context] = await Promise.all([
-      this.dependencies.capability_citizen.health(),
+    const [capabilities, context] = await Promise.all([
+      Promise.all(this.dependencies.capability_citizens.map(
+        (citizen) => citizen.lifecycle.health(),
+      )),
       this.dependencies.context_citizen.health(),
     ]);
     return {
       provider:
-        capability.status === "available" && context.status === "available"
+        capabilities.every((capability) =>
+          capability.status === "available"
+        ) && context.status === "available"
           ? "ready"
           : "failed",
-      capability_citizen: this.dependencies.capability_citizen_id,
+      capability_citizens: this.dependencies.capability_citizens.map(
+        (citizen) => citizen.citizen_id,
+      ),
       context_citizen: this.dependencies.context_citizen_id,
     };
   }
@@ -161,9 +179,11 @@ export class ManagedFeishuProviderComposition
       this.contextStarted = false;
       await this.dependencies.context_citizen.close().catch(() => undefined);
     }
-    if (this.capabilityStarted) {
-      this.capabilityStarted = false;
-      await this.dependencies.capability_citizen.close().catch(() => undefined);
+    while (this.capabilityStarted > 0) {
+      this.capabilityStarted -= 1;
+      await this.dependencies.capability_citizens[
+        this.capabilityStarted
+      ]!.lifecycle.close().catch(() => undefined);
     }
     if (!this.providerStoreClosed) {
       this.providerStoreClosed = true;
@@ -386,10 +406,19 @@ export async function composeFeishuProvider(
   const providerStore = loaded.provider.state.type === "sqlite"
     ? new SqliteFeishuProviderStore(loaded.provider.state)
     : new MemoryFeishuProviderStore();
-  const executorPort = new FeishuCapabilityExecutorPortAdapter(
-    new FeishuCapabilityExecutor({
-      citizen_id: loaded.provider.capability_citizen.citizen_id,
-      endpoint_id: loaded.provider.capability_citizen.endpoint_id,
+  const configuredFacets = enabledFeishuProviderFacets(loaded.provider);
+  const cursorKey = loaded.provider.cursor_signing_key === undefined
+    ? randomBytes(32)
+    : Buffer.from(loaded.provider.cursor_signing_key, "utf8");
+  const queryExecutor = new FeishuMessageQueryExecutor({
+    api: messages,
+    credential_ref: loaded.provider.credential_ref,
+    cursors: new HmacConversationCursorCodec({ key: cursorKey }),
+  });
+  const facetPorts = configuredFacets.map((facet) => {
+    const standardExecutor = new FeishuCapabilityExecutor({
+      citizen_id: facet.citizen.citizen_id,
+      endpoint_id: facet.citizen.endpoint_id,
       backend,
       executions: providerStore,
       ownership: providerStore,
@@ -401,8 +430,43 @@ export async function composeFeishuProvider(
       },
       document_access: resolvedDocumentServices.document_access,
       placement: resolvedDocumentServices.placement,
-    }),
-  );
+    });
+    const declarations = facet.facet === "message"
+      ? feishuMessageCapabilityDeclarations
+      : facet.facet === "document"
+        ? feishuDocumentCapabilityDeclarations
+        : feishuCapabilityDeclarations;
+    const capabilityIds = declarations().map((item) => item.declaration_id);
+    const executor = facet.facet === "document"
+      ? standardExecutor
+      : new FeishuCapabilityExecutorRouter([
+          {
+            capability_ids: ["feishu.message.send"],
+            executor: standardExecutor,
+          },
+          {
+            capability_ids: ["feishu.conversation.history.read"],
+            executor: queryExecutor,
+          },
+          ...(facet.facet === "aggregate"
+            ? [{
+                capability_ids: feishuDocumentCapabilityDeclarations().map(
+                  (item) => item.declaration_id,
+                ),
+                executor: standardExecutor,
+              }]
+            : []),
+        ]);
+    return Object.freeze({
+      facet,
+      declarations,
+      capability_ids: Object.freeze(capabilityIds),
+      port: new FeishuCapabilityExecutorPortAdapter(
+        executor,
+        { declarations },
+      ),
+    });
+  });
   const documentContext = new FeishuDocumentContextProvider({
     backend,
     document_access: resolvedDocumentServices.document_access,
@@ -425,15 +489,19 @@ export async function composeFeishuProvider(
   });
   const shutdown = new AbortController();
   const citizenContext = runtimeContext(loaded, client, shutdown.signal);
-  const capabilityRuntime = new FeishuCapabilityCitizenRuntime({
-    ...loaded.provider.capability_citizen,
-    actor_type: "agent",
-    client_session_id: `feishu-capability-${process.pid}-${randomUUID()}`,
-    expected_registration_version:
-      loaded.provider.capability_citizen.registration_version,
-    declarations: feishuCapabilityDeclarations,
-    execute: (request, context) => executorPort.execute(request, context),
-  });
+  const capabilityRuntimes = facetPorts.map((facet) => ({
+    citizen_id: facet.facet.citizen.citizen_id,
+    runtime: new FeishuCapabilityCitizenRuntime({
+      ...facet.facet.citizen,
+      actor_type: "agent",
+      client_session_id:
+        `feishu-${facet.facet.facet}-${process.pid}-${randomUUID()}`,
+      expected_registration_version:
+        facet.facet.citizen.registration_version,
+      declarations: facet.declarations,
+      execute: (request, context) => facet.port.execute(request, context),
+    }),
+  }));
   const contextRuntime = new FeishuContextCitizenRuntime({
     ...loaded.provider.context_citizen,
     actor_type: "agent",
@@ -447,11 +515,13 @@ export async function composeFeishuProvider(
         conversation: conversationContext,
       }, request, signal),
   });
-  const capabilities = feishuCapabilityDeclarations().map((declaration) =>
-    capabilityDescriptor(
-      declaration,
-      loaded.provider.capability_citizen.citizen_id,
-    ),
+  const capabilities = facetPorts.flatMap((facet) =>
+    facet.declarations().map((declaration) =>
+      capabilityDescriptor(
+        declaration,
+        facet.facet.citizen.citizen_id,
+      ),
+    )
   );
   const gateway = new AgentGateway(client, gatewayConfiguration(
     loaded,
@@ -461,11 +531,40 @@ export async function composeFeishuProvider(
     location: loaded.service.runtime_state.location,
     busy_timeout_ms: loaded.service.runtime_state.busy_timeout_ms,
   });
+  const executorByCapability = new Map(
+    facetPorts.flatMap((facet) =>
+      facet.capability_ids.map((capabilityId) =>
+        [capabilityId, facet.port] as const
+      )
+    ),
+  );
+  const combinedExecutor = {
+    describeCapabilities: () => facetPorts.flatMap(
+      (facet) => facet.declarations(),
+    ),
+    execute: (
+      request: Parameters<FeishuCapabilityExecutorPortAdapter["execute"]>[0],
+      context: Parameters<FeishuCapabilityExecutorPortAdapter["execute"]>[1],
+    ) => {
+      const executor = executorByCapability.get(request.capability_id);
+      if (executor === undefined) {
+        throw new TypeError("Feishu capability is unavailable");
+      }
+      return executor.execute(request, context);
+    },
+  };
+  const citizenIdByCapability = Object.fromEntries(facetPorts.flatMap(
+    (facet) => facet.capability_ids.map((capabilityId) => [
+      capabilityId,
+      facet.facet.citizen.citizen_id,
+    ]),
+  ));
   const driver = new CapabilityProviderDriver({
-    citizen_id: loaded.provider.capability_citizen.citizen_id,
+    citizen_id: configuredFacets[0]!.citizen.citizen_id,
+    citizen_id_by_capability: citizenIdByCapability,
     endpoint_id: loaded.participant.endpoint_id,
     capabilities: capabilities.map((item) => item.capability_id),
-    executor: executorPort,
+    executor: combinedExecutor,
   });
   const host = composeAgentRuntimeHost({
     config: {
@@ -501,14 +600,15 @@ export async function composeFeishuProvider(
     queries: client.queries,
   });
   return new ManagedFeishuProviderComposition({
-    capability_citizen_id:
-      loaded.provider.capability_citizen.citizen_id,
+    capability_citizens: capabilityRuntimes.map((item) => ({
+      citizen_id: item.citizen_id,
+      lifecycle: {
+        start: () => item.runtime.start(citizenContext),
+        health: () => item.runtime.health(),
+        close: () => item.runtime.close(),
+      },
+    })),
     context_citizen_id: loaded.provider.context_citizen.citizen_id,
-    capability_citizen: {
-      start: () => capabilityRuntime.start(citizenContext),
-      health: () => capabilityRuntime.health(),
-      close: () => capabilityRuntime.close(),
-    },
     context_citizen: {
       start: () => contextRuntime.start(citizenContext),
       health: () => contextRuntime.health(),
