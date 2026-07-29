@@ -3,10 +3,14 @@ import type {
 } from "@work-fabric/network-citizen-spi";
 import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 
+import { feishuCalendarSchemaDocuments } from "./calendar-declarations.js";
 import { feishuSchemaDocuments } from "./declarations.js";
 
 export class FeishuCapabilitySchemaRegistry {
-  private readonly documents = feishuSchemaDocuments();
+  private readonly documents = new Map([
+    ...feishuSchemaDocuments(),
+    ...feishuCalendarSchemaDocuments(),
+  ]);
 
   async load(
     reference: CitizenSchemaReference,
