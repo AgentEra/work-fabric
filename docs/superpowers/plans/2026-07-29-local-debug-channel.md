@@ -86,7 +86,7 @@ export interface DebugSubmission {
   readonly conversation_id: string;
   readonly idempotency_key: string;
   readonly request_digest: string;
-  readonly ingress_id: string;
+  readonly ingress_id?: string;
   readonly handoff_id?: string;
   readonly created_at: string;
   readonly updated_at: string;
@@ -111,6 +111,7 @@ export interface DebugChannelStore extends ExchangeAdapter {
     | { readonly kind: "existing"; readonly submission: DebugSubmission }
     | { readonly kind: "conflict"; readonly submission: DebugSubmission }
   >;
+  linkIngress(input: LinkDebugIngress): Promise<DebugSubmission>;
   linkHandoff(input: LinkDebugHandoff): Promise<DebugSubmission>;
   getSubmission(scope: DebugSubmissionScope): Promise<DebugSubmission | null>;
   appendCapture(input: AppendDebugCapture): Promise<
@@ -130,8 +131,9 @@ export interface DebugChannelStore extends ExchangeAdapter {
 Create table-driven tests that reject unknown fields, empty or overlong IDs,
 invalid timestamps, non-JSON event payloads, cross-scope returns and limits
 outside `1..100`. Define `runDebugChannelStoreContract(createStore)` to prove
-identical-create, conflicting-create, one-way Handoff linking, idempotent
-capture, deterministic pagination, payload isolation and bounded pruning.
+identical-create, conflicting-create, one-way Ingress and Handoff linking,
+idempotent capture, deterministic pagination, payload isolation and bounded
+pruning.
 
 ```ts
 it("returns conflict when one idempotency identity is reused with another digest", async () => {
@@ -160,6 +162,7 @@ safe JSON cloning, deterministic manifest creation and typed store errors:
 export class DebugChannelStoreError extends Error {
   constructor(readonly code:
     | "idempotency_conflict"
+    | "ingress_conflict"
     | "handoff_conflict"
     | "capture_conflict"
     | "invalid_cursor") {
@@ -238,8 +241,8 @@ Expected: FAIL because the adapters and migration do not exist.
 
 Use maps keyed by NUL-separated tenant/plugin/id scopes, `structuredClone` on
 every boundary, canonical request digest comparison and deterministic sorting
-by `(captured_at, capture_id)`. `linkHandoff` is idempotent for the same ID and
-throws `handoff_conflict` for a different ID.
+by `(captured_at, capture_id)`. `linkIngress` and `linkHandoff` are idempotent
+for the same ID and throw their scoped conflict error for a different ID.
 
 - [ ] **Step 4: Implement the SQLite migration and adapter**
 
@@ -251,9 +254,10 @@ UNIQUE (tenant_id, plugin_instance_id, event_id, destination_id)
 ```
 
 Persist canonical request/event JSON plus indexed scope and timestamps. Use
-transactions for create-or-read and Handoff linking. Validate decoded JSON
-before returning it. Pruning deletes at most `limit` captures then submissions
-whose expiry is at or before the supplied timestamp and returns exact counts.
+transactions for create-or-read, Ingress linking and Handoff linking. Validate
+decoded JSON before returning it. Pruning deletes at most `limit` captures
+then submissions whose expiry is at or before the supplied timestamp and
+returns exact counts.
 
 - [ ] **Step 5: Run contract, restart and migration checksum tests**
 
@@ -550,7 +554,8 @@ git commit -m "feat(debug): route and capture collaboration results"
 
 **Interfaces:**
 - Consumes: `ConnectorIngressStore`, `DebugChannelStore`, a narrow
-  `DebugHandoffSnapshotSource`, clock, ID source and validated config.
+  `DebugHandoffSnapshotSource`, clock, `DebugIdSource`, cursor codec and
+  validated config.
 - Produces:
 
 ```ts
@@ -559,6 +564,11 @@ export interface DebugHandoffSnapshotSource {
     readonly version: number;
     readonly lifecycle_state: string;
   } | null>;
+}
+
+export interface DebugIdSource {
+  requestId(): string;
+  submissionId(): string;
 }
 
 export class DebugChannelHttpServer {
@@ -657,7 +667,8 @@ git commit -m "feat(debug): expose loopback diagnostic API"
   capabilities `workfabric.development_mode`, `debug.channel_store`,
   `debug.handoff_snapshots`, `connector.ingress`, `connector.command_sink`,
   `channel.routes`, `exchange.subscriptions`, `channel.signal_registry`,
-  `collaboration.admission`, `runtime.clock` and `runtime.handoff_wakeup`.
+  `collaboration.admission`, `runtime.clock`, `runtime.debug_ids`,
+  `runtime.debug_cursor` and `runtime.handoff_wakeup`.
 - Produces: `DebugPluginFactory implements PluginFactory`.
 
 - [ ] **Step 1: Write failing plugin lifecycle tests**
