@@ -4,6 +4,7 @@ import {
   FeishuCapabilitySchemaRegistry,
   feishuCapabilityDeclarations,
 } from "../src/index.js";
+import { JsonSchemaInvocationValidator } from "@work-fabric/agent-capability-runtime";
 import * as provider from "../src/index.js";
 
 type DeclarationFactory = () => readonly {
@@ -13,6 +14,10 @@ type DeclarationFactory = () => readonly {
   readonly confirmation: string;
   readonly constraints: Record<string, unknown>;
   readonly input_schema?: {
+    readonly uri: string;
+    readonly digest: `sha256:${string}`;
+  };
+  readonly output_schema?: {
     readonly uri: string;
     readonly digest: `sha256:${string}`;
   };
@@ -119,5 +124,56 @@ describe("Feishu Calendar capability declarations", () => {
     expect(feishuCapabilityDeclarations().map((item) =>
       item.declaration_id
     )).not.toContain("feishu.calendar.event.create");
+  });
+
+  it("accepts the typed event facts returned by a successful real create", async () => {
+    const declaration = declarations()?.find((item) =>
+      item.declaration_id === "feishu.calendar.event.create"
+    );
+    expect(declaration?.output_schema).toBeDefined();
+    const registry = new FeishuCapabilitySchemaRegistry();
+    const validator = new JsonSchemaInvocationValidator(registry);
+
+    await expect(validator.validateOutput({
+      candidate: {
+        citizen_id: "citizen-feishu-calendar",
+        endpoint_id: "endpoint-feishu-provider",
+        capability_id: "feishu.calendar.event.create",
+        capability_version: "1.0.0",
+        contract_digest: `sha256:${"a".repeat(64)}`,
+      },
+      input_schema: declaration!.input_schema!,
+      output_schema: declaration!.output_schema!,
+      confirmation: "none",
+      risk: "medium",
+      operation_kind: "command",
+    }, {
+      event_resource_uri:
+        "feishu://calendar/cal-team/events/event-1",
+      calendar_resource_uri: "feishu://calendar/cal-team",
+      event_id: "event-1",
+      title: "Work Fabric 真实日历烟测",
+      description: "",
+      start_at: "2026-07-31T08:00:00.000Z",
+      end_at: "2026-07-31T08:30:00.000Z",
+      time_zone: "Asia/Shanghai",
+      visibility: "default",
+      organizer_mode: "application",
+      attendees: [],
+      provider_version: 1,
+      url: "https://applink.feishu.cn/client/calendar/event/detail",
+      provenance: {
+        provider_family: "feishu",
+        source: "feishu.calendar.event",
+      },
+      attendee_outcomes: [],
+      completion_state: "complete",
+    }, [], new AbortController().signal)).resolves.toMatchObject({
+      data: {
+        title: "Work Fabric 真实日历烟测",
+        visibility: "default",
+        completion_state: "complete",
+      },
+    });
   });
 });

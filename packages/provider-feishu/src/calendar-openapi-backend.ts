@@ -294,17 +294,21 @@ export class FeishuCalendarOpenApiBackend
           {
             time_min: input.start_at,
             time_max: input.end_at,
-            user_id_list: [...userIds],
+            user_ids: [...userIds],
             include_external_calendar: input.include_external_calendars,
             only_busy: input.busy_only,
           },
           input.signal,
         ));
         const data = record(response.data);
-        if (response.code !== 0 || !Array.isArray(data.freebusy_list)) {
+        if (
+          response.code !== 0 ||
+          (data.freebusy_lists !== undefined &&
+            !Array.isArray(data.freebusy_lists))
+        ) {
           invalid();
         }
-        return data.freebusy_list;
+        return data.freebusy_lists ?? [];
       },
     );
     const byUser = new Map<string, {
@@ -326,8 +330,8 @@ export class FeishuCalendarOpenApiBackend
         );
         continue;
       }
-      if (!Array.isArray(item.freebusy_list)) invalid();
-      const intervals = item.freebusy_list.map((value) => {
+      if (!Array.isArray(item.freebusy_items)) invalid();
+      const intervals = item.freebusy_items.map((value) => {
         const interval = record(value);
         return {
           start_at: string(interval.start_time, 128),
@@ -343,10 +347,16 @@ export class FeishuCalendarOpenApiBackend
       end_at: input.end_at,
       participants: input.user_open_ids.flatMap((openId) => {
         const value = byUser.get(openId);
-        return value === undefined ? [] : [value];
+        if (value !== undefined) return [value];
+        return input.busy_only && !unresolvedByUser.has(openId)
+          ? [{ open_id: openId, busy_intervals: [] }]
+          : [];
       }),
       unresolved: input.user_open_ids.flatMap((openId) => {
-        if (byUser.has(openId)) return [];
+        if (
+          byUser.has(openId) ||
+          (input.busy_only && !unresolvedByUser.has(openId))
+        ) return [];
         return [{
           open_id: openId,
           code: unresolvedByUser.get(openId) ?? "not_returned",

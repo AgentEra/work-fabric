@@ -215,6 +215,7 @@ const DEFINITIONS = Object.freeze({
   ], {
     ...eventFacts,
     organizer_mode: { const: "application" },
+    visibility: { enum: ["default", "public", "private"] },
     attendees: attendeeRefs,
     attendee_outcomes: {
       type: "array",

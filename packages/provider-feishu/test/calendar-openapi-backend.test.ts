@@ -121,13 +121,13 @@ describe("FeishuCalendarOpenApiBackend", () => {
           },
         };
       }
-      const ids = (body as { user_id_list: string[] }).user_id_list;
+      const ids = (body as { user_ids: string[] }).user_ids;
       return {
         code: 0,
         data: {
-          freebusy_list: [...ids].reverse().map((userId) => ({
+          freebusy_lists: [...ids].reverse().map((userId) => ({
             user_id: userId,
-            freebusy_list: [{
+            freebusy_items: [{
               start_time: "2026-07-30T09:00:00+08:00",
               end_time: "2026-07-30T09:30:00+08:00",
             }],
@@ -198,7 +198,7 @@ describe("FeishuCalendarOpenApiBackend", () => {
         body: {
           time_min: "2026-07-30T09:00:00+08:00",
           time_max: "2026-07-30T18:00:00+08:00",
-          user_id_list: users.slice(0, 10),
+          user_ids: users.slice(0, 10),
           include_external_calendar: false,
           only_busy: true,
         },
@@ -210,12 +210,38 @@ describe("FeishuCalendarOpenApiBackend", () => {
         body: {
           time_min: "2026-07-30T09:00:00+08:00",
           time_max: "2026-07-30T18:00:00+08:00",
-          user_id_list: users.slice(10),
+          user_ids: users.slice(10),
           include_external_calendar: false,
           only_busy: true,
         },
       },
     ]);
+  });
+
+  it("treats an omitted busy list as every requested user being free", async () => {
+    const Constructor = constructor();
+    if (Constructor === undefined) return;
+    const backend = new Constructor({
+      requests: {
+        request: vi.fn(async () => ({ code: 0, data: {} })),
+      },
+    });
+
+    await expect(backend.queryFreeBusy({
+      user_open_ids: ["ou_1", "ou_2"],
+      start_at: "2026-07-31T14:00:00+08:00",
+      end_at: "2026-07-31T17:00:00+08:00",
+      include_external_calendars: false,
+      busy_only: true,
+    })).resolves.toEqual({
+      start_at: "2026-07-31T14:00:00+08:00",
+      end_at: "2026-07-31T17:00:00+08:00",
+      participants: [
+        { open_id: "ou_1", busy_intervals: [] },
+        { open_id: "ou_2", busy_intervals: [] },
+      ],
+      unresolved: [],
+    });
   });
 
   it("maps event CRUD and attendee endpoints with explicit notification", async () => {
