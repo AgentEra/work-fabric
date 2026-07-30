@@ -6,6 +6,12 @@
 
 > **A protocol-driven collaboration interconnect for humans, agents, and work systems.**
 
+愿景级定位：
+
+> **一个去中心化、AI 友好的智能与信息万物互联方案。**
+
+这一定义中的“去中心化”采用联邦式独立权威，而不是无中心节点或纯 P2P：参与方与外部系统保留自身业务事实，每个 Work Fabric Exchange 只拥有本地协作事实，Exchange 之间通过显式选择、签名 Offer/Receipt 和本地 Bridge 完成交接，不共享全局状态或事务。“AI 友好”意味着 Agent 是协议中的一等参与者，身份、能力、上下文、授权、责任、状态和结果均有机器可读契约，但推理、目标选择、模型和工具调用仍在 Fabric 之外。“万物互联”的对象是人、Agent、工作系统及其工作引用与协作事实，不表示 Work Fabric 是通用 IoT 平台、内容主库或内置智能大脑。
+
 Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联与交接层。它让异构参与方以统一方式接受委托、传递上下文、移交责任、同步状态、返回结果并完成验收。
 
 执行发生在 Work Fabric 之外：
@@ -18,6 +24,70 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
 Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A/4B 增加 Endpoint/Agent 与 Connector 边界；阶段 6A/6B 增加数据库权威的集群机械所有权与可选 Wakeup；阶段 7 在 Core 外增加显式 Exchange 间的签名 Federation Profile。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
+
+### 1.1 协作公民分类
+
+“协作公民”是 Work Fabric 的产品级参与模型，对应协议中能够独立承担协作责任的 `Actor`。WFPP v1 的 `actor_type` 是闭合分类：
+
+| 协作公民 | `actor_type` | 核心特征 | 典型入口 |
+|---|---|---|---|
+| 人类公民 | `human` | 以自然人身份承担、移交或验收责任 | Human Adapter、飞书、Console、API |
+| 智能体公民 | `agent` | 以独立 Agent 身份声明能力，通过外部 Runtime 执行 | Agent Endpoint、Agent Gateway、SDK |
+| 系统公民 | `system` | 以工作系统或自动化服务身份提供事实、动作和结果 | Connector、Webhook、SDK |
+
+三类公民在协议权利和责任语义上同构：都可以在授权范围内创建 Handoff、成为明确 Target、接受或拒绝责任、报告状态、返回结果或执行验收。入口、认证方式、能力声明和内部执行机制可以不同，但不能形成 Human 专用、Agent 专用或 System 专用的旁路状态机。
+
+公民类型不等于协作角色。`Initiator`、`Recipient`、`Verifier` 和可选 `Target Resolver` 是一个 Handoff 上下文中的动态角色，任意类型的 Actor 都可以在满足 Authority Policy 时承担其中一个角色。`Principal` 是经过 Binding 认证的调用身份，`Actor` 是责任主体，`Endpoint` 是该 Actor 收发协议消息的入口；三者必须分离，不能因一个 Runtime 或 Adapter 托管多个公民而合并身份和责任。
+
+### 1.2 公民之间的协作协议
+
+所有公民通过同一个 Unified Participation Protocol 协作。协议不是聊天格式，而是一套可验证的责任协定：
+
+```text
+参与：Identity + Delegation + Endpoint + Capability
+提出：WorkReference + Intent + Context + Authority + Acceptance Criteria
+交接：Target Resolution + Offer + Dispatch + Accept / Decline
+执行透明：Status + Checkpoint + Correlation + Causation
+结果闭环：Result + Receipt + Verify / Rework / Transfer / Close
+可靠传播：Event + Subscription + Delivery + Ack + Replay
+```
+
+协议保证不同公民可以相互替换和组合，但不要求它们采用相同的内部工作方式。一个 Human 在飞书点击接受、一个 Agent 通过 SDK 调用 `handoff.accept`、一个 System Connector 提交相同命令，都表达同一个权威事实：该 Actor 明确承担了责任。
+
+### 1.3 任务派发、认领与责任迁移
+
+任务进入协作网络后依次经历四个互不替代的阶段：
+
+| 阶段 | 权威事实 | 责任语义 |
+|---|---|---|
+| 提出 | Initiator 创建包含目标、上下文、授权和验收条件的 Handoff Offer | Initiator 仍负责 |
+| 目标绑定 | 直接指定 Actor/Endpoint，或由外部 Resolver 将 Capability Target 解析为唯一 Target Binding | 尚未转移责任 |
+| 可靠派发 | Exchange 校验目标，通过 Endpoint 投递并记录 Delivery/Ack/Retry | 送达或 Ack 不代表认领 |
+| 显式认领 | 指定 Recipient 执行 `handoff.accept`，Exchange 签发 `responsibility_accepted` Receipt | 责任原子转移给 Recipient |
+
+```mermaid
+flowchart LR
+    I["Initiator<br/>Offer"]
+    T{"Target"}
+    R["External Resolver<br/>Human / Rule / Agent Brain"]
+    B["Explicit Target Binding<br/>Actor / Endpoint"]
+    D["Exchange Dispatch<br/>Deliver / Ack / Retry"]
+    C{"Recipient Decision"}
+    A["Accept<br/>责任转移"]
+    X["External Execution<br/>Status / Result"]
+    V["Verifier<br/>Verify / Rework / Close"]
+    N["Decline / Expire / Cancel<br/>无接收方责任"]
+
+    I --> T
+    T -->|"Actor / Endpoint"| B
+    T -->|"Capability"| R --> B
+    B --> D --> C
+    C -->|"handoff.accept"| A --> X --> V
+    C -->|"decline"| N
+    V -->|"request rework"| C
+```
+
+“认领”在当前协议中不是面向未知参与者的竞争式抢单。Capability Target 可以暴露待解析需求，但 Work Fabric 不采用首个响应者、最高分或最低成本作为内置选择规则；外部 Resolver 负责选择，Exchange 只校验、记录并派发唯一结果。这条边界保证调度智能可以演进，而责任事实始终确定、可审计且可重放。
 
 ### Work Fabric 原生负责
 
@@ -55,6 +125,8 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 9. **最小授权**：交接携带与当前工作绑定的授权范围，不向 Agent 或 Adapter 发放租户级长期权限。
 10. **自动化来自端点可替换性**：人类端点可以逐步替换为 Agent 端点，而协议、治理和交接链保持稳定。
 11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、目标解析协议和可靠派发；目标选择与执行计划由外部人、规则或 Agent Brain 决定。
+12. **联邦式去中心化**：参与方、系统和 Exchange 保持各自权威，通过可验证协议互联，不建立全局共享状态或中央执行权。
+13. **AI 一等参与、智能外置**：协议原生服务 Agent 的机器可读协作需要，但不把模型、推理或工具执行吸收到 Fabric 内部。
 
 ## 3. 系统上下文
 
