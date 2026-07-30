@@ -533,6 +533,7 @@ applications:
       concurrency:
         max_active_runs: 2
         queue_capacity: 32
+        max_active_partitions: 128
       state:
         provider: sqlite
         location: ./var/daily-assistant-runtime.db
@@ -589,6 +590,7 @@ applications:
       concurrency:
         max_active_runs: 2
         queue_capacity: 32
+        max_active_partitions: 128
       runtime_state:
         location: ./var/feishu-provider-runtime.db
         busy_timeout_ms: 5000

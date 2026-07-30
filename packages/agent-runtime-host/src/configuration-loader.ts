@@ -97,7 +97,11 @@ function validateService(value: unknown, path: string): AgentRuntimeServiceConfi
     if (acceptance[field] !== true) invalid("invalid_acceptance_policy", `${path}.acceptance.${field}`);
   }
   const concurrency = object(root.concurrency, `${path}.concurrency`);
-  exact(concurrency, ["max_active_runs", "queue_capacity"], `${path}.concurrency`);
+  exact(
+    concurrency,
+    ["max_active_runs", "queue_capacity", "max_active_partitions"],
+    `${path}.concurrency`,
+  );
   const state = object(root.state, `${path}.state`);
   exact(state, ["provider", "location", "busy_timeout_ms"], `${path}.state`);
   if (state.provider !== "sqlite") invalid("invalid_state_provider", `${path}.state.provider`);
@@ -126,7 +130,23 @@ function validateService(value: unknown, path: string): AgentRuntimeServiceConfi
       base_url: string(workFabric.base_url, `${path}.work_fabric.base_url`), tenant_id: string(workFabric.tenant_id, `${path}.work_fabric.tenant_id`, 128), exchange_id: string(workFabric.exchange_id, `${path}.work_fabric.exchange_id`, 128), actor_id: string(workFabric.actor_id, `${path}.work_fabric.actor_id`, 128), endpoint_id: string(workFabric.endpoint_id, `${path}.work_fabric.endpoint_id`, 128), subscription_id: string(workFabric.subscription_id, `${path}.work_fabric.subscription_id`, 128), access_token: string(workFabric.access_token, `${path}.work_fabric.access_token`, 1024),
     },
     acceptance: { mode: "accept_all_targeted", require_explicit_target: true, reject_expired_handoffs: true, require_authority_scope: true, allowed_capability_ids: capabilityList(acceptance.allowed_capability_ids, `${path}.acceptance.allowed_capability_ids`) },
-    concurrency: { max_active_runs: positive(concurrency.max_active_runs, `${path}.concurrency.max_active_runs`, 128), queue_capacity: positive(concurrency.queue_capacity, `${path}.concurrency.queue_capacity`, 100_000) },
+    concurrency: {
+      max_active_runs: positive(
+        concurrency.max_active_runs,
+        `${path}.concurrency.max_active_runs`,
+        128,
+      ),
+      queue_capacity: positive(
+        concurrency.queue_capacity,
+        `${path}.concurrency.queue_capacity`,
+        100_000,
+      ),
+      max_active_partitions: positive(
+        concurrency.max_active_partitions,
+        `${path}.concurrency.max_active_partitions`,
+        128,
+      ),
+    },
     state: { provider: "sqlite", location: string(state.location, `${path}.state.location`), busy_timeout_ms: positive(state.busy_timeout_ms, `${path}.state.busy_timeout_ms`, 60_000) },
     capability_invocation: {
       enabled: capabilityInvocation.enabled,

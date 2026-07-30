@@ -75,7 +75,9 @@ describe("AgentlyProcessDriver", () => {
     expect(requested).toEqual({
       kind: "capability_request",
       request: {
-        invocation_id: "invocation-fixture-1",
+        invocation_id: expect.stringMatching(
+          /^invocation-[0-9a-f-]{36}$/,
+        ),
         capability_id: "feishu.document.create",
         version_constraint: "1.0.0",
         input: { title: "项目需求" },
@@ -125,6 +127,60 @@ describe("AgentlyProcessDriver", () => {
       signal,
     );
     expect(legacy.summary[0]).toMatchObject({ text: "done" });
+  });
+
+  it("owns capability invocation IDs instead of trusting model-generated IDs", async () => {
+    const config = validateAgentlyRuntimeDriverConfig({
+      python: {
+        executable: worker,
+        module: "work_fabric_agently_runtime",
+      },
+      workspace_root: process.cwd(),
+      execution_timeout_seconds: 2,
+      cancellation_grace_seconds: 1,
+      provider: {
+        type: "OpenAICompatible",
+        base_url: "https://model.example.test/v1",
+        model: "test-model",
+        api_key: "agently-test-secret",
+      },
+    }, "test", { config_directory: process.cwd() });
+    const driver = new AgentlyProcessDriver(config);
+    const signal = new AbortController().signal;
+    const capability = [{
+      citizen_id: "citizen-feishu",
+      capability_id: "feishu.document.create",
+      version: "1.0.0",
+      name: "Create document",
+      description: "Create one simple Docx document.",
+      operation_kind: "command" as const,
+      input_schema: null,
+    }];
+
+    const first = await driver.executeTurn(
+      task("turn-capability"),
+      capability,
+      null,
+      async () => undefined,
+      signal,
+    );
+    const second = await driver.executeTurn(
+      task("turn-capability"),
+      capability,
+      null,
+      async () => undefined,
+      signal,
+    );
+
+    expect(first.kind).toBe("capability_request");
+    expect(second.kind).toBe("capability_request");
+    if (first.kind !== "capability_request" || second.kind !== "capability_request") {
+      throw new Error("fixture did not request a capability");
+    }
+    expect(first.request.invocation_id).not.toBe("invocation-fixture-1");
+    expect(second.request.invocation_id).not.toBe(
+      first.request.invocation_id,
+    );
   });
 
   it("accepts ordered progress followed by exactly one completed record", async () => {

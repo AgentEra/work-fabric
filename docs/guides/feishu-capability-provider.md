@@ -342,6 +342,15 @@ Handoff 或 Agent 流程。飞书字段和公开范围可核对
 Fabric 只记录两次 Human/Agent Handoff、能力 Handoff、Result 与审计事实，
 不解释“可以”、不唤醒 Agent，也不推进排期流程。
 
+模型负责标题、参与人、时间选择、提案说明和最终回复等业务语义；Agently
+Runtime 适配器负责 `invocation_id`、私有状态乐观版本等技术字段。忙闲查询
+成功后的提案使用专用结构化输出契约，必须把完整提案与
+`awaiting_confirmation` 状态一起持久化，不能只发送一段未落状态的确认文案。
+确认后的 Calendar create 一旦成功，助理模块立即以该 Provider Result 形成
+确定性的 Agent 完成回复并把私有状态推进为 `completed`，不会再让模型产生
+第二次创建请求。上述约束全部封闭在助理 Agent/Runtime 内，不进入 Fabric
+Core，也不进入 Feishu Channel 或 Calendar Provider。
+
 ## 6. 安全与失败语义
 
 - 输入拒绝未知字段、超长字符串、不支持的 Markdown 与未授权目标。
@@ -447,6 +456,8 @@ Console 可选，仅用于观察 Handoff/Delivery/Operations，不参与连接�
 
 预期此时才创建一次日程，并返回可点击的日程链接。若要调整时间、时长或
 参与人，先直接说明修改；Agent 会生成新提案并再次要求发起人确认。
+如果返回 `calendar_not_registered`，先按 5.1 节用管理命令登记并绑定默认
+日历；YAML 只启用 Calendar Citizen，不保存动态 calendar ID。
 
 验证 Agent 按需查询与能力调用协同时，可以先发送两条普通消息，再发送：
 

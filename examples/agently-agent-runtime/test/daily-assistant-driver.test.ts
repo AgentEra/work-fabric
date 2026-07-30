@@ -84,12 +84,12 @@ class StubDriver implements CapabilityAwareAgentRuntimeDriver {
       artifacts: [],
       evidence: [],
       extensions: {
-        "workfabric.agent/private_state": {
-          namespace: "daily-assistant.scheduling/v1",
-          expected_version: 0,
-          phase: "awaiting_confirmation",
-          proposal: {
-            version: 1,
+          "workfabric.agent/private_state": {
+            namespace: "daily-assistant.scheduling/v1",
+            expected_version: 99,
+            phase: "awaiting_confirmation",
+            proposal: {
+              version: 99,
             title: "EDA 方案评审",
             participant_resource_uris: [
               "feishu://user/open-id/ou-initiator",
@@ -309,7 +309,7 @@ describe("DailyAssistantDriver", () => {
         request: {
           invocation_id: "invocation-calendar-create",
           capability_id: "feishu.calendar.event.create",
-          version_constraint: "1.0.0",
+          version_constraint: "1.1.0",
           input: {
             calendar: { kind: "default_calendar" },
             title: "EDA 方案评审",

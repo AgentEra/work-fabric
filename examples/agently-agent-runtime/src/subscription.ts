@@ -9,6 +9,7 @@ export function dailyAssistantGatewayConfig(input: {
   readonly endpointId: string;
   readonly subscriptionId: string;
   readonly queueCapacity: number;
+  readonly maxActivePartitions: number;
 }): AgentGatewayConfig {
   const now = new Date().toISOString();
   const subscription: SubscriptionDocument = {
@@ -20,7 +21,9 @@ export function dailyAssistantGatewayConfig(input: {
   return {
     endpoint_id: input.endpointId, subscription,
     open_session: { client_session_id: `daily-assistant-${process.pid}-${randomUUID()}`, protocol_version: "1.0", capabilities: DAILY_ASSISTANT_CAPABILITIES, availability: "available", requested_lease_seconds: 60, expected_registration_version: 1 },
-    inbox_refresh_ms: 5_000, max_active_partitions: 8, incoming_queue_capacity: input.queueCapacity,
+    inbox_refresh_ms: 5_000,
+    max_active_partitions: input.maxActivePartitions,
+    incoming_queue_capacity: input.queueCapacity,
     heartbeat_retry_count: 2, heartbeat_backoff_ms: 250, graceful_close_timeout_ms: 10_000,
   };
 }

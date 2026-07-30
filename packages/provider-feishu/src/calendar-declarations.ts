@@ -390,10 +390,16 @@ const DEFINITIONS = Object.freeze({
   }),
 });
 
+const SCHEMA_VERSIONS: Partial<Record<keyof typeof DEFINITIONS, number>> = {
+  calendarEventCreateInput: 2,
+  calendarEventCreateOutput: 2,
+};
+
 function schema(name: keyof typeof DEFINITIONS) {
   const document = DEFINITIONS[name];
   return {
-    uri: `urn:work-fabric:schema:feishu:${name}:1`,
+    uri:
+      `urn:work-fabric:schema:feishu:${name}:${SCHEMA_VERSIONS[name] ?? 1}`,
     digest: canonicalCitizenDigest(document),
   } as const;
 }
@@ -404,6 +410,7 @@ function capability(input: {
   readonly description: string;
   readonly input: keyof typeof DEFINITIONS;
   readonly output: keyof typeof DEFINITIONS;
+  readonly version?: string;
   readonly risk: CitizenDeclaration["risk"];
   readonly operation_kind: "query" | "command" | "destructive";
   readonly confirmation?: CitizenDeclaration["confirmation"];
@@ -411,7 +418,7 @@ function capability(input: {
   return Object.freeze({
     declaration_id: input.id,
     declaration_kind: "capability",
-    version: "1.0.0",
+    version: input.version ?? "1.0.0",
     name: input.name,
     description: input.description,
     input_schema: schema(input.input),
@@ -458,6 +465,7 @@ export function feishuCalendarCapabilityDeclarations():
         "Create one bounded event on a registered calendar and add attendees.",
       input: "calendarEventCreateInput",
       output: "calendarEventCreateOutput",
+      version: "1.1.0",
       risk: "medium",
       operation_kind: "command",
     }),

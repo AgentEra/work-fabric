@@ -29,6 +29,7 @@ export interface FeishuProviderServiceConfiguration {
   readonly concurrency: {
     readonly max_active_runs: number;
     readonly queue_capacity: number;
+    readonly max_active_partitions: number;
   };
   readonly runtime_state: {
     readonly location: string;
@@ -127,7 +128,11 @@ function service(
     "access_token",
   ], `${path}.work_fabric`);
   const concurrency = object(root.concurrency, `${path}.concurrency`);
-  exact(concurrency, ["max_active_runs", "queue_capacity"], `${path}.concurrency`);
+  exact(
+    concurrency,
+    ["max_active_runs", "queue_capacity", "max_active_partitions"],
+    `${path}.concurrency`,
+  );
   const runtimeState = object(root.runtime_state, `${path}.runtime_state`);
   exact(runtimeState, ["location", "busy_timeout_ms"], `${path}.runtime_state`);
   const documentAccess = object(
@@ -176,6 +181,11 @@ function service(
     concurrency: Object.freeze({
       max_active_runs: positive(concurrency.max_active_runs, `${path}.concurrency.max_active_runs`, 128),
       queue_capacity: positive(concurrency.queue_capacity, `${path}.concurrency.queue_capacity`, 100_000),
+      max_active_partitions: positive(
+        concurrency.max_active_partitions,
+        `${path}.concurrency.max_active_partitions`,
+        128,
+      ),
     }),
     runtime_state: Object.freeze({
       location: string(runtimeState.location, `${path}.runtime_state.location`, 4_096),

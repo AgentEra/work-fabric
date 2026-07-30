@@ -69,7 +69,7 @@ describe("Feishu Calendar capability declarations", () => {
       },
       {
         id: "feishu.calendar.event.create",
-        version: "1.0.0",
+        version: "1.1.0",
         risk: "medium",
         operation: "command",
         confirmation: "none",
@@ -110,6 +110,22 @@ describe("Feishu Calendar capability declarations", () => {
     ]);
   });
 
+  it("publishes the evolved event-create input under an immutable v2 schema URI", () => {
+    const declaration = declarations()?.find((item) =>
+      item.declaration_id === "feishu.calendar.event.create"
+    );
+
+    expect(declaration).toMatchObject({
+      version: "1.1.0",
+      input_schema: {
+        uri: "urn:work-fabric:schema:feishu:calendarEventCreateInput:2",
+      },
+      output_schema: {
+        uri: "urn:work-fabric:schema:feishu:calendarEventCreateOutput:2",
+      },
+    });
+  });
+
   it("loads Calendar schemas without changing existing aggregate contracts", async () => {
     const calendar = declarations();
     expect(calendar).toBeDefined();
@@ -139,7 +155,7 @@ describe("Feishu Calendar capability declarations", () => {
         citizen_id: "citizen-feishu-calendar",
         endpoint_id: "endpoint-feishu-provider",
         capability_id: "feishu.calendar.event.create",
-        capability_version: "1.0.0",
+        capability_version: "1.1.0",
         contract_digest: `sha256:${"a".repeat(64)}`,
       },
       input_schema: declaration!.input_schema!,

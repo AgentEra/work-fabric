@@ -141,7 +141,7 @@ export async function startRealAgentlyRuntime(input: {
     ? {}
     : { observer: input.onWorkerObservation });
   const fabric = e2eClient(input.baseUrl, DAILY_E2E.runtimeToken, DAILY_E2E.runtimeActorId, DAILY_E2E.runtimeEndpointId);
-  const gateway = new AgentGateway({ endpoints: fabric.endpoints, subscriptions: fabric.subscriptions, queries: fabric.queries, handoffs: fabric.handoffs }, dailyAssistantGatewayConfig({ actorId: DAILY_E2E.runtimeActorId, endpointId: DAILY_E2E.runtimeEndpointId, subscriptionId: DAILY_E2E.subscriptionId, queueCapacity: 8 }));
+  const gateway = new AgentGateway({ endpoints: fabric.endpoints, subscriptions: fabric.subscriptions, queries: fabric.queries, handoffs: fabric.handoffs }, dailyAssistantGatewayConfig({ actorId: DAILY_E2E.runtimeActorId, endpointId: DAILY_E2E.runtimeEndpointId, subscriptionId: DAILY_E2E.subscriptionId, queueCapacity: 8, maxActivePartitions: 8 }));
   const role = { role_id: "daily-assistant", version: 1, display_name: "Daily Assistant", description: "E2E runtime", capability_ids: ["information.synthesis"] } as const;
   const host = new AgentRuntimeHost({
     config: { runtime_id: "daily-e2e-runtime", tenant_id: DAILY_E2E.tenantId, actor_id: DAILY_E2E.runtimeActorId, endpoint_id: DAILY_E2E.runtimeEndpointId, max_active_runs: 1, queue_capacity: 8, run_lease_seconds: 60, progress_interval_ms: 1_000, workspace_root: workspaceRoot },

@@ -19,7 +19,11 @@ export interface AgentRuntimeServiceConfiguration {
     readonly require_authority_scope: true;
     readonly allowed_capability_ids: readonly string[];
   };
-  readonly concurrency: { readonly max_active_runs: number; readonly queue_capacity: number };
+  readonly concurrency: {
+    readonly max_active_runs: number;
+    readonly queue_capacity: number;
+    readonly max_active_partitions: number;
+  };
   readonly state: { readonly provider: "sqlite"; readonly location: string; readonly busy_timeout_ms: number };
   readonly capability_invocation: {
     readonly enabled: boolean;

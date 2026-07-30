@@ -118,6 +118,22 @@ function timestamp(value: unknown, field: string): string {
   return new Date(Date.parse(result)).toISOString();
 }
 
+function markdown(value: unknown, field: string, maximum: number): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${field} is invalid`);
+  }
+  const normalized = value.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+  if (
+    normalized.length === 0 ||
+    normalized.length > maximum ||
+    normalized.trim() !== normalized ||
+    /[\u0000-\u0009\u000b\u000c\u000e-\u001f\u007f]/u.test(normalized)
+  ) {
+    throw new TypeError(`${field} is invalid`);
+  }
+  return normalized;
+}
+
 function handoffIds(value: unknown): readonly string[] {
   if (
     !Array.isArray(value) ||
@@ -226,7 +242,7 @@ function proposal(input: SchedulingProposalInput): SchedulingProposal {
     start_at: startAt,
     end_at: endAt,
     timezone: string(input.timezone, "proposal.timezone", 128),
-    summary_markdown: string(
+    summary_markdown: markdown(
       input.summary_markdown,
       "proposal.summary_markdown",
       16_384,

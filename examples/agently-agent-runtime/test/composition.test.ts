@@ -1,4 +1,5 @@
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { join } from "node:path";
 
 import { MemoryAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-memory";
@@ -11,7 +12,13 @@ import type {
 } from "@work-fabric/agent-capability-runtime";
 import { describe, expect, it, vi } from "vitest";
 
-import { composeAgentRuntime, ensureTrustedWorkspaceRoot, startComposedRuntime } from "../src/main.js";
+import {
+  composeAgentRuntime,
+  ensureTrustedWorkspaceRoot,
+  startComposedRuntime,
+  type RuntimeComposition,
+  waitForRuntimeShutdown,
+} from "../src/main.js";
 
 const fixture = {
   api_version: "workfabric.config/v1",
@@ -23,7 +30,11 @@ const fixture = {
       access_token: "${INTAKE_AGENT_ACCESS_TOKEN}",
     },
     acceptance: { mode: "accept_all_targeted", require_explicit_target: true, reject_expired_handoffs: true, require_authority_scope: true, allowed_capability_ids: ["collaboration.request.intake", "information.synthesis", "collaboration.handoff.draft"] },
-    concurrency: { max_active_runs: 2, queue_capacity: 32 },
+    concurrency: {
+      max_active_runs: 2,
+      queue_capacity: 32,
+      max_active_partitions: 32,
+    },
     state: { provider: "sqlite", location: "./var/daily-assistant-runtime.db", busy_timeout_ms: 5_000 },
     capability_invocation: {
       enabled: false,
@@ -56,6 +67,41 @@ const fakeDriver: AgentRuntimeDriver = {
 };
 
 describe("Daily Assistant Runtime composition", () => {
+  it("keeps the executable alive until a termination signal closes the Host", async () => {
+    const signals = new EventEmitter();
+    const close = vi.fn(async () => undefined);
+    const waitForSessionClose = vi.fn(
+      () => new Promise<never>(() => undefined),
+    );
+
+    const waiting = waitForRuntimeShutdown(
+      { host: { close, waitForSessionClose } } as unknown as RuntimeComposition,
+      signals,
+    );
+    await Promise.resolve();
+
+    expect(close).not.toHaveBeenCalled();
+
+    signals.emit("SIGTERM");
+    await waiting;
+
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("fails the executable when the Gateway session ends unexpectedly", async () => {
+    const close = vi.fn(async () => undefined);
+    const waitForSessionClose = vi.fn(async () => ({
+      reason: "failed" as const,
+    }));
+
+    await expect(waitForRuntimeShutdown({
+      host: { close, waitForSessionClose },
+    } as unknown as RuntimeComposition, new EventEmitter())).rejects.toThrow(
+      "Agent Gateway session ended unexpectedly: failed",
+    );
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   it("builds a Daily Assistant Runtime without importing service-node", async () => {
     const composition = await composeAgentRuntime(await loadedFixture(), {
       fetch: async () => new Response(null, { status: 204 }),
@@ -67,6 +113,7 @@ describe("Daily Assistant Runtime composition", () => {
     expect(composition.gatewayConfig.open_session.capabilities.map((item) => item.capability_id)).toEqual([
       "collaboration.request.intake", "information.synthesis", "collaboration.handoff.draft",
     ]);
+    expect(composition.gatewayConfig.max_active_partitions).toBe(32);
     await composition.host.close();
   });
 

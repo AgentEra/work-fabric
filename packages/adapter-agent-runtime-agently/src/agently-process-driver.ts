@@ -156,7 +156,7 @@ export class AgentlyProcessDriver
       transcript,
       this.config,
     );
-    return this.executeWorker(
+    const turn = await this.executeWorker(
       request,
       progress,
       signal,
@@ -167,6 +167,17 @@ export class AgentlyProcessDriver
           : undefined,
       "final or capability_request",
     );
+    if (turn.kind === "final") return turn;
+    return {
+      kind: "capability_request",
+      request: {
+        ...turn.request,
+        // Invocation identity is a transport/idempotency concern. Keeping it
+        // adapter-owned prevents a probabilistic model from accidentally
+        // reusing an ID across continuation turns.
+        invocation_id: `invocation-${request.command_id}`,
+      },
+    };
   }
 
   private async executeWorker<T>(

@@ -168,6 +168,18 @@ export class AgentRuntimeHost {
     }
   }
 
+  async waitForSessionClose(): Promise<{
+    readonly reason: "closed" | "aborted" | "fenced" | "failed";
+  }> {
+    if (!this.started || this.session === null) {
+      throw new AgentRuntimeHostError(
+        "runtime_not_started",
+        this.dependencies.config.runtime_id,
+      );
+    }
+    return this.session.closed;
+  }
+
   private async startInternal(): Promise<void> {
     let createdSession: AgentEndpointSession | null = null;
     try {

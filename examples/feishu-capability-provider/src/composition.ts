@@ -270,7 +270,8 @@ function gatewayConfiguration(
       expected_registration_version: 1,
     },
     inbox_refresh_ms: 1_000,
-    max_active_partitions: 8,
+    max_active_partitions:
+      loaded.service.concurrency.max_active_partitions,
     incoming_queue_capacity: loaded.service.concurrency.queue_capacity,
     heartbeat_retry_count: 2,
     heartbeat_backoff_ms: 250,

@@ -69,7 +69,10 @@ export async function composeAgentRuntime(
   });
   const gatewayConfig = dailyAssistantGatewayConfig({
     actorId: loaded.participant.actor_id, endpointId: loaded.participant.endpoint_id,
-    subscriptionId: loaded.service.work_fabric.subscription_id, queueCapacity: loaded.service.concurrency.queue_capacity,
+    subscriptionId: loaded.service.work_fabric.subscription_id,
+    queueCapacity: loaded.service.concurrency.queue_capacity,
+    maxActivePartitions:
+      loaded.service.concurrency.max_active_partitions,
   });
   const gateway = new AgentGateway(client, gatewayConfig);
   let capabilityHostDependencies = {};
@@ -246,17 +249,48 @@ export async function startAgentRuntime(environment: Readonly<Record<string, str
   }
 }
 
+export interface RuntimeSignalSource {
+  once(event: "SIGINT" | "SIGTERM", listener: () => void): unknown;
+  off?(event: "SIGINT" | "SIGTERM", listener: () => void): unknown;
+}
+
+export async function waitForRuntimeShutdown(
+  composition: Pick<RuntimeComposition, "host">,
+  signals: RuntimeSignalSource = process,
+): Promise<void> {
+  let onInterrupt: () => void = () => undefined;
+  let onTerminate: () => void = () => undefined;
+  try {
+    const termination = new Promise<{ readonly kind: "signal" }>((resolve) => {
+      onInterrupt = () => resolve({ kind: "signal" });
+      onTerminate = () => resolve({ kind: "signal" });
+      signals.once("SIGINT", onInterrupt);
+      signals.once("SIGTERM", onTerminate);
+    });
+    const outcome = await Promise.race([
+      termination,
+      composition.host.waitForSessionClose().then((session) => ({
+        kind: "session" as const,
+        reason: session.reason,
+      })),
+    ]);
+    if (outcome.kind === "session") {
+      throw new Error(
+        `Agent Gateway session ended unexpectedly: ${outcome.reason}`,
+      );
+    }
+  } finally {
+    signals.off?.("SIGINT", onInterrupt);
+    signals.off?.("SIGTERM", onTerminate);
+    await composition.host.close();
+  }
+}
+
 async function executable(): Promise<void> {
   const composition = await startAgentRuntime();
   const { runtimeId, role, gatewayConfig } = composition;
-  let closing: Promise<void> | undefined;
-  const close = () => {
-    closing ??= composition.host.close().finally(() => process.exitCode = 0);
-    return closing;
-  };
-  process.once("SIGINT", () => { void close(); });
-  process.once("SIGTERM", () => { void close(); });
   console.log(`Runtime ready: ${runtimeId}; role=${role.role_id}; actor=${gatewayConfig.subscription.owner.actor_id}; endpoint=${gatewayConfig.endpoint_id}`);
+  await waitForRuntimeShutdown(composition);
 }
 
 if (process.argv[1] !== undefined && import.meta.url === new URL(`file://${process.argv[1]}`).href) {

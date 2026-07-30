@@ -67,6 +67,49 @@ function update(value: unknown): SchedulingSessionUpdate | null {
   return item as unknown as SchedulingSessionUpdate;
 }
 
+function runtimeOwnedVersions(
+  mutation: SchedulingSessionUpdate,
+  privateContext: Record<string, unknown>,
+): SchedulingSessionUpdate {
+  const stateVersion = privateContext.state_version;
+  if (
+    !Number.isSafeInteger(stateVersion)
+    || (stateVersion as number) < 0
+  ) {
+    throw new TypeError("Agent scheduling state version is invalid");
+  }
+  if (mutation.proposal === null) {
+    return {
+      ...mutation,
+      expected_version: stateVersion as number,
+    };
+  }
+  const activeSession = privateContext.active_session;
+  let currentProposalVersion = 0;
+  if (activeSession !== null) {
+    const active = record(activeSession);
+    const proposal = active.proposal;
+    if (proposal !== null) {
+      const currentProposal = record(proposal);
+      if (
+        !Number.isSafeInteger(currentProposal.version)
+        || (currentProposal.version as number) < 1
+      ) {
+        throw new TypeError("Agent scheduling proposal version is invalid");
+      }
+      currentProposalVersion = currentProposal.version as number;
+    }
+  }
+  return {
+    ...mutation,
+    expected_version: stateVersion as number,
+    proposal: {
+      ...mutation.proposal,
+      version: currentProposalVersion + 1,
+    },
+  };
+}
+
 function withoutPrivateExtension(
   result: RuntimeDriverResult,
 ): RuntimeDriverResult {
@@ -153,9 +196,13 @@ export class DailyAssistantDriver
     if (turn.kind !== "final") return turn;
     const privateOutput = turn.response.extensions[PRIVATE_STATE_EXTENSION];
     if (privateOutput === undefined) return turn;
-    const mutation = update(privateOutput);
+    const parsedMutation = update(privateOutput);
     let response = withoutPrivateExtension(turn.response);
-    if (mutation === null) return { kind: "final", response };
+    if (parsedMutation === null) return { kind: "final", response };
+    const mutation = runtimeOwnedVersions(
+      parsedMutation,
+      privateContext,
+    );
     const session = await this.sessions.apply(task, mutation);
     if (session.phase === "awaiting_confirmation") {
       response = withInitiatorMention(

@@ -144,6 +144,29 @@ describe("SchedulingSessionRepository", () => {
     expect((await repository.context(sourceTask)).active_session).toEqual(saved);
   });
 
+  it("preserves multiline Markdown in a proposal summary", async () => {
+    const store = new MemoryAgentRuntimeStateStore();
+    stores.push(store);
+    const repository = new SchedulingSessionRepository(store);
+
+    const saved = await repository.apply(task(), {
+      namespace: "daily-assistant.scheduling/v1",
+      expected_version: 0,
+      phase: "awaiting_confirmation",
+      proposal: {
+        ...proposal,
+        summary_markdown:
+          "## 日程提案\n\n- 时间：14:00–14:30\n- 请确认",
+      },
+      confirmed_proposal_digest: null,
+      confirmation_handoff_id: null,
+      calendar_result_uri: null,
+      capability_result_handoff_ids: ["handoff-members-result-1"],
+    });
+
+    expect(saved.proposal?.summary_markdown).toContain("\n\n- 时间");
+  });
+
   it("increments proposal version and invalidates the previous confirmation", async () => {
     const store = new MemoryAgentRuntimeStateStore();
     stores.push(store);

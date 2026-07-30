@@ -22,6 +22,65 @@ ASSISTANT_OUTPUT_SCHEMA = {
     "handoff_draft_intent": (str, "建议交接意图；无则为空字符串", True),
     "handoff_draft_acceptance_criteria": ([(str, "建议验收条件")], "建议验收条件", True),
 }
+SCHEDULING_PROPOSAL_OUTPUT_SCHEMA = {
+    "version": (int, "提案版本，首版为 1"),
+    "title": (str, "日程标题"),
+    "participant_resource_uris": (
+        [(str, "受邀参与方 resource_uri")],
+        "完整参与方 resource_uri 列表",
+    ),
+    "start_at": (str, "RFC3339 日程开始时间"),
+    "end_at": (str, "RFC3339 日程结束时间"),
+    "timezone": (str, "IANA 时区，例如 Asia/Shanghai"),
+    "summary_markdown": (str, "发给协作者确认的完整 Markdown 提案"),
+}
+SCHEDULING_PRIVATE_STATE_OUTPUT_SCHEMA = {
+    "namespace": (str, "必须为 daily-assistant.scheduling/v1"),
+    "expected_version": (
+        int,
+        "必须等于 agent_private_context.state_version",
+    ),
+    "phase": (
+        str,
+        "awaiting_confirmation 或 completed",
+    ),
+    "proposal": (
+        SCHEDULING_PROPOSAL_OUTPUT_SCHEMA,
+        "awaiting_confirmation 时为完整提案；completed 时为 null",
+    ),
+    "confirmed_proposal_digest": (
+        str,
+        "未确认时为 null；完成时为当前 sha256 提案摘要",
+    ),
+    "confirmation_handoff_id": (
+        str,
+        "未确认时为 null；完成时为确认消息 Handoff ID",
+    ),
+    "calendar_result_uri": (
+        str,
+        "未创建时为 null；完成时为飞书日程 resource_uri",
+    ),
+    "capability_result_handoff_ids": (
+        [(str, "成员或忙闲查询结果的辅助 Handoff ID")],
+        "本次提案依赖的全部能力结果 Handoff ID",
+    ),
+}
+SCHEDULING_PROPOSAL_REQUIRED_OUTPUT_SCHEMA = {
+    key: (definition[0], definition[1], True)
+    for key, definition in SCHEDULING_PROPOSAL_OUTPUT_SCHEMA.items()
+}
+SCHEDULING_PRIVATE_STATE_REQUIRED_OUTPUT_SCHEMA = {
+    key: (
+        (
+            SCHEDULING_PROPOSAL_REQUIRED_OUTPUT_SCHEMA
+            if key == "proposal"
+            else definition[0]
+        ),
+        definition[1],
+        True,
+    )
+    for key, definition in SCHEDULING_PRIVATE_STATE_OUTPUT_SCHEMA.items()
+}
 ASSISTANT_TURN_OUTPUT_SCHEMA = {
     "turn_type": (str, "final 或 capability_request", "not_null"),
     "request_summary": (str, "当前轮次的简短结构化摘要", "not_null"),
@@ -31,7 +90,29 @@ ASSISTANT_TURN_OUTPUT_SCHEMA = {
     "version_constraint": (str, "仅 capability_request 时填写的版本约束", True),
     "input": (dict, "仅 capability_request 时填写的 JSON 输入", True),
     "reason": (str, "仅 capability_request 时填写的调用理由", True),
-    "private_state": (dict, "Agent 私有状态更新；无更新时为空对象", True),
+    "private_state_action": (
+        str,
+        "none 或 update；任何需要人工确认的排期提案必须为 update",
+        "not_null",
+    ),
+    "private_state": (
+        SCHEDULING_PRIVATE_STATE_OUTPUT_SCHEMA,
+        "Agent 私有状态更新；排期提案或排期完成时必须填写完整状态，否则为空对象",
+        True,
+    ),
+}
+SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA = {
+    "request_summary": (str, "当前排期提案的简短结构化摘要", "not_null"),
+    "response": (
+        str,
+        "由 Agent 编写、可直接发给协作者确认的完整排期提案",
+        "not_null",
+    ),
+    "private_state": (
+        SCHEDULING_PRIVATE_STATE_REQUIRED_OUTPUT_SCHEMA,
+        "本轮必须填写完整的 awaiting_confirmation 排期提案状态",
+        "not_null",
+    ),
 }
 _AGENTLY_LOG_SINK: TextIO | None = None
 POST_CAPABILITY_MODEL_TIMEOUT_SECONDS = 30.0
@@ -60,6 +141,7 @@ def role_prompt(
     *,
     capability_turn: bool = False,
     agent_private_context: Mapping[str, JsonValue] | None = None,
+    scheduling_proposal_turn: bool = False,
 ) -> str:
     base = (
         f"You are the Work Fabric role {role['role_id']} ({role['display_name']}).\n"
@@ -80,6 +162,27 @@ def role_prompt(
     )
     if not capability_turn:
         return base
+    if scheduling_proposal_turn:
+        return (
+            base
+            + "\nThis turn follows a successful current-group member lookup "
+            "and free/busy query. Produce the Agent-owned scheduling proposal "
+            "and persist its confirmation state; do not request another "
+            "capability and do not create the calendar event. Return exactly "
+            "three keys: request_summary, response, and private_state. "
+            "private_state must contain exactly namespace, expected_version, "
+            "phase, proposal, confirmed_proposal_digest, "
+            "confirmation_handoff_id, calendar_result_uri, and "
+            "capability_result_handoff_ids. Set namespace to "
+            "daily-assistant.scheduling/v1, expected_version from "
+            "agent_private_context.state_version, phase to "
+            "awaiting_confirmation, and the three confirmation/calendar "
+            "fields to null. proposal must contain exactly version, title, "
+            "participant_resource_uris, start_at, end_at, timezone, and "
+            "summary_markdown. Use only returned member and free/busy facts, "
+            "include every relevant auxiliary_handoff_id, and ask the "
+            "original initiator to confirm before any side effect."
+        )
     turn_contract = (
         base
         + "\nYou may return exactly one turn: final or capability_request. "
@@ -110,15 +213,15 @@ def role_prompt(
         "Never copy Provider text as the final "
         "reply. A final response must be self-contained, human-readable, and Agent-authored. "
         "Use a new invocation_id for each new capability request. "
-        "Every turn must contain all nine keys. For a final turn, use exactly this shape: "
+        "Every turn must contain all ten keys. For an ordinary final turn, use exactly this shape: "
         '{"turn_type":"final","request_summary":"摘要","response":"完整答复",'
         '"invocation_id":"","capability_id":"","version_constraint":"","input":{},'
-        '"reason":"","private_state":{}}. '
+        '"reason":"","private_state_action":"none","private_state":{}}. '
         "For a capability request, use exactly this shape: "
         '{"turn_type":"capability_request","request_summary":"摘要","response":"",'
         '"invocation_id":"唯一调用 ID","capability_id":"已披露能力 ID",'
         '"version_constraint":"版本约束","input":{},"reason":"调用理由",'
-        '"private_state":{}}. '
+        '"private_state_action":"none","private_state":{}}. '
         "Do not omit keys and do not add keys."
     )
     if (
@@ -151,6 +254,10 @@ def role_prompt(
         "version, title, participant_resource_uris, start_at, end_at, timezone, "
         "and summary_markdown; use the same start_at/end_at naming as Calendar "
         "capabilities. Set expected_version to agent_private_context.state_version. "
+        "Never ask a Human to confirm a scheduling proposal while returning "
+        "private_state_action=none or an empty private_state object. A "
+        "scheduling proposal and a completed scheduling turn must use "
+        "private_state_action=update. "
         "A different group member may contribute facts, but must not replace or "
         "confirm an active proposal; ask the original initiator to incorporate or "
         "confirm the change and leave private_state empty. Use an empty private_state object "
@@ -328,6 +435,22 @@ def _calendar_completion_private_state(
     }
 
 
+def _requires_scheduling_proposal(request: WorkerRequest) -> bool:
+    context = request.task.get("agent_private_context")
+    latest = _latest_capability_entry(request)
+    return (
+        isinstance(context, dict)
+        and context.get("namespace") == "daily-assistant.scheduling/v1"
+        and context.get("active_session") is None
+        and latest is not None
+        and isinstance(latest.get("request"), dict)
+        and latest["request"].get("capability_id")
+        == "feishu.calendar.freebusy.query"
+        and isinstance(latest.get("result"), dict)
+        and latest["result"].get("outcome") == "succeeded"
+    )
+
+
 def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValue]:
     continuation = _latest_capability_entry(request)
     if continuation is None:
@@ -456,6 +579,14 @@ def validate_turn_assistant_output(
         response = _non_empty_string(value["response"], "response")
         if not isinstance(value["private_state"], dict):
             raise AssistantOutputError("assistant private_state is invalid")
+        private_state_action = value["private_state_action"]
+        if private_state_action not in ("none", "update"):
+            raise AssistantOutputError("assistant private_state action is invalid")
+        private_state = (
+            value["private_state"]
+            if private_state_action == "update"
+            else {}
+        )
         if any(value[field] not in ("", {}) for field in (
             "invocation_id", "capability_id", "version_constraint", "input", "reason",
         )):
@@ -476,7 +607,7 @@ def validate_turn_assistant_output(
                     ),
                     "workfabric.agent/private_state": cast(
                         dict[str, JsonValue],
-                        value["private_state"],
+                        private_state,
                     ),
                 },
             },
@@ -485,10 +616,9 @@ def validate_turn_assistant_output(
         raise AssistantOutputError("assistant turn type is invalid")
     if value["response"] != "":
         raise AssistantOutputError("assistant capability request response is invalid")
-    if value["private_state"] != {}:
-        raise AssistantOutputError(
-            "assistant capability request private_state is invalid"
-        )
+    # Capability turns cannot commit private Agent state. Those fields are
+    # deliberately discarded at the model boundary; state is only applied
+    # from a final turn after capability facts have returned.
     capability_id = _non_empty_string(value["capability_id"], "capability_id", 128)
     if not CAPABILITY_ID.fullmatch(capability_id):
         raise AssistantOutputError("assistant capability_id is invalid")
@@ -518,6 +648,40 @@ def validate_turn_assistant_output(
     }
 
 
+def validate_scheduling_proposal_output(
+    value: object,
+) -> dict[str, JsonValue]:
+    if (
+        not isinstance(value, dict)
+        or set(value) != set(SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA)
+        or not isinstance(value.get("private_state"), dict)
+        or value["private_state"] == {}
+    ):
+        raise AssistantOutputError(
+            "scheduling proposal output is invalid"
+        )
+    private_state = cast(dict[str, JsonValue], value["private_state"])
+    if (
+        private_state.get("phase") != "awaiting_confirmation"
+        or not isinstance(private_state.get("proposal"), dict)
+    ):
+        raise AssistantOutputError(
+            "scheduling proposal private state is invalid"
+        )
+    return validate_turn_assistant_output({
+        "turn_type": "final",
+        "request_summary": value["request_summary"],
+        "response": value["response"],
+        "invocation_id": "",
+        "capability_id": "",
+        "version_constraint": "",
+        "input": {},
+        "reason": "",
+        "private_state_action": "update",
+        "private_state": private_state,
+    })
+
+
 async def execute_with_agent(request: WorkerRequest, agent: AgentPort) -> Mapping[str, JsonValue]:
     prepared = (
         agent.use_workspace(cast(str, request.task["workspace_path"]))
@@ -542,6 +706,16 @@ async def execute_turn_with_agent(
     *,
     post_capability_timeout_seconds: float = POST_CAPABILITY_MODEL_TIMEOUT_SECONDS,
 ) -> Mapping[str, JsonValue]:
+    latest = _latest_capability_entry(request)
+    if (
+        latest is not None
+        and _calendar_completion_private_state(request, latest) is not None
+    ):
+        # A successful calendar create is the terminal business fact for the
+        # confirmed scheduling proposal. Completing here prevents a
+        # probabilistic follow-up turn from issuing the command twice.
+        return _bounded_capability_completion(request)
+    requires_scheduling_proposal = _requires_scheduling_proposal(request)
     prepared = (
         agent.use_workspace(cast(str, request.task["workspace_path"]))
         .role(
@@ -552,11 +726,19 @@ async def execute_turn_with_agent(
                     Mapping[str, JsonValue] | None,
                     request.task["agent_private_context"],
                 ),
+                scheduling_proposal_turn=requires_scheduling_proposal,
             ),
             always=True,
         )
         .input(turn_prompt_input(request))
-        .output(ASSISTANT_TURN_OUTPUT_SCHEMA, format="json")
+        .output(
+            (
+                SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA
+                if requires_scheduling_proposal
+                else ASSISTANT_TURN_OUTPUT_SCHEMA
+            ),
+            format="json",
+        )
     )
     last_error: AssistantOutputError | None = None
     advertised = frozenset(
@@ -576,7 +758,11 @@ async def execute_turn_with_agent(
         except TimeoutError:
             return _bounded_capability_completion(request)
         try:
-            return validate_turn_assistant_output(result, advertised)
+            return (
+                validate_scheduling_proposal_output(result)
+                if requires_scheduling_proposal
+                else validate_turn_assistant_output(result, advertised)
+            )
         except AssistantOutputError as error:
             last_error = error
     assert last_error is not None
@@ -591,10 +777,20 @@ def required_environment(name: str) -> str:
 
 
 def configure_agently(agently: Any, request: WorkerRequest, api_key: str) -> None:
+    provider_host = urlsplit(request.provider_base_url).hostname
+    request_options = (
+        {"thinking": {"type": "disabled"}}
+        if (
+            provider_host == "api.deepseek.com"
+            and request.provider_model.startswith("deepseek-v4-")
+        )
+        else {}
+    )
     agently.set_settings("OpenAICompatible", {
         "base_url": request.provider_base_url,
         "api_key": api_key,
         "model": request.provider_model,
+        "request_options": request_options,
         # Keep transport retries disabled here: the worker owns bounded
         # structured-output recovery and its outer process Driver owns the
         # final execution deadline.

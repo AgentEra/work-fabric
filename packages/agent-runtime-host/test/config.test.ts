@@ -22,7 +22,11 @@ const base = {
       require_authority_scope: true,
       allowed_capability_ids: ["information.synthesis"],
     },
-    concurrency: { max_active_runs: 2, queue_capacity: 32 },
+    concurrency: {
+      max_active_runs: 2,
+      queue_capacity: 32,
+      max_active_partitions: 32,
+    },
     state: { provider: "sqlite", location: "./var/runtime.db", busy_timeout_ms: 5_000 },
     capability_invocation: {
       enabled: false,
@@ -70,6 +74,7 @@ describe("loadAgentRuntimeConfiguration", () => {
       capability_ids: ["collaboration.request.intake", "information.synthesis", "collaboration.handoff.draft"],
     });
     expect(loaded.service.work_fabric.access_token).toBe("wf-token");
+    expect(loaded.service.concurrency.max_active_partitions).toBe(32);
     expect(loaded.driver.config.provider.api_key).toBe("model-token");
   });
 

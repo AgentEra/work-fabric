@@ -19,7 +19,11 @@ const bundle = {
             subscription_id: "subscription-feishu-provider",
             access_token: "${FEISHU_PROVIDER_ACCESS_TOKEN}",
           },
-          concurrency: { max_active_runs: 2, queue_capacity: 16 },
+          concurrency: {
+            max_active_runs: 2,
+            queue_capacity: 16,
+            max_active_partitions: 32,
+          },
           runtime_state: {
             location: ".local/feishu-provider-runtime.db",
             busy_timeout_ms: 5_000,
@@ -94,6 +98,7 @@ describe("Feishu Provider configuration", () => {
     expect(loaded.provider).not.toHaveProperty("shared_folder");
     expect(loaded.provider.credential_ref).toBe("feishu-primary");
     expect(loaded.participant.endpoint_id).toBe("endpoint-feishu-provider");
+    expect(loaded.service.concurrency.max_active_partitions).toBe(32);
   });
 
   it("fails closed when a required secret is missing", async () => {

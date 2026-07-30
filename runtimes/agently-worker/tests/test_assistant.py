@@ -7,6 +7,7 @@ import pytest
 from work_fabric_agently_runtime.assistant import (
     ASSISTANT_OUTPUT_SCHEMA,
     ASSISTANT_TURN_OUTPUT_SCHEMA,
+    SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA,
     AssistantOutputError,
     execute_turn_with_agent,
     execute_with_agent,
@@ -15,6 +16,7 @@ from work_fabric_agently_runtime.assistant import (
     task_prompt_input,
     turn_prompt_input,
     validate_assistant_output,
+    validate_scheduling_proposal_output,
     validate_turn_assistant_output,
 )
 from work_fabric_agently_runtime.protocol import parse_request
@@ -210,6 +212,20 @@ def test_turn_prompt_teaches_the_disclosed_current_group_calendar_flow() -> None
 
 
 def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
+    private_state_schema = ASSISTANT_TURN_OUTPUT_SCHEMA["private_state"][0]
+    assert isinstance(private_state_schema, dict)
+    assert set(private_state_schema) == {
+        "namespace",
+        "expected_version",
+        "phase",
+        "proposal",
+        "confirmed_proposal_digest",
+        "confirmation_handoff_id",
+        "calendar_result_uri",
+        "capability_result_handoff_ids",
+    }
+    assert isinstance(private_state_schema["proposal"][0], dict)
+
     final = validate_turn_assistant_output({
         "turn_type": "final",
         "request_summary": "已处理",
@@ -219,6 +235,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "version_constraint": "",
         "input": {},
         "reason": "",
+        "private_state_action": "update",
         "private_state": {
             "namespace": "daily-assistant.scheduling/v1",
             "expected_version": 0,
@@ -241,6 +258,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "version_constraint": "^1.0.0",
         "input": {"title": "项目需求"},
         "reason": "创建团队文档",
+        "private_state_action": "none",
         "private_state": {},
     })
     assert capability["kind"] == "capability_request"
@@ -255,9 +273,64 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "version_constraint": "2.0.0",
         "input": {"title": "项目需求"},
         "reason": "",
+        "private_state_action": "none",
         "private_state": {},
     })
     assert capability_without_reason["request"]["reason"] == "需要创建飞书文档"
+
+
+def test_scheduling_proposal_has_a_dedicated_required_output_contract() -> None:
+    assert set(SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA) == {
+        "request_summary",
+        "response",
+        "private_state",
+    }
+    prompt = role_prompt(
+        {
+            "role_id": "daily-assistant",
+            "display_name": "日常助理",
+            "description": "团队共享助理",
+        },
+        capability_turn=True,
+        scheduling_proposal_turn=True,
+    )
+    assert "Return exactly three keys" in prompt
+    assert '"turn_type":"capability_request"' not in prompt
+    with pytest.raises(
+        AssistantOutputError,
+        match="scheduling proposal output",
+    ):
+        validate_scheduling_proposal_output({
+            "request_summary": "已找到时间",
+            "response": "请确认明天下午两点的日程。",
+            "private_state": {},
+        })
+
+    turn = validate_scheduling_proposal_output({
+        "request_summary": "已找到共同空闲时间",
+        "response": "请确认明天下午两点的日程。",
+        "private_state": {
+            "namespace": "daily-assistant.scheduling/v1",
+            "expected_version": 0,
+            "phase": "awaiting_confirmation",
+            "proposal": {
+                "version": 1,
+                "title": "项目评审",
+                "participant_resource_uris": [
+                    "feishu://user/open-id/ou-human",
+                ],
+                "start_at": "2026-07-31T14:00:00+08:00",
+                "end_at": "2026-07-31T14:30:00+08:00",
+                "timezone": "Asia/Shanghai",
+                "summary_markdown": "请确认项目评审日程。",
+            },
+            "confirmed_proposal_digest": None,
+            "confirmation_handoff_id": None,
+            "calendar_result_uri": None,
+            "capability_result_handoff_ids": ["handoff-query-1"],
+        },
+    })
+    assert turn["kind"] == "final"
 
 
 def test_prompt_passes_resolved_context_as_untrusted_evidence() -> None:
@@ -280,6 +353,7 @@ def test_prompt_passes_resolved_context_as_untrusted_evidence() -> None:
             "version_constraint": "^1.0.0",
             "input": {},
             "reason": "创建团队文档",
+            "private_state_action": "none",
             "private_state": {},
         })
 
@@ -299,6 +373,7 @@ async def test_executes_a_v3_turn_with_the_dedicated_schema() -> None:
             "version_constraint": "1.0.0",
             "input": {"title": "项目需求"},
             "reason": "创建团队文档",
+            "private_state_action": "none",
             "private_state": {},
         }
 
@@ -393,7 +468,7 @@ async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_res
 
 
 @pytest.mark.asyncio
-async def test_calendar_partial_fallback_is_agent_owned_and_linked() -> None:
+async def test_calendar_success_completes_without_a_second_model_or_provider_call() -> None:
     value = valid_request_v3()
     proposal_digest = "sha256:" + ("b" * 64)
     value["task"]["agent_private_context"] = {
@@ -464,15 +539,13 @@ async def test_calendar_partial_fallback_is_agent_owned_and_linked() -> None:
     request = parse_request(value)
     agent = FakeAgent()
 
-    async def never_finishes() -> object:
-        await asyncio.sleep(60)
-        raise AssertionError("unreachable")
+    async def must_not_run() -> object:
+        raise AssertionError("calendar success must complete deterministically")
 
-    agent.async_start = never_finishes  # type: ignore[method-assign]
+    agent.async_start = must_not_run  # type: ignore[method-assign]
     turn = await execute_turn_with_agent(
         request,
         agent,
-        post_capability_timeout_seconds=0.01,
     )
 
     text = turn["response"]["summary"][0]["text"]
@@ -514,6 +587,7 @@ async def test_rejects_a_capability_request_that_was_not_advertised() -> None:
             "version_constraint": "1.0.0",
             "input": {"title": "项目需求"},
             "reason": "创建团队文档",
+            "private_state_action": "none",
             "private_state": {},
         }
 
@@ -581,6 +655,24 @@ def test_real_agently_timeout_is_a_provider_transport_setting_not_request_body()
     assert "timeout" not in request_data.request_options
 
 
+def test_deepseek_v4_uses_bounded_non_thinking_mode_for_runtime_turns() -> None:
+    from agently import Agently
+    from agently.builtins.plugins.ModelRequester.OpenAICompatible.plugin import OpenAICompatible
+
+    value = valid_request()
+    value["provider"]["base_url"] = "https://api.deepseek.com"
+    value["provider"]["model"] = "deepseek-v4-pro"
+    request = parse_request(value)
+    configure_agently(Agently, request, "test-key")
+    agent = Agently.create_agent("deepseek-v4-runtime-shape-test")
+    agent.request.input("offline request-builder probe")
+    plugin = OpenAICompatible(agent.request.prompt, agent.request.settings)
+
+    assert plugin.generate_request_data().request_options["thinking"] == {
+        "type": "disabled",
+    }
+
+
 def test_capability_turn_prompt_defines_complete_discriminated_json_shapes() -> None:
     prompt = role_prompt(
         {
@@ -594,14 +686,54 @@ def test_capability_turn_prompt_defines_complete_discriminated_json_shapes() -> 
     assert (
         '{"turn_type":"final","request_summary":"摘要","response":"完整答复",'
         '"invocation_id":"","capability_id":"","version_constraint":"",'
-        '"input":{},"reason":"","private_state":{}}'
+        '"input":{},"reason":"","private_state_action":"none",'
+        '"private_state":{}}'
     ) in prompt
     assert (
         '{"turn_type":"capability_request","request_summary":"摘要",'
         '"response":"","invocation_id":"唯一调用 ID",'
         '"capability_id":"已披露能力 ID","version_constraint":"版本约束",'
-        '"input":{},"reason":"调用理由","private_state":{}}'
+        '"input":{},"reason":"调用理由","private_state_action":"none",'
+        '"private_state":{}}'
     ) in prompt
+
+
+def test_turn_output_normalizes_an_empty_private_state_update_to_noop() -> None:
+    turn = validate_turn_assistant_output({
+        "turn_type": "final",
+        "request_summary": "请确认排期",
+        "response": "请确认明天下午两点的评审日程。",
+        "invocation_id": "",
+        "capability_id": "",
+        "version_constraint": "",
+        "input": {},
+        "reason": "",
+        "private_state_action": "update",
+        "private_state": {},
+    })
+
+    assert (
+        turn["response"]["extensions"]["workfabric.agent/private_state"]
+        == {}
+    )
+
+
+def test_capability_request_discards_private_state_fields() -> None:
+    turn = validate_turn_assistant_output({
+        "turn_type": "capability_request",
+        "request_summary": "创建已确认的日程",
+        "response": "",
+        "invocation_id": "model-owned-id",
+        "capability_id": "feishu.document.create",
+        "version_constraint": "1.0.0",
+        "input": {"title": "项目需求"},
+        "reason": "创建团队文档",
+        "private_state_action": "update",
+        "private_state": {"untrusted": "mutation"},
+    }, frozenset({"feishu.document.create"}))
+
+    assert turn["kind"] == "capability_request"
+    assert "private_state" not in turn["request"]
 
 
 def test_scheduling_private_context_activates_agent_owned_confirmation_rules() -> None:

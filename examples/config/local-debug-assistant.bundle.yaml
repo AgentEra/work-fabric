@@ -149,6 +149,7 @@ applications:
       concurrency:
         max_active_runs: 2
         queue_capacity: 32
+        max_active_partitions: 32
       state:
         provider: sqlite
         location: ./var/local-debug-assistant-runtime.db
