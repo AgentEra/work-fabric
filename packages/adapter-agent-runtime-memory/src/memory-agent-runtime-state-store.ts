@@ -1,5 +1,7 @@
 import type {
   AgentCapabilityInvocationStore,
+  AgentPrivateStateRecord,
+  AgentPrivateStateStore,
   AgentRuntimeStateStore,
   CapabilityInvocationRecord,
   CapabilityInvocationState,
@@ -9,9 +11,12 @@ import type {
   RuntimeRunState,
 } from "@work-fabric/agent-runtime-spi";
 import {
+  AgentPrivateStateConflictError,
   validateCapabilityCandidate,
   validateCapabilityInvocationRequest,
   validateCapabilityInvocationResult,
+  validateAgentPrivateStateIdentity,
+  validateAgentPrivateStatePut,
 } from "@work-fabric/agent-runtime-spi";
 
 const terminalStates = new Set<RuntimeRunState>(["succeeded", "failed", "cancelled"]);
@@ -47,6 +52,11 @@ const commandKey = (
 ) => JSON.stringify([tenant, handoff, idempotencyKey]);
 const invocationKey = (tenant: string, handoff: string, invocation: string) =>
   JSON.stringify([tenant, handoff, invocation]);
+const privateStateKey = (
+  tenant: string,
+  namespace: string,
+  key: string,
+) => JSON.stringify([tenant, namespace, key]);
 
 function clone<T>(value: T): T {
   return structuredClone(value);
@@ -61,11 +71,15 @@ function hasExpired(leaseExpiresAt: string | null, now: string): boolean {
 }
 
 export class MemoryAgentRuntimeStateStore
-  implements AgentRuntimeStateStore, AgentCapabilityInvocationStore {
+  implements
+    AgentRuntimeStateStore,
+    AgentCapabilityInvocationStore,
+    AgentPrivateStateStore {
   private readonly deliveries = new Map<string, RuntimeDeliveryRecord>();
   private readonly runs = new Map<string, RuntimeRunRecord>();
   private readonly commands = new Map<string, RuntimeCommandRecord>();
   private readonly invocations = new Map<string, CapabilityInvocationRecord>();
+  private readonly privateState = new Map<string, AgentPrivateStateRecord>();
   private mutationQueue: Promise<void> = Promise.resolve();
   private closed = false;
 
@@ -412,6 +426,59 @@ export class MemoryAgentRuntimeStateStore
       .map(clone));
   }
 
+  async getPrivateState(
+    tenantId: string,
+    namespace: string,
+    key: string,
+  ): Promise<AgentPrivateStateRecord | null> {
+    const identity = validateAgentPrivateStateIdentity(
+      tenantId,
+      namespace,
+      key,
+    );
+    return this.enqueue(() => {
+      const record = this.privateState.get(privateStateKey(
+        identity.tenant_id,
+        identity.namespace,
+        identity.key,
+      ));
+      return record === undefined ? null : clone(record);
+    });
+  }
+
+  async putPrivateState(
+    input: Parameters<AgentPrivateStateStore["putPrivateState"]>[0],
+  ): Promise<AgentPrivateStateRecord> {
+    const candidate = validateAgentPrivateStatePut(input);
+    return this.enqueue(() => {
+      const key = privateStateKey(
+        candidate.tenant_id,
+        candidate.namespace,
+        candidate.key,
+      );
+      const current = this.privateState.get(key);
+      if (
+        (current === undefined && candidate.expected_version !== 0) ||
+        (
+          current !== undefined &&
+          current.version !== candidate.expected_version
+        )
+      ) {
+        throw new AgentPrivateStateConflictError();
+      }
+      const record: AgentPrivateStateRecord = {
+        tenant_id: candidate.tenant_id,
+        namespace: candidate.namespace,
+        key: candidate.key,
+        version: (current?.version ?? 0) + 1,
+        value: clone(candidate.value),
+        updated_at: candidate.updated_at,
+      };
+      this.privateState.set(key, clone(record));
+      return clone(record);
+    });
+  }
+
   async close(): Promise<void> {
     const result = this.mutationQueue.then(() => {
       this.closed = true;
@@ -419,6 +486,7 @@ export class MemoryAgentRuntimeStateStore
       this.runs.clear();
       this.commands.clear();
       this.invocations.clear();
+      this.privateState.clear();
     });
     this.mutationQueue = result.then(() => undefined, () => undefined);
     return result;

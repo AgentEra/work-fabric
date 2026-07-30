@@ -2,7 +2,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { verifyAgentRuntimeStateStoreContract } from "@work-fabric/agent-runtime-conformance";
+import {
+  verifyAgentPrivateStateStoreContract,
+  verifyAgentRuntimeStateStoreContract,
+} from "@work-fabric/agent-runtime-conformance";
 import type { RuntimeDeliveryRecord } from "@work-fabric/agent-runtime-spi";
 import { describe, expect, it } from "vitest";
 
@@ -24,6 +27,19 @@ function delivery(): RuntimeDeliveryRecord {
 
 verifyAgentRuntimeStateStoreContract("SQLite Agent Runtime state", async () => {
   const directory = await mkdtemp(join(tmpdir(), "work-fabric-agent-runtime-"));
+  const location = join(directory, "runtime.db");
+  const store = new SqliteAgentRuntimeStateStore({ location });
+  return {
+    store,
+    async close() {
+      await store.close();
+      await rm(directory, { recursive: true, force: true });
+    },
+  };
+});
+
+verifyAgentPrivateStateStoreContract("SQLite Agent private state", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "work-fabric-agent-private-"));
   const location = join(directory, "runtime.db");
   const store = new SqliteAgentRuntimeStateStore({ location });
   return {
@@ -123,11 +139,27 @@ describe("SQLite Agent Runtime state durability", () => {
       const first = new SqliteAgentRuntimeStateStore({ location });
       await first.recordDelivery(delivery());
       await first.createRunIfAbsent("tenant-1", "handoff-1", NOW);
+      await first.putPrivateState({
+        tenant_id: "tenant-1",
+        namespace: "daily-assistant.scheduling/v1",
+        key: "feishu-chat-1",
+        expected_version: 0,
+        value: { phase: "awaiting_confirmation" },
+        updated_at: NOW,
+      });
       await first.close();
 
       const reopened = new SqliteAgentRuntimeStateStore({ location });
       expect(await reopened.getRun("tenant-1", "handoff-1")).toMatchObject({ state: "received" });
       expect((await reopened.recordDelivery(delivery())).created).toBe(false);
+      expect(await reopened.getPrivateState(
+        "tenant-1",
+        "daily-assistant.scheduling/v1",
+        "feishu-chat-1",
+      )).toMatchObject({
+        version: 1,
+        value: { phase: "awaiting_confirmation" },
+      });
       await reopened.close();
     } finally {
       await rm(directory, { recursive: true, force: true });

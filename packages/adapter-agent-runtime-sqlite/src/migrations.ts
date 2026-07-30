@@ -16,9 +16,17 @@ export const AGENT_CAPABILITY_INVOCATION_SQLITE_MIGRATION: SqliteMigration = {
     "utf8",
   ),
 };
+export const AGENT_PRIVATE_STATE_SQLITE_MIGRATION: SqliteMigration = {
+  id: "003_private_state",
+  sql: readFileSync(
+    new URL("../migrations/003_private_state.sql", import.meta.url),
+    "utf8",
+  ),
+};
 export const AGENT_RUNTIME_SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
   AGENT_RUNTIME_SQLITE_MIGRATION,
   AGENT_CAPABILITY_INVOCATION_SQLITE_MIGRATION,
+  AGENT_PRIVATE_STATE_SQLITE_MIGRATION,
 ];
 
 function checksum(sql: string): string { return createHash("sha256").update(sql).digest("hex"); }

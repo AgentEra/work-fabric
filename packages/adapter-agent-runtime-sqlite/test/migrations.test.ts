@@ -14,12 +14,20 @@ describe("agent runtime SQLite migrations", () => {
     const session = new SqliteSession({ database });
     try {
       expect(migrateAgentRuntimeSqlite(session)).toEqual({
-        applied: 2,
-        ordered_ids: ["001_agent_runtime", "002_capability_invocations"],
+        applied: 3,
+        ordered_ids: [
+          "001_agent_runtime",
+          "002_capability_invocations",
+          "003_private_state",
+        ],
       });
       expect(migrateAgentRuntimeSqlite(session)).toEqual({
         applied: 0,
-        ordered_ids: ["001_agent_runtime", "002_capability_invocations"],
+        ordered_ids: [
+          "001_agent_runtime",
+          "002_capability_invocations",
+          "003_private_state",
+        ],
       });
       expect(() => migrateAgentRuntimeSqlite(session, [{
         ...AGENT_RUNTIME_SQLITE_MIGRATION,

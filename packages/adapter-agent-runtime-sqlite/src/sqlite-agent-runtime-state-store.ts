@@ -1,5 +1,7 @@
 import type {
   AgentCapabilityInvocationStore,
+  AgentPrivateStateRecord,
+  AgentPrivateStateStore,
   AgentRuntimeStateStore,
   CapabilityInvocationRecord,
   CapabilityInvocationState,
@@ -12,6 +14,10 @@ import type {
   RuntimeRunState,
 } from "@work-fabric/agent-runtime-spi";
 import {
+  AgentPrivateStateConflictError,
+  validateAgentPrivateStateIdentity,
+  validateAgentPrivateStatePut,
+  validateAgentPrivateStateRecord,
   validateCapabilityCandidate,
   validateCapabilityInvocationRequest,
   validateCapabilityInvocationResult,
@@ -34,6 +40,14 @@ interface InvocationRow {
   readonly lease_expires_at: string | null;
   readonly updated_at: string;
   readonly record_json: string;
+}
+interface PrivateStateRow {
+  readonly tenant_id: string;
+  readonly namespace: string;
+  readonly state_key: string;
+  readonly version: number;
+  readonly value_json: string;
+  readonly updated_at: string;
 }
 
 const RUN_STATES = new Set<RuntimeRunState>(["received", "accepted", "running", "result_ready", "succeeded", "failed", "cancelled"]);
@@ -166,8 +180,22 @@ function serializeInvocation(record: CapabilityInvocationRecord): string {
   return JSON.stringify(record);
 }
 
+function privateStateRecord(row: PrivateStateRow): AgentPrivateStateRecord {
+  return clone(validateAgentPrivateStateRecord({
+    tenant_id: row.tenant_id,
+    namespace: row.namespace,
+    key: row.state_key,
+    version: row.version,
+    value: JSON.parse(row.value_json) as RuntimeJsonObject,
+    updated_at: row.updated_at,
+  }));
+}
+
 export class SqliteAgentRuntimeStateStore
-  implements AgentRuntimeStateStore, AgentCapabilityInvocationStore {
+  implements
+    AgentRuntimeStateStore,
+    AgentCapabilityInvocationStore,
+    AgentPrivateStateStore {
   private readonly session: SqliteSession;
   private closed = false;
 
@@ -489,6 +517,83 @@ export class SqliteAgentRuntimeStateStore
       .map(invocationRecord));
   }
 
+  async getPrivateState(
+    tenantId: string,
+    namespace: string,
+    key: string,
+  ): Promise<AgentPrivateStateRecord | null> {
+    const identity = validateAgentPrivateStateIdentity(
+      tenantId,
+      namespace,
+      key,
+    );
+    return this.read(() => {
+      const row = this.getPrivateStateRow(
+        identity.tenant_id,
+        identity.namespace,
+        identity.key,
+      );
+      return row === undefined ? null : privateStateRecord(row);
+    });
+  }
+
+  async putPrivateState(
+    input: Parameters<AgentPrivateStateStore["putPrivateState"]>[0],
+  ): Promise<AgentPrivateStateRecord> {
+    const candidate = validateAgentPrivateStatePut(input);
+    const valueJson = JSON.stringify(candidate.value);
+    return this.write(() => {
+      const current = this.getPrivateStateRow(
+        candidate.tenant_id,
+        candidate.namespace,
+        candidate.key,
+      );
+      if (current === undefined) {
+        if (candidate.expected_version !== 0) {
+          throw new AgentPrivateStateConflictError();
+        }
+        this.session.prepare(`
+          INSERT INTO agent_private_state
+            (tenant_id, namespace, state_key, version, value_json, updated_at)
+          VALUES (?, ?, ?, 1, ?, ?)
+        `).run(
+          candidate.tenant_id,
+          candidate.namespace,
+          candidate.key,
+          valueJson,
+          candidate.updated_at,
+        );
+      } else {
+        if (current.version !== candidate.expected_version) {
+          throw new AgentPrivateStateConflictError();
+        }
+        const changed = this.session.prepare(`
+          UPDATE agent_private_state
+          SET version = version + 1, value_json = ?, updated_at = ?
+          WHERE tenant_id = ? AND namespace = ? AND state_key = ?
+            AND version = ?
+        `).run(
+          valueJson,
+          candidate.updated_at,
+          candidate.tenant_id,
+          candidate.namespace,
+          candidate.key,
+          candidate.expected_version,
+        ).changes;
+        if (changed !== 1) throw new AgentPrivateStateConflictError();
+      }
+      const record = this.getPrivateStateRow(
+        candidate.tenant_id,
+        candidate.namespace,
+        candidate.key,
+      );
+      if (record === undefined) {
+        throw new Error("failed to persist Agent private state");
+      }
+      return privateStateRecord(record);
+    });
+  }
+
   async close(): Promise<void> { if (!this.closed) { this.closed = true; this.session.close(); } }
 
   private getRunRow(tenantId: string, handoffId: string): RunRow | undefined { return this.session.prepare("SELECT * FROM agent_runtime_runs WHERE tenant_id = ? AND handoff_id = ?").get(tenantId, handoffId) as RunRow | undefined; }
@@ -501,6 +606,17 @@ export class SqliteAgentRuntimeStateStore
       SELECT * FROM agent_capability_invocations
       WHERE tenant_id = ? AND original_handoff_id = ? AND invocation_id = ?
     `).get(tenantId, originalHandoffId, invocationId) as InvocationRow | undefined;
+  }
+  private getPrivateStateRow(
+    tenantId: string,
+    namespace: string,
+    key: string,
+  ): PrivateStateRow | undefined {
+    return this.session.prepare(`
+      SELECT tenant_id, namespace, state_key, version, value_json, updated_at
+      FROM agent_private_state
+      WHERE tenant_id = ? AND namespace = ? AND state_key = ?
+    `).get(tenantId, namespace, key) as PrivateStateRow | undefined;
   }
   private read<T>(operation: () => T): T { this.ensureOpen(); return operation(); }
   private write<T>(operation: () => T): T { this.ensureOpen(); return this.session.transaction(operation, "IMMEDIATE"); }
