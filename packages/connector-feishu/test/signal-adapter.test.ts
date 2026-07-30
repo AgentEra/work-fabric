@@ -196,11 +196,13 @@ describe("FeishuSignalAdapter", () => {
       kind: "text",
       media_type: "text/markdown",
       text: "请确认 **EDA 方案评审** 的排期提案。",
-      recipient_references: [{
-        kind: "mention",
-        resource_uri: recipient,
-        display_text: "发起人",
-      }],
+      extensions: {
+        "workfabric.dev/recipient_references": [{
+          kind: "mention",
+          resource_uri: recipient,
+          display_text: "发起人",
+        }],
+      },
     }], [recipient]);
 
     await expect(adapter.deliver(
@@ -247,11 +249,13 @@ describe("FeishuSignalAdapter", () => {
       kind: "text",
       media_type: "text/markdown",
       text: "请确认。",
-      recipient_references: [{
-        kind: "mention",
-        resource_uri: recipient,
-        display_text: "确认人",
-      }],
+      extensions: {
+        "workfabric.dev/recipient_references": [{
+          kind: "mention",
+          resource_uri: recipient,
+          display_text: "确认人",
+        }],
+      },
     }], ["feishu://user/open-id/ou-initiator"]);
 
     await expect(adapter.deliver(
@@ -285,11 +289,15 @@ describe("FeishuSignalAdapter", () => {
       kind: "text",
       media_type: "text/plain",
       text: "请确认。",
-      recipient_references: recipients.map((resourceUri) => ({
-        kind: "mention",
-        resource_uri: resourceUri,
-        display_text: "确认人",
-      })),
+      extensions: {
+        "workfabric.dev/recipient_references": recipients.map(
+          (resourceUri) => ({
+            kind: "mention",
+            resource_uri: resourceUri,
+            display_text: "确认人",
+          }),
+        ),
+      },
     }], recipients);
 
     await expect(adapter.deliver(

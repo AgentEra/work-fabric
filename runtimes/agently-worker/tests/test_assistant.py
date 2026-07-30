@@ -219,10 +219,18 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "version_constraint": "",
         "input": {},
         "reason": "",
+        "private_state": {
+            "namespace": "daily-assistant.scheduling/v1",
+            "expected_version": 0,
+        },
     })
     assert final["kind"] == "final"
     assert final["response"]["summary"][0]["media_type"] == "text/markdown"
     assert final["response"]["summary"][0]["text"] == "当前飞书服务不可用，请稍后重试。"
+    assert final["response"]["extensions"]["workfabric.agent/private_state"] == {
+        "namespace": "daily-assistant.scheduling/v1",
+        "expected_version": 0,
+    }
 
     capability = validate_turn_assistant_output({
         "turn_type": "capability_request",
@@ -233,6 +241,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "version_constraint": "^1.0.0",
         "input": {"title": "项目需求"},
         "reason": "创建团队文档",
+        "private_state": {},
     })
     assert capability["kind"] == "capability_request"
     assert capability["request"]["capability_id"] == "feishu.document.create"
@@ -246,6 +255,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "version_constraint": "2.0.0",
         "input": {"title": "项目需求"},
         "reason": "",
+        "private_state": {},
     })
     assert capability_without_reason["request"]["reason"] == "需要创建飞书文档"
 
@@ -270,6 +280,7 @@ def test_prompt_passes_resolved_context_as_untrusted_evidence() -> None:
             "version_constraint": "^1.0.0",
             "input": {},
             "reason": "创建团队文档",
+            "private_state": {},
         })
 
 
@@ -288,6 +299,7 @@ async def test_executes_a_v3_turn_with_the_dedicated_schema() -> None:
             "version_constraint": "1.0.0",
             "input": {"title": "项目需求"},
             "reason": "创建团队文档",
+            "private_state": {},
         }
 
     agent.async_start = capability_start  # type: ignore[method-assign]
@@ -383,6 +395,33 @@ async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_res
 @pytest.mark.asyncio
 async def test_calendar_partial_fallback_is_agent_owned_and_linked() -> None:
     value = valid_request_v3()
+    proposal_digest = "sha256:" + ("b" * 64)
+    value["task"]["agent_private_context"] = {
+        "namespace": "daily-assistant.scheduling/v1",
+        "correlation_key": "feishu:conversation:oc-team",
+        "current_source": {
+            "handoff_id": "handoff-confirmation",
+            "actor_id": "actor-human",
+            "sender_resource_uri": "feishu://user/open-id/ou-human",
+            "conversation_resource_uri": "feishu://chat/oc-team",
+        },
+        "original_initiator": {
+            "actor_id": "actor-human",
+            "sender_resource_uri": "feishu://user/open-id/ou-human",
+        },
+        "active_session": {
+            "version": 3,
+            "phase": "awaiting_confirmation",
+            "origin_handoff_id": "handoff-origin",
+            "proposal": {
+                "version": 1,
+                "digest": proposal_digest,
+            },
+            "capability_result_handoff_ids": [
+                "handoff-members-result-1",
+            ],
+        },
+    }
     value["task"]["intent"] = [{
         "kind": "text",
         "media_type": "text/plain",
@@ -415,6 +454,8 @@ async def test_calendar_partial_fallback_is_agent_owned_and_linked() -> None:
             "data": {
                 "title": "项目评审",
                 "url": "https://feishu.cn/calendar/event/event-1",
+                "event_resource_uri":
+                    "feishu://calendar/cal-team/events/event-1",
                 "completion_state": "partial",
             },
             "artifacts": [],
@@ -438,6 +479,22 @@ async def test_calendar_partial_fallback_is_agent_owned_and_linked() -> None:
     assert text.startswith("已部分完成：")
     assert "日程《项目评审》" in text
     assert "https://feishu.cn/calendar/event/event-1" in text
+    assert (
+        turn["response"]["extensions"]["workfabric.agent/private_state"]
+        == {
+            "namespace": "daily-assistant.scheduling/v1",
+            "expected_version": 3,
+            "phase": "completed",
+            "proposal": None,
+            "confirmed_proposal_digest": proposal_digest,
+            "confirmation_handoff_id": "handoff-confirmation",
+            "calendar_result_uri":
+                "feishu://calendar/cal-team/events/event-1",
+            "capability_result_handoff_ids": [
+                "handoff-members-result-1",
+            ],
+        }
+    )
 
 
 @pytest.mark.asyncio
@@ -457,6 +514,7 @@ async def test_rejects_a_capability_request_that_was_not_advertised() -> None:
             "version_constraint": "1.0.0",
             "input": {"title": "项目需求"},
             "reason": "创建团队文档",
+            "private_state": {},
         }
 
     agent.async_start = capability_start  # type: ignore[method-assign]
@@ -536,11 +594,50 @@ def test_capability_turn_prompt_defines_complete_discriminated_json_shapes() -> 
     assert (
         '{"turn_type":"final","request_summary":"摘要","response":"完整答复",'
         '"invocation_id":"","capability_id":"","version_constraint":"",'
-        '"input":{},"reason":""}'
+        '"input":{},"reason":"","private_state":{}}'
     ) in prompt
     assert (
         '{"turn_type":"capability_request","request_summary":"摘要",'
         '"response":"","invocation_id":"唯一调用 ID",'
         '"capability_id":"已披露能力 ID","version_constraint":"版本约束",'
-        '"input":{},"reason":"调用理由"}'
+        '"input":{},"reason":"调用理由","private_state":{}}'
+    ) in prompt
+
+
+def test_scheduling_private_context_activates_agent_owned_confirmation_rules() -> None:
+    value = valid_request_v3()
+    private_context = {
+        "namespace": "daily-assistant.scheduling/v1",
+        "correlation_key": "feishu:root:om-root-1",
+        "current_source": {
+            "handoff_id": "handoff-confirmation",
+            "actor_id": "actor-initiator",
+            "sender_resource_uri": "feishu://user/open-id/ou-initiator",
+            "conversation_resource_uri": "feishu://chat/oc-team",
+        },
+        "original_initiator": {
+            "actor_id": "actor-initiator",
+            "sender_resource_uri": "feishu://user/open-id/ou-initiator",
+        },
+        "active_session": None,
+    }
+    value["task"]["agent_private_context"] = private_context
+    request = parse_request(value)
+
+    prompt = role_prompt(
+        request.task["role"],
+        capability_turn=True,
+        agent_private_context=private_context,
+    )
+
+    assert "The Agent owns the scheduling session" in prompt
+    assert "original_initiator" in prompt
+    assert "current proposal digest" in prompt
+    assert "Never request feishu.calendar.event.create before confirmation" in prompt
+    assert "session_origin_handoff_id" in prompt
+    assert "confirmation_handoff_id" in prompt
+    assert "capability_result_handoff_ids" in prompt
+    assert (
+        "version, title, participant_resource_uris, start_at, end_at, "
+        "timezone, and summary_markdown"
     ) in prompt

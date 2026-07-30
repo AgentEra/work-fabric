@@ -418,18 +418,86 @@ describe("LocalInvocationAuthorityProvider", () => {
     )).rejects.toThrow(/authority denied/i);
   });
 
-  it("authorizes only the trusted current chat as a Calendar create attendee", async () => {
-    const original = snapshot({
+  it("authorizes Calendar creation only from the original Human's later confirmation and verified members", async () => {
+    const confirmation = snapshot({
       package: {
         ...(snapshot().state.package as Record<string, unknown>),
+        work_reference: {
+          uri: "feishu://tenant-key-1/message/om-confirmation",
+          extensions: {
+            "workfabric.dev/provider_family": "feishu",
+            "workfabric.dev/resource_kind": "conversation_message",
+            "workfabric.dev/external_tenant_id": "tenant-key-1",
+            "workfabric.dev/conversation_id": "oc-chat-1",
+            "workfabric.dev/message_id": "om-confirmation",
+            "workfabric.dev/sender_resource_uri":
+              "feishu://user/open-id/ou_1",
+          },
+        },
         authority_scope: {
           delegation_id: "delegation-human-agent",
           scopes: ["calendar_event:write"],
-          resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
+          resource_refs: [
+            "feishu://tenant-key-1/message/om-confirmation",
+          ],
           expires_at: "2026-07-27T12:00:00.000Z",
           may_redelegate: true,
         },
       },
+    });
+    const sessionOrigin = snapshot({
+      package: {
+        ...(snapshot().state.package as Record<string, unknown>),
+        work_reference: {
+          uri: "feishu://tenant-key-1/message/om-origin",
+          extensions: {
+            "workfabric.dev/provider_family": "feishu",
+            "workfabric.dev/resource_kind": "conversation_message",
+            "workfabric.dev/external_tenant_id": "tenant-key-1",
+            "workfabric.dev/conversation_id": "oc-chat-1",
+            "workfabric.dev/message_id": "om-origin",
+            "workfabric.dev/sender_resource_uri":
+              "feishu://user/open-id/ou_1",
+          },
+        },
+      },
+    });
+    const getHandoff = vi.fn(async (handoffId: string) => {
+      if (handoffId === "handoff-original") return confirmation;
+      if (handoffId === "handoff-session-origin") {
+        return {
+          ...sessionOrigin,
+          handoff_id: handoffId,
+          partition_id: `handoff:${handoffId}`,
+        };
+      }
+      const members = membersResult();
+      return {
+        ...members,
+        state: {
+          ...members.state,
+          package: {
+            ...(members.state.package as Record<string, unknown>),
+            work_reference: {
+              uri:
+                "urn:work-fabric:capability-invocation:" +
+                "handoff-session-origin:members-1",
+              extensions: {
+                "workfabric.dev/original_handoff_id":
+                  "handoff-session-origin",
+                "workfabric.dev/invocation_id": "members-1",
+              },
+            },
+          },
+        },
+      } as HandoffReadModel;
+    });
+    const policy = new LocalInvocationAuthorityProvider({
+      tenant_id: "tenant-local",
+      agent_actor_id: "actor-intake-agent",
+      queries: { getHandoff },
+      allowed_namespaces: ["feishu."],
+      now: () => "2026-07-27T10:00:00.000Z",
     });
     const request = capabilityInput("feishu.calendar.event.create", {
       calendar: { kind: "default_calendar" },
@@ -437,26 +505,61 @@ describe("LocalInvocationAuthorityProvider", () => {
       start_at: "2026-07-28T09:00:00+08:00",
       end_at: "2026-07-28T10:00:00+08:00",
       time_zone: "Asia/Shanghai",
-      attendees: ["feishu://chat/oc-chat-1"],
+      attendees: [
+        "feishu://user/open-id/ou_1",
+        "feishu://user/open-id/ou_2",
+      ],
+      authority_evidence: {
+        session_origin_handoff_id: "handoff-session-origin",
+        confirmation_handoff_id: "handoff-original",
+        proposal_digest: `sha256:${"b".repeat(64)}`,
+        capability_result_handoff_ids: ["handoff-members-result-1"],
+      },
     });
-    await expect(authority(original).authority.authorize(
+    await expect(policy.authorize(
       request,
       new AbortController().signal,
     )).resolves.toMatchObject({
       extensions: {
         "workfabric.dev/capability_authority": {
-          allowed_target_refs: ["feishu://chat/oc-chat-1"],
+          allowed_target_refs: [
+            "feishu://user/open-id/ou_1",
+            "feishu://user/open-id/ou_2",
+          ],
+          confirmation_proof_refs: [
+            "handoff-session-origin",
+            "handoff-original",
+            "handoff-members-result-1",
+            `urn:work-fabric:scheduling-proposal:sha256:${"b".repeat(64)}`,
+          ],
         },
       },
     });
-    await expect(authority(original).authority.authorize(
+    await expect(policy.authorize(
       {
         ...request,
         request: {
           ...request.request,
           input: {
             ...request.request.input,
-            attendees: ["feishu://chat/model-invented"],
+            attendees: ["feishu://user/open-id/ou_model_invented"],
+          },
+        },
+      },
+      new AbortController().signal,
+    )).rejects.toThrow(/authority denied/i);
+
+    await expect(policy.authorize(
+      {
+        ...request,
+        request: {
+          ...request.request,
+          input: {
+            ...request.request.input,
+            authority_evidence: {
+              ...(request.request.input.authority_evidence as object),
+              confirmation_handoff_id: "handoff-other",
+            },
           },
         },
       },

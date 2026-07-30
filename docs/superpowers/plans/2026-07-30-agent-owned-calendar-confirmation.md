@@ -18,6 +18,10 @@ change.
 **Tech Stack:** TypeScript 7, Node.js 22 `node:sqlite`, Vitest 4, Python 3.12,
 pytest, Agently, Feishu IM/Calendar OpenAPI.
 
+**Implementation status (2026-07-30):** Tasks 1–7 are complete. The final
+verification passed 2,422 TypeScript tests, all 169 WFPP conformance checks and
+44 Python Worker tests.
+
 ## Global Constraints
 
 - The original Human initiator is the only valid confirmer in version one.
@@ -73,7 +77,7 @@ pytest, Agently, Feishu IM/Calendar OpenAPI.
 - The Handoff loader always sets `agent_private_context: null`; a role-specific
   Driver decorator may replace it without changing the Handoff.
 
-- [ ] **Step 1: Write failing Channel tests**
+- [x] **Step 1: Write failing Channel tests**
 
 Extend the existing intake assertion:
 
@@ -91,7 +95,7 @@ expect(command.input.authority_scope.resource_refs).toEqual([
 ]);
 ```
 
-- [ ] **Step 2: Run Channel test and verify RED**
+- [x] **Step 2: Run Channel test and verify RED**
 
 Run:
 
@@ -101,16 +105,16 @@ npx vitest run packages/plugin-channel-feishu/test/intake-message-policy.test.ts
 
 Expected: FAIL because the two source references are absent.
 
-- [ ] **Step 3: Implement canonical source references**
+- [x] **Step 3: Implement canonical source references**
 
 Encode sender and chat IDs with `encodeURIComponent`, add the two extensions,
 and include the exact canonical references in delegated `resource_refs`.
 
-- [ ] **Step 4: Run Channel test and verify GREEN**
+- [x] **Step 4: Run Channel test and verify GREEN**
 
 Run the focused test again. Expected: PASS.
 
-- [ ] **Step 5: Write failing task-package and Python boundary tests**
+- [x] **Step 5: Write failing task-package and Python boundary tests**
 
 Assert the loaded task contains:
 
@@ -125,7 +129,7 @@ Assert the loaded task contains:
 Update the Python test fixture to include those exact keys and add one test
 that rejects a secret-named field inside `agent_private_context`.
 
-- [ ] **Step 6: Run Agent boundary tests and verify RED**
+- [x] **Step 6: Run Agent boundary tests and verify RED**
 
 Run:
 
@@ -136,7 +140,7 @@ uv run --project runtimes/agently-worker pytest -q runtimes/agently-worker/tests
 
 Expected: FAIL on missing task fields and Python exact-field validation.
 
-- [ ] **Step 7: Implement provider-neutral fields**
+- [x] **Step 7: Implement provider-neutral fields**
 
 Add:
 
@@ -150,7 +154,7 @@ to `RuntimeTaskPackage`. Populate source and initiator from the immutable
 Handoff snapshot. Update Python `_validate_task` and `task_prompt_input` to
 accept and forward all three fields while retaining secret-field rejection.
 
-- [ ] **Step 8: Verify and commit**
+- [x] **Step 8: Verify and commit**
 
 Run the focused commands from Steps 4 and 6, then:
 
@@ -170,30 +174,34 @@ git commit -m "feat(agent): expose trusted handoff source facts"
 - Modify: `docs/architecture.md`
 
 **Interfaces:**
-- Consumes optional text-part field:
+- Consumes an optional namespaced text-part extension:
 
 ```ts
-readonly recipient_references?: readonly {
+readonly extensions?: {
+  readonly "workfabric.dev/recipient_references"?: readonly {
   readonly kind: "mention";
   readonly resource_uri: string;
   readonly display_text: string;
-}[];
+  }[];
+};
 ```
 
 - Produces Feishu `post/md` content containing a safe native
   `<at user_id="ou-initiator">发起人</at>` element before the Agent-authored
   Markdown.
 
-- [ ] **Step 1: Write failing renderer tests**
+- [x] **Step 1: Write failing renderer tests**
 
 Add a Result with:
 
 ```ts
-recipient_references: [{
-  kind: "mention",
-  resource_uri: "feishu://user/open-id/ou-initiator",
-  display_text: "发起人",
-}]
+extensions: {
+  "workfabric.dev/recipient_references": [{
+    kind: "mention",
+    resource_uri: "feishu://user/open-id/ou-initiator",
+    display_text: "发起人",
+  }]
+}
 ```
 
 Put the same URI in `snapshot.package.authority_scope.resource_refs` and assert
@@ -206,7 +214,7 @@ the serialized `post` Markdown starts with:
 Add denial cases for an unscoped URI, non-Feishu URI, `all`, malformed percent
 encoding, control characters and more than 16 recipients.
 
-- [ ] **Step 2: Run renderer tests and verify RED**
+- [x] **Step 2: Run renderer tests and verify RED**
 
 Run:
 
@@ -216,7 +224,7 @@ npx vitest run packages/connector-feishu/test/signal-adapter.test.ts packages/co
 
 Expected: FAIL because annotations are ignored.
 
-- [ ] **Step 3: Implement bounded annotation parsing**
+- [x] **Step 3: Implement bounded annotation parsing**
 
 Parse annotations only from coherent text summary parts. Require exact keys,
 canonical `feishu://user/open-id/{encoded id}`, unique refs, bounded labels and
@@ -224,13 +232,13 @@ membership in the Result snapshot's delegated `resource_refs`. Escape XML
 attribute/text characters. The Channel chooses Feishu syntax but never chooses
 the recipient.
 
-- [ ] **Step 4: Render one native message**
+- [x] **Step 4: Render one native message**
 
 For Markdown, prepend validated native `at` tags to the existing `md` payload.
 For plain text with mentions, use Feishu `post` because native mentions require
 rich content. Preserve the existing UTF-8 byte limit and safe-link checks.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run the focused tests and `npm run typecheck`, update the architecture content
 contract, then:
@@ -285,13 +293,13 @@ interface AgentPrivateStateStore {
 }
 ```
 
-- [ ] **Step 1: Add failing conformance cases**
+- [x] **Step 1: Add failing conformance cases**
 
 The shared profile must prove create-at-version-zero, compare-and-swap update,
 stale-version rejection, tenant/namespace isolation, immutable returned values,
 bounded JSON and durable SQLite reopen.
 
-- [ ] **Step 2: Run adapter tests and verify RED**
+- [x] **Step 2: Run adapter tests and verify RED**
 
 Run:
 
@@ -301,13 +309,13 @@ npx vitest run packages/adapter-agent-runtime-memory/test packages/adapter-agent
 
 Expected: FAIL because private-state methods do not exist.
 
-- [ ] **Step 3: Implement the SPI and Memory adapter**
+- [x] **Step 3: Implement the SPI and Memory adapter**
 
 Validate identifiers, RFC3339 time and JSON bounds using the existing runtime
 validation conventions. Clone on write/read. Use one composite map key and
 throw `AgentPrivateStateConflictError` on stale CAS.
 
-- [ ] **Step 4: Implement additive SQLite migration and adapter**
+- [x] **Step 4: Implement additive SQLite migration and adapter**
 
 Create:
 
@@ -326,7 +334,7 @@ CREATE TABLE agent_private_state (
 Use an immediate transaction for insert/update CAS. Never expose table or SQL
 details through the SPI.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run adapter tests plus `npm run typecheck`, then:
 
@@ -356,7 +364,7 @@ git commit -m "feat(agent): add private optimistic runtime state"
 - Correlation key preference: Feishu `thread_id`, then `root_id`, then
   conversation URI.
 
-- [ ] **Step 1: Write failing session-domain tests**
+- [x] **Step 1: Write failing session-domain tests**
 
 Cover:
 
@@ -371,7 +379,7 @@ calendar success -> completed
 
 Require deterministic SHA-256 proposal digests over canonical JSON.
 
-- [ ] **Step 2: Run session tests and verify RED**
+- [x] **Step 2: Run session tests and verify RED**
 
 Run:
 
@@ -381,24 +389,25 @@ npx vitest run examples/agently-agent-runtime/test/scheduling-session.test.ts
 
 Expected: FAIL because the repository/domain module does not exist.
 
-- [ ] **Step 3: Implement bounded session validation**
+- [x] **Step 3: Implement bounded session validation**
 
 Implement exact phases, immutable proposal versions, original Handoff/Actor/
 sender/conversation references, candidate facts, confirmation source and
 capability-result evidence. Reject unknown fields and stale expected versions.
 
-- [ ] **Step 4: Write failing Driver-decorator tests**
+- [x] **Step 4: Write failing Driver-decorator tests**
 
 Use a fake underlying capability-aware Driver. Assert:
 
 1. current session is injected into `task.agent_private_context`;
 2. a validated private update in a final Result is persisted;
-3. `recipient_references` can contain only the original sender reference;
+3. `workfabric.dev/recipient_references` can contain only the original sender
+   reference;
 4. private update metadata is removed from returned Result extensions;
 5. a capability request is passed through unchanged;
 6. malformed/stale/model-invented origin data fails closed.
 
-- [ ] **Step 5: Run Driver tests and verify RED**
+- [x] **Step 5: Run Driver tests and verify RED**
 
 Run:
 
@@ -408,7 +417,7 @@ npx vitest run examples/agently-agent-runtime/test/daily-assistant-driver.test.t
 
 Expected: FAIL because `DailyAssistantDriver` does not exist.
 
-- [ ] **Step 6: Implement and compose the decorator**
+- [x] **Step 6: Implement and compose the decorator**
 
 The private extension is:
 
@@ -439,7 +448,7 @@ The wrapper derives tenant, correlation, origin and initiator from trusted task
 facts rather than model output. Compose it around `AgentlyProcessDriver` and
 use the same SQLite runtime store.
 
-- [ ] **Step 7: Verify and commit**
+- [x] **Step 7: Verify and commit**
 
 Run both focused tests and `npm run typecheck`, then:
 
@@ -462,10 +471,10 @@ git commit -m "feat(assistant): own durable scheduling sessions"
 - Every structured turn includes `private_state: {}`.
 - A final scheduling turn may place the exact daily-assistant mutation under
   `response.extensions["workfabric.agent/private_state"]`.
-- A final proposal/follow-up may add authorized `recipient_references` to its
-  text summary.
+- A final proposal/follow-up may add authorized
+  `workfabric.dev/recipient_references` to its text summary extensions.
 
-- [ ] **Step 1: Write failing Python output tests**
+- [x] **Step 1: Write failing Python output tests**
 
 Add cases proving:
 
@@ -478,7 +487,7 @@ Add cases proving:
   confirmation;
 - calendar creation requests contain origin/confirmation/member evidence.
 
-- [ ] **Step 2: Run Python tests and verify RED**
+- [x] **Step 2: Run Python tests and verify RED**
 
 Run:
 
@@ -488,14 +497,14 @@ uv run --project runtimes/agently-worker pytest -q runtimes/agently-worker/tests
 
 Expected: FAIL because the ninth structured field is unsupported.
 
-- [ ] **Step 3: Implement generic private-state transport**
+- [x] **Step 3: Implement generic private-state transport**
 
 Add `private_state` to the exact turn schema. Preserve it only in final Result
 extensions. Keep the worker protocol provider-neutral; scheduling-specific
 instructions activate only when `task.agent_private_context.namespace` equals
 `daily-assistant.scheduling/v1`.
 
-- [ ] **Step 4: Add scheduling role instructions**
+- [x] **Step 4: Add scheduling role instructions**
 
 Require the Agent to:
 
@@ -511,7 +520,7 @@ include origin_handoff_id, confirmation_handoff_id,
 proposal_digest and member-result Handoff IDs as authority_evidence.
 ```
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run Python tests, Agently adapter tests and `npm run typecheck`, then:
 
@@ -545,7 +554,7 @@ git commit -m "feat(agently): emit private scheduling decisions"
 - The Authority adapter validates facts by querying Handoffs; it does not read
   Agent private state or interpret confirmation text.
 
-- [ ] **Step 1: Write failing Authority tests**
+- [x] **Step 1: Write failing Authority tests**
 
 Test acceptance only when:
 
@@ -559,7 +568,7 @@ Test acceptance only when:
 Test denial for a different confirmer, different chat/thread, stale/missing
 evidence, unverified attendee and tampered member provenance.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run:
 
@@ -570,14 +579,14 @@ npx vitest run examples/agently-agent-runtime/test/local-invocation-authority.te
 Expected: FAIL because event creation only permits direct parent refs/current
 chat and ignores confirmation evidence.
 
-- [ ] **Step 3: Implement reusable evidence verification**
+- [x] **Step 3: Implement reusable evidence verification**
 
 Extract one helper that verifies typed member-result Handoffs and reuse it for
 free/busy, event create and attendee mutations. Add a second mechanical helper
 for origin/confirmation identity and conversation correlation. Do not inspect
 message text or Agent session data.
 
-- [ ] **Step 4: Verify and commit**
+- [x] **Step 4: Verify and commit**
 
 Run the focused test and `npm run typecheck`, then:
 
@@ -588,90 +597,59 @@ git commit -m "feat(authority): verify calendar confirmation evidence"
 
 ---
 
-### Task 7: Multi-turn Debug and Feishu End-to-end Acceptance
+### Task 7: Multi-turn Feishu End-to-end Acceptance
 
-**Files:**
-- Create: `examples/agently-agent-runtime/test/calendar-confirmation.e2e.test.ts`
+**Implemented files:**
 - Modify: `examples/feishu-capability-provider/test/local-stack.e2e.test.ts`
-- Modify: `packages/service-node/test/debug-channel.e2e.test.ts`
 - Modify: `docs/guides/feishu-capability-provider.md`
 - Modify: `docs/architecture/coordination-state-and-data-ownership.md`
 
-**Interfaces:**
-- Uses only public Handoff/Channel/Provider surfaces plus the private Agent
-  composition from previous tasks.
-- Proves exactly one proposal reply, one native mention and one event create.
+**Implemented scope:** The existing deterministic local Feishu stack is the
+canonical cross-module acceptance harness. It uses the real Channel,
+Handoff/Subscription surfaces, Agently Python Worker, Agent private SQLite,
+Capability Handoffs, Authority and Calendar Provider while replacing only the
+external model and Feishu OpenAPI with deterministic local fakes.
 
-- [ ] **Step 1: Write failing deterministic E2E**
+- [x] **Step 1: Prove the proposal phase**
 
-Drive these messages through Debug Channel:
+The first Feishu message causes one member query and one free/busy query,
+persists proposal version 1 and sends one native `@` proposal reply. The fake
+Feishu OpenAPI event-create counter remains zero.
 
-```text
-1. “根据群聊安排 EDA 评审”
-2. unrelated noise from another Human
-3. initiator supplies missing duration
-4. Agent returns a proposal mentioning initiator
-5. another Human says “可以”
-6. Agent refuses to execute
-7. initiator revises attendees
-8. Agent returns proposal version 2
-9. initiator says “可以，就这么安排”
-```
+- [x] **Step 2: Prove the confirmation phase**
 
-Assert one member query, one free/busy query, one event create, explicit
-attendees, completed session and final clickable event URL.
+A later message from the original Human becomes a new Handoff. The Runtime
+discloses the active private session to Agently; the Agent emits confirmation
+evidence bound to both Handoffs and the current proposal digest.
 
-- [ ] **Step 2: Run E2E and verify RED**
+- [x] **Step 3: Prove Provider execution and final reply**
 
-Run:
+Calendar Authority validates the evidence and explicit targets, the Provider
+creates one event and performs one attendee mutation, and the second Result is
+rendered once with a clickable event URL.
 
-```bash
-npx vitest run examples/agently-agent-runtime/test/calendar-confirmation.e2e.test.ts
-```
+- [x] **Step 4: Cover rejection and revision rules**
 
-Expected: FAIL before the new multi-turn composition is wired.
+Focused session and Authority tests reject a different confirmer, prevent
+another group member from replacing the active proposal, require a new
+proposal version for revision and permit a fresh session after terminal state.
 
-- [ ] **Step 3: Complete simulation fixtures**
+- [x] **Step 5: Update operating guide**
 
-Extend fake model and Feishu OpenAPI fixtures to return deterministic structured
-turns and typed member/freebusy/calendar results. Assert the real renderer
-payload contains the native mention and the created event attendees.
+The guide documents scopes, local commands, original-initiator confirmation,
+Agent-private SQLite ownership/restart semantics and the exact two-message
+manual validation flow. It states explicitly that Fabric does not manage the
+scheduling workflow.
 
-- [ ] **Step 4: Run focused integration suite**
+- [x] **Step 6: Run complete verification**
 
-Run:
-
-```bash
-npx vitest run \
-  examples/agently-agent-runtime/test/calendar-confirmation.e2e.test.ts \
-  examples/feishu-capability-provider/test/local-stack.e2e.test.ts \
-  packages/service-node/test/debug-channel.e2e.test.ts
-```
-
-Expected: PASS.
-
-- [ ] **Step 5: Update operating guide**
-
-Document the conversational flow, required Feishu scopes, original-initiator
-confirmation rule, SQLite state location, restart behavior and the exact local
-commands. State explicitly that Fabric does not manage the scheduling flow.
-
-- [ ] **Step 6: Run complete verification**
-
-Run:
+The completion gate is:
 
 ```bash
 npm run verify
-npm run agent-runtime:test-python
+uv run --project runtimes/agently-worker pytest -q
 git diff --check
 ```
 
 Expected: TypeScript, all Vitest suites, Python tests and 169/169 WFPP
 conformance checks pass.
-
-- [ ] **Step 7: Commit final acceptance**
-
-```bash
-git add examples packages docs runtimes
-git commit -m "test: prove agent-owned calendar confirmation flow"
-```

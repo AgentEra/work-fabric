@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -81,6 +82,37 @@ describe("local Feishu assistant stack", () => {
       }
       return [...found];
     };
+    const canonical = (value: unknown): string => {
+      if (value === null || typeof value !== "object") {
+        return JSON.stringify(value);
+      }
+      if (Array.isArray(value)) {
+        return `[${value.map(canonical).join(",")}]`;
+      }
+      const item = value as Record<string, unknown>;
+      return `{${Object.keys(item).sort().map((key) =>
+        `${JSON.stringify(key)}:${canonical(item[key])}`
+      ).join(",")}}`;
+    };
+    const schedulingProposal = {
+      version: 1,
+      title: "Work Fabric 日历联调",
+      start_at: "2026-07-30T07:00:00.000Z",
+      end_at: "2026-07-30T08:00:00.000Z",
+      timezone: "Asia/Shanghai",
+      participant_resource_uris: [
+        "feishu://user/open-id/ou_1",
+        "feishu://user/open-id/ou_2",
+        "feishu://user/open-id/ou_3",
+      ],
+      summary_markdown:
+        "明天 15:00–16:00 举行 Work Fabric 日历联调。",
+    };
+    const proposalDigest = `sha256:${createHash("sha256")
+      .update(canonical(schedulingProposal))
+      .digest("hex")}`;
+    let proposalEvidence: string[] = [];
+    const handoffIds: string[] = [];
     const model = await startFakeOpenAiCompatibleServer({
       structuredOutput: {},
       structuredOutputFactory: (request, index) => {
@@ -98,6 +130,7 @@ describe("local Feishu assistant stack", () => {
               page_size: 50,
             },
             reason: "需要获得当前群内的受信成员事实",
+            private_state: {},
           };
         }
         if (index === 1) {
@@ -128,13 +161,46 @@ describe("local Feishu assistant stack", () => {
               },
             },
             reason: "需要用成员能力的结果作为用户目标权限证据",
+            private_state: {},
           };
         }
         if (index === 2) {
+          const evidence = auxiliaryHandoffIds(request);
+          if (evidence.length < 2) {
+            throw new Error("proposal evidence was not disclosed");
+          }
+          proposalEvidence = evidence;
+          return {
+            turn_type: "final",
+            request_summary: "形成共同空闲的一小时日程提案",
+            response:
+              "排期提案：明天 15:00–16:00 举行 Work Fabric 日历联调，并邀请当前群。请发起人确认。",
+            invocation_id: "",
+            capability_id: "",
+            version_constraint: "",
+            input: {},
+            reason: "",
+            private_state: {
+              namespace: "daily-assistant.scheduling/v1",
+              expected_version: 0,
+              phase: "awaiting_confirmation",
+              proposal: schedulingProposal,
+              confirmed_proposal_digest: null,
+              confirmation_handoff_id: null,
+              calendar_result_uri: null,
+              capability_result_handoff_ids: evidence,
+            },
+          };
+        }
+        if (index === 3) {
+          if (
+            handoffIds.length < 2 ||
+            proposalEvidence.length < 2
+          ) throw new Error("confirmed scheduling session was not disclosed");
           capabilitySequence.push("feishu.calendar.event.create");
           return {
             turn_type: "capability_request",
-            request_summary: "创建共同空闲的一小时日程",
+            request_summary: "发起人已确认，创建共同空闲日程",
             response: "",
             invocation_id: "invocation-calendar-create-1",
             capability_id: "feishu.calendar.event.create",
@@ -147,8 +213,16 @@ describe("local Feishu assistant stack", () => {
               time_zone: "Asia/Shanghai",
               attendees: ["feishu://chat/oc-original"],
               notify_attendees: true,
+              authority_evidence: {
+                session_origin_handoff_id:
+                  handoffIds[0],
+                confirmation_handoff_id: handoffIds[1],
+                proposal_digest: proposalDigest,
+                capability_result_handoff_ids: proposalEvidence,
+              },
             },
-            reason: "15:00 到 16:00 是三位成员共同空闲时间",
+            reason: "原始发起人确认了当前提案",
+            private_state: {},
           };
         }
         return {
@@ -161,6 +235,18 @@ describe("local Feishu assistant stack", () => {
           version_constraint: "",
           input: {},
           reason: "",
+          private_state: {
+            namespace: "daily-assistant.scheduling/v1",
+            expected_version: 1,
+            phase: "completed",
+            proposal: null,
+            confirmed_proposal_digest: proposalDigest,
+            confirmation_handoff_id: handoffIds[1],
+            calendar_result_uri:
+              "feishu://calendar/cal-local/events/event-local-1",
+            capability_result_handoff_ids:
+              proposalEvidence,
+          },
         };
       },
     });
@@ -202,7 +288,6 @@ describe("local Feishu assistant stack", () => {
     const sent: Record<string, unknown>[] = [];
     const eventEpoch = Date.now();
     const commandResponses: unknown[] = [];
-    const handoffIds: string[] = [];
     const workerObservations: AgentlyProcessDriverObservation[] = [];
     let externalEventCreates = 0;
     let attendeeMutations = 0;
@@ -575,6 +660,52 @@ describe("local Feishu assistant stack", () => {
         ),
       });
       await eventually(async () => {
+        expect(model.requests).toHaveLength(3);
+        expect(externalEventCreates).toBe(0);
+        const proposalRun =
+          handoffIds[0] === undefined || agentState === undefined
+            ? null
+            : await agentState.getRun(
+                "tenant-local",
+                handoffIds[0],
+              );
+        expect(sent, JSON.stringify({
+          handoffIds,
+          proposalRun,
+          workerObservations,
+          commandResponses,
+        })).toHaveLength(1);
+        const proposalContent = JSON.parse(
+          String(sent[0]!.content),
+        ) as {
+          zh_cn: { content: Array<Array<{ text: string }>> };
+        };
+        expect(proposalContent.zh_cn.content[0]?.[0]?.text).toContain(
+          '<at user_id="ou-human">发起人</at>',
+        );
+      }, 20_000);
+      const confirmationEvent = {
+        ...inboundEvent,
+        header: {
+          ...inboundEvent.header,
+          event_id: "event-full-stack-confirmation-1",
+        },
+        event: {
+          ...inboundEvent.event,
+          message: {
+            ...inboundEvent.event.message,
+            message_id: "om-full-stack-confirmation-1",
+            content: JSON.stringify({
+              text: "@_user_1 可以，就这么安排",
+            }),
+          },
+        },
+      } as const;
+      await expect(client.emit(confirmationEvent)).resolves.toMatchObject({
+        accepted: true,
+        duplicate: false,
+      });
+      await eventually(async () => {
         const ingress = await connector.operations.listConnectorIngress({
           connectorId: "feishu-primary",
           limit: 10,
@@ -585,15 +716,21 @@ describe("local Feishu assistant stack", () => {
         const claimable = await agentClient.endpoints.listClaimableHandoffs(
           "endpoint-intake-agent",
         );
-        const run = handoffIds[0] === undefined || agentState === undefined
+        const confirmationHandoffId = handoffIds[1];
+        const run = confirmationHandoffId === undefined ||
+            agentState === undefined
           ? null
-          : await agentState.getRun("tenant-local", handoffIds[0]);
+          : await agentState.getRun(
+              "tenant-local",
+              confirmationHandoffId,
+            );
         const invocation =
-          handoffIds[0] === undefined || agentState === undefined
+          confirmationHandoffId === undefined ||
+              agentState === undefined
             ? null
             : await agentState.getInvocation(
                 "tenant-local",
-                handoffIds[0],
+                confirmationHandoffId,
                 "invocation-calendar-create-1",
               );
         expect(externalEventCreates, JSON.stringify({
@@ -623,12 +760,12 @@ describe("local Feishu assistant stack", () => {
           workerObservations,
           run,
           invocation,
-        })).toHaveLength(4);
-        expect(sent).toHaveLength(1);
-        expect(JSON.stringify(sent[0])).toContain(
+        })).toHaveLength(5);
+        expect(sent).toHaveLength(2);
+        expect(JSON.stringify(sent[1])).toContain(
           "https://feishu.example/calendar/event-local-1",
         );
-        expect(JSON.stringify(sent[0])).not.toMatch(
+        expect(JSON.stringify(sent)).not.toMatch(
           /handoff-|State:|offered|accepted/,
         );
       }, 20_000);
@@ -649,7 +786,7 @@ describe("local Feishu assistant stack", () => {
       );
       const createInvocation = await agentState.getInvocation(
         "tenant-local",
-        handoffIds[0]!,
+        handoffIds[1]!,
         "invocation-calendar-create-1",
       );
       expect(JSON.stringify(membersInvocation?.result)).toContain(
@@ -665,8 +802,21 @@ describe("local Feishu assistant stack", () => {
         "text/markdown",
       );
       expect(JSON.stringify(originalHandoff.state.result)).toContain(
+        "请发起人确认",
+      );
+      const confirmationHandoff =
+        await agentClient.queries.getHandoff(handoffIds[1]!);
+      expect(JSON.stringify(confirmationHandoff.state.result)).toContain(
         "https://feishu.example/calendar/event-local-1",
       );
+      expect(workerObservations.some((observation) =>
+        observation.task_json.includes(
+          '"active_session":{"version":1',
+        ) &&
+        observation.task_json.includes(
+          `"handoff_id":"${handoffIds[1]}"`,
+        )
+      )).toBe(true);
     } finally {
       await agent?.host.close().catch(() => undefined);
       await provider?.close().catch(() => undefined);

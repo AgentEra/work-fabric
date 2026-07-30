@@ -105,11 +105,12 @@ flowchart TB
 | Message Provider | 按 Authority 提供成员、历史和消息事实 | 组织会议或解释回答 |
 | Calendar Provider | 按明确参与人列表查询忙闲、创建日程、添加参与人并返回逐项结果 | 猜测参与人或主动发起询问 |
 
-Agent 使用自己的 State Store 保存排期会话、询问消息引用、已收集答案、
-等待截止时间和决策进度。需要询问时，Agent 发布一个 Message Capability
-Handoff；Message Provider 自主接收并执行。外部回复到达时，Channel 发布
-带可信会话和回复关系引用的新消息事实；Agent 通过自己的 Subscription 接收
-候选输入并根据本地会话决定是否认领、关联和继续。
+Agent 使用自己的 State Store 保存排期会话、已收集答案、提案版本、确认
+来源和决策进度。对当前入站 Handoff 的问题或提案使用普通 Result 返回，
+Channel 在原会话中只投递一次；只有需要额外主动通知时，Agent 才发布
+Message Capability Handoff，由 Message Provider 自主接收并执行。外部回复
+到达时，Channel 发布带可信会话和回复关系引用的新消息事实；Agent 通过自己
+的 Subscription 接收候选输入并根据本地会话决定是否认领、关联和继续。
 
 Fabric 不调用任何 Citizen，也不根据等待条件主动恢复 Agent。它只可靠传播
 Offer/Event、执行 Authority 与协议校验，并记录由参与方提交的认领、状态、

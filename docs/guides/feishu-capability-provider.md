@@ -318,6 +318,30 @@ Handoff 或 Agent 流程。飞书字段和公开范围可核对
 [日历资源说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/calendar-v4/calendar/introduction)
 与[应用权限列表](https://open.feishu.cn/document/server-docs/application-scope/scope-list?lang=zh-CN)。
 
+### 5.2 Agent 排期提案与人工确认
+
+日常助理不会因第一条“创建日程”消息直接写日历。参考流程是：
+
+1. Agent 按需读取群成员、相关历史和忙闲事实；
+2. 信息不足时通过当前 Handoff Result 在原群追问；
+3. 信息完整时生成带版本的排期提案，并在飞书原群原生 `@` 最初发起人；
+4. 后续飞书消息作为新的 Handoff 进入网络；
+5. 只有最初发起人对当前提案的自然语言确认才允许继续；
+6. Calendar Authority 核验初始 Handoff、确认 Handoff、同一 Human/会话、
+   提案摘要和成员查询结果后，才允许 Provider 创建日程；
+7. Provider 返回事件 URI、参与人逐项结果和 URL，Agent 生成最终语义回复。
+
+其他群成员可以补充事实，但不能替换或确认当前提案；第一版会要求最初发起人
+吸收修改后重新确认。任何实质修改都会形成新版本并使旧确认失效。当前一个
+飞书会话只维护一个活动排期会话；完成或取消后，下一个请求会在同一私有状态
+键上开始新的逻辑会话。
+
+排期状态保存在 Agent Runtime 自己的 SQLite 中（本地 bundle 的
+`service.state.location`，默认位于 `./var/`），不是 Fabric Handoff 字段，
+也不是 Storage Citizen。Runtime 重启后从该状态与 Subscription Cursor 恢复。
+Fabric 只记录两次 Human/Agent Handoff、能力 Handoff、Result 与审计事实，
+不解释“可以”、不唤醒 Agent，也不推进排期流程。
+
 ## 6. 安全与失败语义
 
 - 输入拒绝未知字段、超长字符串、不支持的 Markdown 与未授权目标。
@@ -408,6 +432,22 @@ URL；`offered`、`accepted`、Citizen ID 和 Handoff ID 不作为聊天回复�
 Console 可选，仅用于观察 Handoff/Delivery/Operations，不参与连接、认领、
 调用或回复。
 
+验证排期确认链路时发送：
+
+```text
+@机器人 根据群聊信息，找一个大家都有空的一小时，安排“EDA 方案评审”。
+```
+
+预期机器人先返回排期提案并 `@` 发起人，此时飞书日历中还没有新事件。发起人
+确认内容无误后再发送：
+
+```text
+@机器人 可以，就按这个安排。
+```
+
+预期此时才创建一次日程，并返回可点击的日程链接。若要调整时间、时长或
+参与人，先直接说明修改；Agent 会生成新提案并再次要求发起人确认。
+
 验证 Agent 按需查询与能力调用协同时，可以先发送两条普通消息，再发送：
 
 ```text
@@ -449,10 +489,11 @@ npm run typecheck
 `feishu-capability-provider.e2e.test.ts` 使用 SQLite、真实公共 HTTP/SSE、
 TypeScript SDK、Citizen session、Gateway 和 Host 完成整条参考闭环；飞书
 OpenAPI 只在 Provider 边界替换为测试 backend。
-`local-stack.e2e.test.ts` 进一步启动真实 Agently Python Worker 与飞书长连接
-Channel，验证触发前历史被筛选、持久化并经 Authority 解析给 Agent，一次
-`@机器人` 消息恰好创建一个文档，第二轮 Agent 只返回一条同时包含摘要和文档
-URL 的语义回复，并拒绝把当前触发消息、Handoff 状态码或内部引用当作聊天
-内容。真实飞书
+`local-stack.e2e.test.ts` 进一步启动真实 Agently Python Worker、飞书长连接
+Channel 和 Calendar Provider，验证第一条消息只查询群成员/忙闲并返回一个
+原生 `@` 发起人的提案，确认前不创建事件；第二条由原发起人发送的确认形成新
+Handoff 后，才创建一次日程、邀请明确目标并返回可点击链接。测试同时证明
+Agent 私有会话被带入第二轮，而 Handoff 状态码和内部引用不会成为聊天内容。
+真实飞书
 smoke test 应使用专用测试策略落点，只删除本次测试创建且仍由当前 Provider
 管理的文档。

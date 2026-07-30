@@ -164,6 +164,17 @@ function currentChatReference(source: RuntimeJsonObject): string | null {
     : null;
 }
 
+function senderReference(source: RuntimeJsonObject): string | null {
+  if (!validFeishuConversationSource(source)) return null;
+  const extensions = record(source.extensions);
+  const sender = extensions?.["workfabric.dev/sender_resource_uri"];
+  return typeof sender === "string" &&
+      sender.startsWith("feishu://user/open-id/") &&
+      sender.length <= 2_048
+    ? sender
+    : null;
+}
+
 function capabilityResult(snapshot: HandoffReadModel): {
   readonly capability_id: string;
   readonly original_handoff_id: string;
@@ -309,6 +320,7 @@ export class LocalInvocationAuthorityProvider
     const chatReference = currentChatReference(originalSource);
     const allowedTargets = new Set<string>();
     const allowedResources = new Set<string>();
+    const confirmationProofRefs = new Set<string>();
 
     if (request.capability_id === "feishu.conversation.members.list") {
       const conversation = record(requestInput.conversation);
@@ -378,8 +390,123 @@ export class LocalInvocationAuthorityProvider
       }
     }
 
+    if (request.capability_id === "feishu.calendar.event.create") {
+      const attendees = resourceArray(requestInput.attendees);
+      const evidence = record(requestInput.authority_evidence);
+      const sessionOriginHandoffId =
+        evidence?.session_origin_handoff_id;
+      const confirmationHandoffId =
+        evidence?.confirmation_handoff_id;
+      const proposalDigest = evidence?.proposal_digest;
+      const evidenceHandoffIds = resourceArray(
+        evidence?.capability_result_handoff_ids,
+      );
+      if (
+        attendees === null ||
+        typeof sessionOriginHandoffId !== "string" ||
+        sessionOriginHandoffId.length === 0 ||
+        sessionOriginHandoffId === request.original_handoff_id ||
+        confirmationHandoffId !== request.original_handoff_id ||
+        typeof proposalDigest !== "string" ||
+        !/^sha256:[a-f0-9]{64}$/u.test(proposalDigest) ||
+        evidenceHandoffIds === null ||
+        evidenceHandoffIds.length === 0 ||
+        new Set(evidenceHandoffIds).size !== evidenceHandoffIds.length
+      ) deny();
+      const sessionOriginSnapshot =
+        await this.options.queries.getHandoff(
+          sessionOriginHandoffId,
+          { signal },
+        );
+      const originState = record(sessionOriginSnapshot.state);
+      const originPackage = record(originState?.package);
+      const originInitiator = record(originState?.initiator);
+      const originSource = sourceReference(
+        originPackage?.work_reference,
+      );
+      const confirmationSender = senderReference(originalSource);
+      const originSender = originSource === null
+        ? null
+        : senderReference(originSource);
+      if (
+        sessionOriginSnapshot.tenant_id !== this.options.tenant_id ||
+        sessionOriginSnapshot.handoff_id !== sessionOriginHandoffId ||
+        (
+          originState?.lifecycle_state !== "accepted" &&
+          originState?.lifecycle_state !== "result_returned"
+        ) ||
+        originInitiator?.actor_type !== "human" ||
+        originInitiator.actor_id !== initiator.actor_id ||
+        originSource === null ||
+        !validFeishuConversationSource(originSource) ||
+        currentChatReference(originSource) !== chatReference ||
+        originSender === null ||
+        confirmationSender === null ||
+        originSender !== confirmationSender
+      ) deny();
+      const verifiedMembers = new Set<string>();
+      for (const handoffId of evidenceHandoffIds) {
+        const evidenceSnapshot =
+          await this.options.queries.getHandoff(handoffId, { signal });
+        const verified = capabilityResult(evidenceSnapshot);
+        if (
+          evidenceSnapshot.tenant_id !== this.options.tenant_id ||
+          evidenceSnapshot.handoff_id !== handoffId ||
+          verified === null ||
+          verified.original_handoff_id !== sessionOriginHandoffId ||
+          verified.outcome.outcome !== "succeeded"
+        ) deny();
+        if (
+          verified.capability_id ===
+          "feishu.conversation.members.list"
+        ) {
+          const outcomeData = record(verified.outcome.data);
+          const provenance = record(outcomeData?.provenance);
+          const members = outcomeData?.members;
+          if (
+            provenance?.provider_family !== "feishu" ||
+            provenance.source !== "im.chat.members" ||
+            provenance.source_reference !== chatReference ||
+            !Array.isArray(members)
+          ) deny();
+          for (const member of members) {
+            const item = record(member);
+            if (
+              typeof item?.resource_uri !== "string" ||
+              !item.resource_uri.startsWith(
+                "feishu://user/open-id/",
+              )
+            ) deny();
+            verifiedMembers.add(item.resource_uri);
+          }
+        } else if (
+          verified.capability_id !==
+          "feishu.calendar.freebusy.query"
+        ) {
+          deny();
+        }
+      }
+      for (const attendee of attendees) {
+        if (
+          attendee === chatReference ||
+          verifiedMembers.has(attendee)
+        ) {
+          allowedTargets.add(attendee);
+        } else {
+          deny();
+        }
+      }
+      confirmationProofRefs.add(sessionOriginHandoffId);
+      confirmationProofRefs.add(request.original_handoff_id);
+      for (const handoffId of evidenceHandoffIds) {
+        confirmationProofRefs.add(handoffId);
+      }
+      confirmationProofRefs.add(
+        `urn:work-fabric:scheduling-proposal:${proposalDigest}`,
+      );
+    }
+
     if (
-      request.capability_id === "feishu.calendar.event.create" ||
       request.capability_id === "feishu.calendar.attendees.add" ||
       request.capability_id === "feishu.calendar.attendees.remove"
     ) {
@@ -440,7 +567,8 @@ export class LocalInvocationAuthorityProvider
           contract_digest: input.candidate.contract_digest,
           allowed_resource_refs: Object.freeze([...allowedResources]),
           allowed_target_refs: Object.freeze([...allowedTargets]),
-          confirmation_proof_refs: Object.freeze([]),
+          confirmation_proof_refs:
+            Object.freeze([...confirmationProofRefs]),
           source_reference: originalSource,
         }),
       }),

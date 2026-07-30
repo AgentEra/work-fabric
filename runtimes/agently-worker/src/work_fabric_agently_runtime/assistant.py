@@ -31,6 +31,7 @@ ASSISTANT_TURN_OUTPUT_SCHEMA = {
     "version_constraint": (str, "仅 capability_request 时填写的版本约束", True),
     "input": (dict, "仅 capability_request 时填写的 JSON 输入", True),
     "reason": (str, "仅 capability_request 时填写的调用理由", True),
+    "private_state": (dict, "Agent 私有状态更新；无更新时为空对象", True),
 }
 _AGENTLY_LOG_SINK: TextIO | None = None
 POST_CAPABILITY_MODEL_TIMEOUT_SECONDS = 30.0
@@ -58,6 +59,7 @@ def role_prompt(
     role: Mapping[str, JsonValue],
     *,
     capability_turn: bool = False,
+    agent_private_context: Mapping[str, JsonValue] | None = None,
 ) -> str:
     base = (
         f"You are the Work Fabric role {role['role_id']} ({role['display_name']}).\n"
@@ -78,7 +80,7 @@ def role_prompt(
     )
     if not capability_turn:
         return base
-    return (
+    turn_contract = (
         base
         + "\nYou may return exactly one turn: final or capability_request. "
         "Use capability_request only for a capability present in the supplied "
@@ -108,14 +110,51 @@ def role_prompt(
         "Never copy Provider text as the final "
         "reply. A final response must be self-contained, human-readable, and Agent-authored. "
         "Use a new invocation_id for each new capability request. "
-        "Every turn must contain all eight keys. For a final turn, use exactly this shape: "
+        "Every turn must contain all nine keys. For a final turn, use exactly this shape: "
         '{"turn_type":"final","request_summary":"摘要","response":"完整答复",'
-        '"invocation_id":"","capability_id":"","version_constraint":"","input":{},"reason":""}. '
+        '"invocation_id":"","capability_id":"","version_constraint":"","input":{},'
+        '"reason":"","private_state":{}}. '
         "For a capability request, use exactly this shape: "
         '{"turn_type":"capability_request","request_summary":"摘要","response":"",'
         '"invocation_id":"唯一调用 ID","capability_id":"已披露能力 ID",'
-        '"version_constraint":"版本约束","input":{},"reason":"调用理由"}. '
+        '"version_constraint":"版本约束","input":{},"reason":"调用理由",'
+        '"private_state":{}}. '
         "Do not omit keys and do not add keys."
+    )
+    if (
+        not isinstance(agent_private_context, Mapping)
+        or agent_private_context.get("namespace")
+        != "daily-assistant.scheduling/v1"
+    ):
+        return turn_contract
+    return (
+        turn_contract
+        + "\nThe Agent owns the scheduling session and all scheduling semantics; "
+        "Fabric only carries Handoffs and shallow collaboration state. Use "
+        "task.agent_private_context as trusted Runtime-supplied private session context. "
+        "Infer participants and requirements from current intent plus relevant conversation "
+        "evidence. If evidence is insufficient, use disclosed query capabilities progressively "
+        "or ask a concise follow-up instead of guessing. Before any calendar side effect, "
+        "produce a versioned proposal, store it through private_state, and ask the "
+        "original_initiator to confirm it in the conversation. A proposal revision must "
+        "increment proposal.version, produce a new current proposal digest, invalidate any "
+        "earlier confirmation, and request confirmation again. Treat confirmation as valid "
+        "only when current_source.actor_id and current_source.sender_resource_uri both equal "
+        "original_initiator. Never request feishu.calendar.event.create before confirmation "
+        "of the current proposal digest. After valid confirmation, calendar create "
+        "authority_evidence must include session_origin_handoff_id, confirmation_handoff_id, "
+        "proposal_digest, and every relevant member/query result auxiliary Handoff ID in "
+        "capability_result_handoff_ids. The final private_state object must contain exactly "
+        "namespace, expected_version, phase, proposal, confirmed_proposal_digest, "
+        "confirmation_handoff_id, calendar_result_uri, and "
+        "capability_result_handoff_ids. A non-null proposal must contain exactly "
+        "version, title, participant_resource_uris, start_at, end_at, timezone, "
+        "and summary_markdown; use the same start_at/end_at naming as Calendar "
+        "capabilities. Set expected_version to agent_private_context.state_version. "
+        "A different group member may contribute facts, but must not replace or "
+        "confirm an active proposal; ask the original initiator to incorporate or "
+        "confirm the change and leave private_state empty. Use an empty private_state object "
+        "for capability_request turns and for unrelated final turns."
     )
 
 
@@ -211,6 +250,84 @@ def _safe_result_artifacts(value: object) -> list[JsonValue]:
     return artifacts
 
 
+def _calendar_completion_private_state(
+    request: WorkerRequest,
+    continuation: Mapping[str, JsonValue],
+) -> dict[str, JsonValue] | None:
+    capability_request = continuation.get("request")
+    result = continuation.get("result")
+    context = request.task.get("agent_private_context")
+    if (
+        not isinstance(capability_request, dict)
+        or capability_request.get("capability_id")
+        != "feishu.calendar.event.create"
+        or not isinstance(result, dict)
+        or result.get("outcome") != "succeeded"
+        or not isinstance(context, dict)
+        or context.get("namespace") != "daily-assistant.scheduling/v1"
+    ):
+        return None
+    current_source = context.get("current_source")
+    active_session = context.get("active_session")
+    if (
+        not isinstance(current_source, dict)
+        or not isinstance(active_session, dict)
+        or not isinstance(active_session.get("version"), int)
+        or isinstance(active_session.get("version"), bool)
+        or not isinstance(active_session.get("proposal"), dict)
+        or not isinstance(
+            active_session["proposal"].get("digest"),
+            str,
+        )
+        or not re.fullmatch(
+            r"sha256:[a-f0-9]{64}",
+            cast(str, active_session["proposal"]["digest"]),
+        )
+        or not isinstance(current_source.get("handoff_id"), str)
+        or not isinstance(
+            active_session.get("capability_result_handoff_ids"),
+            list,
+        )
+    ):
+        return None
+    result_data = result.get("data")
+    event_resource_uri = (
+        result_data.get("event_resource_uri")
+        if isinstance(result_data, dict)
+        else None
+    )
+    if (
+        not isinstance(event_resource_uri, str)
+        or not event_resource_uri.startswith("feishu://calendar/")
+    ):
+        return None
+    evidence_ids = active_session["capability_result_handoff_ids"]
+    if any(
+        not isinstance(item, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,254}", item)
+        for item in evidence_ids
+    ):
+        return None
+    return {
+        "namespace": "daily-assistant.scheduling/v1",
+        "expected_version": cast(int, active_session["version"]),
+        "phase": "completed",
+        "proposal": None,
+        "confirmed_proposal_digest": cast(
+            str,
+            active_session["proposal"]["digest"],
+        ),
+        "confirmation_handoff_id": cast(
+            str,
+            current_source["handoff_id"],
+        ),
+        "calendar_result_uri": usv_string(event_resource_uri),
+        "capability_result_handoff_ids": [
+            usv_string(cast(str, item)) for item in evidence_ids
+        ],
+    }
+
+
 def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValue]:
     continuation = _latest_capability_entry(request)
     if continuation is None:
@@ -256,6 +373,10 @@ def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValu
     else:
         text = f"暂时未能完成：{intent}请稍后重试。"
         artifacts = []
+    private_state = _calendar_completion_private_state(
+        request,
+        continuation,
+    )
     return {
         "kind": "final",
         "response": {
@@ -268,6 +389,14 @@ def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValu
             "evidence": [],
             "extensions": {
                 "workfabric.agent/completion_mode": "bounded_fallback",
+                **(
+                    {}
+                    if private_state is None
+                    else {
+                        "workfabric.agent/private_state":
+                            private_state
+                    }
+                ),
             },
         },
     }
@@ -325,6 +454,8 @@ def validate_turn_assistant_output(
     )
     if turn_type == "final":
         response = _non_empty_string(value["response"], "response")
+        if not isinstance(value["private_state"], dict):
+            raise AssistantOutputError("assistant private_state is invalid")
         if any(value[field] not in ("", {}) for field in (
             "invocation_id", "capability_id", "version_constraint", "input", "reason",
         )):
@@ -343,6 +474,10 @@ def validate_turn_assistant_output(
                     "workfabric.agent/request_summary": usv_string(
                         cast(str, value["request_summary"])
                     ),
+                    "workfabric.agent/private_state": cast(
+                        dict[str, JsonValue],
+                        value["private_state"],
+                    ),
                 },
             },
         }
@@ -350,6 +485,10 @@ def validate_turn_assistant_output(
         raise AssistantOutputError("assistant turn type is invalid")
     if value["response"] != "":
         raise AssistantOutputError("assistant capability request response is invalid")
+    if value["private_state"] != {}:
+        raise AssistantOutputError(
+            "assistant capability request private_state is invalid"
+        )
     capability_id = _non_empty_string(value["capability_id"], "capability_id", 128)
     if not CAPABILITY_ID.fullmatch(capability_id):
         raise AssistantOutputError("assistant capability_id is invalid")
@@ -409,6 +548,10 @@ async def execute_turn_with_agent(
             role_prompt(
                 cast(Mapping[str, JsonValue], request.task["role"]),
                 capability_turn=True,
+                agent_private_context=cast(
+                    Mapping[str, JsonValue] | None,
+                    request.task["agent_private_context"],
+                ),
             ),
             always=True,
         )

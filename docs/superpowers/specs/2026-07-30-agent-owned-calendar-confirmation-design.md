@@ -22,9 +22,11 @@ Complete the first production-shaped calendar collaboration flow:
    language;
 6. the Agent correlates that reply with its private scheduling session,
    interprets it and decides whether to ask again or continue;
-7. after a valid confirmation, the Agent queries free/busy facts and publishes
-   an explicit Calendar Capability Handoff; and
-8. the Calendar Provider creates the event for the explicit attendee list and
+7. before presenting a concrete proposal, the Agent queries the relevant
+   member and free/busy facts through explicit Capability Handoffs;
+8. after a valid confirmation, the Agent publishes an explicit Calendar
+   creation Capability Handoff; and
+9. the Calendar Provider creates the event for the explicit attendee list and
    returns typed facts which the Agent turns into the final group reply.
 
 No fixed confirmation command is required. The Agent owns semantic
@@ -89,9 +91,11 @@ phrases such as “确认” or “可以”.
 9. Confirmation is bound to the latest immutable proposal version and digest.
    A confirmation of an older proposal cannot authorize a newer proposal.
 10. A revised proposal always requires a new confirmation.
-11. One fallback conversation-scoped scheduling session may be active in a
-    non-threaded Feishu chat in the first version. A Feishu thread/root
-    reference takes precedence when present.
+11. One conversation-scoped scheduling session may be active in a Feishu chat
+    in the first version. Thread/root changes do not split a later group-chat
+    confirmation into a different session. A completed or cancelled session
+    becomes terminal and the next scheduling request starts a fresh logical
+    session on the same optimistic state key.
 12. Calendar creation remains impossible until the Agent has recorded a valid
     confirmation fact for the latest proposal.
 
@@ -104,7 +108,8 @@ Feishu inbound message
   -> Daily Assistant independently accepts
   -> Agent loads its private scheduling session
   -> Agent reads more message/member facts when needed
-  -> Agent sends question or versioned proposal through Message Capability
+  -> Agent returns a question or versioned proposal through Result
+  -> Feishu Channel renders that Result once in the original conversation
   -> Channel publishes later Human reply as a new Handoff
   -> Agent independently correlates and interprets the reply
   -> Agent records a private confirmation fact
@@ -182,7 +187,6 @@ The session contains bounded domain state:
 - missing-information questions;
 - immutable proposal versions;
 - current proposal digest;
-- proposal-notification message reference;
 - confirmation source Handoff and confirmer Actor;
 - selected attendee resource URIs;
 - auxiliary capability-result Handoff references;
@@ -235,6 +239,10 @@ The Agent Runtime validates and applies private mutations to the
 Agent-owned store. Those mutations are not Handoffs and cannot invoke a
 Provider. All external actions still require normal Capability Handoffs.
 
+Reactive questions and proposals use the ordinary Agent Result-to-Channel
+route exactly once. `feishu.message.send` remains a separate proactive
+Capability; it is not required for the reply to the inbound Handoff.
+
 ## 8. Channel-neutral mention support
 
 The canonical Agent text result gains an optional bounded recipient annotation:
@@ -244,13 +252,15 @@ The canonical Agent text result gains an optional bounded recipient annotation:
   "kind": "text",
   "media_type": "text/markdown",
   "text": "请确认下面的排期提案……",
-  "recipient_references": [
-    {
-      "kind": "mention",
-      "resource_uri": "feishu://user/open-id/ou_xxx",
-      "display_text": "发起人"
-    }
-  ]
+  "extensions": {
+    "workfabric.dev/recipient_references": [
+      {
+        "kind": "mention",
+        "resource_uri": "feishu://user/open-id/ou_xxx",
+        "display_text": "发起人"
+      }
+    ]
+  }
 }
 ```
 

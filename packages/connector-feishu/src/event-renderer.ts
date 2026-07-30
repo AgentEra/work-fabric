@@ -268,11 +268,19 @@ function agentResultContent(event: ProtocolEvent): AgentResultContent {
     }
     mediaType = part.media_type;
     texts.push(part.text);
-    if (part.recipient_references !== undefined) {
-      if (!Array.isArray(part.recipient_references)) {
+    const contentExtensions = part.extensions === undefined
+      ? undefined
+      : object(
+        part.extensions,
+        `result summary ${index} extensions`,
+      );
+    const recipientReferences =
+      contentExtensions?.["workfabric.dev/recipient_references"];
+    if (recipientReferences !== undefined) {
+      if (!Array.isArray(recipientReferences)) {
         throw new FeishuRenderError("rendering_failed");
       }
-      for (const value of part.recipient_references) {
+      for (const value of recipientReferences) {
         if (recipients.length >= 16) {
           throw new FeishuRenderError("rendering_failed");
         }

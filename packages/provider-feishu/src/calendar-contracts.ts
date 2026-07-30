@@ -10,6 +10,13 @@ export interface CalendarAuthorityEvidenceInput {
   readonly capability_result_handoff_ids: readonly string[];
 }
 
+export interface CalendarEventAuthorityEvidenceInput
+  extends CalendarAuthorityEvidenceInput {
+  readonly session_origin_handoff_id: string;
+  readonly confirmation_handoff_id: string;
+  readonly proposal_digest: `sha256:${string}`;
+}
+
 export interface CalendarEventReference {
   readonly resource_uri: string;
 }
@@ -47,6 +54,7 @@ export interface CalendarEventCreateInput {
   readonly attendee_ability?: CalendarAttendeeAbility;
   readonly reminders?: readonly number[];
   readonly notify_attendees?: boolean;
+  readonly authority_evidence?: CalendarEventAuthorityEvidenceInput;
 }
 
 export interface CalendarEventReadInput {

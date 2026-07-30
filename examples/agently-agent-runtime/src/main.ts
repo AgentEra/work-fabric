@@ -24,6 +24,7 @@ import {
 import {
   isCapabilityAwareAgentRuntimeDriver,
   type AgentCapabilityInvocationStore,
+  type AgentPrivateStateStore,
   type AgentRuntimeDriver,
   type AgentRuntimeStateStore,
 } from "@work-fabric/agent-runtime-spi";
@@ -31,6 +32,7 @@ import { FeishuCapabilitySchemaRegistry } from "@work-fabric/provider-feishu";
 import { BearerTokenProvider, WorkFabricClient } from "@work-fabric/sdk-typescript";
 
 import { LocalInvocationAuthorityProvider } from "./local-invocation-authority.js";
+import { DailyAssistantDriver } from "./daily-assistant-driver.js";
 import { dailyAssistantGatewayConfig } from "./subscription.js";
 
 export interface RuntimeComposition {
@@ -46,7 +48,10 @@ export async function composeAgentRuntime(
   dependencies: {
     readonly fetch?: typeof globalThis.fetch;
     readonly driver: AgentRuntimeDriver;
-    readonly state: AgentRuntimeStateStore & AgentCapabilityInvocationStore;
+    readonly state:
+      & AgentRuntimeStateStore
+      & AgentCapabilityInvocationStore
+      & AgentPrivateStateStore;
     readonly capability?: {
       readonly authority: InvocationAuthorityProvider;
       readonly schemas: InvocationSchemaValidator;
@@ -113,7 +118,10 @@ export async function composeAgentRuntime(
       state: dependencies.state,
     });
     capabilityHostDependencies = {
-      turn_driver: dependencies.driver,
+      turn_driver: new DailyAssistantDriver(
+        dependencies.driver,
+        dependencies.state,
+      ),
       capability_disclosure: new CatalogCapabilityDisclosure(
         client.citizens,
         schemaRegistry,
@@ -157,7 +165,10 @@ export async function composeAgentRuntime(
 
 export function createRuntimeStateStore(
   state: LoadedAgentRuntimeConfiguration["service"]["state"],
-): AgentRuntimeStateStore & AgentCapabilityInvocationStore {
+):
+  & AgentRuntimeStateStore
+  & AgentCapabilityInvocationStore
+  & AgentPrivateStateStore {
   return new SqliteAgentRuntimeStateStore({ location: state.location, busy_timeout_ms: state.busy_timeout_ms });
 }
 

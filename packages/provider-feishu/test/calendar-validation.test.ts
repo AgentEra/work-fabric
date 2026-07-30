@@ -60,12 +60,24 @@ describe("Feishu Calendar input validation", () => {
       time_zone: "Asia/Shanghai",
       attendees: ["feishu://chat/oc_1"],
       description: "评审第一阶段交付",
+      authority_evidence: {
+        session_origin_handoff_id: "handoff-origin-1",
+        confirmation_handoff_id: "handoff-confirmation-1",
+        proposal_digest: `sha256:${"b".repeat(64)}`,
+        capability_result_handoff_ids: ["handoff-members-1"],
+      },
     })).toMatchObject({
       capability_id: "feishu.calendar.event.create",
       calendar: { kind: "default_calendar" },
       title: "项目评审",
       time_zone: "Asia/Shanghai",
       attendees: ["feishu://chat/oc_1"],
+      authority_evidence: {
+        session_origin_handoff_id: "handoff-origin-1",
+        confirmation_handoff_id: "handoff-confirmation-1",
+        proposal_digest: `sha256:${"b".repeat(64)}`,
+        capability_result_handoff_ids: ["handoff-members-1"],
+      },
     });
     expect(() => decode("feishu.calendar.event.create", {
       calendar_id: "raw-calendar-id",

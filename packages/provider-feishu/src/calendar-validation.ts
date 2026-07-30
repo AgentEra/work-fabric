@@ -2,6 +2,7 @@ import type {
   CalendarAttendeeAbility,
   CalendarAttendeeMutationInput,
   CalendarAuthorityEvidenceInput,
+  CalendarEventAuthorityEvidenceInput,
   CalendarEventCreateInput,
   CalendarEventDeleteInput,
   CalendarEventReadInput,
@@ -215,6 +216,58 @@ function authorityEvidence(
   });
 }
 
+function eventAuthorityEvidence(
+  value: unknown,
+): CalendarEventAuthorityEvidenceInput {
+  const evidence = record(value, "event authority evidence");
+  exact(
+    evidence,
+    [
+      "session_origin_handoff_id",
+      "confirmation_handoff_id",
+      "proposal_digest",
+      "capability_result_handoff_ids",
+    ],
+    [],
+    "event authority evidence",
+  );
+  const sessionOriginHandoffId = string(
+    evidence.session_origin_handoff_id,
+    "session origin Handoff",
+    255,
+  );
+  const confirmationHandoffId = string(
+    evidence.confirmation_handoff_id,
+    "confirmation Handoff",
+    255,
+  );
+  if (
+    !OPAQUE_ID.test(sessionOriginHandoffId) ||
+    !OPAQUE_ID.test(confirmationHandoffId) ||
+    sessionOriginHandoffId === confirmationHandoffId
+  ) {
+    invalid("event authority Handoff");
+  }
+  const proposalDigest = string(
+    evidence.proposal_digest,
+    "proposal digest",
+    71,
+  );
+  if (!/^sha256:[a-f0-9]{64}$/u.test(proposalDigest)) {
+    invalid("proposal digest");
+  }
+  return Object.freeze({
+    session_origin_handoff_id: sessionOriginHandoffId,
+    confirmation_handoff_id: confirmationHandoffId,
+    proposal_digest: proposalDigest as `sha256:${string}`,
+    capability_result_handoff_ids:
+      authorityEvidence({
+        capability_result_handoff_ids:
+          evidence.capability_result_handoff_ids,
+      }).capability_result_handoff_ids,
+  });
+}
+
 function optionalEnum<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -304,6 +357,7 @@ function eventCreate(
     "attendee_ability",
     "reminders",
     "notify_attendees",
+    "authority_evidence",
   ], "event create");
   const startAt = timestamp(input.start_at, "start_at");
   const endAt = timestamp(input.end_at, "end_at");
@@ -353,6 +407,13 @@ function eventCreate(
           notify_attendees: boolean(
             input.notify_attendees,
             "notify_attendees",
+          ),
+        }),
+    ...(input.authority_evidence === undefined
+      ? {}
+      : {
+          authority_evidence: eventAuthorityEvidence(
+            input.authority_evidence,
           ),
         }),
   });

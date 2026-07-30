@@ -198,6 +198,41 @@ const DEFINITIONS = Object.freeze({
       items: { type: "integer", minimum: 0, maximum: 40_320 },
     },
     notify_attendees: { type: "boolean" },
+    authority_evidence: objectSchema([
+      "session_origin_handoff_id",
+      "confirmation_handoff_id",
+      "proposal_digest",
+      "capability_result_handoff_ids",
+    ], {
+      session_origin_handoff_id: {
+        type: "string",
+        minLength: 1,
+        maxLength: 255,
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      },
+      confirmation_handoff_id: {
+        type: "string",
+        minLength: 1,
+        maxLength: 255,
+        pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      },
+      proposal_digest: {
+        type: "string",
+        pattern: "^sha256:[a-f0-9]{64}$",
+      },
+      capability_result_handoff_ids: {
+        type: "array",
+        minItems: 1,
+        maxItems: 8,
+        uniqueItems: true,
+        items: {
+          type: "string",
+          minLength: 1,
+          maxLength: 255,
+          pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        },
+      },
+    }),
   }),
   calendarEventCreateOutput: objectSchema([
     "event_resource_uri",

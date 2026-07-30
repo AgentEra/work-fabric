@@ -161,6 +161,16 @@ Agent Endpoint 声明身份、能力、协议版本、可用性和回调方式�
 
 Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具备独立身份、交接状态和回调能力时作为独立 Endpoint。无论采用哪种模式，代码执行过程都不进入 Work Fabric。
 
+日常助理的多轮排期是该边界的参考实现：Agent Runtime 在自身私有、乐观并发
+状态中保存候选参与人、缺失信息、提案版本、提案摘要和确认来源；这些数据既
+不是 Citizen，也不通过 Fabric 暴露为通用存储。Channel 只提供可信发送人、
+会话及回复关系并渲染 Agent 已选择的提醒对象；Message/Calendar Provider
+只返回或执行各自的类型化能力。Agent 必须先形成提案并通过普通 Result 在原
+会话中 @ 原始发起人，后续只有同一 Human 的新 Handoff 才能确认当前版本。
+Calendar Authority 机械核验初始 Handoff、确认 Handoff、会话身份、提案摘要
+及成员查询结果后才签发调用委托，但不解释自然语言。完整设计与验收要求见
+[Agent-owned Calendar Proposal and Confirmation](superpowers/specs/2026-07-30-agent-owned-calendar-confirmation-design.md)。
+
 ### Network Citizens
 
 Network Citizen 是所有网络接入模块的统一责任分类与动态声明面。六类 Citizen
@@ -905,11 +915,12 @@ Channel Adapter 动态声明自己可呈现的媒体类型，并负责目标渠�
 `interactive` 卡片。未知媒体类型和不安全链接显式失败，不能猜测格式、
 静默丢失交互语义或把消息正文与 URL 写入可观测数据。
 
-文本 Result 可以携带有界的 `recipient_references` 注解，内容生产方用它声明
-“这条消息需要谁关注”，但不生成渠道私有的 @ 语法。注解只能引用当前 Result
-委托范围中已有的资源 URI。Channel 负责校验引用并机械映射到目标渠道；例如
-飞书把已授权的 `feishu://user/open-id/...` 引用渲染为原生 `at`。Fabric
-不选择收件人、不解释提醒目的，也不会因为某人被 @ 而推进业务流程。
+文本 Result 可以在既有 content `extensions` 中携带有界的
+`workfabric.dev/recipient_references` 注解，内容生产方用它声明“这条消息
+需要谁关注”，但不生成渠道私有的 @ 语法。注解只能引用当前 Result 委托范围
+中已有的资源 URI。Channel 负责校验引用并机械映射到目标渠道；例如飞书把
+已授权的 `feishu://user/open-id/...` 引用渲染为原生 `at`。Fabric 不选择
+收件人、不解释提醒目的，也不会因为某人被 @ 而推进业务流程。
 
 Result 权威正文不复制进全局协议事件。原会话回复路径通过
 `ChannelHandoffSnapshotSource` 按租户、Handoff 和最低版本装配规范快照，
