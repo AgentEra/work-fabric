@@ -65,6 +65,7 @@ const agentResultEvent: ProtocolEvent = {
 function resultEvent(
   id: string,
   summary: readonly JsonObject[],
+  resourceRefs: readonly string[] = [],
 ): ProtocolEvent {
   return {
     ...agentResultEvent,
@@ -73,6 +74,11 @@ function resultEvent(
       ...agentResultEvent.data,
       snapshot: {
         ...(agentResultEvent.data.snapshot as Record<string, unknown>),
+        package: {
+          authority_scope: {
+            resource_refs: [...resourceRefs],
+          },
+        },
         result: {
           summary,
           artifacts: [],
@@ -170,6 +176,130 @@ describe("FeishuSignalAdapter", () => {
     expect(messages.inputs.every((input) => input.uuid.length <= 50)).toBe(true);
     expect(new Set(messages.inputs.map((input) => input.uuid)).size).toBe(3);
     expect(messages.inputs[0]?.content).toContain("wfaf2.");
+  });
+
+  it("renders an authorized recipient reference as one native Feishu mention", async () => {
+    const messages = new ControlledMessages();
+    const adapter = new FeishuSignalAdapter({
+      messages,
+      renderer: new FeishuEventRenderer({
+        action_codec: new FeishuActionReferenceCodec({
+          encryption_key: new Uint8Array(32).fill(7),
+        }),
+        clock: { now: () => "2026-07-16T00:00:00Z" },
+        max_text_bytes: 150_000,
+        max_card_bytes: 30_000,
+      }),
+    });
+    const recipient = "feishu://user/open-id/ou-initiator";
+    const result = resultEvent("event-agent-mentioned-proposal", [{
+      kind: "text",
+      media_type: "text/markdown",
+      text: "请确认 **EDA 方案评审** 的排期提案。",
+      recipient_references: [{
+        kind: "mention",
+        resource_uri: recipient,
+        display_text: "发起人",
+      }],
+    }], [recipient]);
+
+    await expect(adapter.deliver(
+      result,
+      destination("agent-mentioned", "oc-team", "card"),
+    )).resolves.toEqual({ kind: "accepted" });
+
+    expect(messages.inputs).toHaveLength(1);
+    expect(messages.inputs[0]?.msg_type).toBe("post");
+    expect(JSON.parse(messages.inputs[0]!.content)).toEqual({
+      zh_cn: {
+        title: "",
+        content: [[{
+          tag: "md",
+          text: "<at user_id=\"ou-initiator\">发起人</at>\n请确认 **EDA 方案评审** 的排期提案。",
+        }]],
+      },
+    });
+  });
+
+  it.each([
+    ["unscoped", "feishu://user/open-id/ou-other"],
+    ["non-Feishu", "https://example.com/users/1"],
+    ["all", "feishu://user/open-id/all"],
+    ["encoded slash", "feishu://user/open-id/ou%2Fother"],
+    ["control", "feishu://user/open-id/ou%0Aother"],
+  ])("rejects an invalid or unauthorized %s recipient reference", async (
+    _case,
+    recipient,
+  ) => {
+    const messages = new ControlledMessages();
+    const adapter = new FeishuSignalAdapter({
+      messages,
+      renderer: new FeishuEventRenderer({
+        action_codec: new FeishuActionReferenceCodec({
+          encryption_key: new Uint8Array(32).fill(7),
+        }),
+        clock: { now: () => "2026-07-16T00:00:00Z" },
+        max_text_bytes: 150_000,
+        max_card_bytes: 30_000,
+      }),
+    });
+    const result = resultEvent(`event-agent-recipient-${_case}`, [{
+      kind: "text",
+      media_type: "text/markdown",
+      text: "请确认。",
+      recipient_references: [{
+        kind: "mention",
+        resource_uri: recipient,
+        display_text: "确认人",
+      }],
+    }], ["feishu://user/open-id/ou-initiator"]);
+
+    await expect(adapter.deliver(
+      result,
+      destination(`agent-recipient-${_case}`, "oc-team"),
+    )).resolves.toEqual({
+      kind: "permanent_failure",
+      detail: "rendering_failed",
+    });
+    expect(messages.inputs).toHaveLength(0);
+  });
+
+  it("rejects more than sixteen recipient references", async () => {
+    const messages = new ControlledMessages();
+    const adapter = new FeishuSignalAdapter({
+      messages,
+      renderer: new FeishuEventRenderer({
+        action_codec: new FeishuActionReferenceCodec({
+          encryption_key: new Uint8Array(32).fill(7),
+        }),
+        clock: { now: () => "2026-07-16T00:00:00Z" },
+        max_text_bytes: 150_000,
+        max_card_bytes: 30_000,
+      }),
+    });
+    const recipients = Array.from(
+      { length: 17 },
+      (_, index) => `feishu://user/open-id/ou-user-${index}`,
+    );
+    const result = resultEvent("event-agent-too-many-recipients", [{
+      kind: "text",
+      media_type: "text/plain",
+      text: "请确认。",
+      recipient_references: recipients.map((resourceUri) => ({
+        kind: "mention",
+        resource_uri: resourceUri,
+        display_text: "确认人",
+      })),
+    }], recipients);
+
+    await expect(adapter.deliver(
+      result,
+      destination("agent-too-many-recipients", "oc-team"),
+    )).resolves.toEqual({
+      kind: "permanent_failure",
+      detail: "rendering_failed",
+    });
+    expect(messages.inputs).toHaveLength(0);
   });
 
   it("reuses the same UUID for a replay and rejects secret-shaped destinations", async () => {

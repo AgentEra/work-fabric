@@ -135,6 +135,109 @@ function object(value: unknown, label: string): Record<string, unknown> {
 interface AgentResultContent {
   readonly media_type: string;
   readonly text: string;
+  readonly recipients: readonly {
+    readonly user_id: string;
+    readonly display_text: string;
+  }[];
+}
+
+const FEISHU_OPEN_ID = /^[A-Za-z0-9_-]{1,255}$/;
+
+function exactKeys(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+): boolean {
+  const keys = Object.keys(value);
+  return (
+    keys.length === fields.length &&
+    keys.every((key) => fields.includes(key))
+  );
+}
+
+function delegatedResourceRefs(
+  snapshot: Record<string, unknown>,
+): ReadonlySet<string> {
+  if (
+    snapshot.package === undefined ||
+    snapshot.package === null ||
+    typeof snapshot.package !== "object" ||
+    Array.isArray(snapshot.package)
+  ) return new Set();
+  const handoffPackage = object(snapshot.package, "result snapshot package");
+  if (
+    handoffPackage.authority_scope === undefined ||
+    handoffPackage.authority_scope === null ||
+    typeof handoffPackage.authority_scope !== "object" ||
+    Array.isArray(handoffPackage.authority_scope)
+  ) return new Set();
+  const authority = object(
+    handoffPackage.authority_scope,
+    "result snapshot authority",
+  );
+  if (!Array.isArray(authority.resource_refs)) return new Set();
+  const refs = authority.resource_refs;
+  if (
+    refs.length > 256 ||
+    refs.some((ref) =>
+      typeof ref !== "string" ||
+      ref.length === 0 ||
+      ref.length > 2_048 ||
+      ref.trim() !== ref
+    )
+  ) {
+    throw new FeishuRenderError("rendering_failed");
+  }
+  return new Set(refs as string[]);
+}
+
+function recipientReference(
+  value: unknown,
+  allowed: ReadonlySet<string>,
+): { readonly user_id: string; readonly display_text: string } {
+  try {
+    const recipient = object(value, "result recipient reference");
+    if (
+      !exactKeys(
+        recipient,
+        ["kind", "resource_uri", "display_text"],
+      ) ||
+      recipient.kind !== "mention" ||
+      typeof recipient.resource_uri !== "string" ||
+      !allowed.has(recipient.resource_uri) ||
+      typeof recipient.display_text !== "string" ||
+      recipient.display_text.length === 0 ||
+      recipient.display_text.length > 128 ||
+      recipient.display_text.trim() !== recipient.display_text ||
+      /[\u0000-\u001f\u007f]/u.test(recipient.display_text)
+    ) {
+      throw new FeishuRenderError("rendering_failed");
+    }
+    const prefix = "feishu://user/open-id/";
+    if (!recipient.resource_uri.startsWith(prefix)) {
+      throw new FeishuRenderError("rendering_failed");
+    }
+    const encoded = recipient.resource_uri.slice(prefix.length);
+    let userId: string;
+    try {
+      userId = decodeURIComponent(encoded);
+    } catch {
+      throw new FeishuRenderError("rendering_failed");
+    }
+    if (
+      userId === "all" ||
+      !FEISHU_OPEN_ID.test(userId) ||
+      encodeURIComponent(userId) !== encoded
+    ) {
+      throw new FeishuRenderError("rendering_failed");
+    }
+    return {
+      user_id: userId,
+      display_text: recipient.display_text,
+    };
+  } catch (error) {
+    if (error instanceof FeishuRenderError) throw error;
+    throw new FeishuRenderError("rendering_failed");
+  }
 }
 
 function agentResultContent(event: ProtocolEvent): AgentResultContent {
@@ -144,6 +247,12 @@ function agentResultContent(event: ProtocolEvent): AgentResultContent {
     throw new TypeError("result summary is invalid");
   }
   const texts: string[] = [];
+  const recipients: {
+    readonly user_id: string;
+    readonly display_text: string;
+  }[] = [];
+  const recipientIds = new Set<string>();
+  const allowedRecipients = delegatedResourceRefs(snapshot);
   let mediaType: string | undefined;
   for (const [index, value] of result.summary.entries()) {
     const part = object(value, `result summary ${index}`);
@@ -159,6 +268,22 @@ function agentResultContent(event: ProtocolEvent): AgentResultContent {
     }
     mediaType = part.media_type;
     texts.push(part.text);
+    if (part.recipient_references !== undefined) {
+      if (!Array.isArray(part.recipient_references)) {
+        throw new FeishuRenderError("rendering_failed");
+      }
+      for (const value of part.recipient_references) {
+        if (recipients.length >= 16) {
+          throw new FeishuRenderError("rendering_failed");
+        }
+        const recipient = recipientReference(value, allowedRecipients);
+        if (recipientIds.has(recipient.user_id)) {
+          throw new FeishuRenderError("rendering_failed");
+        }
+        recipientIds.add(recipient.user_id);
+        recipients.push(recipient);
+      }
+    }
   }
   if (texts.length === 0 || mediaType === undefined) {
     throw new TypeError("result summary has no text content");
@@ -166,7 +291,31 @@ function agentResultContent(event: ProtocolEvent): AgentResultContent {
   if (mediaType !== "text/plain" && mediaType !== "text/markdown") {
     throw new FeishuRenderError("unsupported_media_type");
   }
-  return { media_type: mediaType, text: texts.join("\n") };
+  return {
+    media_type: mediaType,
+    text: texts.join("\n"),
+    recipients: Object.freeze(recipients),
+  };
+}
+
+function escapeFeishuMarkup(value: string): string {
+  return value.replace(/[&<>"']/gu, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;",
+  })[character]!);
+}
+
+function markdownMentions(
+  recipients: AgentResultContent["recipients"],
+): string {
+  return recipients.map((recipient) =>
+    `<at user_id="${recipient.user_id}">${
+      escapeFeishuMarkup(recipient.display_text)
+    }</at>`
+  ).join(" ");
 }
 
 export class FeishuEventRenderer {
@@ -185,12 +334,34 @@ export class FeishuEventRenderer {
   ): FeishuRenderedMessage {
     if (event.type === "workfabric.handoff.result_returned.v1") {
       const reply = agentResultContent(event);
-      if (reply.media_type === "text/plain") {
+      if (
+        reply.media_type === "text/plain" &&
+        reply.recipients.length === 0
+      ) {
         const content = JSON.stringify({ text: reply.text });
         if (encodedSize(content) > this.options.max_text_bytes) {
           throw new FeishuRenderError("rendering_failed");
         }
         return { msg_type: "text", content };
+      }
+      if (reply.media_type === "text/plain") {
+        const content = JSON.stringify({
+          zh_cn: {
+            title: "",
+            content: [[
+              ...reply.recipients.map((recipient) => ({
+                tag: "at",
+                user_id: recipient.user_id,
+                user_name: recipient.display_text,
+              })),
+              { tag: "text", text: reply.text },
+            ]],
+          },
+        });
+        if (encodedSize(content) > this.options.max_card_bytes) {
+          throw new FeishuRenderError("rendering_failed");
+        }
+        return { msg_type: "post", content };
       }
       try {
         assertSafeMarkdownLinks(reply.text);
@@ -203,7 +374,12 @@ export class FeishuEventRenderer {
       const content = JSON.stringify({
         zh_cn: {
           title: "",
-          content: [[{ tag: "md", text: reply.text }]],
+          content: [[{
+            tag: "md",
+            text: reply.recipients.length === 0
+              ? reply.text
+              : `${markdownMentions(reply.recipients)}\n${reply.text}`,
+          }]],
         },
       });
       if (encodedSize(content) > this.options.max_card_bytes) {
