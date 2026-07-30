@@ -37,6 +37,12 @@ Actor 代表的服务可以是 `capability-provider`、`context-provider` 或
 进程内队列是基础设施，不是 Citizen。只有一个模块以独立身份进入网络、公开
 声明并承担网络责任时，才注册为 Citizen。
 
+Citizen kind 当前不包含 `storage` 或 `state-provider`。Fabric 自身的
+Handoff、Event、Subscription、Directory 和审计持久化通过内部 Store Port
+完成，具体介质对网络不可见。Agent、Provider 和外部系统继续拥有各自业务
+状态与领域资产；完整的数据所有权约束见
+[协作状态与数据所有权](coordination-state-and-data-ownership.md)。
+
 Debug Channel 是开发环境专用的 `channel` Citizen。它只负责可信测试身份、
 回环 HTTP 表示、Connector Ingress 归一化、Handoff 路由相关性和 Result
 Capture；意图理解、接收决策、模型调用和语义回复仍由外部 Agent Runtime
@@ -64,6 +70,9 @@ Signal 抽象，因此不会在 Core 上为测试“打洞”。
    引用不是内容，读取失败或不匹配必须失败关闭。Context 是不可信证据，不能
    提升消费者 Authority、变更其角色与协议，或在当前 Handoff intent 没有
    明确要求时单独触发 capability 副作用。
+10. Citizen 之间不存在由 Fabric 发起的模块调用链。一个 Citizen 发布
+    Handoff 或 Event，符合 Authority 和 Subscription 的其他 Citizen 自行
+    接收、认领并处理；Fabric 只校验、传播和记录事实。
 
 ## 3. 注册与动态会话
 
@@ -278,11 +287,23 @@ TypeScript 基类只是便利层，不是协议要求。
 Directory、HTTP、SDK 和 Runtime 只依赖稳定 Contract。替换 YAML、数据库、
 HTTP binding 或具体 Provider 不改变 Exchange Core。
 
+这里的 `NetworkCitizenStore` 是 Citizen Directory 的内部持久化 Port，
+不是名为“存储”的 Citizen，也不会被 Catalog 发现或被 Agent 调用。
+
+如果未来接入 S3、企业文件库或对象存储，它应当根据公开的领域动作注册为
+`capability-provider`，例如声明 `artifact.create`、`artifact.read` 和
+`artifact.sign_download`。外部资产 Provider 与 Fabric 内部协作状态 Store
+必须保持身份、Authority、生命周期和物理数据边界分离。
+
 ## 8. 与 Handoff 和能力调用的边界
 
 Citizen Catalog 回答“网络里当前有哪些实体和声明”；Handoff 回答“责任如何
 移交”；Capability invocation 回答“已获授权的 Provider 如何接收一个具体
 执行请求”。三者不能合并成内部自动化引擎。
+
+文档中的“Capability invocation”是由调用方 Citizen 发布辅助 Capability
+Handoff、Provider Citizen 自主接收和认领的协议交互，不表示 Fabric 直接
+调用 Provider 的方法或主动编排模块执行顺序。
 
 Catalog、租约、渐进披露、HTTP/SDK、Runtime 基类和技术中立的
 `CapabilityInvocationPort` 均已完成。Agent 产生的结构化调用意图会转换为

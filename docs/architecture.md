@@ -17,6 +17,13 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
 
+因此 Work Fabric 在领域语义上是**逻辑有状态**的：Handoff、责任、参与方
+声明的浅层状态、事件、订阅位置和审计事实必须可持久化。HTTP、Worker 和
+Projection 进程在部署上可以保持无状态并横向扩容，通过内部技术中立 Port
+访问这些事实。具体 SQLite、PostgreSQL、Memory Store、Broker 或索引实现
+不进入协议，也不构成 Network Citizen。完整约束见
+[协作状态与数据所有权](architecture/coordination-state-and-data-ownership.md)。
+
 Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A/4B 增加 Endpoint/Agent 与 Connector 边界；阶段 6A/6B 增加数据库权威的集群机械所有权与可选 Wakeup；阶段 7 在 Core 外增加显式 Exchange 间的签名 Federation Profile。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
 
 ### Work Fabric 原生负责
@@ -61,7 +68,10 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 15. **调试入口不绕过网络**：开发用 Debug Channel 也必须经过 Connector
     Ingress、Identity/Admission、Authority、Handoff 和 Signal；它只能模拟
     Channel 边界，不能直接驱动模型或伪造 Agent Result。
-15. **责任分类与 Actor 正交**：Actor type 表达谁参与，Citizen kind 表达模块对外闭环的责任。一个 Citizen 注册只有一个 kind，一个进程可以托管多个独立注册。
+16. **责任分类与 Actor 正交**：Actor type 表达谁参与，Citizen kind 表达模块对外闭环的责任。一个 Citizen 注册只有一个 kind，一个进程可以托管多个独立注册。
+17. **浅层协作状态归 Fabric、业务会话归参与方**：Fabric 持久化自身协议事实和参与方声明的状态；Agent、Provider 与外部系统继续拥有等待条件、恢复决策、执行状态和业务资产。
+18. **持久化实现内部化**：部署可以替换 Memory、SQLite、PostgreSQL、Broker、对象或索引实现，但公共协议、SDK、Capability 和 Citizen Discovery 不暴露物理存储。
+19. **网络传播而不主动编排**：Citizen 通过 Handoff、Event 和 Subscription 发布、接收并认领工作；Fabric 负责校验、可靠传播和记录，不调用 Citizen、不匹配业务条件、不主动唤醒或推进业务流程。
 
 ### 2.1 职责闭环与依赖方向
 
@@ -587,6 +597,19 @@ Work Graph 是逻辑查询视图，不是架构中心，也不要求使用图数
 
 权威 Handoff 状态和 Outbox 使用本地事务保证一致；对象、索引和投影通过事件异步更新。
 
+本节的数据组件都是 Fabric 部署内部的物理实现或派生读模型，不是 Network
+Citizen，也不向其他参与方提供通用存储接口。外部只能依赖 Handoff、Receipt、
+Event、Subscription、Context Reference 和查询一致性等协议语义，不能依赖
+表结构、数据库类型、内部 Cursor 或 Adapter 名称。
+
+数据所有权按领域划分：Fabric 拥有协作协议事实；Agent 和 Capability Provider
+拥有各自决策与执行状态；飞书、CRM、Git、文档和日历系统继续拥有外部领域
+资产。Fabric 默认只保存引用、摘要和必要审计事实，不复制外部内容成为新的
+主库。等待外部输入时，Agent 保存等待条件、回复关联、业务会话和恢复决策，
+Fabric 只记录 Agent 声明的 `WAITING` 状态及正常 Handoff/Event/Receipt
+事实。详细边界与当前实现审计见
+[协作状态与数据所有权](architecture/coordination-state-and-data-ownership.md)。
+
 Phase 1 的 Memory Storage Adapter 只用于参考行为、集成测试和一致性验证，不具备生产持久性声明。当前 PostgreSQL Adapter 已通过既有 SPI 提供 authority、outbox、runtime state、delivery/lease 与 Context 元数据持久化；PostgreSQL 不进入 Core/SPI 依赖，其他符合相同行为 Profile 的存储实现可以等价替换。迁移、RLS 和运维边界见 [PostgreSQL 部署文档](postgresql-deployment.md)。
 
 ## 13. 可靠性与失败处理
@@ -684,6 +707,7 @@ Target Resolver 是通过统一协议接入的可选外部模块。它订阅待�
 采用“模块化事务核心 + 独立 Worker”：
 
 - 一个模块化 Core Service 提供协议入口和事务状态。
+- Core 在领域语义上有状态；Service/Worker 实例不持有仅存在于进程内的权威状态。
 - Signal Consumer、Notification Worker、Connector Worker 和 Projection Worker 独立进程运行。
 - Transaction Store 与 Outbox 保证核心一致性。
 - Object Store 和可选索引按需求启用。
