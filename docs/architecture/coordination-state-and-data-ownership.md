@@ -1,7 +1,8 @@
 # 协作状态与数据所有权
 
 本文定义 Work Fabric 的状态属性、数据所有权、内部持久化边界和外部模块
-职责。它是 [Work Fabric 整体架构](../architecture.md) 的约束性补充。
+职责。它是 [Work Fabric 整体架构](../architecture.md) 的约束性补充，并
+受 [Work Fabric 项目章程](../../PROJECT_CHARTER.md) 约束。
 
 ## 1. 结论
 

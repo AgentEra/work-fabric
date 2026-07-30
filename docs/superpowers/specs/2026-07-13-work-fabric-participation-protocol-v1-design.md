@@ -2,6 +2,10 @@
 
 - 日期：2026-07-13
 - 状态：设计已确认，等待书面规范最终审阅
+
+> 本文记录 WFPP v1 的详细协议设计。所有后续解释和实现必须服从
+> [Work Fabric 项目章程](../../../PROJECT_CHARTER.md)；
+> 协议状态只能表达和记录参与方协作事实，不能演变为 Fabric 内部业务编排。
 - 工作名称：Work Fabric Participation Protocol（WFPP）
 - 协议版本：`1.0`
 - 定位：面向 Human、Agent 与 Work System 的开放参与和交接协议

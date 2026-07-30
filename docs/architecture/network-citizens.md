@@ -360,7 +360,9 @@ tenant、原始 Handoff、目标能力、成功 Result Schema 和资源包含关
 
 ## 9. 新模块接入清单
 
-每个进入网络的新模块必须在设计、实现和运维文档中明确：
+每个进入网络的新模块必须先通过
+[Work Fabric 项目章程中的 Architecture Boundary Check](../../PROJECT_CHARTER.md#12-architecture-boundary-check)，
+并在设计、实现和运维文档中明确：
 
 1. 唯一 Citizen kind，以及与 Actor type 分离的 Principal/Actor/Endpoint。
 2. Runtime 动态声明、版本、Schema URI/digest、风险和确认要求。
@@ -372,3 +374,7 @@ tenant、原始 Handoff、目标能力、成功 Result Schema 和资源包含关
 8. 结构化事件、审计引用和低基数可观测性，不记录业务内容或凭据。
 9. 对应 conformance、失败路径、跨模块 E2E 和真实服务的 opt-in smoke test。
 10. 模块内部闭环的职责，以及明确不承担的决策、语义或执行职责。
+11. 每一个动作的主动发起 Citizen，以及 Fabric 只负责的传播和记录步骤。
+12. 模块禁用后的行为，证明 Core 和无关 Citizen 不依赖该模块。
+13. 状态所有权表，明确区分 Fabric 浅层事实、模块业务状态和外部领域资产。
+14. 不存在 Fabric 主动编排、跨 Citizen 实现依赖或 Core 厂商特例的证据。

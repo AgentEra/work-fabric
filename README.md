@@ -6,6 +6,12 @@ Work Fabric 是面向人、AI Agent 与各类工作系统的协作对接和工�
 
 Work Fabric 不执行参与方的专业工作。人的实际工作、Agent 的规划与推理、Codex 的代码实施，以及飞书、CRM、Git、知识库和运维平台的业务逻辑，始终发生在各自系统内部。
 
+所有后续方案和实现必须遵守
+[Work Fabric 项目章程与不可妥协架构规则](PROJECT_CHARTER.md)：
+Fabric 只做公民接入、协议校验、可靠传播、浅层协作状态记录和审计；它不
+根据业务内容、时间或结果主动调用 Citizen、选择下一步或推进业务流程。
+局部功能 Spec 不能覆盖这些底线。
+
 ## 为什么需要 Work Fabric
 
 企业的工作通常分散在文档、需求、代码、知识、沟通和运维系统中。AI Agent 即使具备足够的推理或工具能力，也仍然需要解决一组协作边界问题：
@@ -116,7 +122,9 @@ Work Fabric 由以下逻辑能力组成：
 - **Trust & Trace**：身份、委托、权限、因果、审计和责任历史。
 - **Read Projections**：Inbox、项目状态、协作时间线和关系视图。
 
-详细说明见[整体架构文档](docs/architecture.md)。可执行的协议规范、Canonical Schema、Handoff 状态机、Golden Fixtures 和参考序列见 [WFPP v1 Core Protocol](protocol/README.md)。
+详细说明见[整体架构文档](docs/architecture.md)，所有新模块和功能必须先通过
+[Architecture Boundary Check](PROJECT_CHARTER.md#12-architecture-boundary-check)。
+可执行的协议规范、Canonical Schema、Handoff 状态机、Golden Fixtures 和参考序列见 [WFPP v1 Core Protocol](protocol/README.md)。
 
 ## 示例接入
 

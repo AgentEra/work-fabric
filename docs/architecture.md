@@ -2,6 +2,11 @@
 
 本文是 Work Fabric 的 canonical 架构说明，面向协议设计者、系统实现者、Connector/Agent 开发者和技术决策者。更详细的设计推导与验收标准见[协作对接与工作交接详细设计](superpowers/specs/2026-07-13-collaboration-handoff-fabric-design.md)。
 
+所有后续 Spec、计划和实现必须先遵守
+[Work Fabric 项目章程](../PROJECT_CHARTER.md) 并完成其中的
+`Architecture Boundary Check`。局部功能需求不能覆盖这些底线；发生冲突时
+必须停止实现并重新划分到外部 Citizen，不能先在 Core 中实现后再抽离。
+
 ## 1. 定位与系统边界
 
 > **A protocol-driven collaboration interconnect for humans, agents, and work systems.**
