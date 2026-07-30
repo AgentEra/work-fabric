@@ -15,8 +15,9 @@ Complete the first production-shaped calendar collaboration flow:
 2. the Agent understands the current message and bounded group history;
 3. the Agent infers a meeting proposal and asks follow-up questions when facts
    are insufficient;
-4. when the proposal is complete, the Agent posts it to the original group and
-   uses a native Feishu mention to ask the original initiator to confirm;
+4. when the proposal is complete, the Agent returns it through the original
+   Channel route and identifies the original initiator as the confirmation
+   recipient; the Feishu Channel renders that recipient as a native mention;
 5. the original initiator confirms or revises the proposal in natural
    language;
 6. the Agent correlates that reply with its private scheduling session,
@@ -75,8 +76,8 @@ phrases such as “确认” or “可以”.
 3. The Feishu Channel publishes trusted source, sender, conversation and reply
    relationship facts. It does not decide whether a message belongs to a
    scheduling session.
-4. The Message Provider exposes history, member and outbound-message
-   capabilities. It does not infer scheduling semantics.
+4. The Message Provider exposes history, member and explicitly requested
+   proactive-message capabilities. It does not infer scheduling semantics.
 5. The Calendar Provider receives only an explicit attendee list, time range,
    title and authorized resource references.
 6. Work Fabric does not introduce Wait, Resume, Scheduler, Planner or
@@ -223,8 +224,8 @@ The worker is instructed to:
 4. separate relevant scheduling facts from unrelated group noise;
 5. ask the group for missing information instead of guessing;
 6. form an explicit proposal before any calendar side effect;
-7. send the proposal to the current conversation and mention the original
-   initiator;
+7. return the proposal through the current conversation route and identify the
+   original initiator as the notification recipient;
 8. accept confirmation only from the original initiator and only for the latest
    proposal;
 9. create a new proposal version after any material revision; and
@@ -234,19 +235,18 @@ The Agent Runtime validates and applies private mutations to the
 Agent-owned store. Those mutations are not Handoffs and cannot invoke a
 Provider. All external actions still require normal Capability Handoffs.
 
-## 8. Feishu mention support
+## 8. Channel-neutral mention support
 
-`feishu.message.send` is extended with an optional bounded list:
+The canonical Agent text result gains an optional bounded recipient annotation:
 
 ```json
 {
-  "target": { "kind": "current_conversation" },
-  "content": {
-    "media_type": "text/markdown",
-    "text": "请确认下面的排期提案……"
-  },
-  "mentions": [
+  "kind": "text",
+  "media_type": "text/markdown",
+  "text": "请确认下面的排期提案……",
+  "recipient_references": [
     {
+      "kind": "mention",
       "resource_uri": "feishu://user/open-id/ou_xxx",
       "display_text": "发起人"
     }
@@ -254,18 +254,25 @@ Provider. All external actions still require normal Capability Handoffs.
 }
 ```
 
-The Message Provider:
+The producing Agent decides which recipient requires attention. Work Fabric
+preserves the annotation as inert content metadata and does not interpret it.
+The Feishu Channel:
 
 - validates canonical Feishu user resource references;
-- verifies every mention against delegated Authority;
-- renders a Feishu-native post containing `at` elements;
+- renders each accepted reference as a Feishu-native `at` element;
 - preserves Markdown links as clickable elements where supported;
-- returns the resulting message ID and typed target facts; and
 - never chooses whom to mention.
 
-For the proposal-confirmation message, Authority permits the source Human's
-trusted sender resource reference. Mentioning any other user requires explicit
-parent resource scope or verified group-member evidence.
+The Channel only accepts a mention whose resource reference is already within
+the Result's delegated source scope. For the proposal-confirmation reply, that
+scope contains the source Human's trusted sender resource reference.
+Mentioning any other user requires explicit parent resource scope or verified
+group-member evidence.
+
+This reactive Result path produces exactly one reply. The independent
+`feishu.message.send` Capability remains available for an Agent that explicitly
+needs a proactive additional message; it is not used to duplicate the response
+already carried by the Result.
 
 ## 9. Confirmation and execution evidence
 
@@ -370,4 +377,3 @@ interpret natural-language confirmation or decide that the proposal is good.
    No. Feishu fields remain in Channel/Provider modules. Scheduling states
    remain in the Daily Assistant. The generic Agent task only exposes existing
    source and initiator facts.
-
