@@ -20,6 +20,19 @@ def valid_request() -> dict[str, Any]:
                 "capability_ids": ["information.synthesis"],
             },
             "capability_id": "information.synthesis",
+            "source_reference": {
+                "uri": "feishu://tenant-1/message/message-1",
+                "extensions": {
+                    "workfabric.dev/provider_family": "feishu",
+                    "workfabric.dev/sender_resource_uri":
+                        "feishu://user/open-id/ou-human-1",
+                },
+            },
+            "initiator": {
+                "actor_id": "human-1",
+                "actor_type": "human",
+            },
+            "agent_private_context": None,
             "intent": [{"kind": "text", "text": "Summarize this request"}],
             "context_reference": {"reference": "handoff-context-1"},
             "resolved_context": {

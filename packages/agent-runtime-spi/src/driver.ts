@@ -8,6 +8,9 @@ export interface RuntimeTaskPackage {
   readonly stream_version: number;
   readonly role: AgentRoleProfile;
   readonly capability_id: string | null;
+  readonly source_reference: RuntimeJsonObject;
+  readonly initiator: RuntimeJsonObject;
+  readonly agent_private_context: RuntimeJsonObject | null;
   readonly intent: readonly RuntimeJsonObject[];
   readonly context_reference: RuntimeJsonObject | null;
   readonly resolved_context: RuntimeJsonObject | null;

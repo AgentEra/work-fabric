@@ -156,8 +156,10 @@ def _validate_role(value: object) -> dict[str, JsonValue]:
 def _validate_task(value: object) -> dict[str, JsonValue]:
     fields = (
         "tenant_id", "handoff_id", "thread_id", "stream_version", "role", "capability_id",
-        "intent", "context_reference", "resolved_context", "authority_scope", "acceptance_criteria", "priority",
-        "accept_by", "result_due_at", "workspace_path",
+        "source_reference", "initiator", "agent_private_context", "intent",
+        "context_reference", "resolved_context", "authority_scope",
+        "acceptance_criteria", "priority", "accept_by", "result_due_at",
+        "workspace_path",
     )
     task = _exact_object(value, fields, "task")
     for key in ("tenant_id", "handoff_id", "thread_id", "accept_by", "result_due_at", "workspace_path"):
@@ -167,6 +169,15 @@ def _validate_task(value: object) -> dict[str, JsonValue]:
     _validate_role(task["role"])
     if task["capability_id"] is not None:
         _string(task["capability_id"], "task.capability_id", 128)
+    if not isinstance(task["source_reference"], dict):
+        _fail("task.source_reference is invalid")
+    if not isinstance(task["initiator"], dict):
+        _fail("task.initiator is invalid")
+    if (
+        task["agent_private_context"] is not None
+        and not isinstance(task["agent_private_context"], dict)
+    ):
+        _fail("task.agent_private_context is invalid")
     if task["priority"] not in ("low", "normal", "high", "critical"):
         _fail("task.priority is invalid")
     for key in ("intent", "acceptance_criteria"):

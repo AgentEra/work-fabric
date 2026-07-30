@@ -67,6 +67,13 @@ describe("HandoffPackageLoader", () => {
     expect(loaded.task.intent).toEqual(snapshotPackage.package.intent);
     expect(loaded.task.acceptance_criteria).toEqual(snapshotPackage.package.acceptance_criteria);
     expect(loaded.task.stream_version).toBe(snapshot.stream_version);
+    expect(loaded.task.source_reference).toEqual(
+      (snapshot.state as unknown as {
+        package: { work_reference: unknown };
+      }).package.work_reference,
+    );
+    expect(loaded.task.initiator).toEqual(snapshot.state.initiator);
+    expect(loaded.task.agent_private_context).toBeNull();
     expect(client.listHandoffEvents).toHaveBeenCalledWith("handoff-1", expect.objectContaining({ fromVersion: 1, limit: 100 }));
   });
 

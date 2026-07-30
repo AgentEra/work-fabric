@@ -188,6 +188,15 @@ describe("Agent -> auxiliary Handoff -> Feishu Provider loop", () => {
               capability_ids: [candidate.capability_id],
             },
             capability_id: candidate.capability_id,
+            source_reference: {
+              uri: "urn:test:capability-source",
+              extensions: {},
+            },
+            initiator: {
+              actor_id: "agent-1",
+              actor_type: "agent",
+            },
+            agent_private_context: null,
             intent: payload.intent,
             context_reference: null,
             resolved_context: null,

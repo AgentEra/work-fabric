@@ -188,7 +188,12 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
     if (identity.endpoint_id === undefined) return { kind: "rejected", reason_code: "participant_endpoint_missing", retryable: false };
     const now = this.options.clock.now();
     const messageId = bounded(payload.message_id, "message_id", 255);
+    const conversationId = bounded(payload.chat_id, "chat_id", 255);
     const reference = `feishu://${encodeURIComponent(claim.envelope.external_tenant_id)}/message/${encodeURIComponent(messageId)}`;
+    const senderReference =
+      `feishu://user/open-id/${encodeURIComponent(sender)}`;
+    const conversationReference =
+      `feishu://chat/${encodeURIComponent(conversationId)}`;
     const delegationId = `intake-${createHash("sha256").update(messageId).digest("hex").slice(0, 24)}`;
     const delegationExpiresAt = addSeconds(
       now,
@@ -203,7 +208,7 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
             tenant_id: claim.envelope.tenant_id,
             provider_family: "feishu",
             external_tenant_id: claim.envelope.external_tenant_id,
-            conversation_id: bounded(payload.chat_id, "chat_id", 255),
+            conversation_id: conversationId,
             trigger_message_id: messageId,
             ...(typeof payload.thread_id === "string"
               ? { thread_id: bounded(payload.thread_id, "thread_id", 255) }
@@ -266,12 +271,10 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
         "workfabric.dev/provider_family": "feishu",
         "workfabric.dev/resource_kind": "conversation_message",
         "workfabric.dev/external_tenant_id": claim.envelope.external_tenant_id,
-        "workfabric.dev/conversation_id": bounded(
-          payload.chat_id,
-          "chat_id",
-          255,
-        ),
+        "workfabric.dev/conversation_id": conversationId,
         "workfabric.dev/message_id": messageId,
+        "workfabric.dev/sender_resource_uri": senderReference,
+        "workfabric.dev/conversation_resource_uri": conversationReference,
         "workfabric.dev/occurred_at": claim.envelope.occurred_at,
         ...(typeof payload.root_id === "string" ? { "workfabric.dev/root_id": payload.root_id } : {}),
         ...(typeof payload.parent_id === "string" ? { "workfabric.dev/parent_id": payload.parent_id } : {}),
@@ -281,7 +284,12 @@ export class FeishuIntakeMessagePolicy implements FeishuMessageMappingPolicy {
       intent: [{ kind: "text", media_type: "text/plain", text }],
       authority_scope: {
         delegation_id: delegationId,
-        scopes: [...this.options.delegation.scopes], resource_refs: [reference],
+        scopes: [...this.options.delegation.scopes],
+        resource_refs: [
+          reference,
+          senderReference,
+          conversationReference,
+        ],
         expires_at: delegationExpiresAt,
         may_redelegate: this.options.delegation.may_redelegate,
       },

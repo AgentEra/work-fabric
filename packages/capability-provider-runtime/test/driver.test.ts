@@ -37,6 +37,9 @@ function task(): RuntimeTaskPackage {
       capability_ids: ["feishu.message.send"],
     },
     capability_id: "feishu.message.send",
+    source_reference: { uri: "urn:test:source", extensions: {} },
+    initiator: { actor_id: "agent-1", actor_type: "agent" },
+    agent_private_context: null,
     intent: [{
       kind: "data",
       schema_ref: "urn:work-fabric:schema:feishu:messageSendInput:1",

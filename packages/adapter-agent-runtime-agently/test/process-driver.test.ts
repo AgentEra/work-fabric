@@ -14,7 +14,11 @@ const worker = fileURLToPath(new URL("./fixtures/fake-worker.mjs", import.meta.u
 const task = (scenario: string): RuntimeTaskPackage => ({
   tenant_id: "tenant-1", handoff_id: scenario, thread_id: "thread-1", stream_version: 1,
   role: { role_id: "daily-assistant", version: 1, display_name: "Daily", description: "Daily", capability_ids: ["information.synthesis"] },
-  capability_id: "information.synthesis", intent: [], context_reference: null, resolved_context: null, authority_scope: {}, acceptance_criteria: [], priority: "normal",
+  capability_id: "information.synthesis",
+  source_reference: { uri: "urn:test:source", extensions: {} },
+  initiator: { actor_id: "human-1", actor_type: "human" },
+  agent_private_context: null,
+  intent: [], context_reference: null, resolved_context: null, authority_scope: {}, acceptance_criteria: [], priority: "normal",
   accept_by: "2026-01-01T00:00:00.000Z", result_due_at: "2026-01-01T01:00:00.000Z", workspace_path: "/tmp/workspace",
 });
 

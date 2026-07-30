@@ -112,9 +112,10 @@ function capabilityRequirement(value: unknown, path: string): void {
   if (item.extensions !== undefined) jsonObject(item.extensions, `${path}.extensions`);
 }
 
-function actor(value: unknown, path: string): void {
+function actor(value: unknown, path: string): RuntimeJsonObject {
   const item = record(value, path); exact(item, ["actor_id", "actor_type"], path); id(item.actor_id, `${path}.actor_id`);
   if (item.actor_type !== "human" && item.actor_type !== "agent" && item.actor_type !== "system") invalid("invalid_snapshot", `${path}.actor_type`);
+  return item as RuntimeJsonObject;
 }
 
 function activeClaim(value: unknown, path: string, fencingToken: number): void {
@@ -241,7 +242,8 @@ export class HandoffPackageLoader {
     const mode = options.mode ?? "offered";
     if (state.lifecycle_state !== mode) invalid("snapshot_lifecycle_mismatch", "state.lifecycle_state");
     normalizeRfc3339(state.created_at, "state.created_at", "invalid_snapshot"); normalizeRfc3339(state.updated_at, "state.updated_at", "invalid_snapshot");
-    actor(state.initiator, "state.initiator"); actor(state.verifier, "state.verifier");
+    const initiator = actor(state.initiator, "state.initiator");
+    actor(state.verifier, "state.verifier");
     if (state.recipient !== null) actor(state.recipient, "state.recipient");
     if (state.current_responsible_actor !== null) actor(state.current_responsible_actor, "state.current_responsible_actor");
     if (
@@ -265,7 +267,10 @@ export class HandoffPackageLoader {
     }
     const handoffPackage = record(state.package, "state.package"); exact(handoffPackage, PACKAGE_FIELDS, "state.package");
     target(handoffPackage.target, "state.package.target");
-    jsonObject(handoffPackage.work_reference, "state.package.work_reference");
+    const sourceReference = jsonObject(
+      handoffPackage.work_reference,
+      "state.package.work_reference",
+    );
     const intent = objectArray(handoffPackage.intent, "state.package.intent", 128);
     const contextReference = context(handoffPackage.context, "state.package.context");
     let resolvedContextValue: RuntimeJsonObject | null = null;
@@ -290,7 +295,26 @@ export class HandoffPackageLoader {
       : timestamp(handoffPackage.accept_by, "state.package.accept_by");
     const resultDueAt = futureTimestamp(handoffPackage.result_due_at, "state.package.result_due_at", this.now());
     const events = await this.readEvents(handoffId, snapshot.stream_version, options.signal);
-    const task = cloneFrozenJson({ tenant_id: this.tenantId, handoff_id: handoffId, thread_id: threadId, stream_version: snapshot.stream_version, role: this.role, capability_id: this.capabilityId(handoffPackage.target), intent, context_reference: contextReference, resolved_context: resolvedContextValue, authority_scope: authorityScope, acceptance_criteria: acceptanceCriteria, priority: handoffPackage.priority, accept_by: acceptBy, result_due_at: resultDueAt, workspace_path: workspacePath }, "task") as RuntimeTaskPackage;
+    const task = cloneFrozenJson({
+      tenant_id: this.tenantId,
+      handoff_id: handoffId,
+      thread_id: threadId,
+      stream_version: snapshot.stream_version,
+      role: this.role,
+      capability_id: this.capabilityId(handoffPackage.target),
+      source_reference: sourceReference,
+      initiator,
+      agent_private_context: null,
+      intent,
+      context_reference: contextReference,
+      resolved_context: resolvedContextValue,
+      authority_scope: authorityScope,
+      acceptance_criteria: acceptanceCriteria,
+      priority: handoffPackage.priority,
+      accept_by: acceptBy,
+      result_due_at: resultDueAt,
+      workspace_path: workspacePath,
+    }, "task") as RuntimeTaskPackage;
     return Object.freeze({ snapshot, events, task });
   }
 

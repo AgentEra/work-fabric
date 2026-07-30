@@ -167,6 +167,13 @@ def test_rejects_secret_named_fields_at_any_task_depth() -> None:
     with pytest.raises(ProtocolError, match="secret"):
         parse_request(value)
 
+    value = valid_request()
+    value["task"]["agent_private_context"] = {
+        "session": {"access_token": "forbidden"}
+    }
+    with pytest.raises(ProtocolError, match="secret"):
+        parse_request(value)
+
 
 def test_request_rejects_excessive_json_bounds() -> None:
     value = valid_request()

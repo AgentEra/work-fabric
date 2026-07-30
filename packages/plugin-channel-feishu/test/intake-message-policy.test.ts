@@ -118,6 +118,10 @@ describe("FeishuIntakeMessagePolicy", () => {
               "workfabric.dev/external_tenant_id": "tenant-key-1",
               "workfabric.dev/conversation_id": "oc-1",
               "workfabric.dev/message_id": "om-1",
+              "workfabric.dev/sender_resource_uri":
+                "feishu://user/open-id/ou-human-1",
+              "workfabric.dev/conversation_resource_uri":
+                "feishu://chat/oc-1",
               "workfabric.dev/thread_id": "omt-thread-1",
             },
           },
@@ -217,12 +221,21 @@ describe("FeishuIntakeMessagePolicy", () => {
               "workfabric.dev/external_tenant_id": "tenant-key-1",
               "workfabric.dev/conversation_id": "oc-1",
               "workfabric.dev/message_id": "om-1",
+              "workfabric.dev/sender_resource_uri":
+                "feishu://user/open-id/ou-human-1",
+              "workfabric.dev/conversation_resource_uri":
+                "feishu://chat/oc-1",
             },
           },
           target: { actor_id: "actor-agent" },
           intent: [{ kind: "text", media_type: "text/plain", text: "create a requirement" }],
           authority_scope: {
             scopes: ["work:read", "document:read", "document:write"],
+            resource_refs: [
+              "feishu://tenant-key-1/message/om-1",
+              "feishu://user/open-id/ou-human-1",
+              "feishu://chat/oc-1",
+            ],
             may_redelegate: true,
           },
           verifier: { actor_id: "actor-human", actor_type: "agent" },

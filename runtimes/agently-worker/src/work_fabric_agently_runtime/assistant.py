@@ -123,7 +123,9 @@ def task_prompt_input(task: Mapping[str, JsonValue]) -> dict[str, JsonValue]:
     """Supply only the current Handoff data; the Workspace is bound separately."""
     fields = (
         "tenant_id", "handoff_id", "thread_id", "stream_version", "capability_id", "intent",
-        "context_reference", "resolved_context", "authority_scope", "acceptance_criteria", "priority", "accept_by", "result_due_at",
+        "source_reference", "initiator", "agent_private_context",
+        "context_reference", "resolved_context", "authority_scope",
+        "acceptance_criteria", "priority", "accept_by", "result_due_at",
     )
     return {field: task[field] for field in fields}
 
