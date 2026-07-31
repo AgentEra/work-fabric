@@ -165,6 +165,174 @@ describe("DailyAssistantDriver", () => {
     expect(underlying.executeTurn).not.toHaveBeenCalled();
   });
 
+  it("continues from offline history to a document command and semantic result without repeating preflight", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    stores.push(state);
+    const underlying = new StubDriver();
+    const driver = new DailyAssistantDriver(underlying, state);
+    const currentTask = task({ text: "你把上面的事做一下" });
+    const first = await driver.executeTurn(
+      currentTask,
+      [historyCapability],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    );
+    if (first.kind !== "capability_request") {
+      throw new Error("expected history request");
+    }
+    const historyTranscript: RuntimeCapabilityTranscript = {
+      entries: [{
+        request: first.request,
+        result: {
+          outcome: "succeeded",
+          invocation_id: first.request.invocation_id,
+          auxiliary_handoff_id: "handoff-history-result",
+          candidate: {
+            citizen_id: "citizen-feishu-message",
+            endpoint_id: "endpoint-feishu-provider",
+            capability_id: "feishu.conversation.history.read",
+            capability_version: "1.0.0",
+            contract_digest:
+              `sha256:${"a".repeat(64)}` as `sha256:${string}`,
+          },
+          data: {
+            messages: [{
+              message_id: "om-offline-request",
+              sender: {
+                external_id: "ou-initiator",
+                sender_type: "user",
+              },
+              created_at: "2026-07-31T06:52:57.980Z",
+              content: {
+                media_type: "text/plain",
+                text: "帮我创建一份标题为办公网环境的文档",
+              },
+              provenance: {
+                provider_family: "feishu",
+                source: "im.message",
+                updated: false,
+              },
+            }],
+            has_more: false,
+            coverage: {
+              oldest_at: "2026-07-31T06:52:57.980Z",
+              newest_at: "2026-07-31T06:52:57.980Z",
+            },
+            provenance: {
+              provider_family: "feishu",
+              source: "im.message",
+              source_reference:
+                "feishu://tenant-1/message/handoff-origin",
+            },
+          },
+          artifacts: [],
+        },
+      }],
+    };
+    underlying.executeTurn.mockResolvedValueOnce({
+      kind: "capability_request",
+      request: {
+        invocation_id: "invocation-document-create",
+        capability_id: "feishu.document.create",
+        version_constraint: "2.0.0",
+        input: {
+          document: { kind: "new_document" },
+          title: "办公网环境",
+          content: {
+            media_type: "text/markdown",
+            text: "# 办公网环境",
+          },
+        },
+        reason: "当前同一发起人明确要求执行上面的文档任务",
+      },
+    });
+
+    const documentTurn = await driver.executeTurn(
+      currentTask,
+      [historyCapability],
+      historyTranscript,
+      async () => undefined,
+      new AbortController().signal,
+    );
+    expect(documentTurn).toMatchObject({
+      kind: "capability_request",
+      request: {
+        capability_id: "feishu.document.create",
+        input: { title: "办公网环境" },
+      },
+    });
+    if (documentTurn.kind !== "capability_request") {
+      throw new Error("expected document request");
+    }
+    const completeTranscript: RuntimeCapabilityTranscript = {
+      entries: [
+        ...historyTranscript.entries,
+        {
+          request: documentTurn.request,
+          result: {
+            outcome: "succeeded",
+            invocation_id: documentTurn.request.invocation_id,
+            auxiliary_handoff_id: "handoff-document-result",
+            candidate: {
+              citizen_id: "citizen-feishu-document",
+              endpoint_id: "endpoint-feishu-provider",
+              capability_id: "feishu.document.create",
+              capability_version: "2.0.0",
+              contract_digest:
+                `sha256:${"b".repeat(64)}` as `sha256:${string}`,
+            },
+            data: {
+              document: {
+                resource_uri: "feishu://docx/doc-office-network",
+                url: "https://example.feishu.cn/docx/doc-office-network",
+                title: "办公网环境",
+              },
+            },
+            artifacts: [],
+          },
+        },
+      ],
+    };
+    underlying.executeTurn.mockResolvedValueOnce({
+      kind: "final",
+      response: {
+        summary: [{
+          kind: "text",
+          media_type: "text/markdown",
+          text:
+            "已创建[办公网环境](https://example.feishu.cn/docx/doc-office-network)。",
+        }],
+        artifacts: [{
+          uri: "feishu://docx/doc-office-network",
+          media_type: "application/vnd.feishu.docx",
+        }],
+        evidence: [],
+        extensions: {
+          "workfabric.agent/request_summary": "创建办公网环境文档",
+        },
+      },
+    });
+
+    await expect(driver.executeTurn(
+      currentTask,
+      [historyCapability],
+      completeTranscript,
+      async () => undefined,
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      kind: "final",
+      response: {
+        summary: [{
+          text: expect.stringContaining(
+            "https://example.feishu.cn/docx/doc-office-network",
+          ),
+        }],
+      },
+    });
+    expect(underlying.executeTurn).toHaveBeenCalledTimes(2);
+  });
+
   it("injects private context, persists a proposal, mentions the initiator and strips private output", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     stores.push(state);

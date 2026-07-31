@@ -124,6 +124,19 @@ describe("Agently Runtime operator guide", () => {
     );
   });
 
+  it("documents bounded progressive retrieval for offline conversation references", async () => {
+    const source = await readFile(guide, "utf8");
+    const prose = source.replace(/\s+/gu, " ");
+
+    for (const term of [
+      "does not replay messages sent while the Service is offline",
+      "20 recent messages",
+      "self-contained request",
+      "current Handoff intent authorizes",
+      "has_more",
+    ]) expect(prose).toContain(term);
+  });
+
   it("configures the Calendar Citizen and least-privilege scheduling delegation", async () => {
     const source = await readFile(localBundle, "utf8");
     for (const value of [

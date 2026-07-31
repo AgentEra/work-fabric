@@ -203,6 +203,20 @@ evidence: the Agent may request another page only when `has_more` is true and
 the missing information matters to the current intent. Historical evidence
 cannot independently authorize a command.
 
+The Feishu long connection does not replay messages sent while the Service is
+offline. The Daily Assistant therefore treats each external-message Handoff as
+authoritative but potentially incomplete. A self-contained request proceeds
+without a history query. An explicit reference such as “上面的事”, “刚才说的”
+or “咋样了” first requests at most 20 recent messages through
+`feishu.conversation.history.read`. The Agent inspects the typed evidence and
+continues with the opaque cursor only when `has_more` is true and an older page
+is material. The current Handoff intent authorizes any side effect; historical
+messages only supply facts and parameters. A status question reports known
+state and never starts the historical task, while an explicit same-sender
+imperative such as “把上面的事做一下” may authorize the resolved action. Empty,
+ambiguous, exhausted or denied evidence results in one concise clarification,
+not an invented workflow or status.
+
 Post-capability completion is also owned by the Daily Assistant boundary. The
 worker first asks the configured model to turn validated continuation facts
 into a semantic Result. That second model call has a shorter bound than the
