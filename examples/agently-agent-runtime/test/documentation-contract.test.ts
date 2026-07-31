@@ -136,6 +136,7 @@ describe("Agently Runtime operator guide", () => {
       "calendar_event:write",
       "calendar_attendee:write",
       "calendar_event:delete",
+      "citizen-feishu-calendar/feishu.calendar.events.list",
     ]) expect(source).toContain(value);
     expect(source).not.toMatch(/calendar_(?:id|ids):/);
   });

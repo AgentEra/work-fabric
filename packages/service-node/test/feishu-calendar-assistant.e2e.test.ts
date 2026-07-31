@@ -31,7 +31,7 @@ describe("Feishu Calendar assistant release contracts", () => {
         : await registry.load(declaration.input_schema, signal),
     })));
 
-    expect(validateRuntimeCapabilitySummaries(summaries)).toHaveLength(7);
+    expect(validateRuntimeCapabilitySummaries(summaries)).toHaveLength(8);
 
     const create = declarations.find((declaration) =>
       declaration.declaration_id === "feishu.calendar.event.create"

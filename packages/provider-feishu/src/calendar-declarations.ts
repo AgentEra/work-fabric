@@ -96,6 +96,23 @@ const eventFacts = {
   provider_version: expectedProviderVersion,
   external_updated_at: rfc3339,
 };
+const eventBoundary = {
+  oneOf: [
+    objectSchema(["kind", "at", "time_zone"], {
+      kind: { const: "date_time" },
+      at: rfc3339,
+      time_zone: { type: "string", minLength: 1, maxLength: 255 },
+    }),
+    objectSchema(["kind", "date"], {
+      kind: { const: "all_day" },
+      date: {
+        type: "string",
+        format: "date",
+        pattern: "^\\d{4}-\\d{2}-\\d{2}$",
+      },
+    }),
+  ],
+};
 const attendeeOutcome = objectSchema([
   "resource_uri",
   "outcome",
@@ -278,6 +295,85 @@ const DEFINITIONS = Object.freeze({
     visibility: { enum: ["default", "public", "private"] },
     organizer_mode: { enum: ["application", "external"] },
     attendees: attendeeRefs,
+    provenance,
+  }),
+  calendarEventListInput: objectSchema([
+    "subject_resource_uri",
+    "start_at",
+    "end_at",
+    "page_size",
+  ], {
+    subject_resource_uri: {
+      ...resourceUri,
+      pattern: "^feishu://user/open-id/[^/]+$",
+    },
+    start_at: rfc3339,
+    end_at: rfc3339,
+    page_size: { type: "integer", minimum: 1, maximum: 50 },
+    page_token: {
+      type: "string",
+      minLength: 1,
+      maxLength: 1_024,
+    },
+  }),
+  calendarEventListOutput: objectSchema([
+    "subject_resource_uri",
+    "calendar_resource_uri",
+    "coverage",
+    "access_mode",
+    "events",
+    "has_more",
+    "provenance",
+  ], {
+    subject_resource_uri: {
+      ...resourceUri,
+      pattern: "^feishu://user/open-id/[^/]+$",
+    },
+    calendar_resource_uri: {
+      ...resourceUri,
+      pattern: "^feishu://calendar/[^/]+$",
+    },
+    coverage: objectSchema(["start_at", "end_at"], {
+      start_at: rfc3339,
+      end_at: rfc3339,
+    }),
+    access_mode: {
+      enum: ["full", "free_busy_only", "unknown"],
+    },
+    events: {
+      type: "array",
+      maxItems: 50,
+      items: objectSchema([
+        "event_resource_uri",
+        "event_id",
+        "start",
+        "end",
+        "details_visible",
+      ], {
+        event_resource_uri: eventFacts.event_resource_uri,
+        event_id: eventFacts.event_id,
+        title: eventFacts.title,
+        description: eventFacts.description,
+        start: eventBoundary,
+        end: eventBoundary,
+        status: {
+          enum: ["tentative", "confirmed", "cancelled"],
+        },
+        visibility: { type: "string", minLength: 1, maxLength: 64 },
+        url: eventFacts.url,
+        organizer_resource_uri: {
+          ...resourceUri,
+          pattern: "^feishu://user/open-id/[^/]+$",
+        },
+        details_visible: { type: "boolean" },
+      }),
+    },
+    has_more: { type: "boolean" },
+    next_page_token: {
+      type: "string",
+      minLength: 1,
+      maxLength: 1_024,
+    },
     provenance,
   }),
   calendarEventUpdateInput: objectSchema([
@@ -498,6 +594,16 @@ export function feishuCalendarCapabilityDeclarations():
       output: "calendarEventUpdateOutput",
       risk: "medium",
       operation_kind: "command",
+    }),
+    capability({
+      id: "feishu.calendar.events.list",
+      name: "List Feishu Calendar events",
+      description:
+        "Return a bounded page of authoritative primary-calendar event facts for one authorized user.",
+      input: "calendarEventListInput",
+      output: "calendarEventListOutput",
+      risk: "low",
+      operation_kind: "query",
     }),
     capability({
       id: "feishu.calendar.freebusy.query",

@@ -1,6 +1,6 @@
 # Authoritative Calendar Query and Cancellation Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make calendar-list answers use authoritative Feishu facts and make proposal cancellation atomically terminate the Daily Assistant's private scheduling session.
 
@@ -32,14 +32,14 @@
 - Produces: `CalendarEventListInput`, normalized event-page facts, and capability ID `feishu.calendar.events.list`
 - Consumes: existing Calendar resource adapters and declaration helpers
 
-- [ ] **Step 1: Write failing declaration and validation tests**
+- [x] **Step 1: Write failing declaration and validation tests**
 
 Add assertions that the capability is a low-risk query, accepts one authorized
 user subject, a maximum 31-day RFC3339 window, `page_size` 1-50 and an optional
 opaque token, and rejects unknown fields, invalid subjects and oversized
 windows.
 
-- [ ] **Step 2: Run tests and observe the missing capability failures**
+- [x] **Step 2: Run tests and observe the missing capability failures**
 
 Run:
 
@@ -49,12 +49,12 @@ npx vitest run packages/provider-feishu/test/calendar-declarations.test.ts packa
 
 Expected: FAIL because `feishu.calendar.events.list` is not declared or parsed.
 
-- [ ] **Step 3: Implement the minimal typed contract, schemas and parser**
+- [x] **Step 3: Implement the minimal typed contract, schemas and parser**
 
 Add the new input to `CalendarExecutionInput`, publish bounded input/output
 schemas, and route it through `parseCalendarExecutionInput`.
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 Run the Step 2 command. Expected: PASS.
 
@@ -69,7 +69,7 @@ Run the Step 2 command. Expected: PASS.
 - Produces: `FeishuCalendarBackend.listPrimaryEvents(...)`
 - Consumes: `FeishuOpenApiRequestClient`
 
-- [ ] **Step 1: Write failing tests for primary resolution, pagination, redaction and all-day boundaries**
+- [x] **Step 1: Write failing tests for primary resolution, pagination, redaction and all-day boundaries**
 
 The fake request client must observe:
 
@@ -81,7 +81,7 @@ GET  /open-apis/calendar/v4/calendars/{id}/events?...&op_user_id={open_id}
 Assert that missing summaries become `details_visible=false`, visible summaries
 are preserved, all-day values stay dates, and provider tokens stay opaque.
 
-- [ ] **Step 2: Run the focused backend test and observe the missing method**
+- [x] **Step 2: Run the focused backend test and observe the missing method**
 
 ```bash
 npx vitest run packages/provider-feishu/test/calendar-openapi-backend.test.ts
@@ -89,12 +89,12 @@ npx vitest run packages/provider-feishu/test/calendar-openapi-backend.test.ts
 
 Expected: FAIL because `listPrimaryEvents` does not exist.
 
-- [ ] **Step 3: Implement bounded response normalization**
+- [x] **Step 3: Implement bounded response normalization**
 
 Resolve exactly one requested primary calendar, classify its role, issue one
 event page request, normalize each event, and fail closed on malformed data.
 
-- [ ] **Step 4: Run the focused backend test**
+- [x] **Step 4: Run the focused backend test**
 
 Run the Step 2 command. Expected: PASS.
 
@@ -110,25 +110,25 @@ Run the Step 2 command. Expected: PASS.
 - Consumes: `CalendarEventListInput` and `FeishuCalendarBackend.listPrimaryEvents`
 - Produces: typed Capability outcome with Feishu provenance
 
-- [ ] **Step 1: Write failing authorization and executor tests**
+- [x] **Step 1: Write failing authorization and executor tests**
 
 Assert that only `source_reference.extensions["workfabric.dev/sender_resource_uri"]`
 may be queried, another user is denied, redacted event facts are returned
 without a fabricated title, and paging fields survive.
 
-- [ ] **Step 2: Run the focused tests and observe unsupported capability failures**
+- [x] **Step 2: Run the focused tests and observe unsupported capability failures**
 
 ```bash
 npx vitest run packages/provider-feishu/test/calendar-executor-query.test.ts examples/agently-agent-runtime/test/local-invocation-authority.test.ts
 ```
 
-- [ ] **Step 3: Implement the scope, Authority and executor branch**
+- [x] **Step 3: Implement the scope, Authority and executor branch**
 
 Reuse `calendar_event:read`; add the trusted sender to
 `allowed_target_refs`; map backend facts to stable resource URIs and typed
 JSON.
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 Run the Step 2 command. Expected: PASS.
 
@@ -144,7 +144,7 @@ Run the Step 2 command. Expected: PASS.
 - Consumes: a model final turn containing `phase=cancelled`
 - Produces: a terminal private state that is absent from later `active_session`
 
-- [ ] **Step 1: Write failing repository and Driver tests**
+- [x] **Step 1: Write failing repository and Driver tests**
 
 Persist an `awaiting_confirmation` proposal, then return a cancellation final
 turn from the stub model. Assert version increments, stored phase is
@@ -152,19 +152,19 @@ turn from the stub model. Assert version increments, stored phase is
 enriched task has `active_session=null`. Also assert that a different sender
 cannot cancel.
 
-- [ ] **Step 2: Run the focused tests and observe missing cancellation validation**
+- [x] **Step 2: Run the focused tests and observe missing cancellation validation**
 
 ```bash
 npx vitest run examples/agently-agent-runtime/test/scheduling-session.test.ts examples/agently-agent-runtime/test/daily-assistant-driver.test.ts
 ```
 
-- [ ] **Step 3: Implement the minimal cancellation invariants**
+- [x] **Step 3: Implement the minimal cancellation invariants**
 
 Validate active phase, original initiator, null side-effect fields and empty
 evidence. Keep optimistic persistence in the Driver before returning the final
 Result.
 
-- [ ] **Step 4: Run the focused tests**
+- [x] **Step 4: Run the focused tests**
 
 Run the Step 2 command. Expected: PASS.
 
@@ -178,25 +178,25 @@ Run the Step 2 command. Expected: PASS.
 - Produces: model instructions and validated structured state for authoritative event queries and cancellation
 - Consumes: dynamic capability summaries and trusted `agent_private_context`
 
-- [ ] **Step 1: Write failing prompt and output-contract tests**
+- [x] **Step 1: Write failing prompt and output-contract tests**
 
 Assert that the prompt requires `feishu.calendar.events.list` for calendar
 truth, uses only the current sender as subject, treats redacted items as busy
 slots, forbids proposal substitution, and requires `private_state_action=update`
 for proposal cancellation with all eight state fields.
 
-- [ ] **Step 2: Run the Python test and observe the missing rules**
+- [x] **Step 2: Run the Python test and observe the missing rules**
 
 ```bash
 uv run --project runtimes/agently-worker pytest -q runtimes/agently-worker/tests/test_assistant.py
 ```
 
-- [ ] **Step 3: Extend the scheduling state schema and prompt**
+- [x] **Step 3: Extend the scheduling state schema and prompt**
 
 Allow `cancelled`, describe the exact cancellation envelope, and retain generic
 dynamic capability selection.
 
-- [ ] **Step 4: Run the Python test**
+- [x] **Step 4: Run the Python test**
 
 Run the Step 2 command. Expected: PASS.
 
@@ -209,21 +209,21 @@ Run the Step 2 command. Expected: PASS.
 **Interfaces:**
 - Documents: permissions, current free/busy visibility, example Agent behavior and module boundaries
 
-- [ ] **Step 1: Document configuration and permission behavior**
+- [x] **Step 1: Document configuration and permission behavior**
 
 Document `calendar:calendar.event:read` or
 `calendar:calendar:readonly`, the difference between application
 `free_busy_reader` and full event visibility, pagination, and the fact that
 proposal cancellation does not delete an external event.
 
-- [ ] **Step 2: Run focused verification**
+- [x] **Step 2: Run focused verification**
 
 ```bash
 npx vitest run packages/provider-feishu/test examples/agently-agent-runtime/test
 uv run --project runtimes/agently-worker pytest -q
 ```
 
-- [ ] **Step 3: Run repository verification**
+- [x] **Step 3: Run repository verification**
 
 ```bash
 npm run typecheck
@@ -231,13 +231,13 @@ npm test
 npm run conformance
 ```
 
-- [ ] **Step 4: Run an opt-in real read-only smoke query**
+- [x] **Step 4: Run an opt-in real read-only smoke query**
 
 Use the configured Feishu application identity to query the known current
 sender through the new Provider backend. Record only counts, access mode and
 visibility counts; never print credentials or raw private event content.
 
-- [ ] **Step 5: Review the final diff and commit**
+- [x] **Step 5: Review the final diff and commit**
 
 ```bash
 git status --short

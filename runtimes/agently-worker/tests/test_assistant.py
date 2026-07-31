@@ -211,6 +211,17 @@ def test_turn_prompt_teaches_the_disclosed_current_group_calendar_flow() -> None
     assert "missing date, duration, or time zone" in prompt
 
 
+def test_turn_prompt_requires_authoritative_calendar_event_facts() -> None:
+    prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
+
+    assert "feishu.calendar.events.list" in prompt
+    assert "current_source.sender_resource_uri" in prompt
+    assert "only authoritative source for calendar event facts" in prompt
+    assert "pending scheduling proposal" in prompt
+    assert "details_visible=false" in prompt
+    assert "busy time interval" in prompt
+
+
 def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
     private_state_schema = ASSISTANT_TURN_OUTPUT_SCHEMA["private_state"][0]
     assert isinstance(private_state_schema, dict)
@@ -773,3 +784,64 @@ def test_scheduling_private_context_activates_agent_owned_confirmation_rules() -
         "version, title, participant_resource_uris, start_at, end_at, "
         "timezone, and summary_markdown"
     ) in prompt
+
+
+def test_scheduling_private_context_requires_atomic_proposal_cancellation() -> None:
+    private_context = {
+        "namespace": "daily-assistant.scheduling/v1",
+        "state_version": 1,
+        "current_source": {
+            "handoff_id": "handoff-cancellation",
+            "actor_id": "actor-initiator",
+            "sender_resource_uri": "feishu://user/open-id/ou-initiator",
+            "conversation_resource_uri": "feishu://chat/oc-team",
+        },
+        "original_initiator": {
+            "actor_id": "actor-initiator",
+            "sender_resource_uri": "feishu://user/open-id/ou-initiator",
+        },
+        "active_session": {
+            "version": 1,
+            "phase": "awaiting_confirmation",
+            "proposal": {"digest": "sha256:" + ("a" * 64)},
+        },
+    }
+    prompt = role_prompt(
+        valid_request_v3()["task"]["role"],
+        capability_turn=True,
+        agent_private_context=private_context,
+    )
+
+    assert "phase to cancelled" in prompt
+    assert "before claiming that the proposal is cancelled" in prompt
+    assert "private_state_action=update" in prompt
+    assert "proposal, confirmation, calendar, and capability-result fields" in prompt
+
+
+def test_cancelled_private_state_output_survives_strict_validation() -> None:
+    turn = validate_turn_assistant_output({
+        "turn_type": "final",
+        "request_summary": "取消尚未创建的日程提案",
+        "response": "已取消这份尚未创建的日程提案。",
+        "invocation_id": "",
+        "capability_id": "",
+        "version_constraint": "",
+        "input": {},
+        "reason": "",
+        "private_state_action": "update",
+        "private_state": {
+            "namespace": "daily-assistant.scheduling/v1",
+            "expected_version": 1,
+            "phase": "cancelled",
+            "proposal": None,
+            "confirmed_proposal_digest": None,
+            "confirmation_handoff_id": None,
+            "calendar_result_uri": None,
+            "capability_result_handoff_ids": [],
+        },
+    })
+
+    assert (
+        turn["response"]["extensions"]["workfabric.agent/private_state"]["phase"]
+        == "cancelled"
+    )

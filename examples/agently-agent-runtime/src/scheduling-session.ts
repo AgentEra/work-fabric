@@ -430,6 +430,29 @@ export class SchedulingSessionRepository {
         "only the original initiator may revise the current proposal",
       );
     }
+    if (update.phase === "cancelled") {
+      if (
+        current === null ||
+        current.phase !== "awaiting_confirmation" ||
+        current.proposal === null ||
+        source.actor_id !== current.origin_initiator_actor_id ||
+        correlation.sender_resource_uri !==
+          current.origin_sender_resource_uri
+      ) {
+        throw new TypeError(
+          "only the original initiator may cancel the active proposal",
+        );
+      }
+      if (
+        update.proposal !== null ||
+        update.confirmed_proposal_digest !== null ||
+        update.confirmation_handoff_id !== null ||
+        update.calendar_result_uri !== null ||
+        update.capability_result_handoff_ids.length !== 0
+      ) {
+        throw new TypeError("cancelled proposal state is invalid");
+      }
+    }
     if (update.phase === "completed" || update.phase === "executing") {
       if (
         current === null ||

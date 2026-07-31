@@ -1,11 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  feishuEndpointRegistrationVersion,
   ManagedFeishuProviderComposition,
   resolveFeishuContextRequest,
 } from "../src/composition.js";
 
 describe("ManagedFeishuProviderComposition", () => {
+  it("uses the provisioned Endpoint registration version supplied by the launcher", () => {
+    expect(feishuEndpointRegistrationVersion({})).toBe(1);
+    expect(feishuEndpointRegistrationVersion({
+      WORK_FABRIC_FEISHU_ENDPOINT_REGISTRATION_VERSION: "3",
+    })).toBe(3);
+    expect(() => feishuEndpointRegistrationVersion({
+      WORK_FABRIC_FEISHU_ENDPOINT_REGISTRATION_VERSION: "0",
+    })).toThrow("must be a positive integer");
+  });
+
   it("routes the conversation declaration to the conversation provider without changing document context", async () => {
     const bundle = {
       context_id: "context-feishu-1",

@@ -5,6 +5,7 @@ import type {
   CalendarEventAuthorityEvidenceInput,
   CalendarEventCreateInput,
   CalendarEventDeleteInput,
+  CalendarEventListInput,
   CalendarEventReadInput,
   CalendarEventReference,
   CalendarEventUpdateInput,
@@ -23,6 +24,7 @@ const RFC3339 =
 const OPAQUE_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const MAX_EVENT_DURATION_MS = 14 * 24 * 60 * 60 * 1_000;
 const MAX_FREEBUSY_SPAN_MS = 14 * 24 * 60 * 60 * 1_000;
+const MAX_EVENT_LIST_SPAN_MS = 31 * 24 * 60 * 60 * 1_000;
 const UPDATE_FIELDS = new Set([
   "title",
   "description",
@@ -341,6 +343,46 @@ function freeBusy(input: Record<string, unknown>): CalendarFreeBusyInput {
   });
 }
 
+function eventList(
+  input: Record<string, unknown>,
+): CalendarEventListInput {
+  exact(input, [
+    "subject_resource_uri",
+    "start_at",
+    "end_at",
+    "page_size",
+  ], ["page_token"], "event list");
+  const subjectResourceUri = string(
+    input.subject_resource_uri,
+    "event list subject",
+    2_048,
+  );
+  resources.parseUser(subjectResourceUri);
+  const startAt = timestamp(input.start_at, "start_at");
+  const endAt = timestamp(input.end_at, "end_at");
+  assertCalendarTimeRange({
+    start_at: startAt,
+    end_at: endAt,
+    maximum_span_ms: MAX_EVENT_LIST_SPAN_MS,
+  });
+  return Object.freeze({
+    capability_id: "feishu.calendar.events.list",
+    subject_resource_uri: subjectResourceUri,
+    start_at: startAt,
+    end_at: endAt,
+    page_size: integer(input.page_size, "page size", 1, 50),
+    ...(input.page_token === undefined
+      ? {}
+      : {
+          page_token: string(
+            input.page_token,
+            "page token",
+            1_024,
+          ),
+        }),
+  });
+}
+
 function eventCreate(
   input: Record<string, unknown>,
 ): CalendarEventCreateInput {
@@ -596,6 +638,8 @@ export function parseCalendarExecutionInput(
       return eventCreate(value);
     case "feishu.calendar.event.read":
       return eventRead(value);
+    case "feishu.calendar.events.list":
+      return eventList(value);
     case "feishu.calendar.event.update":
       return eventUpdate(value);
     case "feishu.calendar.attendees.add":

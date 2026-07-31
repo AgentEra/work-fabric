@@ -607,7 +607,7 @@ describe("local Feishu assistant stack", () => {
           ),
         }).citizens,
         new FeishuCapabilitySchemaRegistry(),
-      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(15);
+      ).list(["feishu."], new AbortController().signal)).resolves.toHaveLength(16);
       client.snapshot = {
         ...client.snapshot,
         state: "connected",

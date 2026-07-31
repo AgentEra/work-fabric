@@ -10,6 +10,7 @@ import type {
 } from "@work-fabric/agent-runtime-spi";
 
 import {
+  SCHEDULING_SESSION_NAMESPACE,
   SchedulingSessionRepository,
   type SchedulingSessionUpdate,
 } from "./scheduling-session.js";
@@ -31,6 +32,70 @@ function supportsSchedulingContext(task: RuntimeTaskPackage): boolean {
     extensions["workfabric.dev/provider_family"] === "feishu" &&
     extensions["workfabric.dev/resource_kind"] === "conversation_message"
   );
+}
+
+function intentText(task: RuntimeTaskPackage): string {
+  return task.intent.flatMap((item) => {
+    if (
+      typeof item === "object"
+      && item !== null
+      && "kind" in item
+      && item.kind === "text"
+      && "text" in item
+      && typeof item.text === "string"
+    ) {
+      return [item.text];
+    }
+    return [];
+  }).join("\n").trim();
+}
+
+function explicitProposalCancellation(
+  task: RuntimeTaskPackage,
+  privateContext: Record<string, unknown>,
+): boolean {
+  const activeValue = privateContext.active_session;
+  if (
+    activeValue === null
+    || typeof activeValue !== "object"
+    || Array.isArray(activeValue)
+  ) return false;
+  const active = activeValue as Record<string, unknown>;
+  if (active.phase !== "awaiting_confirmation") return false;
+  const current = record(privateContext.current_source);
+  const original = record(privateContext.original_initiator);
+  if (
+    current.actor_id !== original.actor_id
+    || current.sender_resource_uri !== original.sender_resource_uri
+  ) return false;
+  const text = intentText(task);
+  if (text.length === 0 || /(?:不要|别|无需)取消/u.test(text)) return false;
+  return (
+    /(?:取消|撤销|作废)(?:一下|掉)?(?:这个|当前|该)?(?:日程|安排|排期|提案)/u
+      .test(text)
+    || /(?:这个|当前|该)?(?:日程|安排|排期|提案).{0,8}(?:取消|撤销|作废|不要了)/u
+      .test(text)
+    || /^(?:取消|撤销|作废|不要了)[吧。！!]?\s*$/u.test(text)
+  );
+}
+
+function cancellationTurn(): RuntimeDriverTurn {
+  return {
+    kind: "final",
+    response: {
+      summary: [{
+        kind: "text",
+        media_type: "text/markdown",
+        text:
+          "已取消这份尚未创建的日程提案。没有调用日历删除能力，因为它还不是一个已创建的日程。",
+      }],
+      artifacts: [],
+      evidence: [],
+      extensions: {
+        "workfabric.agent/request_summary": "取消待确认日程提案",
+      },
+    },
+  };
 }
 
 function record(value: unknown): Record<string, unknown> {
@@ -182,6 +247,22 @@ export class DailyAssistantDriver
       );
     }
     const privateContext = await this.sessions.context(task);
+    if (
+      transcript === null
+      && explicitProposalCancellation(task, privateContext)
+    ) {
+      await this.sessions.apply(task, {
+        namespace: SCHEDULING_SESSION_NAMESPACE,
+        expected_version: privateContext.state_version as number,
+        phase: "cancelled",
+        proposal: null,
+        confirmed_proposal_digest: null,
+        confirmation_handoff_id: null,
+        calendar_result_uri: null,
+        capability_result_handoff_ids: [],
+      });
+      return cancellationTurn();
+    }
     const enrichedTask: RuntimeTaskPackage = {
       ...task,
       agent_private_context: privateContext,

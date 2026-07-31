@@ -6,6 +6,8 @@ import type {
   FeishuCalendarBackend,
   FeishuCalendarEventFacts,
   FeishuCalendarFacts,
+  FeishuCalendarListedEventFacts,
+  FeishuPrimaryCalendarEventPage,
   FeishuDeleteEventFacts,
   FeishuFreeBusyFacts,
 } from "./calendar-contracts.js";
@@ -75,6 +77,88 @@ function parseEventTime(value: unknown): {
   return {
     at: epoch(info.timestamp),
     time_zone: string(info.timezone, 255),
+  };
+}
+
+function parseListedEventBoundary(
+  value: unknown,
+): FeishuCalendarListedEventFacts["start"] {
+  const info = record(value);
+  if (
+    typeof info.date === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/u.test(info.date) &&
+    Number.isFinite(Date.parse(`${info.date}T00:00:00Z`)) &&
+    info.timestamp === undefined
+  ) {
+    return { kind: "all_day", date: info.date };
+  }
+  if (info.date !== undefined) invalid();
+  const parsed = parseEventTime(info);
+  return {
+    kind: "date_time",
+    at: parsed.at,
+    time_zone: parsed.time_zone,
+  };
+}
+
+function visibleString(
+  value: unknown,
+  maximum: number,
+): string | undefined {
+  if (value === undefined || value === "") return undefined;
+  return string(value, maximum);
+}
+
+function listedEventFacts(value: unknown): FeishuCalendarListedEventFacts {
+  const event = record(value);
+  const start = parseListedEventBoundary(event.start_time);
+  const end = parseListedEventBoundary(event.end_time);
+  if (
+    start.kind !== end.kind ||
+    (
+      start.kind === "date_time" &&
+      end.kind === "date_time" &&
+      (
+        start.time_zone !== end.time_zone ||
+        Date.parse(start.at) >= Date.parse(end.at)
+      )
+    ) ||
+    (
+      start.kind === "all_day" &&
+      end.kind === "all_day" &&
+      start.date >= end.date
+    )
+  ) invalid();
+  const title = visibleString(event.summary, 512);
+  const description = visibleString(event.description, 16_384);
+  const visibility = visibleString(event.visibility, 64);
+  const url = visibleString(event.app_link, 2_048);
+  const organizer = event.event_organizer === undefined
+    ? undefined
+    : record(event.event_organizer);
+  const organizerOpenId = organizer === undefined
+    ? undefined
+    : visibleString(organizer.user_id, 255);
+  const status = event.status;
+  if (
+    status !== undefined &&
+    status !== "tentative" &&
+    status !== "confirmed" &&
+    status !== "cancelled"
+  ) invalid();
+  return {
+    event_id: string(event.event_id, 512),
+    ...(title === undefined ? {} : { title }),
+    ...(description === undefined ? {} : { description }),
+    start,
+    end,
+    ...(status === undefined ? {} : { status }),
+    ...(visibility === undefined ? {} : { visibility }),
+    ...(url === undefined ? {} : { url }),
+    ...(organizerOpenId === undefined
+      ? {}
+      : { organizer_open_id: organizerOpenId }),
+    details_visible: title !== undefined,
   };
 }
 
@@ -362,6 +446,95 @@ export class FeishuCalendarOpenApiBackend
           code: unresolvedByUser.get(openId) ?? "not_returned",
         }];
       }),
+    };
+  }
+
+  async listPrimaryEvents(
+    input: Parameters<FeishuCalendarBackend["listPrimaryEvents"]>[0],
+  ): Promise<FeishuPrimaryCalendarEventPage> {
+    const primaryResponse = record(await this.options.requests.request(
+      "POST",
+      "/open-apis/calendar/v4/calendars/primarys?user_id_type=open_id",
+      { user_ids: [input.user_open_id] },
+      input.signal,
+    ));
+    const primaryData = record(primaryResponse.data);
+    if (
+      primaryResponse.code !== 0 ||
+      !Array.isArray(primaryData.calendars) ||
+      primaryData.calendars.length > 16
+    ) invalid();
+    const primary = primaryData.calendars.map((value) => {
+      const item = record(value);
+      const calendar = record(item.calendar);
+      return {
+        user_id: string(item.user_id, 255),
+        calendar_id: string(calendar.calendar_id, 512),
+        type: calendar.type,
+        role: calendar.role,
+      };
+    }).find((item) =>
+      item.user_id === input.user_open_id && item.type === "primary"
+    );
+    if (primary === undefined) {
+      throw new FeishuProviderBackendError(
+        "calendar_not_found",
+        false,
+      );
+    }
+    const accessRoles = new Set([
+      "free_busy_reader",
+      "reader",
+      "writer",
+      "owner",
+      "unknown",
+    ]);
+    if (
+      typeof primary.role !== "string" ||
+      !accessRoles.has(primary.role)
+    ) invalid();
+    const query = new URLSearchParams({
+      user_id_type: "open_id",
+      op_user_id: input.user_open_id,
+      start_time: String(Math.floor(Date.parse(input.start_at) / 1_000)),
+      end_time: String(Math.floor(Date.parse(input.end_at) / 1_000)),
+      page_size: String(input.page_size),
+      ...(input.page_token === undefined
+        ? {}
+        : { page_token: input.page_token }),
+    });
+    const response = record(await this.options.requests.request(
+      "GET",
+      `/open-apis/calendar/v4/calendars/${
+        encodeURIComponent(primary.calendar_id)
+      }/events?${query.toString()}`,
+      undefined,
+      input.signal,
+    ));
+    const data = record(response.data);
+    if (
+      response.code !== 0 ||
+      (data.items !== undefined && !Array.isArray(data.items)) ||
+      (
+        Array.isArray(data.items) &&
+        data.items.length > input.page_size
+      ) ||
+      typeof data.has_more !== "boolean"
+    ) invalid();
+    const events = (data.items ?? []).map(listedEventFacts);
+    const nextPageToken = data.has_more
+      ? string(data.page_token, 1_024)
+      : undefined;
+    return {
+      calendar_id: primary.calendar_id,
+      access_role: primary.role as FeishuPrimaryCalendarEventPage[
+        "access_role"
+      ],
+      events,
+      has_more: data.has_more,
+      ...(nextPageToken === undefined
+        ? {}
+        : { next_page_token: nextPageToken }),
     };
   }
 

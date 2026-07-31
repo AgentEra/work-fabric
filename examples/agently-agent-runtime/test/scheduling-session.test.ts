@@ -271,6 +271,78 @@ describe("SchedulingSessionRepository", () => {
     });
   });
 
+  it("allows only the original Human to cancel an uncreated proposal and makes the session inactive", async () => {
+    const store = new MemoryAgentRuntimeStateStore();
+    stores.push(store);
+    const repository = new SchedulingSessionRepository(store, {
+      now: () => "2026-07-30T01:00:00.000Z",
+    });
+    const proposed = await repository.apply(task(), {
+      namespace: "daily-assistant.scheduling/v1",
+      expected_version: 0,
+      phase: "awaiting_confirmation",
+      proposal,
+      confirmed_proposal_digest: null,
+      confirmation_handoff_id: null,
+      calendar_result_uri: null,
+      capability_result_handoff_ids: ["handoff-members-result-1"],
+    });
+    const cancellation = {
+      namespace: "daily-assistant.scheduling/v1" as const,
+      expected_version: proposed.version,
+      phase: "cancelled" as const,
+      proposal: null,
+      confirmed_proposal_digest: null,
+      confirmation_handoff_id: null,
+      calendar_result_uri: null,
+      capability_result_handoff_ids: [],
+    };
+
+    await expect(repository.apply(task({
+      handoff_id: "handoff-other-cancellation",
+      actor_id: "actor-other",
+      sender: "feishu://user/open-id/ou-other",
+      text: "这个日程取消吧",
+    }), cancellation)).rejects.toThrow(/original initiator/i);
+
+    const cancelled = await repository.apply(task({
+      handoff_id: "handoff-cancellation",
+      text: "这个日程取消吧",
+    }), cancellation);
+    expect(cancelled).toMatchObject({
+      version: 2,
+      phase: "cancelled",
+      confirmed_proposal_digest: null,
+      confirmation_handoff_id: null,
+      calendar_result_uri: null,
+      capability_result_handoff_ids: [],
+    });
+    await expect(repository.context(task({
+      handoff_id: "handoff-next",
+      text: "我未来三天还有其他日程吗",
+    }))).resolves.toMatchObject({
+      state_version: 2,
+      active_session: null,
+    });
+  });
+
+  it("rejects cancellation after side-effect execution has started", async () => {
+    const store = new MemoryAgentRuntimeStateStore();
+    stores.push(store);
+    const repository = new SchedulingSessionRepository(store);
+
+    await expect(repository.apply(task(), {
+      namespace: "daily-assistant.scheduling/v1",
+      expected_version: 0,
+      phase: "cancelled",
+      proposal: null,
+      confirmed_proposal_digest: null,
+      confirmation_handoff_id: null,
+      calendar_result_uri: null,
+      capability_result_handoff_ids: [],
+    })).rejects.toThrow(/active proposal/i);
+  });
+
   it("starts a fresh conversation session after a terminal one", async () => {
     const store = new MemoryAgentRuntimeStateStore();
     stores.push(store);

@@ -7,6 +7,7 @@ import type {
   CalendarBinding,
   CalendarEventCreateInput,
   CalendarEventDeleteInput,
+  CalendarEventListInput,
   CalendarEventReadInput,
   CalendarEventUpdateInput,
   CalendarExecutionInput,
@@ -49,6 +50,7 @@ const REQUIRED_SCOPE = Object.freeze({
   "feishu.calendar.event.delete": "calendar_event:delete",
   "feishu.calendar.event.read": "calendar_event:read",
   "feishu.calendar.event.update": "calendar_event:write",
+  "feishu.calendar.events.list": "calendar_event:read",
   "feishu.calendar.freebusy.query": "calendar_freebusy:read",
 } as const);
 
@@ -166,6 +168,8 @@ export class FeishuCalendarCapabilityExecutor
           return await this.freeBusy(request, input);
         case "feishu.calendar.event.read":
           return await this.readEvent(request, input);
+        case "feishu.calendar.events.list":
+          return await this.listEvents(request, input);
         case "feishu.calendar.event.create":
           return await this.createEvent(request, input);
         case "feishu.calendar.event.update":
@@ -272,6 +276,87 @@ export class FeishuCalendarCapabilityExecutor
       ownership?.provider_version,
       ownership === null ? "external" : "application",
     );
+    return { outcome: "succeeded", data, artifacts: [] };
+  }
+
+  private async listEvents(
+    request: FeishuCapabilityExecutionRequest,
+    input: CalendarEventListInput,
+  ): Promise<FeishuCapabilityOutcome> {
+    if (
+      !request.authority.allowed_target_refs.includes(
+        input.subject_resource_uri,
+      )
+    ) {
+      return rejected(
+        "target_not_allowed",
+        "Calendar subject is not authorized",
+      );
+    }
+    const subject = this.resources.parseUser(
+      input.subject_resource_uri,
+    );
+    const page = await this.options.backend.listPrimaryEvents({
+      user_open_id: subject.open_id,
+      start_at: input.start_at,
+      end_at: input.end_at,
+      page_size: input.page_size,
+      ...(input.page_token === undefined
+        ? {}
+        : { page_token: input.page_token }),
+      ...(request.signal === undefined ? {} : { signal: request.signal }),
+    });
+    const calendarUri = this.resources.calendar(page.calendar_id);
+    const accessMode =
+      page.access_role === "free_busy_reader"
+        ? "free_busy_only"
+        : page.access_role === "reader" ||
+            page.access_role === "writer" ||
+            page.access_role === "owner"
+        ? "full"
+        : "unknown";
+    const data: RuntimeJsonObject = {
+      subject_resource_uri: input.subject_resource_uri,
+      calendar_resource_uri: calendarUri,
+      coverage: {
+        start_at: input.start_at,
+        end_at: input.end_at,
+      },
+      access_mode: accessMode,
+      events: page.events.map((event) => ({
+        event_resource_uri: this.resources.event(
+          page.calendar_id,
+          event.event_id,
+        ),
+        event_id: event.event_id,
+        ...(event.title === undefined ? {} : { title: event.title }),
+        ...(event.description === undefined
+          ? {}
+          : { description: event.description }),
+        start: event.start,
+        end: event.end,
+        ...(event.status === undefined ? {} : { status: event.status }),
+        ...(event.visibility === undefined
+          ? {}
+          : { visibility: event.visibility }),
+        ...(event.url === undefined ? {} : { url: event.url }),
+        ...(event.organizer_open_id === undefined
+          ? {}
+          : {
+              organizer_resource_uri:
+                this.resources.user(event.organizer_open_id),
+            }),
+        details_visible: event.details_visible,
+      })),
+      has_more: page.has_more,
+      ...(page.next_page_token === undefined
+        ? {}
+        : { next_page_token: page.next_page_token }),
+      provenance: {
+        provider_family: "feishu",
+        source: "feishu.calendar.events",
+      },
+    };
     return { outcome: "succeeded", data, artifacts: [] };
   }
 

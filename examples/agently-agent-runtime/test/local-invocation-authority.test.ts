@@ -418,6 +418,59 @@ describe("LocalInvocationAuthorityProvider", () => {
     )).rejects.toThrow(/authority denied/i);
   });
 
+  it("authorizes an event-list query only for the trusted current sender", async () => {
+    const original = snapshot({
+      package: {
+        ...(snapshot().state.package as Record<string, unknown>),
+        work_reference: {
+          uri: "feishu://tenant-key-1/message/om-trigger",
+          extensions: {
+            "workfabric.dev/provider_family": "feishu",
+            "workfabric.dev/resource_kind": "conversation_message",
+            "workfabric.dev/external_tenant_id": "tenant-key-1",
+            "workfabric.dev/conversation_id": "oc-chat-1",
+            "workfabric.dev/message_id": "om-trigger",
+            "workfabric.dev/sender_resource_uri":
+              "feishu://user/open-id/ou_sender",
+          },
+        },
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["calendar_event:read"],
+          resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: true,
+        },
+      },
+    });
+    const query = (subjectResourceUri: string) =>
+      capabilityInput("feishu.calendar.events.list", {
+        subject_resource_uri: subjectResourceUri,
+        start_at: "2026-07-28T00:00:00+08:00",
+        end_at: "2026-07-31T00:00:00+08:00",
+        page_size: 25,
+      });
+
+    await expect(authority(original).authority.authorize(
+      query("feishu://user/open-id/ou_sender"),
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      scopes: ["capability:invoke", "calendar_event:read"],
+      extensions: {
+        "workfabric.dev/capability_authority": {
+          delegation_scopes: ["calendar_event:read"],
+          allowed_target_refs: [
+            "feishu://user/open-id/ou_sender",
+          ],
+        },
+      },
+    });
+    await expect(authority(original).authority.authorize(
+      query("feishu://user/open-id/ou_other"),
+      new AbortController().signal,
+    )).rejects.toThrow(/authority denied/i);
+  });
+
   it("authorizes Calendar creation only from the original Human's later confirmation and verified members", async () => {
     const confirmation = snapshot({
       package: {

@@ -267,7 +267,7 @@ create/read/update/append，保留 Handoff 委托与 operation scope 检查，�
 | 内部员工通配准入 | Contact 用户查询权限、应用通讯录可见范围覆盖目标员工 |
 | 群成员展开 | `im:chat.members:read`；机器人必须在目标群内 |
 | 日历创建/注册 | `calendar:calendar:create`、`calendar:calendar:read` |
-| 日程创建/读取/更新/删除 | `calendar:calendar.event:create`、`calendar:calendar.event:read`、`calendar:calendar.event:update`、`calendar:calendar.event:delete` |
+| 日程创建/单条读取/列表查询/更新/删除 | `calendar:calendar.event:create`、`calendar:calendar.event:read`、`calendar:calendar.event:update`、`calendar:calendar.event:delete`；也可用只读聚合权限 `calendar:calendar:readonly` 覆盖查询接口 |
 | 忙闲查询 | `calendar:calendar.free_busy:read` |
 
 飞书的资源协作者权限和 API scope 是两层条件；仅开 API scope 不会让应用
@@ -318,6 +318,38 @@ Handoff 或 Agent 流程。飞书字段和公开范围可核对
 [日历资源说明](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/calendar-v4/calendar/introduction)
 与[应用权限列表](https://open.feishu.cn/document/server-docs/application-scope/scope-list?lang=zh-CN)。
 
+#### 查询当前发送者的真实日程
+
+`feishu.calendar.events.list` 是独立的只读能力，用于查询一个明确授权用户在
+有界时间窗内的主日历日程。Daily Assistant 只能把当前飞书消息的可信
+`sender_resource_uri` 作为 `subject_resource_uri`；本地 Authority 不允许
+Agent 改查群内其他成员。Calendar Provider 通过批量主日历接口解析用户主日历，
+再分页调用日程列表接口。这个用户主日历不会被登记成 Provider 管理的可写
+Calendar binding，也不会把日程复制到 Fabric 或 Provider 状态库。
+
+示例输入：
+
+```json
+{
+  "subject_resource_uri": "feishu://user/open-id/ou_xxx",
+  "start_at": "2026-07-31T00:00:00+08:00",
+  "end_at": "2026-08-03T00:00:00+08:00",
+  "page_size": 50
+}
+```
+
+单次时间窗最长 31 天，单页最多 50 条；只有 `has_more=true` 且下一页对当前
+问题确实必要时，Agent 才继续传入 Provider 返回的 opaque `page_token`。
+
+应用身份对某个用户主日历可能只有 `free_busy_reader`。这种情况下飞书仍会
+返回真实日程时间，但会隐藏标题和详情；Provider 对每条记录返回
+`details_visible=false`，Agent 只能说明忙碌时间段和权限限制，不能从群历史、
+旧提案或模型知识补写标题。获得 `reader`/`writer`/`owner`，或以后接入
+`user_access_token` 后，同一能力契约会返回飞书实际允许看到的标题和链接。
+飞书对身份和可见性的定义见
+[获取日程列表](https://open.feishu.cn/document/server-docs/calendar-v4/calendar-event/list?lang=zh-CN)
+和[查询日历列表](https://open.feishu.cn/document/server-docs/calendar-v4/calendar/list-2?lang=zh-CN)。
+
 ### 5.2 Agent 排期提案与人工确认
 
 日常助理不会因第一条“创建日程”消息直接写日历。参考流程是：
@@ -350,6 +382,14 @@ Runtime 适配器负责 `invocation_id`、私有状态乐观版本等技术字�
 确定性的 Agent 完成回复并把私有状态推进为 `completed`，不会再让模型产生
 第二次创建请求。上述约束全部封闭在助理 Agent/Runtime 内，不进入 Fabric
 Core，也不进入 Feishu Channel 或 Calendar Provider。
+
+如果最初发起人在 `awaiting_confirmation` 阶段要求取消，Agent 必须在返回
+“已取消”之前以乐观版本把自己的私有状态推进为 `cancelled`。取消更新不携带
+确认、日历结果或能力结果，也不会调用 Calendar delete，因为这时外部日程尚未
+创建。只有最初发起人可以取消；状态落库冲突时不得发送成功取消的语义回复。
+终态 `cancelled` 不再出现在后续轮次的 `active_session`，因此旧提案不会污染
+“我未来三天有哪些日程”之类的查询。已经创建的日程要取消时，必须走独立的
+受确认 Calendar delete 能力，不能复用提案取消。
 
 ## 6. 安全与失败语义
 
@@ -429,6 +469,13 @@ npm run local:feishu:status
 启动，退出时反序关闭。也可在已启动的 Service 上单独运行
 `npm run local:feishu:provision`。不要并行运行两套本地 Supervisor 共享同一
 SQLite 文件。
+
+动态能力集合发生变化时，Endpoint 不能在同一个注册版本下悄悄改写声明。
+本地启动器会从 v1 开始进行有界版本协商，取得实际注册版本后再把该版本交给
+Provider Runtime 打开会话。因此升级新增能力不需要删除 SQLite 数据库，也
+不会绕开乐观并发控制。消费方仍须具备对应声明的最小读取权限；示例配置已为
+日常助理加入
+`citizen-feishu-calendar/feishu.calendar.events.list` 的声明读取规则。
 
 在飞书群聊中发送：
 

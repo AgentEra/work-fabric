@@ -42,11 +42,11 @@ SCHEDULING_PRIVATE_STATE_OUTPUT_SCHEMA = {
     ),
     "phase": (
         str,
-        "awaiting_confirmation 或 completed",
+        "awaiting_confirmation、completed 或 cancelled",
     ),
     "proposal": (
         SCHEDULING_PROPOSAL_OUTPUT_SCHEMA,
-        "awaiting_confirmation 时为完整提案；completed 时为 null",
+        "awaiting_confirmation 时为完整提案；completed 或 cancelled 时为 null",
     ),
     "confirmed_proposal_digest": (
         str,
@@ -208,6 +208,15 @@ def role_prompt(
         "inside authority_evidence.capability_result_handoff_ids. Choose a time only from "
         "returned free/busy facts. Then call feishu.calendar.event.create only when the current "
         "intent requests creation, using the authorized current-chat attendee when appropriate. "
+        "When the current intent asks what calendar events the current Human has in a bounded "
+        "time window and feishu.calendar.events.list is disclosed, that capability is the "
+        "only authoritative source for calendar event facts. Set subject_resource_uri exactly "
+        "to agent_private_context.current_source.sender_resource_uri, never to another group "
+        "member. A pending scheduling proposal is not a created event and must never substitute "
+        "for Provider results. If an event has details_visible=false, describe only its returned "
+        "busy time interval and explicitly say that its title/details are not visible; never "
+        "invent or recover a hidden title from conversation history. Continue pagination only "
+        "when has_more=true and another page is material to the current question. "
         "Report complete, partial, rejected, or failed facts honestly and include the event URL "
         "when returned. Ask for a missing date, duration, or time zone instead of guessing. "
         "Never copy Provider text as the final "
@@ -258,6 +267,13 @@ def role_prompt(
         "private_state_action=none or an empty private_state object. A "
         "scheduling proposal and a completed scheduling turn must use "
         "private_state_action=update. "
+        "When the original initiator asks to cancel an active awaiting_confirmation proposal, "
+        "persist the terminal mutation before claiming that the proposal is cancelled: use "
+        "private_state_action=update, set phase to cancelled and expected_version to "
+        "agent_private_context.state_version, and set the proposal, confirmation, calendar, "
+        "and capability-result fields respectively to null, null, null, null, and an empty "
+        "array. This cancels only the uncreated Agent proposal and must not request a Calendar "
+        "delete capability. A different sender cannot cancel the proposal. "
         "A different group member may contribute facts, but must not replace or "
         "confirm an active proposal; ask the original initiator to incorporate or "
         "confirm the change and leave private_state empty. Use an empty private_state object "

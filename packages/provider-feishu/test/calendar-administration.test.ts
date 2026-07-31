@@ -27,6 +27,7 @@ function backend(): FeishuCalendarBackend {
       access_role: "owner" as const,
     })),
     queryFreeBusy: vi.fn(),
+    listPrimaryEvents: vi.fn(),
     createEvent: vi.fn(),
     readEvent: vi.fn(),
     updateEvent: vi.fn(),

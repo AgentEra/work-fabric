@@ -103,12 +103,20 @@ describe("LocalFeishuStackSupervisor", () => {
     const calls: string[] = [];
     const children = [child(101), child(102), child(103)];
     const supervisor = new LocalFeishuStackSupervisor({
-      spawn: (name) => {
-        calls.push(`spawn:${name}`);
+      spawn: (name, environment) => {
+        calls.push(
+          `spawn:${name}:${
+            environment.WORK_FABRIC_FEISHU_ENDPOINT_REGISTRATION_VERSION
+              ?? "unset"
+          }`,
+        );
         return children.shift()!;
       },
       wait_for_service: async () => { calls.push("ready:service"); },
-      provision: async () => { calls.push("provision"); },
+      provision: async () => {
+        calls.push("provision");
+        return { feishu_endpoint_registration_version: 2 };
+      },
       write_pid_state: async (state) => {
         calls.push(`pids:${state.children.map((item) => item.name).join(",")}`);
       },
@@ -117,11 +125,11 @@ describe("LocalFeishuStackSupervisor", () => {
     });
     await supervisor.start({});
     expect(calls).toEqual([
-      "spawn:service",
+      "spawn:service:unset",
       "ready:service",
       "provision",
-      "spawn:feishu-provider",
-      "spawn:daily-assistant",
+      "spawn:feishu-provider:2",
+      "spawn:daily-assistant:unset",
       "pids:service,feishu-provider,daily-assistant",
     ]);
   });
@@ -140,7 +148,9 @@ describe("LocalFeishuStackSupervisor", () => {
     const supervisor = new LocalFeishuStackSupervisor({
       spawn: () => children.shift()!,
       wait_for_service: async () => undefined,
-      provision: async () => undefined,
+      provision: async () => ({
+        feishu_endpoint_registration_version: 1,
+      }),
       write_pid_state: async () => undefined,
       remove_pid_state: async () => { calls.push("pids:remove"); },
       log: () => undefined,
@@ -164,7 +174,9 @@ describe("LocalFeishuStackSupervisor", () => {
     const supervisor = new LocalFeishuStackSupervisor({
       spawn: () => service,
       wait_for_service: async () => { throw new Error("service timeout"); },
-      provision: async () => undefined,
+      provision: async () => ({
+        feishu_endpoint_registration_version: 1,
+      }),
       write_pid_state: async () => undefined,
       remove_pid_state: async () => undefined,
       log: () => undefined,

@@ -33,7 +33,7 @@ function declarations(): ReturnType<DeclarationFactory> | undefined {
 }
 
 describe("Feishu Calendar capability declarations", () => {
-  it("publishes seven independent typed-facts-only Calendar contracts", () => {
+  it("publishes eight independent typed-facts-only Calendar contracts", () => {
     expect(declarations()?.map((item) => item.declaration_id)).toEqual([
       "feishu.calendar.attendees.add",
       "feishu.calendar.attendees.remove",
@@ -41,6 +41,7 @@ describe("Feishu Calendar capability declarations", () => {
       "feishu.calendar.event.delete",
       "feishu.calendar.event.read",
       "feishu.calendar.event.update",
+      "feishu.calendar.events.list",
       "feishu.calendar.freebusy.query",
     ]);
     expect(declarations()?.map((item) => ({
@@ -100,6 +101,14 @@ describe("Feishu Calendar capability declarations", () => {
         output: "typed_facts_only",
       },
       {
+        id: "feishu.calendar.events.list",
+        version: "1.0.0",
+        risk: "low",
+        operation: "query",
+        confirmation: "none",
+        output: "typed_facts_only",
+      },
+      {
         id: "feishu.calendar.freebusy.query",
         version: "1.0.0",
         risk: "low",
@@ -108,6 +117,42 @@ describe("Feishu Calendar capability declarations", () => {
         output: "typed_facts_only",
       },
     ]);
+  });
+
+  it("publishes a bounded primary-calendar event-list schema", async () => {
+    const declaration = declarations()?.find((item) =>
+      item.declaration_id === "feishu.calendar.events.list"
+    );
+    expect(declaration).toMatchObject({
+      version: "1.0.0",
+      risk: "low",
+      confirmation: "none",
+      constraints: {
+        operation_kind: "query",
+        provider_output: "typed_facts_only",
+      },
+    });
+    const registry = new FeishuCapabilitySchemaRegistry();
+    const validator = new JsonSchemaInvocationValidator(registry);
+    await expect(validator.validateInput({
+      candidate: {
+        citizen_id: "citizen-feishu-calendar",
+        endpoint_id: "endpoint-feishu-provider",
+        capability_id: "feishu.calendar.events.list",
+        capability_version: "1.0.0",
+        contract_digest: `sha256:${"a".repeat(64)}`,
+      },
+      input_schema: declaration!.input_schema!,
+      output_schema: declaration!.output_schema!,
+      confirmation: "none",
+      risk: "low",
+      operation_kind: "query",
+    }, {
+      subject_resource_uri: "feishu://user/open-id/ou_1",
+      start_at: "2026-07-31T00:00:00+08:00",
+      end_at: "2026-08-03T00:00:00+08:00",
+      page_size: 50,
+    }, new AbortController().signal)).resolves.toBeUndefined();
   });
 
   it("publishes the evolved event-create input under an immutable v2 schema URI", () => {

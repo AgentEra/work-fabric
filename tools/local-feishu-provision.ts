@@ -5,10 +5,14 @@ import { prepareLocalFeishuEnvironment } from "./local-feishu-common.js";
 
 export async function provisionLocalFeishu(
   input: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<void> {
+): Promise<{ readonly feishu_endpoint_registration_version: number }> {
   const environment = await prepareLocalFeishuEnvironment(input);
   await provisionDailyAssistant(environment);
-  await provisionFeishuProvider(environment);
+  const provider = await provisionFeishuProvider(environment);
+  return {
+    feishu_endpoint_registration_version:
+      provider.endpoint_registration_version,
+  };
 }
 
 if (

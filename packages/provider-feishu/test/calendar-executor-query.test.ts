@@ -82,6 +82,39 @@ function backend(): FeishuCalendarBackend {
       })),
       unresolved: [],
     })),
+    listPrimaryEvents: vi.fn(async () => ({
+      calendar_id: "cal-primary-1",
+      access_role: "free_busy_reader" as const,
+      events: [{
+        event_id: "event-redacted",
+        start: {
+          kind: "date_time" as const,
+          at: "2026-07-31T01:00:00.000Z",
+          time_zone: "Asia/Shanghai",
+        },
+        end: {
+          kind: "date_time" as const,
+          at: "2026-07-31T02:00:00.000Z",
+          time_zone: "Asia/Shanghai",
+        },
+        status: "confirmed" as const,
+        details_visible: false,
+      }, {
+        event_id: "event-visible",
+        title: "项目评审",
+        start: {
+          kind: "all_day" as const,
+          date: "2026-08-01",
+        },
+        end: {
+          kind: "all_day" as const,
+          date: "2026-08-02",
+        },
+        details_visible: true,
+      }],
+      has_more: true,
+      next_page_token: "next-page",
+    })),
     createEvent: vi.fn(),
     readEvent: vi.fn(async (input) => ({
       calendar_id: input.calendar_id,
@@ -177,6 +210,93 @@ describe("FeishuCalendarCapabilityExecutor query boundary", () => {
         end_at: "2026-07-30T18:00:00+08:00",
         include_external_calendars: false,
         busy_only: true,
+      });
+    } finally {
+      await store.close();
+    }
+  });
+
+  it("returns authoritative event facts only for an Authority-bound subject", async () => {
+    const store = new MemoryFeishuCalendarStore();
+    const api = backend();
+    const value = {
+      subject_resource_uri: "feishu://user/open-id/ou_1",
+      start_at: "2026-07-31T00:00:00+08:00",
+      end_at: "2026-08-03T00:00:00+08:00",
+      page_size: 25,
+    };
+    try {
+      const calendar = executor(store, api);
+      await expect(calendar.execute(request({
+        capability_id: "feishu.calendar.events.list",
+        value,
+        scopes: ["calendar_event:read"],
+        allowed_target_refs: ["feishu://user/open-id/ou_1"],
+      }))).resolves.toEqual({
+        outcome: "succeeded",
+        data: {
+          subject_resource_uri: "feishu://user/open-id/ou_1",
+          calendar_resource_uri:
+            "feishu://calendar/cal-primary-1",
+          coverage: {
+            start_at: "2026-07-31T00:00:00+08:00",
+            end_at: "2026-08-03T00:00:00+08:00",
+          },
+          access_mode: "free_busy_only",
+          events: [{
+            event_resource_uri:
+              "feishu://calendar/cal-primary-1/events/event-redacted",
+            event_id: "event-redacted",
+            start: {
+              kind: "date_time",
+              at: "2026-07-31T01:00:00.000Z",
+              time_zone: "Asia/Shanghai",
+            },
+            end: {
+              kind: "date_time",
+              at: "2026-07-31T02:00:00.000Z",
+              time_zone: "Asia/Shanghai",
+            },
+            status: "confirmed",
+            details_visible: false,
+          }, {
+            event_resource_uri:
+              "feishu://calendar/cal-primary-1/events/event-visible",
+            event_id: "event-visible",
+            title: "项目评审",
+            start: {
+              kind: "all_day",
+              date: "2026-08-01",
+            },
+            end: {
+              kind: "all_day",
+              date: "2026-08-02",
+            },
+            details_visible: true,
+          }],
+          has_more: true,
+          next_page_token: "next-page",
+          provenance: {
+            provider_family: "feishu",
+            source: "feishu.calendar.events",
+          },
+        },
+        artifacts: [],
+      });
+      expect(api.listPrimaryEvents).toHaveBeenCalledWith({
+        user_open_id: "ou_1",
+        start_at: "2026-07-31T00:00:00+08:00",
+        end_at: "2026-08-03T00:00:00+08:00",
+        page_size: 25,
+      });
+      await expect(calendar.execute(request({
+        capability_id: "feishu.calendar.events.list",
+        value,
+        scopes: ["calendar_event:read"],
+        allowed_target_refs: [],
+      }))).resolves.toMatchObject({
+        outcome: "rejected",
+        code: "target_not_allowed",
       });
     } finally {
       await store.close();

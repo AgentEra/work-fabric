@@ -57,6 +57,7 @@ const OPERATION_SCOPE = Object.freeze({
   "feishu.calendar.event.read": "calendar_event:read",
   "feishu.calendar.event.create": "calendar_event:write",
   "feishu.calendar.event.update": "calendar_event:write",
+  "feishu.calendar.events.list": "calendar_event:read",
   "feishu.calendar.attendees.add": "calendar_attendee:write",
   "feishu.calendar.attendees.remove": "calendar_attendee:write",
   "feishu.calendar.event.delete": "calendar_event:delete",
@@ -388,6 +389,17 @@ export class LocalInvocationAuthorityProvider
       for (const participant of participants) {
         allowedTargets.add(participant);
       }
+    }
+
+    if (request.capability_id === "feishu.calendar.events.list") {
+      const subject = requestInput.subject_resource_uri;
+      const sender = senderReference(originalSource);
+      if (
+        typeof subject !== "string" ||
+        sender === null ||
+        subject !== sender
+      ) deny();
+      allowedTargets.add(subject);
     }
 
     if (request.capability_id === "feishu.calendar.event.create") {

@@ -62,6 +62,15 @@ export interface CalendarEventReadInput {
   readonly event: CalendarEventReference;
 }
 
+export interface CalendarEventListInput {
+  readonly capability_id: "feishu.calendar.events.list";
+  readonly subject_resource_uri: string;
+  readonly start_at: string;
+  readonly end_at: string;
+  readonly page_size: number;
+  readonly page_token?: string;
+}
+
 export interface CalendarEventUpdateInput {
   readonly capability_id: "feishu.calendar.event.update";
   readonly event: CalendarEventReference;
@@ -91,6 +100,7 @@ export type CalendarExecutionInput =
   | CalendarFreeBusyInput
   | CalendarEventCreateInput
   | CalendarEventReadInput
+  | CalendarEventListInput
   | CalendarEventUpdateInput
   | CalendarAttendeeMutationInput
   | CalendarEventDeleteInput;
@@ -274,6 +284,43 @@ export interface FeishuCalendarEventFacts {
   readonly updated_at?: string;
 }
 
+export type FeishuCalendarEventBoundary =
+  | {
+      readonly kind: "date_time";
+      readonly at: string;
+      readonly time_zone: string;
+    }
+  | {
+      readonly kind: "all_day";
+      readonly date: string;
+    };
+
+export interface FeishuCalendarListedEventFacts {
+  readonly event_id: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly start: FeishuCalendarEventBoundary;
+  readonly end: FeishuCalendarEventBoundary;
+  readonly status?: "tentative" | "confirmed" | "cancelled";
+  readonly visibility?: string;
+  readonly url?: string;
+  readonly organizer_open_id?: string;
+  readonly details_visible: boolean;
+}
+
+export interface FeishuPrimaryCalendarEventPage {
+  readonly calendar_id: string;
+  readonly access_role:
+    | "free_busy_reader"
+    | "reader"
+    | "writer"
+    | "owner"
+    | "unknown";
+  readonly events: readonly FeishuCalendarListedEventFacts[];
+  readonly has_more: boolean;
+  readonly next_page_token?: string;
+}
+
 export type FeishuCalendarAttendeeTarget =
   | { readonly kind: "user"; readonly open_id: string }
   | { readonly kind: "chat"; readonly chat_id: string };
@@ -311,6 +358,14 @@ export interface FeishuCalendarBackend {
     readonly busy_only: boolean;
     readonly signal?: AbortSignal;
   }): Promise<FeishuFreeBusyFacts>;
+  listPrimaryEvents(input: {
+    readonly user_open_id: string;
+    readonly start_at: string;
+    readonly end_at: string;
+    readonly page_size: number;
+    readonly page_token?: string;
+    readonly signal?: AbortSignal;
+  }): Promise<FeishuPrimaryCalendarEventPage>;
   createEvent(input: {
     readonly calendar_id: string;
     readonly title: string;

@@ -22,6 +22,7 @@ function backend(): FeishuCalendarBackend {
     getCalendar: vi.fn(),
     createSharedCalendar: vi.fn(),
     queryFreeBusy: vi.fn(),
+    listPrimaryEvents: vi.fn(),
     createEvent: vi.fn(async (input) => ({
       calendar_id: input.calendar_id,
       event_id: "event-1",

@@ -15,6 +15,60 @@ function parse(): Parse | undefined {
 }
 
 describe("Feishu Calendar input validation", () => {
+  it("normalizes a bounded primary-calendar event-list query", () => {
+    const decode = parse();
+    expect(decode).toBeTypeOf("function");
+    if (decode === undefined) return;
+
+    expect(decode("feishu.calendar.events.list", {
+      subject_resource_uri: "feishu://user/open-id/ou_1",
+      start_at: "2026-07-31T00:00:00+08:00",
+      end_at: "2026-08-03T00:00:00+08:00",
+      page_size: 25,
+      page_token: "opaque-page-token",
+    })).toEqual({
+      capability_id: "feishu.calendar.events.list",
+      subject_resource_uri: "feishu://user/open-id/ou_1",
+      start_at: "2026-07-31T00:00:00+08:00",
+      end_at: "2026-08-03T00:00:00+08:00",
+      page_size: 25,
+      page_token: "opaque-page-token",
+    });
+  });
+
+  it.each([
+    {
+      subject_resource_uri: "feishu://chat/oc_1",
+      start_at: "2026-07-31T00:00:00+08:00",
+      end_at: "2026-08-03T00:00:00+08:00",
+      page_size: 25,
+    },
+    {
+      subject_resource_uri: "feishu://user/open-id/ou_1",
+      start_at: "2026-07-01T00:00:00Z",
+      end_at: "2026-08-02T00:00:00Z",
+      page_size: 25,
+    },
+    {
+      subject_resource_uri: "feishu://user/open-id/ou_1",
+      start_at: "2026-07-31T00:00:00Z",
+      end_at: "2026-08-01T00:00:00Z",
+      page_size: 51,
+    },
+    {
+      subject_resource_uri: "feishu://user/open-id/ou_1",
+      start_at: "2026-07-31T00:00:00Z",
+      end_at: "2026-08-01T00:00:00Z",
+      page_size: 25,
+      unexpected: true,
+    },
+  ])("rejects invalid event-list input %#", (input) => {
+    const decode = parse();
+    if (decode === undefined) return;
+    expect(() => decode("feishu.calendar.events.list", input))
+      .toThrow(/input|range|subject|page|user/i);
+  });
+
   it("normalizes a bounded free/busy query with Authority evidence", () => {
     const decode = parse();
     expect(decode).toBeTypeOf("function");

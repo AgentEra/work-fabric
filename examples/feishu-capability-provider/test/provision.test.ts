@@ -107,4 +107,63 @@ describe("Feishu Provider provisioning", () => {
       }),
     );
   });
+
+  it("advances the Endpoint registration version when declarations change", async () => {
+    const endpoints = {
+      provision: vi.fn(async (_id, input) => {
+        if (input.registration_version === 1) {
+          throw Object.assign(new Error("Endpoint state conflict"), {
+            code: "version_conflict",
+          });
+        }
+        return input;
+      }),
+    };
+    const citizens = { provision: vi.fn(async (_id, input) => input) };
+    const result = await provisionFeishuProviderRecords({
+      endpoints,
+      citizens,
+      participant: {
+        actor_id: "actor-provider",
+        actor_type: "agent",
+        endpoint_id: "endpoint-provider",
+      },
+      capability_facets: [{
+        citizen: {
+          citizen_id: "citizen-calendar",
+          principal_id: "principal-provider",
+          actor_id: "actor-provider",
+          endpoint_id: "endpoint-provider",
+          registration_version: 3,
+        },
+        declarations: [{
+          declaration_id: "feishu.calendar.events.list",
+          risk: "low",
+        }],
+      }],
+      context_citizen: {
+        citizen_id: "citizen-context",
+        principal_id: "principal-provider",
+        actor_id: "actor-provider",
+        endpoint_id: "endpoint-provider",
+        registration_version: 4,
+      },
+      context_declarations: [{
+        declaration_id: "feishu.document.context",
+        risk: "low",
+      }],
+    });
+
+    expect(endpoints.provision).toHaveBeenNthCalledWith(
+      1,
+      "endpoint-provider",
+      expect.objectContaining({ registration_version: 1 }),
+    );
+    expect(endpoints.provision).toHaveBeenNthCalledWith(
+      2,
+      "endpoint-provider",
+      expect.objectContaining({ registration_version: 2 }),
+    );
+    expect(result.endpoint_registration_version).toBe(2);
+  });
 });

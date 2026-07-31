@@ -29,7 +29,7 @@ export interface FeishuProviderProvisioningPorts {
     provision(
       endpointId: string,
       input: EndpointRegistration,
-    ): Promise<unknown>;
+    ): Promise<EndpointRegistration>;
   };
   readonly citizens: {
     provision(
@@ -70,6 +70,35 @@ function citizen(
   };
 }
 
+export interface FeishuProviderProvisioningResult {
+  readonly endpoint_registration_version: number;
+}
+
+function versionConflict(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && error.code === "version_conflict";
+}
+
+async function provisionVersionedEndpoint(
+  endpoints: FeishuProviderProvisioningPorts["endpoints"],
+  endpointId: string,
+  registration: Omit<EndpointRegistration, "registration_version">,
+): Promise<EndpointRegistration> {
+  for (let registrationVersion = 1; registrationVersion <= 100; registrationVersion += 1) {
+    try {
+      return await endpoints.provision(endpointId, {
+        ...registration,
+        registration_version: registrationVersion,
+      });
+    } catch (error) {
+      if (!versionConflict(error) || registrationVersion === 100) throw error;
+    }
+  }
+  throw new Error("Feishu Provider Endpoint version negotiation failed");
+}
+
 export async function provisionFeishuProviderRecords(
   input: FeishuProviderProvisioningPorts & {
     readonly participant: FeishuProviderParticipant;
@@ -80,7 +109,7 @@ export async function provisionFeishuProviderRecords(
     readonly context_citizen: FeishuProviderCitizenConfig;
     readonly context_declarations: readonly MinimalDeclaration[];
   },
-): Promise<void> {
+): Promise<FeishuProviderProvisioningResult> {
   if (input.capability_facets.length === 0) {
     throw new TypeError("at least one capability facet is required");
   }
@@ -88,7 +117,7 @@ export async function provisionFeishuProviderRecords(
     .flatMap((facet) => facet.declarations)
     .map((item) => item.declaration_id)
     .sort();
-  const registration: EndpointRegistration = {
+  const registration: Omit<EndpointRegistration, "registration_version"> = {
     endpoint_id: input.participant.endpoint_id,
     actor: {
       actor_id: input.participant.actor_id,
@@ -109,9 +138,12 @@ export async function provisionFeishuProviderRecords(
       max_concurrent_handoffs: 8,
     },
     administrative_state: "enabled",
-    registration_version: 1,
   };
-  await input.endpoints.provision(input.participant.endpoint_id, registration);
+  const provisionedEndpoint = await provisionVersionedEndpoint(
+    input.endpoints,
+    input.participant.endpoint_id,
+    registration,
+  );
   for (const facet of input.capability_facets) {
     await input.citizens.provision(
       facet.citizen.citizen_id,
@@ -130,11 +162,15 @@ export async function provisionFeishuProviderRecords(
       input.context_declarations,
     ),
   );
+  return {
+    endpoint_registration_version:
+      provisionedEndpoint.registration_version,
+  };
 }
 
 export async function provisionFeishuProvider(
   environment: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<void> {
+): Promise<FeishuProviderProvisioningResult> {
   const loaded = await loadFeishuProviderConfiguration({ environment });
   const adminToken = environment.WORK_FABRIC_ADMIN_TOKEN;
   if (adminToken === undefined || adminToken.length === 0) {
@@ -150,7 +186,7 @@ export async function provisionFeishuProvider(
     },
     authentication: new BearerTokenProvider(adminToken),
   });
-  await provisionFeishuProviderRecords({
+  const result = await provisionFeishuProviderRecords({
     endpoints: client.endpoints,
     citizens: client.citizens,
     participant: loaded.participant,
@@ -170,8 +206,9 @@ export async function provisionFeishuProvider(
     context_declarations: feishuContextDeclarations(),
   });
   console.log(
-    `Feishu Provider provisioned: ${loaded.participant.endpoint_id}`,
+    `Feishu Provider provisioned: ${loaded.participant.endpoint_id} (registration v${result.endpoint_registration_version})`,
   );
+  return result;
 }
 
 if (

@@ -36,7 +36,9 @@ interface SupervisorDependencies {
   ) => Promise<void>;
   readonly provision: (
     environment: Readonly<Record<string, string>>,
-  ) => Promise<void>;
+  ) => Promise<{
+    readonly feishu_endpoint_registration_version: number;
+  }>;
   readonly write_pid_state: (state: LocalFeishuPidState) => Promise<void>;
   readonly remove_pid_state: () => Promise<void>;
   readonly log: (message: string) => void;
@@ -145,8 +147,12 @@ export class LocalFeishuStackSupervisor {
     try {
       this.launch("service", environment);
       await this.dependencies.wait_for_service(environment);
-      await this.dependencies.provision(environment);
-      this.launch("feishu-provider", environment);
+      const provisioned = await this.dependencies.provision(environment);
+      this.launch("feishu-provider", {
+        ...environment,
+        WORK_FABRIC_FEISHU_ENDPOINT_REGISTRATION_VERSION:
+          String(provisioned.feishu_endpoint_registration_version),
+      });
       this.launch("daily-assistant", environment);
       await this.dependencies.write_pid_state({
         supervisor_pid: process.pid,

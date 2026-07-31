@@ -232,6 +232,7 @@ function capabilityDescriptor(
 function gatewayConfiguration(
   loaded: LoadedFeishuProviderConfiguration,
   capabilities: readonly CapabilityDescriptor[],
+  endpointRegistrationVersion: number,
 ): AgentGatewayConfig {
   const now = new Date().toISOString();
   const subscription: SubscriptionDocument = {
@@ -267,7 +268,7 @@ function gatewayConfiguration(
       availability: "available",
       requested_lease_seconds:
         loaded.service.citizen_lease.requested_lease_seconds,
-      expected_registration_version: 1,
+      expected_registration_version: endpointRegistrationVersion,
     },
     inbox_refresh_ms: 1_000,
     max_active_partitions:
@@ -277,6 +278,19 @@ function gatewayConfiguration(
     heartbeat_backoff_ms: 250,
     graceful_close_timeout_ms: 10_000,
   };
+}
+
+export function feishuEndpointRegistrationVersion(
+  environment: Readonly<Record<string, string | undefined>>,
+): number {
+  const raw =
+    environment.WORK_FABRIC_FEISHU_ENDPOINT_REGISTRATION_VERSION ?? "1";
+  if (!/^[1-9][0-9]*$/.test(raw)) {
+    throw new TypeError(
+      "WORK_FABRIC_FEISHU_ENDPOINT_REGISTRATION_VERSION must be a positive integer",
+    );
+  }
+  return Number(raw);
 }
 
 function runtimeContext(
@@ -587,6 +601,7 @@ export async function composeFeishuProvider(
   const gateway = new AgentGateway(client, gatewayConfiguration(
     loaded,
     capabilities,
+    feishuEndpointRegistrationVersion(environment),
   ));
   const runtimeState = new SqliteAgentRuntimeStateStore({
     location: loaded.service.runtime_state.location,

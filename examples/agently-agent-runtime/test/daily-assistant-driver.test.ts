@@ -406,4 +406,185 @@ describe("DailyAssistantDriver", () => {
       },
     });
   });
+
+  it("persists proposal cancellation before returning the Agent-authored reply", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    stores.push(state);
+    const underlying = new StubDriver();
+    const driver = new DailyAssistantDriver(underlying, state, {
+      now: () => "2026-07-30T01:00:00.000Z",
+    });
+    await driver.executeTurn(
+      task(),
+      [],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    );
+    await expect(driver.executeTurn(
+      task({
+        handoff_id: "handoff-cancellation",
+        text: "这个日程取消吧",
+      }),
+      [],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      kind: "final",
+      response: {
+        summary: [{
+          text: expect.stringContaining("已取消这份尚未创建的日程提案"),
+        }],
+      },
+    });
+    expect(await state.getPrivateState(
+      "tenant-1",
+      "daily-assistant.scheduling/v1",
+      "feishu:conversation:feishu%3A%2F%2Fchat%2Foc-team",
+    )).toMatchObject({
+      version: 2,
+      value: {
+        phase: "cancelled",
+      },
+    });
+
+    underlying.executeTurn.mockImplementationOnce(async (enriched) => {
+      expect(enriched.agent_private_context).toMatchObject({
+        state_version: 2,
+        active_session: null,
+      });
+      return {
+        kind: "final",
+        response: {
+          summary: [{
+            kind: "text",
+            media_type: "text/markdown",
+            text: "接下来三天的日程需要查询飞书日历。",
+          }],
+          artifacts: [],
+          evidence: [],
+          extensions: {},
+        },
+      };
+    });
+    await driver.executeTurn(
+      task({
+        handoff_id: "handoff-next",
+        text: "我未来三天还有其它日程吗",
+      }),
+      [],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    );
+  });
+
+  it("deterministically closes an explicit initiator cancellation without relying on model state output", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    stores.push(state);
+    const underlying = new StubDriver();
+    const driver = new DailyAssistantDriver(underlying, state, {
+      now: () => "2026-07-30T01:00:00.000Z",
+    });
+    await driver.executeTurn(
+      task(),
+      [],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    );
+    underlying.executeTurn.mockClear();
+    underlying.executeTurn.mockRejectedValueOnce(
+      new Error("the model must not own deterministic cancellation"),
+    );
+
+    await expect(driver.executeTurn(
+      task({
+        handoff_id: "handoff-deterministic-cancellation",
+        text: "这个日程取消吧",
+      }),
+      [],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      kind: "final",
+      response: {
+        summary: [{
+          kind: "text",
+          media_type: "text/markdown",
+          text: expect.stringContaining("已取消"),
+        }],
+        extensions: {
+          "workfabric.agent/request_summary": "取消待确认日程提案",
+        },
+      },
+    });
+    expect(underlying.executeTurn).not.toHaveBeenCalled();
+    expect(await state.getPrivateState(
+      "tenant-1",
+      "daily-assistant.scheduling/v1",
+      "feishu:conversation:feishu%3A%2F%2Fchat%2Foc-team",
+    )).toMatchObject({
+      version: 2,
+      value: {
+        phase: "cancelled",
+        confirmation_handoff_id: null,
+        calendar_result_uri: null,
+        capability_result_handoff_ids: [],
+      },
+    });
+  });
+
+  it("does not treat cancellation of another object as cancellation of the active calendar proposal", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    stores.push(state);
+    const underlying = new StubDriver();
+    const driver = new DailyAssistantDriver(underlying, state, {
+      now: () => "2026-07-30T01:00:00.000Z",
+    });
+    await driver.executeTurn(
+      task(),
+      [],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    );
+    underlying.executeTurn.mockClear();
+    underlying.executeTurn.mockResolvedValueOnce({
+      kind: "final",
+      response: {
+        summary: [{
+          kind: "text",
+          media_type: "text/markdown",
+          text: "已取消文档操作，当前日程提案保持不变。",
+        }],
+        artifacts: [],
+        evidence: [],
+        extensions: {},
+      },
+    });
+
+    await driver.executeTurn(
+      task({
+        handoff_id: "handoff-unrelated-cancellation",
+        text: "取消文档操作，不要动当前日程",
+      }),
+      [],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(underlying.executeTurn).toHaveBeenCalledOnce();
+    expect(await state.getPrivateState(
+      "tenant-1",
+      "daily-assistant.scheduling/v1",
+      "feishu:conversation:feishu%3A%2F%2Fchat%2Foc-team",
+    )).toMatchObject({
+      version: 1,
+      value: { phase: "awaiting_confirmation" },
+    });
+  });
 });

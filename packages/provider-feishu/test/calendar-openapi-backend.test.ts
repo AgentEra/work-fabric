@@ -23,6 +23,9 @@ type Backend = {
   queryFreeBusy(
     input: Record<string, unknown>,
   ): Promise<Record<string, unknown>>;
+  listPrimaryEvents(
+    input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>>;
   createEvent(input: Record<string, unknown>): Promise<Record<string, unknown>>;
   readEvent(input: Record<string, unknown>): Promise<Record<string, unknown>>;
   updateEvent(input: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -241,6 +244,136 @@ describe("FeishuCalendarOpenApiBackend", () => {
         { open_id: "ou_2", busy_intervals: [] },
       ],
       unresolved: [],
+    });
+  });
+
+  it("lists a bounded primary-calendar page with explicit redaction and all-day facts", async () => {
+    const Constructor = constructor();
+    if (Constructor === undefined) return;
+    const calls: Array<{
+      readonly method: string;
+      readonly path: string;
+      readonly body?: unknown;
+    }> = [];
+    const request = vi.fn(async (
+      method: string,
+      path: string,
+      body?: unknown,
+    ) => {
+      calls.push(body === undefined
+        ? { method, path }
+        : { method, path, body });
+      if (path.startsWith(
+        "/open-apis/calendar/v4/calendars/primarys",
+      )) {
+        return {
+          code: 0,
+          data: {
+            calendars: [{
+              user_id: "ou_1",
+              calendar: {
+                calendar_id: "cal-primary-1",
+                type: "primary",
+                role: "free_busy_reader",
+              },
+            }],
+          },
+        };
+      }
+      return {
+        code: 0,
+        data: {
+          has_more: true,
+          page_token: "next-page",
+          items: [
+            {
+              event_id: "event-redacted",
+              summary: "",
+              start_time: {
+                timestamp: "1785366000",
+                timezone: "Asia/Shanghai",
+              },
+              end_time: {
+                timestamp: "1785369600",
+                timezone: "Asia/Shanghai",
+              },
+              status: "confirmed",
+            },
+            {
+              event_id: "event-all-day",
+              summary: "项目里程碑",
+              description: "阶段交付",
+              start_time: { date: "2026-07-31" },
+              end_time: { date: "2026-08-01" },
+              visibility: "public",
+              app_link: "https://feishu.example/calendar/event-all-day",
+              event_organizer: { user_id: "ou_organizer" },
+            },
+          ],
+        },
+      };
+    });
+    const backend = new Constructor({ requests: { request } });
+
+    await expect(backend.listPrimaryEvents({
+      user_open_id: "ou_1",
+      start_at: "2026-07-31T00:00:00+08:00",
+      end_at: "2026-08-03T00:00:00+08:00",
+      page_size: 25,
+      page_token: "current-page",
+    })).resolves.toEqual({
+      calendar_id: "cal-primary-1",
+      access_role: "free_busy_reader",
+      events: [
+        {
+          event_id: "event-redacted",
+          start: {
+            kind: "date_time",
+            at: "2026-07-29T23:00:00.000Z",
+            time_zone: "Asia/Shanghai",
+          },
+          end: {
+            kind: "date_time",
+            at: "2026-07-30T00:00:00.000Z",
+            time_zone: "Asia/Shanghai",
+          },
+          status: "confirmed",
+          details_visible: false,
+        },
+        {
+          event_id: "event-all-day",
+          title: "项目里程碑",
+          description: "阶段交付",
+          start: { kind: "all_day", date: "2026-07-31" },
+          end: { kind: "all_day", date: "2026-08-01" },
+          visibility: "public",
+          url: "https://feishu.example/calendar/event-all-day",
+          organizer_open_id: "ou_organizer",
+          details_visible: true,
+        },
+      ],
+      has_more: true,
+      next_page_token: "next-page",
+    });
+    expect(calls[0]).toEqual({
+      method: "POST",
+      path:
+        "/open-apis/calendar/v4/calendars/primarys?user_id_type=open_id",
+      body: { user_ids: ["ou_1"] },
+    });
+    const eventCall = calls[1]!;
+    expect(eventCall.method).toBe("GET");
+    const url = new URL(`https://open.feishu.test${eventCall.path}`);
+    expect(url.pathname).toBe(
+      "/open-apis/calendar/v4/calendars/cal-primary-1/events",
+    );
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      user_id_type: "open_id",
+      op_user_id: "ou_1",
+      start_time: "1785427200",
+      end_time: "1785686400",
+      page_size: "25",
+      page_token: "current-page",
     });
   });
 

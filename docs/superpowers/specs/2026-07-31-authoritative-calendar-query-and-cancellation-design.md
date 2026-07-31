@@ -1,6 +1,6 @@
 # Authoritative Calendar Query and Cancellation Design
 
-**Status:** Approved for implementation  
+**Status:** Implemented and verified
 **Date:** 2026-07-31  
 **Scope:** Feishu Calendar event facts and Daily Assistant scheduling-session cancellation
 
@@ -24,8 +24,8 @@ Channel.
 | Owner | Must close within the owner | Must not do |
 | --- | --- | --- |
 | Calendar Provider | Resolve an authorized Feishu user primary calendar, query a bounded time window, page results, normalize visibility and return typed facts | Interpret “我的日程”, compose a user reply or read Agent private state |
-| Daily Assistant | Decide whether the current intent requires a calendar query, select the current sender as the represented subject, explain returned visibility, and atomically persist cancellation before replying | Call Feishu directly, invent hidden event details or use a proposal as calendar truth |
-| Agent Runtime adapter | Inject and persist validated Agent-private scheduling state with optimistic concurrency | Interpret cancellation semantics or synthesize business replies |
+| Daily Assistant | Decide whether the current intent requires a calendar query, select the current sender as the represented subject, explain returned visibility, and atomically persist cancellation before replying. Its application-specific Driver handles an unambiguous original-initiator cancellation deterministically; ambiguous language remains an Agent decision | Call Feishu directly, invent hidden event details or use a proposal as calendar truth |
+| Generic Agent Runtime | Carry the task, run capability continuation, and persist validated Runtime records | Interpret scheduling semantics or synthesize business replies |
 | Feishu Channel | Carry trusted sender/conversation facts and render the Agent-authored Result | Query calendars, cancel sessions or author fallback business text |
 | Work Fabric | Carry Capability Handoffs, Authority, result facts and audit state | Orchestrate the calendar flow or inspect private scheduling state |
 
@@ -127,6 +127,12 @@ The Runtime adapter applies the mutation before returning the final Result. If
 optimistic persistence fails, the cancellation reply is not returned as a
 successful final turn.
 
+For a clear cancellation command from the original initiator, the
+Daily Assistant's own application Driver performs this transition
+deterministically instead of depending on a model to reproduce the state
+envelope. This is still Agent-owned behavior: neither Fabric, Channel nor
+Calendar Provider recognizes the business intent.
+
 Repository validation requires:
 
 - an active session exists;
@@ -152,6 +158,13 @@ Calendar capability and is not covered by this proposal-cancellation path.
   cancellation acknowledgment.
 - Provider query failure: the Agent reports the failure and does not fall back
   to private proposal state.
+- A newly declared capability must have a matching least-privilege
+  `workfabric.citizen.declaration.read.v1` rule for the consuming Agent.
+  Otherwise progressive disclosure fails before the Agent turn.
+- When the Provider capability set changes, local provisioning advances the
+  Endpoint registration version and starts the Provider Runtime with that
+  exact negotiated version. It never overwrites a changed declaration set at
+  the same optimistic version.
 
 ## 8. Acceptance criteria
 
@@ -170,4 +183,8 @@ Calendar capability and is not covered by this proposal-cancellation path.
    green.
 8. A real opt-in smoke query with the configured Feishu application returns
    actual event intervals without exposing credentials or inventing titles.
-
+9. Re-running the local stack over an existing v1 Provider registration
+   migrates it to v2 and keeps the Runtime session version aligned.
+10. The real Feishu-routed cancellation and subsequent three-day query both
+    reach `result_returned`; private scheduling state is `cancelled`, and the
+    query invokes `feishu.calendar.events.list`.
