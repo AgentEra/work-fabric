@@ -431,6 +431,49 @@ describe("runCapabilityContinuationLoop", () => {
     expect(disallowedPort.invoke).not.toHaveBeenCalled();
   });
 
+  it("rejects a repeated successful side effect even when the Agent changes the invocation ID", async () => {
+    const driver = turnDriver([
+      {
+        kind: "capability_request",
+        request: {
+          invocation_id: "invocation-create-1",
+          capability_id: "feishu.document.create",
+          version_constraint: "1.0.0",
+          input: { title: "客户项目需求" },
+          reason: "创建协作文档",
+        },
+      },
+      {
+        kind: "capability_request",
+        request: {
+          invocation_id: "invocation-create-2",
+          capability_id: "feishu.document.create",
+          version_constraint: "1.0.0",
+          input: { title: "客户项目需求" },
+          reason: "再次创建协作文档",
+        },
+      },
+    ]);
+    const invocations = invocationPort();
+
+    await expect(runCapabilityContinuationLoop({
+      task,
+      driver,
+      disclosure: disclosurePort(),
+      invocations,
+      limits: {
+        max_invocations_per_handoff: 4,
+        max_query_invocations_per_handoff: 3,
+        max_query_result_bytes: 65_536,
+        allowed_namespaces: ["feishu."],
+      },
+      progress: async () => undefined,
+      signal: new AbortController().signal,
+      now: () => "2026-07-27T10:00:00.000Z",
+    })).rejects.toThrow(/duplicate_successful_side_effect/i);
+    expect(invocations.invoke).toHaveBeenCalledTimes(1);
+  });
+
   it("rejects execution after the original Handoff deadline", async () => {
     const invocations = invocationPort();
     await expect(runCapabilityContinuationLoop({

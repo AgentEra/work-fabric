@@ -60,9 +60,15 @@ describe("Feishu document Contract v2", () => {
 
   it("publishes a new major Contract without identity, ACL or vendor token fields", () => {
     const declarations = feishuCapabilityDeclarations();
-    expect(declarations.filter((item) =>
-      item.declaration_id.startsWith("feishu.document.")
-    ).every((item) => item.version === "2.0.0")).toBe(true);
+    expect(Object.fromEntries(declarations
+      .filter((item) => item.declaration_id.startsWith("feishu.document."))
+      .map((item) => [item.declaration_id, item.version]))).toEqual({
+      "feishu.document.append": "2.0.0",
+      "feishu.document.create": "2.0.1",
+      "feishu.document.delete": "2.0.0",
+      "feishu.document.read": "2.0.0",
+      "feishu.document.update": "2.0.0",
+    });
     expect(declarations.find((item) =>
       item.declaration_id === "feishu.message.send"
     )?.version).toBe("1.0.0");

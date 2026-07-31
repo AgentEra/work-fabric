@@ -187,6 +187,10 @@ def test_turn_prompt_requires_provider_owned_input_contract() -> None:
     supplied = turn_prompt_input(request)
 
     assert "must exactly conform to input_schema" in prompt
+    assert "Omit optional input fields" in prompt
+    assert "Never invent optional identifiers or policy references" in prompt
+    assert "After a command or destructive capability succeeds" in prompt
+    assert "must not request the same side effect again" in prompt
     assert supplied["available_capabilities"][0]["input_schema"]["required"] == [
         "title",
         "content",
@@ -481,8 +485,13 @@ async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_res
                 ),
             }],
             "artifacts": [{
-                "uri": "feishu://docx/doc-1",
-                "media_type": "application/vnd.feishu.docx",
+                "artifact_id": "capability-artifact-1",
+                "artifact_type": "external_resource",
+                "resource": {
+                    "uri": "feishu://docx/doc-1",
+                    "media_type": "application/vnd.feishu.docx",
+                    "extensions": {},
+                },
             }],
             "evidence": [],
             "extensions": {
@@ -490,6 +499,68 @@ async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_res
             },
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_successful_command_completes_inside_the_agent_without_a_second_model_call() -> None:
+    value = valid_request_v3()
+    value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "创建项目需求文档",
+    }]
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-document-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "2.0.1",
+            "input": {
+                "title": "项目需求",
+                "content": {
+                    "media_type": "text/markdown",
+                    "text": "需求正文",
+                },
+            },
+            "reason": "创建项目需求文档",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "invocation-document-1",
+            "auxiliary_handoff_id": "handoff-document-1",
+            "candidate": {
+                "citizen_id": "citizen-feishu-document",
+                "endpoint_id": "endpoint-feishu-provider",
+                "capability_id": "feishu.document.create",
+                "capability_version": "2.0.1",
+                "contract_digest": "sha256:" + ("a" * 64),
+            },
+            "data": {
+                "document_token": "doc-1",
+                "url": "https://feishu.cn/docx/doc-1",
+                "title": "项目需求",
+                "revision": "2",
+            },
+            "artifacts": [{
+                "uri": "feishu://docx/doc-1",
+                "media_type": "application/vnd.feishu.docx",
+            }],
+        },
+    }]}
+    request = parse_request(value)
+    agent = FakeAgent()
+
+    async def must_not_run() -> object:
+        raise AssertionError("successful command must complete deterministically")
+
+    agent.async_start = must_not_run  # type: ignore[method-assign]
+
+    turn = await execute_turn_with_agent(request, agent)
+
+    assert turn["kind"] == "final"
+    assert turn["response"]["summary"][0]["text"] == (
+        "已完成：创建项目需求文档。\n"
+        "文档《项目需求》：https://feishu.cn/docx/doc-1"
+    )
 
 
 @pytest.mark.asyncio

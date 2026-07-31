@@ -203,7 +203,7 @@ describe("Feishu Capability Provider", () => {
     const schemas = feishuSchemaDocuments();
     expect(
       JSON.stringify(
-        schemas.get("urn:work-fabric:schema:feishu:documentCreateInput:2"),
+        schemas.get("urn:work-fabric:schema:feishu:documentCreateInput:3"),
       ),
     ).not.toContain("folder_token");
     expect(feishuContextDeclarations()).toMatchObject([

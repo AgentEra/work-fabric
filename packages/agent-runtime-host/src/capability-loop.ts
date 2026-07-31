@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   validateCapabilityInvocationRequest,
   validateRuntimeCapabilitySummaries,
@@ -182,6 +184,20 @@ export async function runCapabilityContinuationLoop(
       );
     }
     const operationKind = [...operationKinds][0]!;
+    if (
+      operationKind !== "query" &&
+      transcriptEntries.some((entry) =>
+        entry.result.outcome === "succeeded" &&
+        entry.request.capability_id === turn.request.capability_id &&
+        entry.request.version_constraint === turn.request.version_constraint &&
+        isDeepStrictEqual(entry.request.input, turn.request.input)
+      )
+    ) {
+      throw new AgentRuntimeHostError(
+        "duplicate_successful_side_effect",
+        turn.request.capability_id,
+      );
+    }
     if (
       operationKind === "query" &&
       queryInvocations >= input.limits.max_query_invocations_per_handoff

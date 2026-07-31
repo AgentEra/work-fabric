@@ -8,7 +8,9 @@ const schema = (
   body: Record<string, unknown>,
 ): { readonly uri: string; readonly digest: `sha256:${string}` } => ({
   uri: `urn:work-fabric:schema:feishu:${name}:${
-    name.startsWith("document") ? "2" : "1"
+    name === "documentCreateInput"
+      ? "3"
+      : name.startsWith("document") ? "2" : "1"
   }`,
   digest: canonicalCitizenDigest(body),
 });
@@ -46,6 +48,8 @@ const documentReference = {
   },
 };
 const placement = {
+  description:
+    "Optional. Omit to use the Provider-owned default placement. Supply only an explicit resource URI or a qualified usage policy reference.",
   oneOf: [
     {
       type: "object",
@@ -69,6 +73,7 @@ const placement = {
           type: "string",
           minLength: 3,
           maxLength: 256,
+          pattern: "^[a-z][a-z0-9_-]*(?:\\.[a-z][a-z0-9_-]*)+$",
         },
       },
     },
@@ -442,6 +447,7 @@ function allCapabilityDeclarations(): readonly CitizenDeclaration[] {
       output: "documentCreateOutput",
       risk: "medium",
       operation_kind: "command",
+      version: "2.0.1",
     }),
     capability({
       id: "feishu.document.delete",
