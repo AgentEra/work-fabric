@@ -28,6 +28,10 @@ export function assertSafeMarkdownLinks(markdown: string): void {
   const tokens = lexer(markdown, { gfm: true });
   walkTokens(tokens, (token: Token) => {
     if (token.type === "link") {
+      if (
+        token.raw === token.text &&
+        token.href === `mailto:${token.text}`
+      ) return;
       assertSafeHref(token.href);
     }
   });
