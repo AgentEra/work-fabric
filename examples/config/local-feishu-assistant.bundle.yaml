@@ -18,7 +18,7 @@ applications:
         grant_ttl_seconds: 120
         max_evidence_cache_entries: 10000
       listen:
-        host: 127.0.0.1
+        host: ${WORK_FABRIC_LISTEN_HOST}
         port: 8787
       sqlite:
         location: ./var/work-fabric.db

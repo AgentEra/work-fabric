@@ -59,7 +59,10 @@ async function loadEnvironmentFile(
 
 function replaceDeploymentValue(
   source: string,
-  name: "FEISHU_EXTERNAL_TENANT_ID" | "FEISHU_BOT_OPEN_ID",
+  name:
+    | "FEISHU_EXTERNAL_TENANT_ID"
+    | "FEISHU_BOT_OPEN_ID"
+    | "WORK_FABRIC_LISTEN_HOST",
   value: string,
 ): string {
   const marker = `\${${name}}`;
@@ -81,6 +84,10 @@ export async function prepareLocalFeishuEnvironment(
     ...fileValues,
     ...input,
     WORK_FABRIC_ENV_FILE: resolve(envFile),
+    WORK_FABRIC_LISTEN_HOST:
+      input.WORK_FABRIC_LISTEN_HOST
+      ?? fileValues.WORK_FABRIC_LISTEN_HOST
+      ?? "127.0.0.1",
   };
   const missing = LOCAL_FEISHU_REQUIRED_ENVIRONMENT.filter(
     (name) => combined[name] === undefined || combined[name]!.length === 0,
@@ -110,6 +117,15 @@ export async function prepareLocalFeishuEnvironment(
     );
   } else if (sourcePath !== resolvedPath) {
     throw new Error("Configuration deployment markers are missing");
+  }
+  if (configuration.includes("${WORK_FABRIC_LISTEN_HOST}")) {
+    configuration = replaceDeploymentValue(
+      configuration,
+      "WORK_FABRIC_LISTEN_HOST",
+      combined.WORK_FABRIC_LISTEN_HOST!,
+    );
+  } else if (sourcePath !== resolvedPath) {
+    throw new Error("Configuration listen marker is missing");
   }
   await mkdir(dirname(resolvedPath), { recursive: true, mode: 0o700 });
   await writeFile(resolvedPath, configuration, { mode: 0o600 });

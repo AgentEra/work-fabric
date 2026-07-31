@@ -73,6 +73,7 @@ describe("LocalFeishuStackSupervisor", () => {
         loadFeishuProviderConfiguration({ environment }),
       ]);
       expect(service.service.tenant_id).toBe("tenant-local");
+      expect(service.service.listen.host).toBe("127.0.0.1");
       expect(agent.role.role_id).toBe("daily-assistant");
       expect(provider.provider).not.toHaveProperty("shared_folder");
       expect(provider.service.document_access.mode).toBe(
@@ -94,6 +95,20 @@ describe("LocalFeishuStackSupervisor", () => {
       expect(await readFile(resolvedConfig, "utf8")).not.toContain(
         "tenant-external\n",
       );
+
+      const deployedConfig = join(directory, "deployed.yaml");
+      const deployedEnvironment = await prepareLocalFeishuEnvironment({
+        WORK_FABRIC_ENV_FILE: envFile,
+        WORK_FABRIC_CONFIG: resolve(
+          "examples/config/local-feishu-assistant.bundle.yaml",
+        ),
+        WORK_FABRIC_RESOLVED_CONFIG: deployedConfig,
+        WORK_FABRIC_LISTEN_HOST: "0.0.0.0",
+      });
+      const deployedService = await loadNodeConfiguration(
+        deployedEnvironment,
+      );
+      expect(deployedService.service.listen.host).toBe("0.0.0.0");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

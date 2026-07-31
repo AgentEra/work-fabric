@@ -1,0 +1,11 @@
+.git
+.worktrees/
+.superpowers/
+node_modules/
+var/
+feishu.env
+*.env
+.pytest_cache/
+runtimes/agently-worker/.venv/
+packages/console-web/dist/
+npm-debug.log*
