@@ -17,6 +17,19 @@ afterEach(async () => {
   await Promise.all(stores.splice(0).map((store) => store.close()));
 });
 
+const historyCapability: RuntimeCapabilitySummary = {
+  citizen_id: "citizen-feishu-message",
+  capability_id: "feishu.conversation.history.read",
+  version: "1.0.0",
+  name: "Read Feishu conversation history",
+  description: "Read one bounded page of authorized conversation messages.",
+  operation_kind: "query",
+  input_schema: {
+    type: "object",
+    required: ["conversation", "maximum_messages"],
+  },
+};
+
 function task(input: {
   readonly handoff_id?: string;
   readonly text?: string;
@@ -124,6 +137,34 @@ class StubDriver implements CapabilityAwareAgentRuntimeDriver {
 }
 
 describe("DailyAssistantDriver", () => {
+  it("requests recent history before interpreting an explicit conversation follow-up", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    stores.push(state);
+    const underlying = new StubDriver();
+    const driver = new DailyAssistantDriver(underlying, state);
+
+    const turn = await driver.executeTurn(
+      task({ text: "你把上面的事做一下" }),
+      [historyCapability],
+      null,
+      async () => undefined,
+      new AbortController().signal,
+    );
+
+    expect(turn).toMatchObject({
+      kind: "capability_request",
+      request: {
+        capability_id: "feishu.conversation.history.read",
+        version_constraint: "1.0.0",
+        input: {
+          conversation: { kind: "current_conversation" },
+          maximum_messages: 20,
+        },
+      },
+    });
+    expect(underlying.executeTurn).not.toHaveBeenCalled();
+  });
+
   it("injects private context, persists a proposal, mentions the initiator and strips private output", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     stores.push(state);

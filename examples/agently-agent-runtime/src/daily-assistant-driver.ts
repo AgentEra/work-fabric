@@ -14,6 +14,10 @@ import {
   SchedulingSessionRepository,
   type SchedulingSessionUpdate,
 } from "./scheduling-session.js";
+import {
+  DefaultContextPreflightPolicy,
+  type ContextPreflightPolicy,
+} from "./context-preflight-policy.js";
 
 const PRIVATE_STATE_EXTENSION = "workfabric.agent/private_state";
 
@@ -221,13 +225,19 @@ function withInitiatorMention(
 export class DailyAssistantDriver
   implements CapabilityAwareAgentRuntimeDriver {
   private readonly sessions: SchedulingSessionRepository;
+  private readonly contextPreflight: ContextPreflightPolicy;
 
   constructor(
     private readonly underlying: CapabilityAwareAgentRuntimeDriver,
     store: AgentPrivateStateStore,
-    options: { readonly now?: () => string } = {},
+    options: {
+      readonly now?: () => string;
+      readonly context_preflight?: ContextPreflightPolicy;
+    } = {},
   ) {
     this.sessions = new SchedulingSessionRepository(store, options);
+    this.contextPreflight =
+      options.context_preflight ?? new DefaultContextPreflightPolicy();
   }
 
   async executeTurn(
@@ -262,6 +272,18 @@ export class DailyAssistantDriver
         capability_result_handoff_ids: [],
       });
       return cancellationTurn();
+    }
+    const preflight = this.contextPreflight.decide({
+      task,
+      available_capabilities: availableCapabilities,
+      transcript,
+      agent_private_context: privateContext,
+    });
+    if (preflight.kind === "request") {
+      return {
+        kind: "capability_request",
+        request: preflight.request,
+      };
     }
     const enrichedTask: RuntimeTaskPackage = {
       ...task,
