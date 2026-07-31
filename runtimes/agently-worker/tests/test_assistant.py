@@ -201,6 +201,20 @@ def test_historical_context_cannot_initiate_capability_side_effects() -> None:
     assert "summary or extraction request" in prompt
 
 
+def test_turn_prompt_requires_progressive_context_before_clarification_or_invention() -> None:
+    prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
+
+    assert "authoritative but may be incomplete" in prompt
+    assert "authorized collaboration protocol" in prompt
+    assert "before asking the Human to repeat" in prompt
+    assert "has_more=true" in prompt
+    assert "must not invent a workflow type or status" in prompt
+    assert "current Handoff intent is the only source of side-effect authorization" in prompt
+    assert "same current sender" in prompt
+    assert "status question" in prompt
+    assert "imperative" in prompt
+
+
 def test_turn_prompt_teaches_the_disclosed_current_group_calendar_flow() -> None:
     prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
 
