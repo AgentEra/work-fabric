@@ -1,7 +1,7 @@
 # Work Fabric Participation Discovery Design
 
-**Date:** 2026-08-01  
-**Status:** Proposed for implementation  
+**Date:** 2026-08-01
+**Status:** Proposed for implementation
 **Profile:** `workfabric.discovery.v1`
 
 ## 1. Purpose
