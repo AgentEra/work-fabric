@@ -82,7 +82,7 @@ import {
   createSqliteDiscoveryPeerBindingStore,
   createSqliteDiscoveryStore,
 } from "@work-fabric/adapter-storage-sqlite";
-import { DiscoveryQueryService, type DiscoveryGateway } from "@work-fabric/discovery-runtime";
+import { DiscoveryOperationsService, DiscoveryQueryService, type DiscoveryGateway } from "@work-fabric/discovery-runtime";
 import type { DiscoveryPeerBindingStore, DiscoveryStore } from "@work-fabric/discovery-spi";
 import {
   ExchangeApplication,
@@ -954,6 +954,14 @@ export async function composeNodeService(
         max_scan_results: Math.min(100_000, config.discovery.max_records_per_origin),
       })
     : undefined;
+  const discoveryOperations = config.discovery?.enabled === true && discoveryRecords !== undefined && discoveryPeers !== undefined
+    ? new DiscoveryOperationsService({
+        store: discoveryRecords,
+        peers: discoveryPeers,
+        clock,
+        max_peer_samples: config.discovery.max_page_limit,
+      })
+    : undefined;
   const delivery = new CursorPullService(
     storage.persistence,
     storage.persistence,
@@ -983,6 +991,12 @@ export async function composeNodeService(
     ...(discoveryQuery === undefined ? {} : {
       discovery: discoveryQuery,
       discovery_tenant_view_id: config.discovery!.tenant_view_id,
+    }),
+    ...(discoveryOperations === undefined ? {} : {
+      discovery_operations: {
+        service: discoveryOperations,
+        tenant_view_id: config.discovery!.tenant_view_id,
+      },
     }),
     ...(config.discovery?.enabled !== true || options.discovery_gateway === undefined
       ? {}

@@ -54,6 +54,7 @@ function fixture() {
     ["workfabric.operations.discrepancy.read.v1", "connector-1"],
     ["workfabric.operations.audit.read.v1", "tenant-1"],
     ["workfabric.operations.cluster.read.v1", "tenant-1"],
+    ["workfabric.operations.discovery.read.v1", "tenant-1"],
   ] as const;
   const authority = new LocalAuthorityPolicy(grants.map(([action, resource_id]) => ({
     tenant_id: "tenant-1", principal_id: "principal-1", actor_id: "actor-1",
@@ -65,6 +66,20 @@ function fixture() {
     identity: new LocalIdentityProvider([{ authentication_evidence: { bearer_token: "known" }, principal }]),
     authority,
     operations,
+    discovery_operations: {
+      tenant_view_id: "view-1",
+      service: {
+        async snapshot(scope: unknown) {
+          calls.push({ method: "discovery", tenant: "tenant-1", input: scope });
+          return {
+            observed_at: "2026-08-01T00:00:00.000Z", health: "healthy", dependency_failures: 0,
+            records: { fresh: 1, expired: 0, withdrawn: 0, conflicts: 0, capacity: 10, utilization: 0.1 },
+            peers: { total: 0, active: 0, disabled: 0, samples: [], samples_truncated: false },
+            counters: { coalesced_updates: 0, prevented_forwards: 0, sync_failures: 0, query_rejections: 0 },
+          };
+        },
+      } as never,
+    },
   }, normalizeHttpServiceConfig({ default_page_limit: 2, max_page_limit: 10 }));
   return { service, calls };
 }
@@ -118,6 +133,20 @@ describe("operational visibility routes", () => {
     expect(calls).toEqual([{
       method: "failures", tenant: "tenant-1",
       input: { projector_id: "projector-1", partition_id: "partition-1", limit: 4 },
+    }]);
+    await service.close();
+  });
+
+  it("exposes the bounded discovery aggregate under operations authority", async () => {
+    const { service, calls } = fixture();
+    const response = await service.dispatch({ method: "GET", url: "/v1/operations/discovery", headers });
+    expect(response.status_code).toBe(200);
+    expect(response.json()).toMatchObject({
+      health: "healthy", records: { fresh: 1 }, peers: { samples: [] },
+    });
+    expect(calls).toEqual([{
+      method: "discovery", tenant: "tenant-1",
+      input: { tenant_id: "tenant-1", tenant_view_id: "view-1" },
     }]);
     await service.close();
   });

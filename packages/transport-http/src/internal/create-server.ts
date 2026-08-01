@@ -42,7 +42,7 @@ import {
   type SemanticObservation,
   type SemanticTelemetryObserver,
 } from "@work-fabric/operations-spi";
-import type { DiscoveryGateway, DiscoveryQueryService } from "@work-fabric/discovery-runtime";
+import type { DiscoveryGateway, DiscoveryOperationsService, DiscoveryQueryService } from "@work-fabric/discovery-runtime";
 import { registerDiscoveryRoutes } from "../routes/discovery-routes.js";
 
 export interface InternalServerDependencies {
@@ -69,6 +69,10 @@ export interface InternalServerDependencies {
   readonly discovery_gateway?: DiscoveryGateway;
   readonly discovery_manifest?: () => Promise<Uint8Array>;
   readonly discovery_tenant_view_id?: string;
+  readonly discovery_operations?: {
+    readonly service: DiscoveryOperationsService;
+    readonly tenant_view_id: string;
+  };
 }
 
 function httpOperation(method: string, url: string): SemanticObservation["operation"] {
@@ -196,6 +200,9 @@ export function createInternalServer(
         identity: dependencies.identity,
         authority: dependencies.authority,
         authenticator: dependencies.authenticator,
+        ...(dependencies.discovery_operations === undefined
+          ? {}
+          : { discovery: dependencies.discovery_operations }),
       }, config);
     }
     if (dependencies.collaboration !== undefined) {

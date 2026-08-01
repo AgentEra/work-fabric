@@ -96,6 +96,23 @@ describe("semantic telemetry observers", () => {
     }
   });
 
+  it("exports only an enumerated discovery reason", () => {
+    const metricCalls: unknown[][] = [];
+    const meter = {
+      createCounter: () => ({ add: (...input: unknown[]) => metricCalls.push(input) }),
+      createHistogram: () => ({ record: (...input: unknown[]) => metricCalls.push(input) }),
+    } as unknown as Meter;
+    const tracer = { startSpan: () => span() } as unknown as Tracer;
+    new OtelSemanticObserver({ meter, tracer }).observe({
+      operation: "discovery_query", outcome: "denied", category: "discovery",
+      reason: "rate_limited", duration_ms: 1, count: 1,
+    });
+    expect(metricCalls[0]?.[1]).toMatchObject({
+      "workfabric.operation": "discovery_query",
+      "workfabric.reason": "rate_limited",
+    });
+  });
+
   it("traces only stable semantics and a validated correlation id", () => {
     const spans: Array<{ name: string; attributes: Record<string, unknown>; ended: boolean }> = [];
     const tracer = {

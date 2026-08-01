@@ -4,6 +4,7 @@ import {
   OPERATIONS_STORE_REQUIRED_CAPABILITIES,
   createOpaqueCursorCodec,
   normalizePageLimit,
+  observeSemanticSafely,
   validateAuditRecord,
   validateSemanticObservation,
   type AuditRecord,
@@ -196,5 +197,21 @@ describe("operations SPI contracts", () => {
     expect(() =>
       validateSemanticObservation({ ...observation, duration_ms: -1 }),
     ).toThrow(/duration/i);
+
+    const observed: SemanticObservation[] = [];
+    const discovery: SemanticObservation = {
+      operation: "discovery_query",
+      outcome: "denied",
+      category: "discovery",
+      reason: "rate_limited",
+      duration_ms: 1,
+      count: 1,
+    };
+    expect(validateSemanticObservation(discovery)).toEqual(discovery);
+    observeSemanticSafely({ observe(value) { observed.push(value); } }, {
+      ...discovery,
+      reason: "peer-secret" as never,
+    });
+    expect(observed).toEqual([]);
   });
 });

@@ -8,3 +8,4 @@ export * from "./query-service.js";
 export * from "./message-codec.js";
 export * from "./gateway.js";
 export * from "./query-budget.js";
+export * from "./operations.js";

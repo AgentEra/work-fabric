@@ -18,6 +18,10 @@ export const SEMANTIC_OPERATIONS = [
   "cluster_queue_overload",
   "cluster_drain",
   "cluster_wakeup_transport",
+  "discovery_query",
+  "discovery_sync",
+  "discovery_export",
+  "discovery_prune",
 ] as const;
 
 export const SEMANTIC_OUTCOMES = [
@@ -36,6 +40,18 @@ export const SEMANTIC_CATEGORIES = [
   "connector",
   "recovery",
   "cluster",
+  "discovery",
+] as const;
+
+export const SEMANTIC_REASONS = [
+  "accepted",
+  "denied",
+  "expired",
+  "invalid_signature",
+  "conflict",
+  "budget_exhausted",
+  "rate_limited",
+  "unavailable",
 ] as const;
 
 export interface SemanticObservation {
@@ -45,6 +61,7 @@ export interface SemanticObservation {
   readonly duration_ms: number;
   readonly count: number;
   readonly correlation_id?: string;
+  readonly reason?: (typeof SEMANTIC_REASONS)[number];
 }
 
 export interface SemanticTelemetryObserver {
@@ -72,6 +89,9 @@ export function validateSemanticObservation(
   }
   if (!SEMANTIC_CATEGORIES.includes(input.category)) {
     throw new TypeError("telemetry category is invalid");
+  }
+  if (input.reason !== undefined && !SEMANTIC_REASONS.includes(input.reason)) {
+    throw new TypeError("telemetry reason is invalid");
   }
   if (!Number.isFinite(input.duration_ms) || input.duration_ms < 0) {
     throw new TypeError("telemetry duration is invalid");
