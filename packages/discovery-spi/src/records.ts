@@ -76,12 +76,16 @@ export type DiscoveryRecordPayload =
   | ParticipantDiscoveryPayload
   | EndpointDiscoveryPayload;
 
-export interface DiscoveryUnsignedRecord<
-  P extends DiscoveryRecordPayload = DiscoveryRecordPayload,
-> {
+export interface DiscoveryPayloadByKind {
+  readonly exchange: ExchangeDiscoveryPayload;
+  readonly capability_route: CapabilityRouteDiscoveryPayload;
+  readonly participant: ParticipantDiscoveryPayload;
+  readonly endpoint: EndpointDiscoveryPayload;
+}
+
+interface DiscoveryRecordCommon {
   readonly profile: typeof DISCOVERY_PROFILE;
   readonly record_id: string;
-  readonly record_kind: DiscoveryRecordKind;
   readonly origin_exchange_id: string;
   readonly revision: number;
   readonly issued_at: string;
@@ -90,16 +94,30 @@ export interface DiscoveryUnsignedRecord<
   readonly audiences: readonly string[];
   readonly transitive: boolean;
   readonly max_hops: number;
-  readonly payload: P;
   readonly payload_digest: string;
   readonly key_id: string;
 }
 
-export interface DiscoveryRecord<
-  P extends DiscoveryRecordPayload = DiscoveryRecordPayload,
-> extends DiscoveryUnsignedRecord<P> {
-  readonly signature: string;
-}
+export type DiscoveryUnsignedRecord<
+  K extends DiscoveryRecordKind = DiscoveryRecordKind,
+> = K extends DiscoveryRecordKind
+  ? DiscoveryRecordCommon & {
+      readonly record_kind: K;
+      readonly payload: DiscoveryPayloadByKind[K];
+    }
+  : never;
+
+export type DiscoveryRecord<K extends DiscoveryRecordKind = DiscoveryRecordKind> =
+  K extends DiscoveryRecordKind
+    ? DiscoveryUnsignedRecord<K> & { readonly signature: string }
+    : never;
+
+export type DiscoveryRecordDraft = {
+  readonly [K in DiscoveryRecordKind]: Omit<
+    DiscoveryUnsignedRecord<K>,
+    "profile" | "key_id" | "payload_digest"
+  >;
+}[DiscoveryRecordKind];
 
 export interface DiscoveryTombstone {
   readonly profile: typeof DISCOVERY_PROFILE;

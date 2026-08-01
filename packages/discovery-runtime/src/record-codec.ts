@@ -4,6 +4,7 @@ import {
   DISCOVERY_PROFILE,
   type DiscoveryClock,
   type DiscoveryRecord,
+  type DiscoveryRecordDraft,
   type DiscoveryRecordKind,
   type DiscoveryRecordPayload,
   type DiscoverySigner,
@@ -218,7 +219,7 @@ function normalizeUnsigned(value: unknown): DiscoveryUnsignedRecord {
     payload: normalizedPayload,
     payload_digest: expectedDigest,
     key_id: source.key_id,
-  };
+  } as unknown as DiscoveryUnsignedRecord;
 }
 
 function unsigned(record: DiscoveryRecord): DiscoveryUnsignedRecord {
@@ -253,7 +254,7 @@ export class DiscoveryRecordCodec {
     timestamp(options.clock.now());
   }
 
-  async sign(input: Omit<DiscoveryUnsignedRecord, "profile" | "key_id" | "payload_digest">): Promise<Uint8Array> {
+  async sign(input: DiscoveryRecordDraft): Promise<Uint8Array> {
     const normalized = normalizeUnsigned({
       ...input,
       profile: DISCOVERY_PROFILE,
