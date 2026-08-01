@@ -137,7 +137,7 @@ describe("discovery HTTP routes", () => {
       },
     }, {
       discovery_gateway: {
-        async executeQuery() {
+        async executeQueryAny() {
           return {
             request_message_id: "internal-message",
             request_digest: "a".repeat(64),
@@ -157,7 +157,6 @@ describe("discovery HTTP routes", () => {
       url: "/v1/discovery/queries",
       headers: { ...headers, "content-type": "application/json" },
       payload: {
-        peer_id: "configured-peer",
         query_id: "query-a",
         query: { limit: 5 },
         budget: { deadline: "2026-08-01T00:01:00.000Z", remaining_hops: 1, remaining_fanout: 1, remaining_results: 5, remaining_bytes: 32_768 },

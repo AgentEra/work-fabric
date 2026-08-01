@@ -141,7 +141,7 @@ function participant(server: FastifyInstance, deps: ParticipantDependencies, con
         return problem(reply, 400, "invalid_request", "Invalid discovery query", request.url);
       }
       try {
-        const remote = await deps.gateway!.executeQuery(request.body as never);
+        const remote = await deps.gateway!.executeQueryAny(request.body as never);
         return reply.send(await deps.discovery.filterFederated(context(auth, deps.tenant_view_id), {
           coverage: remote.coverage,
           items: remote.items,

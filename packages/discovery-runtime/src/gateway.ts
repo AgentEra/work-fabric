@@ -259,6 +259,23 @@ export class DiscoveryGateway {
     return this.deliverQuery(prepared, transport);
   }
 
+  async executeQueryAny(input: {
+    readonly query_id?: string;
+    readonly query: DiscoveryQuery;
+    readonly budget: DiscoveryQueryBudget;
+  }): Promise<DiscoveryFederatedQueryResponse> {
+    const peers = await this.options.peers.list({
+      tenant_id: this.options.tenant_id,
+      tenant_view_id: this.options.tenant_view_id,
+    });
+    const peer = peers.find((candidate) =>
+      candidate.state === "active" && candidate.allow_query && candidate.allow_import &&
+      (this.options.query_transport?.(candidate) ?? null) !== null
+    );
+    if (peer === undefined) throw new DiscoveryError("discovery_unavailable");
+    return this.executeQuery({ peer_id: peer.peer_id, ...input });
+  }
+
   async receiveQuery(requestBytes: Uint8Array): Promise<Uint8Array> {
     const request = await this.options.message_codec.verify(requestBytes);
     if (request.message_type !== "query_request") throw new DiscoveryError("discovery_record_invalid");

@@ -18,3 +18,5 @@ export type * from "./operations-client.js";
 export type * from "./protocol-types.js";
 export type * from "./query-client.js";
 export type * from "./subscription-client.js";
+export { DiscoveryClient } from "./discovery-client.js";
+export type * from "./discovery-client.js";

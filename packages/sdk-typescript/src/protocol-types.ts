@@ -52,6 +52,15 @@ export type {
   ResponsibilityView,
   TimelineEntry,
 } from "@work-fabric/operations-spi";
+export type {
+  DiscoveryCoverage,
+  DiscoveryFederatedQueryResponse,
+  DiscoveryPage,
+  DiscoveryQuery,
+  DiscoveryQueryBudget,
+  DiscoveryRecord,
+  DiscoveryRecordKind,
+} from "@work-fabric/discovery-spi";
 
 export interface SubscriptionDocument {
   readonly subscription_id: string;
