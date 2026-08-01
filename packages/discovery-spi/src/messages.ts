@@ -54,10 +54,13 @@ export interface DiscoveryFederatedQueryRequest {
 }
 
 export interface DiscoveryFederatedQueryResponse {
+  readonly request_message_id: string;
+  readonly request_digest: string;
   readonly query_id: string;
   readonly coverage: "complete" | "partial";
   readonly items: readonly DiscoveryRecord[];
   readonly warnings: readonly string[];
+  readonly budget: DiscoveryQueryBudget;
 }
 
 export type DiscoveryMessagePayload =

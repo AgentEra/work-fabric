@@ -8,6 +8,10 @@ import {
   type DiscoveryMessageDraft,
   type DiscoveryMessagePayload,
   type DiscoveryMessageType,
+  type DiscoveryFederatedQueryRequest,
+  type DiscoveryFederatedQueryResponse,
+  type DiscoveryQuery,
+  type DiscoveryQueryBudget,
   type DiscoverySignedMessage,
   type DiscoverySigner,
   type DiscoverySyncRequest,
@@ -62,6 +66,18 @@ function boundedInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): numb
   return value as number;
 }
 
+function naturalInteger(value: unknown, maximum = Number.MAX_SAFE_INTEGER): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0 || (value as number) > maximum) {
+    return fail("discovery_record_invalid");
+  }
+  return value as number;
+}
+
+function strings(value: unknown, maximum = 128): readonly string[] {
+  if (!Array.isArray(value) || value.length > maximum) return fail("discovery_record_invalid");
+  return value.map((item) => identifier(item, 2048));
+}
+
 function optionalIdentifier(source: Record<string, unknown>, key: string, maximum = 4096): { readonly [key: string]: string } {
   const value = source[key];
   return value === undefined ? {} : { [key]: identifier(value, maximum) };
@@ -95,19 +111,88 @@ function normalizeSyncResponse(value: unknown): DiscoverySyncResponse {
   };
 }
 
+const queryOptionalKeys = [
+  "actor_id", "binding_types", "capability_id", "cursor", "endpoint_id", "exchange_id",
+  "input_media_types", "interaction_modes", "origin_exchange_id", "output_media_types",
+  "record_id", "record_kinds", "version_constraint",
+] as const;
+
+function normalizeQuery(value: unknown): DiscoveryQuery {
+  const source = object(value);
+  exact(source, ["limit"], queryOptionalKeys);
+  const recordKinds = source.record_kinds === undefined ? undefined : strings(source.record_kinds, 4);
+  if (recordKinds?.some((kind) => !["exchange", "capability_route", "participant", "endpoint"].includes(kind))) {
+    return fail("discovery_record_invalid");
+  }
+  const result: Record<string, unknown> = { limit: boundedInteger(source.limit, 10_000) };
+  for (const key of ["record_id", "capability_id", "exchange_id", "actor_id", "endpoint_id", "version_constraint", "origin_exchange_id", "cursor"] as const) {
+    if (source[key] !== undefined) result[key] = identifier(source[key], 4096);
+  }
+  for (const key of ["input_media_types", "output_media_types", "interaction_modes", "binding_types"] as const) {
+    if (source[key] !== undefined) result[key] = strings(source[key], 32);
+  }
+  if (recordKinds !== undefined) result.record_kinds = recordKinds;
+  return result as unknown as DiscoveryQuery;
+}
+
+function normalizeBudget(value: unknown): DiscoveryQueryBudget {
+  const source = object(value);
+  exact(source, ["deadline", "remaining_bytes", "remaining_fanout", "remaining_hops", "remaining_results"]);
+  return {
+    deadline: timestamp(source.deadline),
+    remaining_hops: naturalInteger(source.remaining_hops, 8),
+    remaining_fanout: naturalInteger(source.remaining_fanout, 64),
+    remaining_results: naturalInteger(source.remaining_results, 10_000),
+    remaining_bytes: naturalInteger(source.remaining_bytes, DISCOVERY_MAX_MESSAGE_BYTES),
+  };
+}
+
+function normalizeQueryRequest(value: unknown): DiscoveryFederatedQueryRequest {
+  const source = object(value);
+  exact(source, ["budget", "path", "query", "query_id"]);
+  const path = strings(source.path, 9);
+  if (new Set(path).size !== path.length) return fail("discovery_record_invalid");
+  return {
+    query_id: identifier(source.query_id),
+    path,
+    query: normalizeQuery(source.query),
+    budget: normalizeBudget(source.budget),
+  };
+}
+
+function normalizeQueryResponse(value: unknown): DiscoveryFederatedQueryResponse {
+  const source = object(value);
+  exact(source, ["budget", "coverage", "items", "query_id", "request_digest", "request_message_id", "warnings"]);
+  if (!Array.isArray(source.items) || source.items.length > 10_000 ||
+      !(source.coverage === "complete" || source.coverage === "partial")) {
+    return fail("discovery_record_invalid");
+  }
+  const digest = identifier(source.request_digest, 64);
+  if (!/^[a-f0-9]{64}$/.test(digest)) return fail("discovery_record_invalid");
+  return {
+    request_message_id: identifier(source.request_message_id),
+    request_digest: digest,
+    query_id: identifier(source.query_id),
+    coverage: source.coverage,
+    items: structuredClone(source.items) as DiscoveryFederatedQueryResponse["items"],
+    warnings: strings(source.warnings, 32),
+    budget: normalizeBudget(source.budget),
+  };
+}
+
 function normalizePayload(type: DiscoveryMessageType, value: unknown): DiscoveryMessagePayload {
   if (type === "sync_request") return normalizeSyncRequest(value);
   if (type === "sync_response") return normalizeSyncResponse(value);
-  // Query envelopes are added with the bounded-query gateway. Rejecting them here keeps
-  // this direct-sync codec closed until their budget members are validated in that layer.
-  return fail("discovery_record_invalid");
+  if (type === "query_request") return normalizeQueryRequest(value);
+  return normalizeQueryResponse(value);
 }
 
 function normalizeUnsigned(value: unknown): DiscoveryUnsignedMessage {
   const source = object(value);
   exact(source, unsignedKeys);
   if (source.profile !== DISCOVERY_PROFILE) return fail("discovery_record_invalid");
-  if (!(source.message_type === "sync_request" || source.message_type === "sync_response")) {
+  if (!(source.message_type === "sync_request" || source.message_type === "sync_response" ||
+      source.message_type === "query_request" || source.message_type === "query_response")) {
     return fail("discovery_record_invalid");
   }
   const issuedAt = timestamp(source.issued_at);
