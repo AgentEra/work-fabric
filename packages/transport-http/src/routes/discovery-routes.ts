@@ -173,6 +173,9 @@ function peers(server: FastifyInstance, deps: PeerDependencies): void {
   if (deps.gateway !== undefined) {
     peerRoute("/v1/discovery/peer/sync", "receiveSync");
     peerRoute("/v1/discovery/peer/query", "receiveQuery");
+    // Resolve is the bounded detail-query binding; it deliberately reuses the
+    // same signed query envelope and budget enforcement as broader Peer query.
+    peerRoute("/v1/discovery/peer/resolve", "receiveQuery");
   }
 }
 

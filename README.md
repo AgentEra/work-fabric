@@ -62,6 +62,12 @@ Work Fabric 的中心不是内部工作流引擎，而是两个稳定能力：
 
 全局事件、订阅、通知、Context 和关系视图都服务于这条交接主线。
 
+### Participation Discovery
+
+`workfabric.discovery.v1` 让新接入的通用 Agent 查询其被授权看到的 Exchange、聚合能力、参与者、Endpoint 和安全 Binding。它采用显式 Peer、签名短 TTL 记录、增量拉取和有预算的按需查询，不使用全网广播、匿名 Gossip 或全局注册中心。
+
+Discovery 只返回带来源、版本、新鲜度和签名证明的未排序事实。候选比较与目标选择由 Agent、人或外部 Resolver 完成；实际调用继续经过目标 Exchange 的 Identity、Authority、Federation 与 Handoff 流程。公开一项发现记录不等于授权调用，也不等于目标已经接受责任。
+
 ### 任务派发与认领
 
 Work Fabric 将“找到接收方”“可靠送达”和“承担责任”拆成三个独立事实：
@@ -371,6 +377,7 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 - Console 仅使用公共 SDK；SSE 只使查询失效且不自动 Ack，轮询有间隔、抖动、Abort 和单并发上限。
 - Federation 只连接显式 Source/Target Exchange；每方只对本地记录权威，签名 Receipt 不能覆盖本地状态，Bridge 必须使用公共 API/SDK 且以 Transfer ID 幂等。
 - Federation 不做 Peer discovery/ranking、目标选择、状态复制、两阶段提交、全局顺序、Agent 推理或工作执行；生产 Transport、持久 Replay Store 与密钥托管保持可插拔。
+- Participation Discovery 只同步经发布/导出策略允许的签名事实；读取、转发和实际调用各自重新授权，停止发布后必须发送 Tombstone 或等待短 TTL 到期，不能把“停止同步”误当成立即撤回。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
 
@@ -379,7 +386,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-阶段 1–7 的当前架构闭环已经完成。后续可以按部署需要独立增加 HTTP Federation Binding、生产 Replay Store、更多 Connector 或 A2A/MCP Binding，但它们不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+阶段 1–10 的当前架构闭环已经完成。后续可以按部署需要增加生产 Peer Transport、密钥托管、更多 Connector 或 A2A/MCP Binding，但它们不能改变 Exchange 权威与“连接/发现/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 
@@ -402,6 +409,8 @@ npm run verify:exchange
 - [NATS Wakeup 部署](docs/nats-wakeup-deployment.md)
 - [Phase 6B NATS Wakeup 性能基线](docs/performance-nats-wakeup-baseline.md)
 - [跨 Exchange Federation](docs/federation.md)
+- [Participation Discovery 部署与边界](docs/participation-discovery.md)
+- [Participation Discovery 性能基线](docs/performance-discovery-baseline.md)
 - [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

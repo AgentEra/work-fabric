@@ -120,6 +120,12 @@ describe("discovery HTTP routes", () => {
     });
     expect(sync.status_code).toBe(200);
     expect(new TextDecoder().decode(received[0])).toBe("not generic json");
+    const resolve = await service.dispatch({
+      method: "POST", url: "/v1/discovery/peer/resolve",
+      headers: { "content-type": "application/workfabric-discovery+json" }, payload: "signed-resolve-query",
+    });
+    expect(resolve.status_code).toBe(200);
+    expect(new TextDecoder().decode(received[1])).toBe("signed-resolve-query");
     const oversized = await service.dispatch({
       method: "POST", url: "/v1/discovery/peer/query",
       headers: { "content-type": "application/workfabric-discovery+json" }, payload: "x".repeat(65_537),

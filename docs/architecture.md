@@ -147,7 +147,9 @@ flowchart TB
             Admission["Collaboration Admission<br/>Policy / Binding / tuple-bound Grant"]
         end
         AgentGateway["Agent Gateway<br/>Session / Inbox / SSE"]
-        Directory["Endpoint Directory<br/>Facts / Lease / Discovery"]
+        Directory["Endpoint Directory<br/>Local facts / Lease"]
+        Discovery["Participation Discovery<br/>Signed facts / Cache / Bounded query"]
+        Federation["Federation Gateway<br/>Explicit selected target"]
         Protocol["Unified Participation Protocol"]
         Exchange["Collaboration & Handoff Exchange"]
         Signal["Signal / Subscription / Notification"]
@@ -158,19 +160,26 @@ flowchart TB
     Human <--> HumanAdapter
     Agent <--> AgentGateway
     System <--> Connector
-    Resolver <--> Protocol
+    Resolver <--> Discovery
+    Resolver --> Protocol
     HumanAdapter --> Admission
     Connector --> Admission
     Admission --> Protocol
     Protocol --> HumanAdapter
     AgentGateway <--> Protocol
     AgentGateway <--> Directory
+    AgentGateway <--> Discovery
+    Directory --> Discovery
+    Discovery <--> Federation
+    Federation --> Protocol
     Directory <--> Protocol
     Protocol --> Connector
     Protocol <--> Exchange
     Exchange <--> Signal
     Exchange <--> Support
 ```
+
+Participation Discovery 位于 Endpoint Directory 与外部 Resolver 之间，并与 Federation 并列：Directory 是本地 Endpoint/Session 权威，Discovery 发布和缓存经策略过滤的短 TTL 事实，Resolver 在 Fabric 外选择目标，Federation 只连接已经明确选定的 Exchange。Discovery 结果不能写 Handoff，Federation Receipt 也不能替代目标 Actor 的显式 Accept。
 
 ### Human Workplaces
 
@@ -484,6 +493,8 @@ flowchart TB
         HA["Human Adapter"]
         AG["Agent Gateway"]
         CG["Connector Gateway"]
+        PD["Participation Discovery"]
+        FG["Federation Gateway"]
     end
 
     Protocol["Protocol & Contract<br/>Schema / State Machine / Version / Binding"]
@@ -514,6 +525,10 @@ flowchart TB
     HA --> Protocol
     AG --> Protocol
     CG --> Protocol
+    AG --> PD
+    Directory --> PD
+    PD --> FG
+    FG --> Protocol
     Protocol --> Directory
     Protocol --> Registry
     Protocol --> Thread
@@ -532,7 +547,7 @@ flowchart TB
 
 ### 11.1 Participation Edge
 
-适配不同参与方的渠道、认证、传输和外部对象，同时保持统一协议语义。
+适配不同参与方的渠道、认证、传输和外部对象，同时保持统一协议语义。Participation Discovery 和 Federation Gateway 也在 Core 外：前者给出经授权的未排序候选事实，后者连接已经显式选定的目标。
 
 ### 11.2 Protocol & Contract
 
@@ -807,6 +822,28 @@ flowchart LR
     SG -. "no discovery / scheduling / execution" .-> Outside7["External people / Agents / systems"]
 ```
 
+阶段 10 增加独立的 Participation Discovery Profile：
+
+- Endpoint Session 仍是本地状态权威；Exporter 只按公开语义摘要生成 `exchange`、`capability_route`、`participant` 或 `endpoint` 记录，不外发 fencing、heartbeat、session、Tenant、凭据、Context 或业务正文。
+- 记录具有 Origin、Revision、TTL、Visibility、Audience、Hop 上限和 Ed25519 证明；读取策略、导出策略、Peer Import/Export/Query/Transit 和最终调用 Authority 是不同决策。
+- Peer 必须显式配置并预置信任。同步是定向、条件式、分页增量拉取；按需查询受 Deadline、Hop、Fan-out、Result、Byte、并发、去重和负缓存限制，没有广播或全网 Gossip。
+- `coverage` 明确表达 complete/partial/authoritative；任何 Exchange 都不能声称知道开放网络的全局完整成员表。
+- Memory、SQLite 和 PostgreSQL Store 实现同一技术中立契约；HTTP/SDK 只暴露调用者有权读取的事实，默认组合只披露 Exchange 和聚合 Capability Route。
+- Discovery 停止或故障不影响本地 Endpoint/Handoff 和显式寻址 Federation。撤回已发布事实必须签发 Tombstone，或由接收端在最长 300 秒 TTL 后自然失效。
+
+```mermaid
+flowchart LR
+    ED["Endpoint Directory<br/>local authority"] --> EX["Policy-filtered Exporter"]
+    EX --> DS["Discovery Store<br/>local + verified cache"]
+    DS --> DQ["Authorized Query Service"]
+    DS --> DG["Discovery Gateway<br/>delta pull + budgets"]
+    DG <--> PG["Explicit trusted Peer"]
+    DQ --> ER["External Resolver / Agent choice"]
+    ER --> FG["Federation Gateway"]
+    FG --> HF["Target local Handoff"]
+    HF --> AC["Explicit Accept"]
+```
+
 ```mermaid
 flowchart LR
     API6["API role<br/>public HTTP + SDK"] --> Facts6["Authoritative Handoff facts<br/>Journal + Outbox"]
@@ -835,7 +872,7 @@ flowchart LR
     Owners -. "never participant execution" .-> External["External work systems and Agent runtimes"]
 ```
 
-运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，Exchange 间交接见 [Federation 文档](federation.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md) 与 [Phase 6B](performance-nats-wakeup-baseline.md) 基线。
+运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，Exchange 间交接见 [Federation 文档](federation.md)，发现网络见 [Participation Discovery](participation-discovery.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md)、[Phase 6B](performance-nats-wakeup-baseline.md) 与 [Discovery](performance-discovery-baseline.md) 基线。
 
 ## 20. 阶段路线与执行状态
 
@@ -854,5 +891,6 @@ flowchart LR
 | 7 | 跨 Exchange Federation Profile | 已完成 |
 | 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
 | 9 | Collaboration Admission、稳定参与方绑定与短时表示 | 已完成 |
+| 10 | Participation Discovery、直接 Peer 同步与有预算查询 | 已完成 |
 
-阶段 1–9 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–10 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 提供可验证、无广播且调用者范围化的参与发现。后续 Binding、Adapter 或 Connector 必须继续保持连接/发现/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
