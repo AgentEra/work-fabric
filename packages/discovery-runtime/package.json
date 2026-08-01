@@ -8,5 +8,23 @@
   "dependencies": {
     "@work-fabric/discovery-spi": "0.1.0",
     "@work-fabric/exchange-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/adapter-context-memory": "0.1.0",
+    "@work-fabric/adapter-discovery-memory": "0.1.0",
+    "@work-fabric/adapter-discovery-node-crypto": "0.1.0",
+    "@work-fabric/adapter-endpoint-memory": "0.1.0",
+    "@work-fabric/adapter-federation-memory": "0.1.0",
+    "@work-fabric/adapter-federation-node-crypto": "0.1.0",
+    "@work-fabric/adapter-identity-local": "0.1.0",
+    "@work-fabric/adapter-storage-memory": "0.1.0",
+    "@work-fabric/endpoint-directory": "0.1.0",
+    "@work-fabric/exchange-core": "0.1.0",
+    "@work-fabric/exchange-runtime": "0.1.0",
+    "@work-fabric/federation-runtime": "0.1.0",
+    "@work-fabric/federation-spi": "0.1.0",
+    "@work-fabric/protocol-runtime": "0.1.0",
+    "@work-fabric/sdk-typescript": "0.1.0",
+    "@work-fabric/transport-http": "0.1.0"
   }
 }
