@@ -8,6 +8,7 @@ import {
   type DiscoveryRecordKind,
   type DiscoveryRecordPayload,
   type DiscoverySigner,
+  type DiscoveryTombstone,
   type DiscoveryTrustResolver,
   type DiscoveryUnsignedRecord,
 } from "@work-fabric/discovery-spi";
@@ -24,6 +25,11 @@ const unsignedKeys = [
   "record_kind", "revision", "transitive", "visibility",
 ] as const;
 const signedKeys = [...unsignedKeys, "signature"].sort();
+const tombstoneUnsignedKeys = [
+  "key_id", "origin_exchange_id", "profile", "record_id", "retain_until",
+  "revision", "withdrawn_at",
+] as const;
+const tombstoneSignedKeys = [...tombstoneUnsignedKeys, "signature"].sort();
 
 function fail(code: ConstructorParameters<typeof DiscoveryError>[0]): never {
   throw new DiscoveryError(code);
@@ -269,6 +275,21 @@ export class DiscoveryRecordCodec {
     return bytes;
   }
 
+  async signTombstone(input: Omit<DiscoveryTombstone, "profile" | "key_id" | "signature">): Promise<Uint8Array> {
+    const normalized = normalizeTombstone({
+      ...input,
+      profile: DISCOVERY_PROFILE,
+      key_id: this.options.signer.key_id,
+    });
+    if (normalized.origin_exchange_id !== this.options.local_exchange_id) return fail("discovery_wrong_audience");
+    const { signature: _signature, ...unsignedValue } = normalized;
+    const signature = await this.options.signer.sign(discoveryCanonicalJsonBytes(unsignedValue as unknown as JsonValue));
+    if (!/^[A-Za-z0-9_-]{86}$/.test(signature)) return fail("discovery_signature_invalid");
+    const bytes = discoveryCanonicalJsonBytes({ ...unsignedValue, signature } as unknown as JsonValue);
+    if (bytes.byteLength > DISCOVERY_MAX_MESSAGE_BYTES) return fail("discovery_record_too_large");
+    return bytes;
+  }
+
   async verify(bytes: Uint8Array, input: { readonly audience: string }): Promise<DiscoveryRecord> {
     if (!(bytes instanceof Uint8Array) || bytes.byteLength > DISCOVERY_MAX_MESSAGE_BYTES) return fail("discovery_record_too_large");
     identifier(input.audience);
@@ -299,4 +320,60 @@ export class DiscoveryRecordCodec {
     if (now - this.skewMilliseconds > Date.parse(normalized.expires_at)) return fail("discovery_expired");
     return structuredClone({ ...normalized, signature: parsed.signature });
   }
+
+  async verifyTombstone(bytes: Uint8Array, input: { readonly audience: string }): Promise<DiscoveryTombstone> {
+    if (!(bytes instanceof Uint8Array) || bytes.byteLength > DISCOVERY_MAX_MESSAGE_BYTES) return fail("discovery_record_too_large");
+    identifier(input.audience);
+    if (input.audience !== this.options.local_exchange_id) return fail("discovery_wrong_audience");
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = object(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+    } catch (error) {
+      if (error instanceof DiscoveryError) throw error;
+      return fail("discovery_record_invalid");
+    }
+    if (!sameBytes(bytes, discoveryCanonicalJsonBytes(parsed as JsonObject))) return fail("discovery_record_invalid");
+    exact(parsed, tombstoneSignedKeys);
+    const normalized = normalizeTombstone(parsed);
+    const { signature, ...unsignedValue } = normalized;
+    const verified = await this.options.trust.verify({
+      origin_exchange_id: normalized.origin_exchange_id,
+      audience_exchange_id: input.audience,
+      key_id: normalized.key_id,
+      canonical: discoveryCanonicalJsonBytes(unsignedValue as unknown as JsonValue),
+      signature,
+    });
+    if (!verified) return fail("discovery_signature_invalid");
+    const now = Date.parse(timestamp(this.options.clock.now()));
+    if (now + this.skewMilliseconds < Date.parse(normalized.withdrawn_at)) return fail("discovery_not_yet_valid");
+    if (now - this.skewMilliseconds > Date.parse(normalized.retain_until)) return fail("discovery_expired");
+    return structuredClone(normalized);
+  }
+}
+
+function normalizeTombstone(value: unknown): DiscoveryTombstone {
+  const source = object(value);
+  const hasSignature = Object.hasOwn(source, "signature");
+  exact(source, hasSignature ? tombstoneSignedKeys : tombstoneUnsignedKeys);
+  if (source.profile !== DISCOVERY_PROFILE) return fail("discovery_record_invalid");
+  const withdrawnAt = timestamp(source.withdrawn_at);
+  const retainUntil = timestamp(source.retain_until);
+  const retention = Date.parse(retainUntil) - Date.parse(withdrawnAt);
+  if (retention < 1_000 || retention > 360_000) return fail("discovery_record_invalid");
+  if (typeof source.key_id !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(source.key_id)) return fail("discovery_record_invalid");
+  const signature = hasSignature && typeof source.signature === "string" && /^[A-Za-z0-9_-]{86}$/.test(source.signature)
+    ? source.signature
+    : hasSignature
+      ? fail("discovery_signature_invalid")
+      : "";
+  return {
+    profile: DISCOVERY_PROFILE,
+    record_id: identifier(source.record_id),
+    origin_exchange_id: identifier(source.origin_exchange_id),
+    revision: positive(source.revision),
+    withdrawn_at: withdrawnAt,
+    retain_until: retainUntil,
+    key_id: source.key_id,
+    signature,
+  };
 }

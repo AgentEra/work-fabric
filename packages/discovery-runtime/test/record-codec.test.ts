@@ -117,4 +117,20 @@ describe("DiscoveryRecordCodec", () => {
       expires_at: "2026-08-01T00:05:01.000Z",
     })).rejects.toMatchObject({ code: "discovery_record_invalid" });
   });
+
+  it("origin-signs tombstones so older records cannot be relayed back", async () => {
+    const bytes = await codec("exchange-alpha").signTombstone({
+      record_id: "exchange:alpha",
+      origin_exchange_id: "exchange-alpha",
+      revision: 2,
+      withdrawn_at: "2026-08-01T00:00:30.000Z",
+      retain_until: "2026-08-01T00:05:30.000Z",
+    });
+    const tombstone = await codec("exchange-beta").verifyTombstone(bytes, {
+      audience: "exchange-beta",
+    });
+
+    expect(tombstone.revision).toBe(2);
+    expect(tombstone.signature).toBe(signature);
+  });
 });
