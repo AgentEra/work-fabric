@@ -1,0 +1,120 @@
+import { describe, expect, it } from "vitest";
+
+import type {
+  DiscoverySigner,
+  DiscoveryTrustResolver,
+} from "@work-fabric/discovery-spi";
+
+import {
+  DiscoveryRecordCodec,
+  discoveryPayloadDigest,
+} from "../src/index.js";
+
+const now = "2026-08-01T00:00:30.000Z";
+const signature = "A".repeat(86);
+const signer: DiscoverySigner = {
+  key_id: "key-1",
+  async sign() { return signature; },
+};
+const trust: DiscoveryTrustResolver = {
+  async verify(input) { return input.signature === signature; },
+};
+
+function codec(localExchangeId: string) {
+  return new DiscoveryRecordCodec({
+    local_exchange_id: localExchangeId,
+    signer,
+    trust,
+    clock: { now: () => now },
+    max_clock_skew_seconds: 0,
+  });
+}
+
+function exchangeInput() {
+  return {
+    record_id: "exchange:alpha",
+    record_kind: "exchange" as const,
+    origin_exchange_id: "exchange-alpha",
+    revision: 1,
+    issued_at: "2026-08-01T00:00:00.000Z",
+    expires_at: "2026-08-01T00:01:00.000Z",
+    visibility: "peer" as const,
+    audiences: ["exchange-beta"],
+    transitive: false,
+    max_hops: 0,
+    payload: {
+      exchange_id: "exchange-alpha",
+      display_name: "Alpha",
+      discovery_profiles: ["workfabric.discovery.v1"],
+      federation_profiles: ["workfabric.federation.v1"],
+      bindings: [{
+        binding_type: "workfabric.discovery/http",
+        uri: "https://alpha.example.test/discovery",
+        security_schemes: ["ed25519"],
+      }],
+      security_schemes: ["ed25519"],
+    },
+  };
+}
+
+describe("DiscoveryRecordCodec", () => {
+  it("round-trips one canonical origin-signed record", async () => {
+    const bytes = await codec("exchange-alpha").sign(exchangeInput());
+    const record = await codec("exchange-beta").verify(bytes, {
+      audience: "exchange-beta",
+    });
+
+    expect(record.origin_exchange_id).toBe("exchange-alpha");
+    expect(record.payload_digest).toBe(discoveryPayloadDigest(record.payload));
+    expect(record.signature).toBe(signature);
+  });
+
+  it.each([
+    ["unknown member", (text: string) => text.replace('"expires_at":', '"extra":true,"expires_at":')],
+    ["non canonical bytes", (text: string) => `${text}\n`],
+    ["duplicate member", (text: string) => text.replace('"revision":1', '"revision":1,"revision":1')],
+    ["digest mismatch", (text: string) => text.replace(/"payload_digest":"[a-f0-9]{64}"/, `"payload_digest":"${"0".repeat(64)}"`)],
+  ])("rejects %s before returning a record", async (_name, mutate) => {
+    const bytes = await codec("exchange-alpha").sign(exchangeInput());
+    const changed = new TextEncoder().encode(mutate(new TextDecoder().decode(bytes)));
+
+    await expect(codec("exchange-beta").verify(changed, { audience: "exchange-beta" }))
+      .rejects.toMatchObject({ code: expect.stringMatching(/^discovery_/) });
+  });
+
+  it("rejects wrong audience, invalid signature, expiry, and excessive input", async () => {
+    const bytes = await codec("exchange-alpha").sign(exchangeInput());
+    await expect(codec("exchange-gamma").verify(bytes, { audience: "exchange-gamma" }))
+      .rejects.toMatchObject({ code: "discovery_wrong_audience" });
+
+    const badTrust = new DiscoveryRecordCodec({
+      local_exchange_id: "exchange-beta",
+      signer,
+      trust: { async verify() { return false; } },
+      clock: { now: () => now },
+    });
+    await expect(badTrust.verify(bytes, { audience: "exchange-beta" }))
+      .rejects.toMatchObject({ code: "discovery_signature_invalid" });
+
+    const expired = new DiscoveryRecordCodec({
+      local_exchange_id: "exchange-beta",
+      signer,
+      trust,
+      clock: { now: () => "2026-08-01T00:01:01.000Z" },
+      max_clock_skew_seconds: 0,
+    });
+    await expect(expired.verify(bytes, { audience: "exchange-beta" }))
+      .rejects.toMatchObject({ code: "discovery_expired" });
+
+    await expect(codec("exchange-beta").verify(new Uint8Array(65_537), {
+      audience: "exchange-beta",
+    })).rejects.toMatchObject({ code: "discovery_record_too_large" });
+  });
+
+  it("rejects TTL over 300 seconds when signing", async () => {
+    await expect(codec("exchange-alpha").sign({
+      ...exchangeInput(),
+      expires_at: "2026-08-01T00:05:01.000Z",
+    })).rejects.toMatchObject({ code: "discovery_record_invalid" });
+  });
+});
