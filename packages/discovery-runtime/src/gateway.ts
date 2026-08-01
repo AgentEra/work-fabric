@@ -246,6 +246,19 @@ export class DiscoveryGateway {
     });
   }
 
+  async executeQuery(input: {
+    readonly peer_id: string;
+    readonly query_id?: string;
+    readonly query: DiscoveryQuery;
+    readonly budget: DiscoveryQueryBudget;
+  }): Promise<DiscoveryFederatedQueryResponse> {
+    const prepared = await this.prepareQuery(input);
+    const peer = await this.requirePeer(prepared.peer_id, "query");
+    const transport = this.options.query_transport?.(peer) ?? null;
+    if (transport === null) throw new DiscoveryError("discovery_unavailable");
+    return this.deliverQuery(prepared, transport);
+  }
+
   async receiveQuery(requestBytes: Uint8Array): Promise<Uint8Array> {
     const request = await this.options.message_codec.verify(requestBytes);
     if (request.message_type !== "query_request") throw new DiscoveryError("discovery_record_invalid");

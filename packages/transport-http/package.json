@@ -10,6 +10,8 @@
   "dependencies": {
     "@work-fabric/connector-feishu": "0.1.0",
     "@work-fabric/connector-spi": "0.1.0",
+    "@work-fabric/discovery-runtime": "0.1.0",
+    "@work-fabric/discovery-spi": "0.1.0",
     "@work-fabric/exchange-core": "0.1.0",
     "@work-fabric/endpoint-directory": "0.1.0",
     "@work-fabric/exchange-runtime": "0.1.0",

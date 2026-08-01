@@ -122,6 +122,25 @@ export class DiscoveryQueryService {
     };
   }
 
+  async filterFederated(
+    context: DiscoveryCallContext,
+    page: DiscoveryPage,
+  ): Promise<DiscoveryPage> {
+    this.validateContext(context);
+    const now = Date.parse(this.options.clock.now());
+    const items = (await Promise.all(page.items.map(async (record) =>
+      Date.parse(record.expires_at) > now && await this.canRead(context, record) ? record : null
+    )))
+      .filter((record): record is DiscoveryRecord => record !== null)
+      .sort(stableRecordOrder);
+    return {
+      coverage: page.coverage,
+      items,
+      warnings: [...page.warnings],
+      ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }),
+    };
+  }
+
   getExchange(context: DiscoveryCallContext, exchangeId: string): Promise<DiscoveryRecord<"exchange">> {
     return this.resolve(context, "exchange", "exchange_id", exchangeId);
   }

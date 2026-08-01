@@ -42,6 +42,8 @@ import {
   type SemanticObservation,
   type SemanticTelemetryObserver,
 } from "@work-fabric/operations-spi";
+import type { DiscoveryGateway, DiscoveryQueryService } from "@work-fabric/discovery-runtime";
+import { registerDiscoveryRoutes } from "../routes/discovery-routes.js";
 
 export interface InternalServerDependencies {
   readonly application: CommandApplication;
@@ -63,6 +65,10 @@ export interface InternalServerDependencies {
   readonly operations?: OperationsQueryService;
   readonly recovery?: RecoveryService;
   readonly telemetry?: SemanticTelemetryObserver;
+  readonly discovery?: DiscoveryQueryService;
+  readonly discovery_gateway?: DiscoveryGateway;
+  readonly discovery_manifest?: () => Promise<Uint8Array>;
+  readonly discovery_tenant_view_id?: string;
 }
 
 function httpOperation(method: string, url: string): SemanticObservation["operation"] {
@@ -166,6 +172,16 @@ export function createInternalServer(
     });
   }
   if (dependencies.identity !== undefined && dependencies.authority !== undefined) {
+    if (dependencies.discovery !== undefined && dependencies.discovery_tenant_view_id !== undefined) {
+      registerDiscoveryRoutes(server, {
+        discovery: dependencies.discovery,
+        identity: dependencies.identity,
+        authority: dependencies.authority,
+        authenticator: dependencies.authenticator,
+        tenant_view_id: dependencies.discovery_tenant_view_id,
+        ...(dependencies.discovery_gateway === undefined ? {} : { gateway: dependencies.discovery_gateway }),
+      }, config);
+    }
     if (dependencies.recovery !== undefined) {
       registerRecoveryRoutes(server, {
         recovery: dependencies.recovery,
@@ -239,6 +255,12 @@ export function createInternalServer(
         authenticator: dependencies.authenticator,
       }, config);
     }
+  }
+  if (dependencies.discovery_gateway !== undefined || dependencies.discovery_manifest !== undefined) {
+    registerDiscoveryRoutes(server, {
+      ...(dependencies.discovery_gateway === undefined ? {} : { gateway: dependencies.discovery_gateway }),
+      ...(dependencies.discovery_manifest === undefined ? {} : { manifest: dependencies.discovery_manifest }),
+    }, config);
   }
   return server;
 }

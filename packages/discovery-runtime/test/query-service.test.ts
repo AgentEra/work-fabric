@@ -215,4 +215,20 @@ describe("DiscoveryQueryService", () => {
       cursor: first.next_cursor!,
     })).rejects.toMatchObject({ code: "discovery_cursor_invalid" });
   });
+
+  it("re-applies caller disclosure to federated facts", async () => {
+    const query = await service(["route-a"]);
+
+    const page = await query.filterFederated(context, {
+      coverage: "partial",
+      items: [route("exchange-a", "route-a"), route("exchange-z", "route-z")],
+      warnings: ["remote_partial"],
+    });
+
+    expect(page).toEqual({
+      coverage: "partial",
+      items: [expect.objectContaining({ record_id: "route-z" })],
+      warnings: ["remote_partial"],
+    });
+  });
 });
