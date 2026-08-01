@@ -8,3 +8,4 @@ export * from "./sqlite-endpoint-store.js";
 export * from "./sqlite-connector-ingress-store.js";
 export * from "./sqlite-operations-store.js";
 export * from "./sqlite-partition-position-source.js";
+export * from "./sqlite-discovery-store.js";

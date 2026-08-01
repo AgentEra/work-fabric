@@ -44,6 +44,13 @@ async function rejects(operation: Promise<unknown>, message: string): Promise<vo
   assert.fail(message);
 }
 
+async function isolated(operation: Promise<DiscoveryRecord | null>, message: string): Promise<void> {
+  let value: DiscoveryRecord | null | undefined;
+  let rejected = false;
+  try { value = await operation; } catch { rejected = true; }
+  assert.ok(rejected || value === null, message);
+}
+
 export async function verifyDiscoveryStoreProfile(factory: DiscoveryStoreFactory): Promise<void> {
   const store = factory();
   assert.equal(store.manifest.profile, "workfabric.discovery-store.v1");
@@ -54,8 +61,8 @@ export async function verifyDiscoveryStoreProfile(factory: DiscoveryStoreFactory
   const stored = await store.get({ ...scope, origin_exchange_id: "exchange-origin", record_id: "record-a", now });
   assert.ok(stored?.record_kind === "exchange");
   assert.equal(stored.payload.display_name, "Origin record-a");
-  assert.equal(await store.get({ tenant_id: "tenant-other", tenant_view_id: scope.tenant_view_id, origin_exchange_id: "exchange-origin", record_id: "record-a", now }), null);
-  assert.equal(await store.get({ tenant_id: scope.tenant_id, tenant_view_id: "view-other", origin_exchange_id: "exchange-origin", record_id: "record-a", now }), null);
+  await isolated(store.get({ tenant_id: "tenant-other", tenant_view_id: scope.tenant_view_id, origin_exchange_id: "exchange-origin", record_id: "record-a", now }), "cross-tenant reads must be absent or rejected");
+  await isolated(store.get({ tenant_id: scope.tenant_id, tenant_view_id: "view-other", origin_exchange_id: "exchange-origin", record_id: "record-a", now }), "cross-view reads must be absent or rejected");
 
   const same = record("record-a");
   assert.equal((await store.apply({ ...scope, source_peer_id: "peer-a", value: same })).outcome, "duplicate");
