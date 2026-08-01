@@ -57,6 +57,43 @@ function exchangeInput() {
   };
 }
 
+function endpointInput() {
+  return {
+    record_id: "endpoint:alpha",
+    record_kind: "endpoint" as const,
+    origin_exchange_id: "exchange-alpha",
+    revision: 1,
+    issued_at: "2026-08-01T00:00:00.000Z",
+    expires_at: "2026-08-01T00:01:00.000Z",
+    visibility: "peer" as const,
+    audiences: ["exchange-beta"],
+    transitive: false,
+    max_hops: 0,
+    payload: {
+      endpoint_id: "endpoint-alpha",
+      actor: { actor_id: "actor-alpha", actor_type: "agent" as const },
+      endpoint_type: "native_agent",
+      display_name: "Alpha Agent",
+      protocol_versions: ["1.0"],
+      bindings: [],
+      capabilities: [{
+        capability_id: "software.implementation",
+        version: "1.0.0",
+        name: "Implementation",
+        description: "Implements explicitly accepted work",
+        input_media_types: ["application/json"],
+        output_media_types: ["application/json"],
+        input_schema_refs: [],
+        output_schema_refs: [],
+        interaction_modes: ["asynchronous" as const],
+        constraints: { max_input_bytes: 65_536 },
+      }],
+      availability: "available" as const,
+      limits: { max_inline_content_bytes: 65_536 },
+    },
+  };
+}
+
 describe("DiscoveryRecordCodec", () => {
   it("round-trips one canonical origin-signed record", async () => {
     const bytes = await codec("exchange-alpha").sign(exchangeInput());
@@ -116,6 +153,20 @@ describe("DiscoveryRecordCodec", () => {
       ...exchangeInput(),
       expires_at: "2026-08-01T00:05:01.000Z",
     })).rejects.toMatchObject({ code: "discovery_record_invalid" });
+  });
+
+  it("strictly validates nested Endpoint capabilities", async () => {
+    await expect(codec("exchange-alpha").sign(endpointInput())).resolves.toBeInstanceOf(Uint8Array);
+
+    const unknownCapabilityMember = endpointInput();
+    (unknownCapabilityMember.payload.capabilities[0] as Record<string, unknown>).unexpected = true;
+    await expect(codec("exchange-alpha").sign(unknownCapabilityMember as never))
+      .rejects.toMatchObject({ code: "discovery_record_invalid" });
+
+    const invalidInteraction = endpointInput();
+    (invalidInteraction.payload.capabilities[0]!.interaction_modes as unknown as string[])[0] = "automatic";
+    await expect(codec("exchange-alpha").sign(invalidInteraction as never))
+      .rejects.toMatchObject({ code: "discovery_record_invalid" });
   });
 
   it("origin-signs tombstones so older records cannot be relayed back", async () => {

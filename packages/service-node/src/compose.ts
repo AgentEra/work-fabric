@@ -83,7 +83,11 @@ import {
   createSqliteDiscoveryStore,
 } from "@work-fabric/adapter-storage-sqlite";
 import { DiscoveryOperationsService, DiscoveryQueryService, type DiscoveryGateway } from "@work-fabric/discovery-runtime";
-import type { DiscoveryPeerBindingStore, DiscoveryStore } from "@work-fabric/discovery-spi";
+import type {
+  DiscoveryDisclosurePolicy,
+  DiscoveryPeerBindingStore,
+  DiscoveryStore,
+} from "@work-fabric/discovery-spi";
 import {
   ExchangeApplication,
   canonicalJson,
@@ -226,6 +230,8 @@ export interface NodeServiceCompositionOptions {
   /** Deployment-owned signed gateway; trust material never comes from service YAML. */
   readonly discovery_gateway?: DiscoveryGateway;
   readonly discovery_manifest?: () => Promise<Uint8Array>;
+  /** Caller-scoped disclosure; defaults to Exchange and aggregate capability facts only. */
+  readonly discovery_disclosure_policy?: DiscoveryDisclosurePolicy;
   /** Optional deployment/test override for the selected storage profile. */
   readonly discovery_records?: DiscoveryStore;
   readonly discovery_peers?: DiscoveryPeerBindingStore;
@@ -941,7 +947,7 @@ export async function composeNodeService(
   const discoveryQuery = config.discovery?.enabled === true && discoveryRecords !== undefined
     ? new DiscoveryQueryService({
         store: discoveryRecords,
-        policy: {
+        policy: options.discovery_disclosure_policy ?? {
           async canRead({ record }) {
             return (record.record_kind === "exchange" || record.record_kind === "capability_route") &&
               (record.visibility === "public" || record.audiences.includes(config.exchange_id));

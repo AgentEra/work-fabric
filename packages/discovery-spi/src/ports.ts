@@ -1,6 +1,7 @@
 import type { CapabilityManifest, EndpointActorRef } from "@work-fabric/exchange-spi";
 
 import type {
+  DiscoveryFederatedQueryRequest,
   DiscoveryFederatedQueryResponse,
   DiscoveryQuery,
 } from "./messages.js";
@@ -140,7 +141,7 @@ export interface DiscoveryIdGenerator {
 }
 
 export interface DiscoveryFederatedQueryPort {
-  query(input: DiscoveryFederatedQueryResponse): Promise<DiscoveryFederatedQueryResponse>;
+  query(input: DiscoveryFederatedQueryRequest): Promise<DiscoveryFederatedQueryResponse>;
 }
 
 export interface DiscoveryRecordSelector {

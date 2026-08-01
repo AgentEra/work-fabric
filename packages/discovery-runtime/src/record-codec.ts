@@ -1,4 +1,4 @@
-import type { JsonObject, JsonValue } from "@work-fabric/exchange-spi";
+import type { CapabilityDescriptor, JsonObject, JsonValue } from "@work-fabric/exchange-spi";
 import {
   DISCOVERY_MAX_MESSAGE_BYTES,
   DISCOVERY_PROFILE,
@@ -120,6 +120,39 @@ function actor(value: unknown): { readonly actor_id: string; readonly actor_type
   return { actor_id: identifier(source.actor_id), actor_type: source.actor_type as "human" | "agent" | "system" };
 }
 
+function interactionModes(value: unknown): CapabilityDescriptor["interaction_modes"] {
+  const result = strings(value, 3);
+  if (result.some((item) => !("synchronous" === item || "asynchronous" === item || "status_updates" === item))) {
+    return fail("discovery_record_invalid");
+  }
+  return result as CapabilityDescriptor["interaction_modes"];
+}
+
+function capabilities(value: unknown): readonly CapabilityDescriptor[] {
+  if (!Array.isArray(value) || value.length > 64) return fail("discovery_record_invalid");
+  return value.map((item) => {
+    const source = object(item);
+    exact(source, [
+      "capability_id", "constraints", "description", "input_media_types",
+      "input_schema_refs", "interaction_modes", "name", "output_media_types",
+      "output_schema_refs", "version",
+    ], ["extensions"]);
+    return {
+      capability_id: identifier(source.capability_id, 128),
+      version: identifier(source.version, 128),
+      name: identifier(source.name, 256),
+      description: identifier(source.description, 2_048),
+      input_media_types: strings(source.input_media_types, 64),
+      output_media_types: strings(source.output_media_types, 64),
+      input_schema_refs: strings(source.input_schema_refs, 64),
+      output_schema_refs: strings(source.output_schema_refs, 64),
+      interaction_modes: interactionModes(source.interaction_modes),
+      constraints: safeObject(source.constraints),
+      ...(source.extensions === undefined ? {} : { extensions: safeObject(source.extensions) }),
+    };
+  });
+}
+
 function payload(value: unknown, kind: DiscoveryRecordKind, origin: string): DiscoveryRecordPayload {
   const source = object(value);
   if (kind === "exchange") {
@@ -146,7 +179,7 @@ function payload(value: unknown, kind: DiscoveryRecordKind, origin: string): Dis
       output_media_types: strings(source.output_media_types, 64),
       input_schema_refs: strings(source.input_schema_refs, 64),
       output_schema_refs: strings(source.output_schema_refs, 64),
-      interaction_modes: strings(source.interaction_modes, 3) as readonly ("synchronous" | "asynchronous" | "status_updates")[],
+      interaction_modes: interactionModes(source.interaction_modes),
       binding_types: strings(source.binding_types, 32),
       security_schemes: strings(source.security_schemes, 32),
       availability: source.availability as "available" | "constrained" | "unavailable",
@@ -165,7 +198,6 @@ function payload(value: unknown, kind: DiscoveryRecordKind, origin: string): Dis
   }
   exact(source, ["actor", "availability", "bindings", "capabilities", "display_name", "endpoint_id", "endpoint_type", "limits", "protocol_versions"], ["extensions"]);
   if (!["available", "busy", "draining", "unavailable"].includes(String(source.availability))) return fail("discovery_record_invalid");
-  if (!Array.isArray(source.capabilities)) return fail("discovery_record_invalid");
   const limits = object(source.limits);
   exact(limits, ["max_inline_content_bytes"], ["max_concurrent_handoffs", "max_context_bytes"]);
   return {
@@ -175,7 +207,7 @@ function payload(value: unknown, kind: DiscoveryRecordKind, origin: string): Dis
     display_name: identifier(source.display_name),
     protocol_versions: strings(source.protocol_versions, 16),
     bindings: bindings(source.bindings),
-    capabilities: structuredClone(source.capabilities) as never,
+    capabilities: capabilities(source.capabilities),
     availability: source.availability as "available" | "busy" | "draining" | "unavailable",
     limits: {
       max_inline_content_bytes: natural(limits.max_inline_content_bytes),
