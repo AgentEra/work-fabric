@@ -4,3 +4,4 @@ export * from "./record-codec.js";
 export * from "./cache-service.js";
 export * from "./endpoint-exporter.js";
 export * from "./export-coordinator.js";
+export * from "./query-service.js";

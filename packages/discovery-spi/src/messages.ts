@@ -16,7 +16,11 @@ export interface DiscoveryQueryBudget {
 
 export interface DiscoveryQuery {
   readonly record_kinds?: readonly DiscoveryRecordKind[];
+  readonly record_id?: string;
   readonly capability_id?: string;
+  readonly exchange_id?: string;
+  readonly actor_id?: string;
+  readonly endpoint_id?: string;
   readonly version_constraint?: string;
   readonly input_media_types?: readonly string[];
   readonly output_media_types?: readonly string[];

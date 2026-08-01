@@ -176,16 +176,23 @@ export class MemoryDiscoveryStore implements DiscoveryStore {
       .map(([, entry]) => entry.value as DiscoveryRecord)
       .filter((record) => {
         if (input.record_kinds !== undefined && !input.record_kinds.includes(record.record_kind)) return false;
+        if (input.record_id !== undefined && input.record_id !== record.record_id) return false;
         if (input.origin_exchange_id !== undefined && input.origin_exchange_id !== record.origin_exchange_id) return false;
-        if (input.capability_id !== undefined) {
+        if (input.exchange_id !== undefined && (record.record_kind !== "exchange" || record.payload.exchange_id !== input.exchange_id)) return false;
+        if (input.actor_id !== undefined && (record.record_kind !== "participant" || record.payload.actor.actor_id !== input.actor_id)) return false;
+        if (input.endpoint_id !== undefined && (record.record_kind !== "endpoint" || record.payload.endpoint_id !== input.endpoint_id)) return false;
+        const hasCapabilityFilter = input.capability_id !== undefined || input.version_constraint !== undefined ||
+          input.input_media_types !== undefined || input.output_media_types !== undefined ||
+          input.interaction_modes !== undefined || input.binding_types !== undefined;
+        if (hasCapabilityFilter) {
           if (record.record_kind === "capability_route") {
-            if (record.payload.capability_id !== input.capability_id) return false;
+            if (input.capability_id !== undefined && record.payload.capability_id !== input.capability_id) return false;
             if (!record.payload.versions.some((version) => matchesVersion(version, input.version_constraint))) return false;
             if (input.input_media_types?.some((item) => !record.payload.input_media_types.includes(item))) return false;
             if (input.output_media_types?.some((item) => !record.payload.output_media_types.includes(item))) return false;
             if (input.interaction_modes?.some((item) => !record.payload.interaction_modes.includes(item as never))) return false;
             if (input.binding_types?.some((item) => !record.payload.binding_types.includes(item))) return false;
-          } else if (record.record_kind === "endpoint") {
+          } else if (record.record_kind === "endpoint" && input.capability_id !== undefined) {
             if (!record.payload.capabilities.some((capability) => capability.capability_id === input.capability_id)) return false;
           } else return false;
         }
