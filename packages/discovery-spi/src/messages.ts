@@ -38,6 +38,8 @@ export interface DiscoverySyncRequest {
 }
 
 export interface DiscoverySyncResponse {
+  readonly request_message_id: string;
+  readonly request_digest: string;
   readonly items: readonly DiscoveryStoredValue[];
   readonly next_cursor?: string;
   readonly etag: string;
@@ -79,3 +81,8 @@ export interface DiscoveryUnsignedMessage {
 export interface DiscoverySignedMessage extends DiscoveryUnsignedMessage {
   readonly signature: string;
 }
+
+export type DiscoveryMessageDraft = Omit<
+  DiscoveryUnsignedMessage,
+  "profile" | "source_exchange_id" | "key_id"
+>;

@@ -48,9 +48,16 @@ export class DiscoveryCacheService {
     if (input.audience_exchange_id !== this.options.local_exchange_id) {
       throw new DiscoveryError("discovery_wrong_audience");
     }
-    const record = await this.options.codec.verify(input.bytes, {
-      audience: input.audience_exchange_id,
-    });
+    let tombstone = false;
+    try {
+      const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(input.bytes)) as Record<string, unknown>;
+      tombstone = typeof value === "object" && value !== null && Object.hasOwn(value, "withdrawn_at");
+    } catch {
+      // The strict codec below returns the protocol error without exposing parser details.
+    }
+    const record = tombstone
+      ? await this.options.codec.verifyTombstone(input.bytes, { audience: input.audience_exchange_id })
+      : await this.options.codec.verify(input.bytes, { audience: input.audience_exchange_id });
     const scope = {
       tenant_id: input.tenant_id,
       tenant_view_id: input.tenant_view_id,
@@ -60,7 +67,7 @@ export class DiscoveryCacheService {
       throw new DiscoveryError("discovery_wrong_audience");
     }
     const direct = peer.exchange_id === record.origin_exchange_id;
-    if (!direct && !(peer.allow_transit && record.transitive && record.max_hops > 0)) {
+    if (!direct && (tombstone || !("transitive" in record && peer.allow_transit && record.transitive && record.max_hops > 0))) {
       throw new DiscoveryError("discovery_wrong_audience");
     }
     return this.options.store.apply({

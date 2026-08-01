@@ -5,3 +5,5 @@ export * from "./cache-service.js";
 export * from "./endpoint-exporter.js";
 export * from "./export-coordinator.js";
 export * from "./query-service.js";
+export * from "./message-codec.js";
+export * from "./gateway.js";

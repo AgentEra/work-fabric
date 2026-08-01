@@ -230,7 +230,7 @@ export class MemoryDiscoveryStore implements DiscoveryStore {
     return {
       items: clone(page.map((entry) => entry.value)),
       etag: `W/\"${this.sequence}\"`,
-      ...(changes.length > page.length ? { next_cursor: changeCursor(input, input.peer_id, last) } : {}),
+      ...(page.length > 0 ? { next_cursor: changeCursor(input, input.peer_id, last) } : {}),
     };
   }
 
