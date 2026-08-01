@@ -60,6 +60,7 @@ export interface OutboxWakeupHandlerOptions {
 
 const DOWNSTREAM_WORK = [
   "handoff_projection",
+  "endpoint_inbox_projection",
   "collaboration_projection",
   "signal_delivery",
 ] as const;
@@ -197,7 +198,10 @@ function projectionOutcome(result: ProjectionPortResult): PartitionTurnOutcome {
 }
 
 abstract class ProjectionHandler implements PartitionTurnHandler {
-  abstract readonly kind: "handoff_projection" | "collaboration_projection";
+  abstract readonly kind:
+    | "handoff_projection"
+    | "endpoint_inbox_projection"
+    | "collaboration_projection";
 
   constructor(private readonly projector: ProjectionPort) {}
 
@@ -217,6 +221,10 @@ abstract class ProjectionHandler implements PartitionTurnHandler {
 
 export class HandoffProjectionHandler extends ProjectionHandler {
   readonly kind = "handoff_projection" as const;
+}
+
+export class EndpointInboxProjectionHandler extends ProjectionHandler {
+  readonly kind = "endpoint_inbox_projection" as const;
 }
 
 export class CollaborationProjectionHandler extends ProjectionHandler {

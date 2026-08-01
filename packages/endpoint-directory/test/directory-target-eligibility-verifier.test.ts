@@ -12,6 +12,7 @@ import type {
 import {
   DirectoryTargetEligibilityVerifier,
   EndpointDirectoryService,
+  NetworkCitizenBindingConstraintEvaluator,
 } from "../src/index.js";
 
 const tenantId = "tenant_01";
@@ -192,5 +193,56 @@ describe("DirectoryTargetEligibilityVerifier", () => {
     const verifier = new DirectoryTargetEligibilityVerifier({ store: failing, clock });
 
     await expect(verifier.verify(request({ endpoint_id: endpointId }))).resolves.toEqual({ kind: "unavailable", reason: "directory_unavailable" });
+  });
+});
+
+describe("NetworkCitizenBindingConstraintEvaluator", () => {
+  const evaluator = new NetworkCitizenBindingConstraintEvaluator();
+  const boundCapability = {
+    ...capability,
+    constraints: {
+      selected_citizen_id: "feishu-actions",
+      contract_digest: `sha256:${"a".repeat(64)}`,
+    },
+  };
+
+  it("matches only the exact Citizen and Contract binding advertised by the Endpoint", async () => {
+    await expect(evaluator.evaluate({
+      tenant_id: tenantId,
+      capability: boundCapability,
+      requirement_constraints: {
+        selected_citizen_id: "feishu-actions",
+        contract_digest: `sha256:${"a".repeat(64)}`,
+      },
+    })).resolves.toBe("match");
+    await expect(evaluator.evaluate({
+      tenant_id: tenantId,
+      capability: boundCapability,
+      requirement_constraints: {
+        selected_citizen_id: "feishu-other",
+        contract_digest: `sha256:${"a".repeat(64)}`,
+      },
+    })).resolves.toBe("mismatch");
+  });
+
+  it("fails closed for partial, malformed, or unrelated constraints", async () => {
+    for (const requirement_constraints of [
+      { selected_citizen_id: "feishu-actions" },
+      {
+        selected_citizen_id: "feishu-actions",
+        contract_digest: "not-a-digest",
+      },
+      {
+        selected_citizen_id: "feishu-actions",
+        contract_digest: `sha256:${"a".repeat(64)}`,
+        region: "local",
+      },
+    ]) {
+      await expect(evaluator.evaluate({
+        tenant_id: tenantId,
+        capability: boundCapability,
+        requirement_constraints,
+      })).resolves.toBe("unavailable");
+    }
   });
 });

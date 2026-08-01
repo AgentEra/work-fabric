@@ -9,12 +9,18 @@ Phase 4A 提供 Work Fabric 的原生 Agent 连接边界。它把一个外部 Ag
 | Endpoint 注册、Actor 绑定与版本 | Runtime 进程和凭据生命周期 |
 | Capability 与可用性事实 | 能力真实性与实际执行 |
 | 单活 Session、租约、心跳和 fencing | 规划、推理、模型与工具选择 |
-| 未排序、未评分的 Endpoint 发现 | 候选比较与明确目标选择 |
-| Handoff 路由事实与分区发现 | 是否接受责任 |
+| 渐进式、未排序、未评分的 Endpoint/Capability 发现 | 候选比较与明确目标选择 |
+| Handoff 路由事实、候选池与分区发现 | 是否认领、是否接受责任 |
+| 原子 Claim Lease、fencing 与审计 | 排名、推荐和智能调度 |
 | Durable SSE、重放与显式 Ack | 本地去重、持久化和恢复策略 |
 | Handoff 状态、结果、回执和审计 | 专业工作及外部产物 |
 
 Endpoint Directory 不是调度器；Agent Gateway 不是 Agent Brain。Resolver 可以是人、规则服务或 AI 调度大脑，但必须作为外部参与方读取事实，再通过标准 `resolve_target` 命令提交唯一明确的 Actor 或 Endpoint。
+
+当发起方显式选择 `eligible_pool_claim` 时，不需要 Resolver 先选出唯一目标。符合 Authority
+与 Capability Contract 的 Endpoint 可以读取自己的候选池并显式 Claim。Claim 只是短时
+排他预留；Runtime 必须再携带当前 Claim ID 与 fencing token 调用 Accept，责任才会迁移。
+Gateway 不自动执行 Claim 或 Accept。
 
 ## 参考链路
 
@@ -45,12 +51,34 @@ sequenceDiagram
     Runtime->>Fabric: Report status / return result
 ```
 
+候选池路径如下：
+
+```mermaid
+sequenceDiagram
+    participant Initiator
+    participant Fabric as Work Fabric
+    participant Gateway as Agent Gateway
+    participant Runtime as External Agent Runtime
+
+    Initiator->>Fabric: Offer Capability + eligible_pool_claim
+    Gateway->>Fabric: List own authorized claimable Handoffs
+    Fabric-->>Gateway: Unranked eligible facts
+    Runtime->>Fabric: Claim(claim_id, requested lease)
+    Fabric-->>Runtime: claim_acquired receipt + fencing token
+    Runtime->>Fabric: Accept(claim_id, fencing token)
+    Fabric-->>Runtime: responsibility_accepted
+```
+
 这里存在两个完全不同的确认：
 
 - `acknowledgeSignal("acknowledged")` 只确认 Delivery 已被外部 Runtime 持久接收，可以推进该 Subscription × Partition 的交付位置。
 - `handoffs.accept(...)` 表示 Actor 明确接受 Handoff 责任，会改变权威生命周期。
 
 Ack 不能推断 Accept，Accept 也不能替代 Ack。Gateway 不自动调用其中任何一个。
+
+## Daily Assistant Runtime Host
+
+`@work-fabric/agent-runtime-host` and the Agently adapter are an external Runtime Host reference implementation, not an execution feature of Work Fabric Core. They load the authorized Handoff Package through the public SDK, durably record Delivery and Run state locally, explicitly acknowledge and accept, invoke a worker outside the Fabric, and return Status/Result through the same public contract. The `daily-assistant` Role Profile and Capability declarations are Runtime extension points; they do not change Core's target-resolution or execution boundary. See [Agently Daily Assistant Runtime](guides/agently-agent-runtime.md) for operation and verification.
 
 ## 模块
 
@@ -68,14 +96,20 @@ Memory Adapter 适合开发、本地演示和测试，不是生产持久化。�
 ```text
 PUT    /v1/admin/endpoints/{endpoint_id}
 GET    /v1/endpoints/{endpoint_id}
-GET    /v1/endpoints?capability_id=...&cursor=...&limit=...
+GET    /v1/endpoints?disclosure=identity|summary|full&capability_id=...
+GET    /v1/endpoints/{endpoint_id}/capabilities/{capability_id}
 POST   /v1/endpoints/{endpoint_id}/sessions
 POST   /v1/endpoints/{endpoint_id}/sessions/{session_id}/heartbeat
 POST   /v1/endpoints/{endpoint_id}/sessions/{session_id}/close
 GET    /v1/endpoints/{endpoint_id}/inbox/partitions?cursor=...&limit=...
+GET    /v1/endpoints/{endpoint_id}/claimable-handoffs?cursor=...&limit=...
 ```
 
-对应 SDK 统一位于 `client.endpoints`：`provision`、`get`、`discover`、`openSession`、`heartbeat`、`closeSession` 和 `listInboxPartitions`。所有请求继续使用与 Human、Connector、Console 相同的认证、Actor/Endpoint 表示和 Authority 链。
+对应 SDK 统一位于 `client.endpoints`：`provision`、`get`、渐进式 Discovery、`getCapability`、`openSession`、`heartbeat`、`closeSession`、`listInboxPartitions` 和 `listClaimableHandoffs`。Claim、续租、释放和带 fence 的 Accept 统一位于 `client.handoffs`。所有请求继续使用与 Human、Connector、Console 相同的认证、Actor/Endpoint 表示和 Authority 链。
+
+Gateway Session 提供 `claimableHandoffs()` 便捷查询，并继续暴露标准 `handoffs` Client。
+生产调用方从 `claim_acquired` Receipt 读取实际 fencing token 和资源版本，再显式 Accept；
+不能硬编码 fence，也不能把 Claim 成功当成责任已转移。
 
 Provision 是管理动作；Session open/heartbeat/close 只能由注册绑定的 Actor/Endpoint 表示执行。一个 Endpoint 同时只有一个有效 Session。新 Session 会提高 `fencing_token`，旧 Session 的后续写入返回冲突；心跳还要求严格递增 `heartbeat_sequence`。
 
@@ -136,4 +170,7 @@ export WF_DECISION=accept  # 必须显式为 accept 或 decline
 
 ## 当前限制与下一阶段
 
-Phase 4A 不包含飞书、Console、Agent Brain、自动 failover、内置调度、Codex 调用、A2A/MCP、Local IPC 或生产部署组合。Phase 4B 将实现飞书 Connector，把消息、文档引用、通知和人工交互映射到同一 WFPP/Handoff/Subscription Contract，而不会创建第二套工作流状态。
+飞书 Connector、Console、Daily Assistant Runtime 与集群运行能力已经作为独立模块接入，
+但 Agent Brain、候选排名、内置调度、Codex 执行、A2A/MCP 和参与方内部 Workflow 仍不属于
+Fabric Core。Claim Lease 的部署级机械过期 Runner 与生产压测仍是下一步；其实现必须调用
+标准 fenced `expire_claim` 交互并写入统一 Journal，不能直接修改投影或候选池。

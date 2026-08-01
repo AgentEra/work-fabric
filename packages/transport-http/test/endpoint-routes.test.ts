@@ -13,6 +13,7 @@ import {
 } from "@work-fabric/exchange-runtime";
 import type {
   AuthorityPolicy,
+  AuthorityDecision,
   AuthorityRequest,
   CapabilityManifest,
 } from "@work-fabric/exchange-spi";
@@ -106,7 +107,7 @@ class TrackingAuthority implements AuthorityPolicy {
     },
   };
 
-  async authorize(request: AuthorityRequest) {
+  async authorize(request: AuthorityRequest): Promise<AuthorityDecision> {
     this.requests.push(structuredClone(request));
     return { kind: "allow" as const };
   }
@@ -144,6 +145,7 @@ function fixture() {
   const inbox = new EndpointInboxQueryService({
     directory: directoryStore,
     inbox: inboxStore,
+    clock: { now: () => "2026-07-15T00:00:00Z" },
     defaultPageLimit: 20,
     maxPageLimit: 100,
   });
@@ -163,12 +165,12 @@ function fixture() {
     endpoint_directory: directory,
     endpoint_inbox: inbox,
   }, normalizeHttpServiceConfig({}));
-  return { service, authority };
+  return { service, authority, inboxStore };
 }
 
 describe("Endpoint HTTP resources", () => {
   it("binds provision, facts, lease, discovery, and inbox to exact actions", async () => {
-    const { service, authority } = fixture();
+    const { service, authority, inboxStore } = fixture();
     const provision = await service.dispatch({
       method: "PUT",
       url: "/v1/admin/endpoints/endpoint_agent",
@@ -214,6 +216,44 @@ describe("Endpoint HTTP resources", () => {
     });
     expect(heartbeat.status_code).toBe(200);
 
+    const identities = await service.dispatch({
+      method: "GET",
+      url: "/v1/endpoints?disclosure=identity&limit=10",
+      headers: headers("resolver"),
+    });
+    expect(identities.status_code).toBe(200);
+    expect(identities.json()).toMatchObject({
+      items: [{ endpoint_id: "endpoint_agent", availability: "busy" }],
+    });
+    expect(JSON.stringify(identities.json())).not.toContain("bindings");
+    expect(JSON.stringify(identities.json())).not.toContain("capabilities");
+
+    const summaries = await service.dispatch({
+      method: "GET",
+      url: "/v1/endpoints?disclosure=summary&capability_id=software.implementation",
+      headers: headers("resolver"),
+    });
+    expect(summaries.status_code).toBe(200);
+    expect(summaries.json()).toMatchObject({
+      items: [{
+        endpoint_id: "endpoint_agent",
+        capabilities: [{ capability_id: "software.implementation" }],
+      }],
+    });
+    expect(JSON.stringify(summaries.json())).not.toContain("input_schema_refs");
+    expect(JSON.stringify(summaries.json())).not.toContain("constraints");
+
+    const contract = await service.dispatch({
+      method: "GET",
+      url: "/v1/endpoints/endpoint_agent/capabilities/software.implementation",
+      headers: headers("resolver"),
+    });
+    expect(contract.status_code).toBe(200);
+    expect(contract.json()).toMatchObject({
+      endpoint_id: "endpoint_agent",
+      capability,
+    });
+
     const inbox = await service.dispatch({
       method: "GET",
       url: "/v1/endpoints/endpoint_agent/inbox/partitions?limit=10",
@@ -221,6 +261,32 @@ describe("Endpoint HTTP resources", () => {
     });
     expect(inbox.status_code).toBe(200);
     expect(inbox.json()).toEqual({ items: [] });
+
+    await inboxStore.upsertRoutingFact({
+      tenant_id: "tenant_01",
+      partition_id: "partition_claimable",
+      handoff_id: "handoff_claimable",
+      resource_version: 1,
+      lifecycle_state: "claimable",
+      capability_ids: ["software.implementation"],
+      last_event_id: "event_claimable",
+      observed_position: 1,
+      visible_actor_ids: [],
+      visible_endpoint_ids: [],
+      active: true,
+    });
+    const claimable = await service.dispatch({
+      method: "GET",
+      url: "/v1/endpoints/endpoint_agent/claimable-handoffs?limit=10",
+      headers: headers("runtime"),
+    });
+    expect(claimable.status_code).toBe(200);
+    expect(claimable.json()).toMatchObject({
+      items: [{
+        handoff_id: "handoff_claimable",
+        capability_ids: ["software.implementation"],
+      }],
+    });
 
     const closed = await service.dispatch({
       method: "POST",
@@ -240,9 +306,39 @@ describe("Endpoint HTTP resources", () => {
       "workfabric.endpoint.discover.v1",
       "workfabric.endpoint.session.open.v1",
       "workfabric.endpoint.session.heartbeat.v1",
+      "workfabric.endpoint.identity.discover.v1",
+      "workfabric.endpoint.capability-summary.discover.v1",
+      "workfabric.endpoint.capability.read.v1",
       "workfabric.endpoint.inbox.read.v1",
+      "workfabric.endpoint.claim-pool.read.v1",
       "workfabric.endpoint.session.close.v1",
     ]);
+    await service.close();
+  });
+
+  it("does not let a lower disclosure grant escalate to full Endpoint contracts", async () => {
+    const { service, authority } = fixture();
+    authority.authorize = async (request: AuthorityRequest) => {
+      authority.requests.push(structuredClone(request));
+      if (request.action === "workfabric.endpoint.discover.v1") {
+        return { kind: "deny" as const, reason: "full disclosure denied" };
+      }
+      return { kind: "allow" as const };
+    };
+
+    const identity = await service.dispatch({
+      method: "GET",
+      url: "/v1/endpoints?disclosure=identity",
+      headers: headers("resolver"),
+    });
+    const full = await service.dispatch({
+      method: "GET",
+      url: "/v1/endpoints?disclosure=full",
+      headers: headers("resolver"),
+    });
+
+    expect(identity.status_code).toBe(200);
+    expect(full.status_code).toBe(403);
     await service.close();
   });
 

@@ -356,7 +356,11 @@ describe("Handoff Command decoding", () => {
   });
 
   it.each([
-    ["accept", { handoff_id: "handoff_01" }, {}],
+    [
+      "accept",
+      { handoff_id: "handoff_01" },
+      { endpoint_id: "endpoint_initiator" },
+    ],
     ["decline", { handoff_id: "handoff_01" }, {}],
     ["expire", { handoff_id: "handoff_01" }, {}],
     ["cancel", { handoff_id: "handoff_01", reason: [] }, { reason: [] }],
@@ -506,6 +510,7 @@ function encodingInput(
     event_ids: events.map((_event, index) => `event_${index + 1}`),
     receipt_ids: events.map((event, index) =>
       [
+        "workfabric.handoff.claimed.v1",
         "workfabric.handoff.accepted.v1",
         "workfabric.handoff.result_returned.v1",
         "workfabric.handoff.verified.v1",
@@ -601,6 +606,72 @@ describe("Handoff Event encoding", () => {
 
   beforeAll(async () => {
     schemas = await loadWfppSchemaValidator("protocol/schemas/v1");
+  });
+
+  it("encodes a fenced Claim transition from a claimable capability pool", () => {
+    const offered = offeredEvent();
+    const poolOpened: HandoffEvent = {
+      ...offered,
+      event_type: "workfabric.handoff.claim_pool_opened.v1",
+      package: {
+        ...offered.package,
+        target: {
+          capability_requirement: {
+            capability_id: "software.implementation",
+            assignment_mode: "eligible_pool_claim",
+          },
+        },
+      },
+    };
+    const claimable = stateAfter(poolOpened);
+    const claimed: HandoffEvent = {
+      event_type: "workfabric.handoff.claimed.v1",
+      handoff_id: "handoff_01",
+      claim: {
+        claim_id: "claim_01",
+        actor: recipient,
+        endpoint_id: "endpoint_recipient",
+        fencing_token: 1,
+        heartbeat_sequence: 0,
+        accepted_lease_seconds: 60,
+        expires_at: "2026-07-14T02:01:00Z",
+        renew_after: "2026-07-14T02:00:40Z",
+      },
+      occurred_at: "2026-07-14T02:00:00Z",
+    };
+
+    const encoded = encodeHandoffEvents(
+      encodingInput([claimed], {
+        current_state: claimable,
+        current_stream_version: 1,
+        receipt_ids: ["receipt_claim"],
+      }),
+    );
+
+    expect(encoded.events[0]?.protocol_data.change).toMatchObject({
+      change_type: "claimed",
+      from_state: "claimable",
+      to_state: "claimed",
+    });
+    expect(encoded.receipt).toEqual({
+      receipt_id: "receipt_claim",
+      receipt_type: "claim_acquired",
+      handoff_id: "handoff_01",
+      actor_id: recipient.actor_id,
+      endpoint_id: "endpoint_recipient",
+      resource_version: 2,
+      recorded_at: "2026-07-14T02:00:01Z",
+      extensions: {
+        "workfabric.dev/claim": {
+          claim_id: "claim_01",
+          fencing_token: 1,
+          heartbeat_sequence: 0,
+          accepted_lease_seconds: 60,
+          expires_at: "2026-07-14T02:01:00Z",
+          renew_after: "2026-07-14T02:00:40Z",
+        },
+      },
+    });
   });
 
   it("encodes Accepted at the next resource version with a Receipt summary", () => {
@@ -1049,6 +1120,12 @@ describe("Handoff Event encoding", () => {
     );
 
     expect(resolvedEncoding.events[0]?.protocol_data.change).toMatchObject({
+      changed_fields: [
+        "lifecycle_state",
+        "target_binding",
+        "updated_at",
+        "resource_version",
+      ],
       details: {
         work_reference_uri: "urn:work:item:42",
         capability_ids: ["software.implementation"],
@@ -1059,6 +1136,12 @@ describe("Handoff Event encoding", () => {
         delegation_id: "delegation_resolver",
       },
     });
+    expect(
+      schemas.validate(
+        "urn:work-fabric:schema:v1:event-data",
+        resolvedEncoding.events[0]?.protocol_data,
+      ),
+    ).toEqual({ valid: true });
     expect(
       canonicalJson(resolvedEncoding.events[0]?.protocol_data),
     ).not.toMatch(/private_policy_hint|private_score|evidence/);

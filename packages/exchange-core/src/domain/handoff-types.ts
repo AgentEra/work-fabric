@@ -37,6 +37,8 @@ export interface AuthorityScope {
 export type HandoffLifecycleState =
   | "target_resolution_pending"
   | "target_unavailable"
+  | "claimable"
+  | "claimed"
   | "offered"
   | "accepted"
   | "result_returned"
@@ -47,6 +49,17 @@ export type HandoffLifecycleState =
   | "expired"
   | "cancelled"
   | "transferred";
+
+export interface HandoffClaim {
+  readonly claim_id: string;
+  readonly actor: ActorRef;
+  readonly endpoint_id: string;
+  readonly fencing_token: number;
+  readonly heartbeat_sequence: number;
+  readonly accepted_lease_seconds: number;
+  readonly expires_at: string;
+  readonly renew_after: string;
+}
 
 export interface HandoffPackage {
   readonly work_reference: JsonObject;
@@ -80,6 +93,8 @@ export interface HandoffState {
   readonly verifier: ActorRef;
   readonly current_responsible_actor: ActorRef | null;
   readonly target_binding: TargetBinding | null;
+  readonly active_claim: HandoffClaim | null;
+  readonly claim_fencing_token: number;
   readonly package: HandoffPackage;
   readonly result: JsonObject | null;
   readonly parent_handoff_id: string | null;

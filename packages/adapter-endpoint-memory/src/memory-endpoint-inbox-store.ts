@@ -4,10 +4,18 @@ import {
   ENDPOINT_INBOX_REQUIRED_CAPABILITIES,
   assertCapabilities,
   type CapabilityManifest,
+  type EndpointClaimableHandoffPage,
+  type EndpointClaimableHandoffQuery,
   type EndpointInboxPartitionPage,
   type EndpointInboxPartitionQuery,
   type EndpointInboxRoutingFact,
   type EndpointInboxStore,
+  type EndpointExpiredClaimPage,
+  type EndpointExpiredClaimQuery,
+} from "@work-fabric/exchange-spi";
+import {
+  compareUtcTimestamps,
+  parseUtcTimestamp,
 } from "@work-fabric/exchange-spi";
 
 const manifest: CapabilityManifest = {
@@ -58,6 +66,81 @@ function decodeCursor(query: EndpointInboxPartitionQuery): string | null {
       throw new Error("cursor audience mismatch");
     }
     return value.partition_id;
+  } catch {
+    throw new TypeError("invalid cursor");
+  }
+}
+
+function normalizedCapabilities(values: readonly string[]): readonly string[] {
+  return [...new Set(values)].sort();
+}
+
+function encodeClaimableCursor(
+  query: EndpointClaimableHandoffQuery,
+  handoffId: string,
+): string {
+  return Buffer.from(
+    JSON.stringify({
+      tenant_id: query.tenant_id,
+      endpoint_id: query.endpoint_id,
+      capability_ids: normalizedCapabilities(query.capability_ids),
+      handoff_id: handoffId,
+    }),
+  ).toString("base64url");
+}
+
+function decodeClaimableCursor(
+  query: EndpointClaimableHandoffQuery,
+): string | null {
+  if (query.cursor === undefined) return null;
+  try {
+    const value = JSON.parse(
+      Buffer.from(query.cursor, "base64url").toString("utf8"),
+    ) as Record<string, unknown>;
+    if (
+      value.tenant_id !== query.tenant_id ||
+      value.endpoint_id !== query.endpoint_id ||
+      JSON.stringify(value.capability_ids) !==
+        JSON.stringify(normalizedCapabilities(query.capability_ids)) ||
+      typeof value.handoff_id !== "string"
+    ) {
+      throw new Error("cursor query mismatch");
+    }
+    return value.handoff_id;
+  } catch {
+    throw new TypeError("invalid cursor");
+  }
+}
+
+function encodeExpiredCursor(
+  query: EndpointExpiredClaimQuery,
+  expiresAt: string,
+  handoffId: string,
+): string {
+  return Buffer.from(JSON.stringify({
+    tenant_id: query.tenant_id,
+    expires_at_or_before: query.expires_at_or_before,
+    expires_at: expiresAt,
+    handoff_id: handoffId,
+  })).toString("base64url");
+}
+
+function decodeExpiredCursor(
+  query: EndpointExpiredClaimQuery,
+): { readonly expires_at: string; readonly handoff_id: string } | null {
+  if (query.cursor === undefined) return null;
+  try {
+    const value = JSON.parse(
+      Buffer.from(query.cursor, "base64url").toString("utf8"),
+    ) as Record<string, unknown>;
+    if (
+      value.tenant_id !== query.tenant_id ||
+      value.expires_at_or_before !== query.expires_at_or_before ||
+      typeof value.expires_at !== "string" ||
+      typeof value.handoff_id !== "string"
+    ) throw new Error("cursor query mismatch");
+    parseUtcTimestamp(value.expires_at, "cursor expires_at");
+    return { expires_at: value.expires_at, handoff_id: value.handoff_id };
   } catch {
     throw new TypeError("invalid cursor");
   }
@@ -141,9 +224,121 @@ export class MemoryEndpointInboxStore implements EndpointInboxStore {
     };
   }
 
+  async listClaimableHandoffs(
+    input: EndpointClaimableHandoffQuery,
+  ): Promise<EndpointClaimableHandoffPage> {
+    if (!Number.isSafeInteger(input.limit) || input.limit <= 0) {
+      throw new TypeError("limit must be a positive safe integer");
+    }
+    const capabilities = new Set(normalizedCapabilities(input.capability_ids));
+    const after = decodeClaimableCursor(input);
+    const values = [...this.facts.values()]
+      .filter((fact) =>
+        fact.tenant_id === input.tenant_id &&
+        fact.active &&
+        fact.lifecycle_state === "claimable" &&
+        (after === null || fact.handoff_id > after) &&
+        fact.capability_ids.some((capabilityId) =>
+          capabilities.has(capabilityId)
+        ),
+      )
+      .sort((left, right) =>
+        left.handoff_id < right.handoff_id
+          ? -1
+          : left.handoff_id > right.handoff_id
+            ? 1
+            : 0
+      );
+    const items = values.slice(0, input.limit).map((fact) => ({
+      partition_id: fact.partition_id,
+      handoff_id: fact.handoff_id,
+      resource_version: fact.resource_version,
+      lifecycle_state: "claimable" as const,
+      capability_ids: [...fact.capability_ids],
+      last_event_id: fact.last_event_id,
+      observed_position: fact.observed_position,
+    }));
+    return {
+      items: clone(items),
+      ...(values.length > input.limit
+        ? {
+            next_cursor: encodeClaimableCursor(
+              input,
+              items.at(-1)!.handoff_id,
+            ),
+          }
+        : {}),
+    };
+  }
+
+  async listExpiredClaims(
+    input: EndpointExpiredClaimQuery,
+  ): Promise<EndpointExpiredClaimPage> {
+    if (!Number.isSafeInteger(input.limit) || input.limit <= 0) {
+      throw new TypeError("limit must be a positive safe integer");
+    }
+    parseUtcTimestamp(input.expires_at_or_before, "expires_at_or_before");
+    const after = decodeExpiredCursor(input);
+    const values = [...this.facts.values()]
+      .filter((fact) => {
+        const claim = fact.active_claim;
+        if (
+          fact.tenant_id !== input.tenant_id ||
+          !fact.active ||
+          fact.lifecycle_state !== "claimed" ||
+          claim === undefined ||
+          claim === null ||
+          compareUtcTimestamps(claim.expires_at, input.expires_at_or_before) > 0
+        ) return false;
+        if (after === null) return true;
+        const order = compareUtcTimestamps(claim.expires_at, after.expires_at);
+        return order > 0 || (order === 0 && fact.handoff_id > after.handoff_id);
+      })
+      .sort((left, right) => {
+        const expiry = compareUtcTimestamps(
+          left.active_claim!.expires_at,
+          right.active_claim!.expires_at,
+        );
+        return expiry !== 0
+          ? expiry
+          : left.handoff_id < right.handoff_id
+            ? -1
+            : left.handoff_id > right.handoff_id ? 1 : 0;
+      });
+    const items = values.slice(0, input.limit).map((fact) => ({
+      partition_id: fact.partition_id,
+      handoff_id: fact.handoff_id,
+      resource_version: fact.resource_version,
+      claim_id: fact.active_claim!.claim_id,
+      fencing_token: fact.active_claim!.fencing_token,
+      expires_at: fact.active_claim!.expires_at,
+    }));
+    const last = items.at(-1);
+    return {
+      items: clone(items),
+      ...(values.length > input.limit && last !== undefined
+        ? {
+            next_cursor: encodeExpiredCursor(
+              input,
+              last.expires_at,
+              last.handoff_id,
+            ),
+          }
+        : {}),
+    };
+  }
+
   async clearTenantProjection(tenantId: string): Promise<void> {
     for (const [key, fact] of this.facts) {
       if (fact.tenant_id === tenantId) this.facts.delete(key);
+    }
+  }
+
+  async clearPartitionProjection(tenantId: string, partitionId: string): Promise<void> {
+    for (const [key, fact] of this.facts) {
+      if (fact.tenant_id === tenantId && fact.partition_id === partitionId) {
+        this.facts.delete(key);
+      }
     }
   }
 }

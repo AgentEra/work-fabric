@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import type { AtomicCommitRequest, RuntimeSubscription } from "@work-fabric/exchange-spi";
+import type { AtomicCommitRequest, PendingDeliveryRecord, RuntimeSubscription } from "@work-fabric/exchange-spi";
 import {
   SqliteExchangePersistence,
   SqliteRuntimeState,
@@ -76,7 +76,30 @@ function subscription(): RuntimeSubscription {
   };
 }
 
+function delivery(nextCursor: string): PendingDeliveryRecord {
+  return {
+    delivery_id: "delivery-local", subscription_id: "subscription-local", partition_id: "partition-local",
+    from_position: 0, to_position: 1, next_cursor: nextCursor, attempt: 1,
+    events: [{
+      event_id: "event-local", tenant_id: "tenant-local", event_type: "workfabric.handoff.offered.v1", schema_version: "1.0",
+      exchange_id: "exchange-local", request_message_id: "message-local", idempotency_key: "key-local",
+      thread_id: "thread-local", handoff_id: "handoff-local", actor_id: "actor-local", endpoint_id: "endpoint-local",
+      visibility: "public", visible_actor_ids: [], visible_endpoint_ids: [], occurred_at: "2026-07-16T08:00:00.000000001Z",
+      domain_data: {}, protocol_data: {}, partition_id: "partition-local", partition_position: 1, stream_id: "stream-local", stream_version: 1, commit_id: "commit-local", commit_ordinal: 0,
+    }],
+    delivered_at: "2026-07-16T08:00:00.000000001Z", visibility_expires_at: "2026-07-16T08:01:00.000000001Z", outcome: "pending",
+  };
+}
+
 describe("SQLite runtime state", () => {
+  it("claims a delivery with a protocol-valid opaque cursor longer than an identifier", async () => {
+    const session = new SqliteSession({ location: ":memory:" });
+    migrateSqlite(session);
+    const persistence = new SqliteExchangePersistence(session, "tenant-local");
+    await expect(persistence.claimPendingDelivery(delivery("c".repeat(129)), null)).resolves.toMatchObject({ kind: "claimed" });
+    session.close();
+  });
+
   it("claims committed outbox facts and preserves fencing across restart", async () => {
     const directory = mkdtempSync(join(tmpdir(), "work-fabric-runtime-"));
     directories.push(directory);

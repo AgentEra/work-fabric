@@ -1,0 +1,17 @@
+{
+  "name": "@work-fabric/example-agently-agent-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "provision": "tsx src/provision.ts"
+  },
+  "dependencies": {
+    "@work-fabric/agent-capability-runtime": "0.1.0",
+    "@work-fabric/agent-runtime-spi": "0.1.0",
+    "@work-fabric/provider-feishu": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/adapter-agent-runtime-memory": "0.1.0"
+  }
+}

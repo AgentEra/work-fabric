@@ -45,3 +45,10 @@ and Peer transports must be injected by deployment composition. Worker-only
 roles cannot enable the discovery HTTP surface. The built-in disclosure default
 returns only Exchange and aggregate CapabilityRoute records; individual Actor
 and Endpoint records require an explicit deployment policy.
+
+`local-feishu-assistant.bundle.yaml` also enables independent Message,
+Document and Calendar Provider Citizens. The Calendar block contains identity
+only: calendar IDs and defaults are dynamic Provider state. Bootstrap with
+`npm run feishu-calendar:admin -- create-and-bind ...` or `bind-existing ...`.
+The command reads `WORK_FABRIC_ENV_FILE`, `WORK_FABRIC_CONFIG` and
+`WORK_FABRIC_ADMIN_PRINCIPAL_ID`, and never accepts credentials as flags.

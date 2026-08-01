@@ -11,6 +11,7 @@ import { PARTITION_WORK_KINDS } from "@work-fabric/cluster-spi";
 import { migratePostgres } from "../../../tools/postgres-migrate.js";
 import {
   CLUSTER_RUNTIME_MIGRATION,
+  ENDPOINT_INBOX_PROJECTION_MIGRATION,
   PostgresPartitionWorkCatalog,
   PostgresRuntimeState,
 } from "../src/index.js";
@@ -189,9 +190,11 @@ describe("PostgresPartitionWorkCatalog", () => {
     expect(CLUSTER_RUNTIME_MIGRATION.sql).not.toMatch(
       /DROP TABLE|ALTER TABLE work_fabric_events DROP|TRUNCATE/i,
     );
-    for (const kind of PARTITION_WORK_KINDS) {
+    for (const kind of PARTITION_WORK_KINDS.filter((kind) => kind !== "endpoint_inbox_projection")) {
       expect(CLUSTER_RUNTIME_MIGRATION.sql).toContain(`'${kind}'`);
     }
+    expect(ENDPOINT_INBOX_PROJECTION_MIGRATION.id).toBe("011_endpoint_inbox_projection");
+    expect(ENDPOINT_INBOX_PROJECTION_MIGRATION.sql).toContain("endpoint_inbox_projection");
   });
 });
 

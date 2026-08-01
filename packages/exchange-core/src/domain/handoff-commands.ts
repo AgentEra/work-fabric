@@ -35,9 +35,45 @@ export type HandoffCommand =
       readonly evidence: readonly JsonObject[];
     }
   | {
+      readonly kind: "claim";
+      readonly handoff_id: string;
+      readonly actor: ActorRef;
+      readonly endpoint_id: string;
+      readonly claim_id: string;
+      readonly requested_lease_seconds?: number;
+    }
+  | {
+      readonly kind: "renew_claim";
+      readonly handoff_id: string;
+      readonly actor: ActorRef;
+      readonly endpoint_id: string;
+      readonly claim_id: string;
+      readonly fencing_token: number;
+      readonly heartbeat_sequence: number;
+    }
+  | {
+      readonly kind: "release_claim";
+      readonly handoff_id: string;
+      readonly actor: ActorRef;
+      readonly endpoint_id: string;
+      readonly claim_id: string;
+      readonly fencing_token: number;
+      readonly heartbeat_sequence: number;
+    }
+  | {
+      readonly kind: "expire_claim";
+      readonly handoff_id: string;
+      readonly actor: ActorRef;
+      readonly claim_id: string;
+      readonly fencing_token: number;
+    }
+  | {
       readonly kind: "accept";
       readonly handoff_id: string;
       readonly actor: ActorRef;
+      readonly endpoint_id?: string;
+      readonly claim_id?: string;
+      readonly fencing_token?: number;
     }
   | {
       readonly kind: "decline";
@@ -97,4 +133,10 @@ export interface HandoffDecisionContext {
   readonly authority_valid: boolean;
   readonly resolver_authorized?: boolean;
   readonly target_eligible?: boolean;
+  readonly claimant_eligible?: boolean;
+  readonly claim_lease?: {
+    readonly accepted_lease_seconds: number;
+    readonly expires_at: string;
+    readonly renew_after: string;
+  };
 }

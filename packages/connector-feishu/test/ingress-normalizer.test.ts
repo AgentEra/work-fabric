@@ -15,6 +15,7 @@ describe("Feishu ingress normalizer", () => {
     const message = ((withMentions.event as JsonObject).message as unknown as Record<string, unknown>);
     message.root_id = "om-root-1";
     message.parent_id = "om-parent-1";
+    message.thread_id = "omt-thread-1";
     message.mentions = [{ key: "@_user_1", id: { open_id: "ou-bot-1" }, name: "Work Fabric" }];
     const result = normalizeFeishuEvent(withMentions, {
       tenant_id: "tenant-1",
@@ -32,6 +33,7 @@ describe("Feishu ingress normalizer", () => {
         sender_open_id: "ou-human-1",
         root_id: "om-root-1",
         parent_id: "om-parent-1",
+        thread_id: "omt-thread-1",
         mentions: [{ key: "@_user_1", open_id: "ou-bot-1" }],
       },
     });

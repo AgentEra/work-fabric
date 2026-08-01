@@ -69,6 +69,7 @@ const globallyExcludedDirectories = new Set([
   ".temp",
   ".tmp",
   ".turbo",
+  ".venv",
   ".worktrees",
   "node_modules",
   "scratch",

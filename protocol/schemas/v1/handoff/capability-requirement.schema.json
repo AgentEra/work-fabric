@@ -11,6 +11,9 @@
       "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
       "maxLength": 128
     },
+    "assignment_mode": {
+      "enum": ["external_resolution", "eligible_pool_claim"]
+    },
     "version_constraint": {
       "type": "string",
       "minLength": 1,

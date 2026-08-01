@@ -3,6 +3,7 @@ import type { ExchangeAdapter } from "@work-fabric/exchange-spi";
 export const PARTITION_WORK_KINDS = [
   "outbox_wakeup",
   "handoff_projection",
+  "endpoint_inbox_projection",
   "collaboration_projection",
   "signal_delivery",
 ] as const;

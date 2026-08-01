@@ -1,0 +1,14 @@
+{
+  "name": "@work-fabric/capability-provider-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/agent-runtime-spi": "0.1.0",
+    "@work-fabric/network-citizen-spi": "0.1.0"
+  }
+}

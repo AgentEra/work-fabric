@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:citizen-declaration",
+  "title": "Network Citizen Declaration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "declaration_id",
+    "declaration_kind",
+    "version",
+    "name",
+    "description",
+    "interaction_modes",
+    "risk",
+    "confirmation",
+    "constraints",
+    "extensions"
+  ],
+  "properties": {
+    "declaration_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 128
+    },
+    "declaration_kind": {
+      "enum": ["capability", "context", "channel", "policy"]
+    },
+    "version": {
+      "$ref": "#/$defs/semantic_version"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "input_schema": {
+      "$ref": "#/$defs/schema_reference"
+    },
+    "output_schema": {
+      "$ref": "#/$defs/schema_reference"
+    },
+    "interaction_modes": {
+      "type": "array",
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["synchronous", "asynchronous", "status-updates"]
+      }
+    },
+    "risk": {
+      "enum": ["low", "medium", "high", "destructive"]
+    },
+    "confirmation": {
+      "enum": ["none", "explicit"]
+    },
+    "constraints": {
+      "$ref": "#/$defs/safe_object"
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  },
+  "$defs": {
+    "semantic_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "maxLength": 64
+    },
+    "sha256_digest": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "schema_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "digest"],
+      "properties": {
+        "uri": {
+          "type": "string",
+          "format": "uri",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256_digest"
+        }
+      }
+    },
+    "safe_object": {
+      "type": "object",
+      "propertyNames": {
+        "not": {
+          "pattern": "(?:access[_-]?token|refresh[_-]?token|password|passwd|credential|client[_-]?secret|private[_-]?key|api[_-]?key)"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/safe_json_value"
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "declaration_id",
+        "declaration_kind",
+        "version",
+        "name",
+        "description"
+      ],
+      "properties": {
+        "declaration_id": {
+          "$ref": "#/properties/declaration_id"
+        },
+        "declaration_kind": {
+          "$ref": "#/properties/declaration_kind"
+        },
+        "version": {
+          "$ref": "#/$defs/semantic_version"
+        },
+        "name": {
+          "$ref": "#/properties/name"
+        },
+        "description": {
+          "$ref": "#/properties/description"
+        }
+      }
+    }
+  }
+}

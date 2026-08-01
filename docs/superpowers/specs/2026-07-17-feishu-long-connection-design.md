@@ -329,8 +329,9 @@ leader-election or broadcast layer.
 2. The event is durably accepted once under duplicate delivery.
 3. The Connector Worker creates exactly one Intake Handoff via the public SDK.
 4. Original conversation route and canonical Subscription are durable.
-5. A committed Handoff event returns through the existing Feishu outbound
-   adapter to the original chat.
+5. A committed Agent-authored Handoff Result returns through the existing
+   Feishu outbound adapter to the original chat; lifecycle and Status events do
+   not become assistant replies.
 6. Connection loss degrades readiness without breaking Core liveness.
 7. Stop drains an active accept and leaves no open handle.
 

@@ -4,6 +4,7 @@ import {
 } from "./config.js";
 import type {
   HandoffReadModel,
+  JsonObject,
   ProtocolEvent,
 } from "./protocol-types.js";
 import type { SdkTransport } from "./transport.js";
@@ -25,6 +26,12 @@ export interface PartitionHandoffQuery extends RequestOptions {
 export interface PartitionEventQuery extends RequestOptions {
   readonly afterPosition?: number;
   readonly limit?: number;
+}
+
+export interface ContextReferenceInput {
+  readonly contextId: string;
+  readonly version: number;
+  readonly digest: string | null;
 }
 
 function object(value: unknown): Record<string, unknown> {
@@ -84,6 +91,20 @@ function requestOptions(
   };
 }
 
+function contextDigest(value: string | null): string | null {
+  if (value === null) return null;
+  if (
+    typeof value !== "string" ||
+    value.length === 0 ||
+    value.length > 512 ||
+    value.trim() !== value ||
+    !/^(?:sha-256|sha-384|sha-512):[^\s:][^\s]*$/.test(value)
+  ) {
+    throw new TypeError("digest must be a bounded canonical digest");
+  }
+  return value;
+}
+
 export class QueryClient {
   constructor(
     private readonly transport: SdkTransport,
@@ -97,6 +118,29 @@ export class QueryClient {
       retry: "query",
       ...requestOptions(this.representation, options),
       decode: decodeObject<HandoffReadModel>,
+    });
+  }
+
+  getContextBundle(
+    reference: ContextReferenceInput,
+    options: RequestOptions = {},
+  ): Promise<JsonObject> {
+    const version = positive(reference.version, "version");
+    if (version === undefined) throw new TypeError("version is required");
+    const digest = contextDigest(reference.digest);
+    return this.transport.request({
+      method: "GET",
+      path: [
+        "v1",
+        "contexts",
+        identifier(reference.contextId, "contextId"),
+        "versions",
+        String(version),
+      ],
+      query: digest === null ? {} : { digest },
+      retry: "query",
+      ...requestOptions(this.representation, options),
+      decode: decodeObject<JsonObject>,
     });
   }
 

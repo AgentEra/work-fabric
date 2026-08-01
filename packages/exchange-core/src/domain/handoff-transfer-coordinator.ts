@@ -1,5 +1,8 @@
 import type { DomainError } from "./domain-error.js";
-import type { HandoffDecisionContext } from "./handoff-commands.js";
+import type {
+  HandoffCommand,
+  HandoffDecisionContext,
+} from "./handoff-commands.js";
 import { decideHandoff } from "./handoff-decider.js";
 import type { HandoffEvent } from "./handoff-events.js";
 import type { ActorRef, HandoffPackage, HandoffState } from "./handoff-types.js";
@@ -56,27 +59,38 @@ export function offerChildHandoff(
     );
   }
 
-  return {
-    kind: "accepted",
-    parent_events: [],
-    child_events: [
-      {
-        event_type: "workfabric.handoff.offered.v1",
-        handoff_id: childId,
-        thread_id: parent.thread_id,
-        initiator: actor,
-        package: childPackage,
-        parent_handoff_id: parent.handoff_id,
-        occurred_at: now,
-      },
-    ],
-  };
+  const childDecision = decideHandoff(
+    null,
+    {
+      kind: "offer",
+      handoff_id: childId,
+      thread_id: parent.thread_id,
+      actor,
+      package: childPackage,
+      parent_handoff_id: parent.handoff_id,
+    },
+    {
+      now,
+      recipient_authorized: true,
+      verifier_authorized: true,
+      policy_allows_cancel: true,
+      context_available: true,
+      authority_valid: true,
+    },
+  );
+  return childDecision.kind === "rejected"
+    ? childDecision
+    : {
+        kind: "accepted",
+        parent_events: [],
+        child_events: childDecision.events,
+      };
 }
 
 export function acceptChildAndTransferParent(
   parent: HandoffState,
   child: HandoffState,
-  recipient: ActorRef,
+  command: Extract<HandoffCommand, { readonly kind: "accept" }>,
   context: HandoffDecisionContext,
 ): TransferDecision {
   if (parent.lifecycle_state !== "accepted") {
@@ -112,7 +126,7 @@ export function acceptChildAndTransferParent(
 
   const childDecision = decideHandoff(
     child,
-    { kind: "accept", handoff_id: child.handoff_id, actor: recipient },
+    command,
     context,
   );
   if (childDecision.kind === "rejected") {

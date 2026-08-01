@@ -60,6 +60,27 @@ const validPayloads: Readonly<Record<string, unknown>> = {
     ],
     evidence: [],
   },
+  "workfabric.handoff.claim.v1": {
+    handoff_id: "handoff_01",
+    claim_id: "claim_01",
+  },
+  "workfabric.handoff.renew_claim.v1": {
+    handoff_id: "handoff_01",
+    claim_id: "claim_01",
+    fencing_token: 1,
+    heartbeat_sequence: 1,
+  },
+  "workfabric.handoff.release_claim.v1": {
+    handoff_id: "handoff_01",
+    claim_id: "claim_01",
+    fencing_token: 1,
+    heartbeat_sequence: 1,
+  },
+  "workfabric.handoff.expire_claim.v1": {
+    handoff_id: "handoff_01",
+    claim_id: "claim_01",
+    fencing_token: 1,
+  },
   "workfabric.handoff.accept.v1": { handoff_id: "handoff_01" },
   "workfabric.handoff.decline.v1": { handoff_id: "handoff_01" },
   "workfabric.handoff.expire.v1": { handoff_id: "handoff_01" },

@@ -50,7 +50,7 @@ Send any complete WFPP command without transformation:
 const outcome = await fabric.commands.send(envelope, { signal });
 ```
 
-Or use typed Handoff methods for `offer`, `resolveTarget`, `reportTargetUnavailable`, `accept`, `decline`, `expire`, `cancel`, `reportStatus`, `returnResult`, `verify`, `close`, `requestRework`, and `transfer`:
+Or use typed Handoff methods for `offer`, `resolveTarget`, `reportTargetUnavailable`, `claim`, `renewClaim`, `releaseClaim`, `expireClaim`, `accept`, `decline`, `expire`, `cancel`, `reportStatus`, `returnResult`, `verify`, `close`, `requestRework`, and `transfer`:
 
 ```ts
 const offered = await fabric.handoffs.offer(offerPayload, {
@@ -69,7 +69,7 @@ const accepted = await fabric.handoffs.accept(
 
 Callers must create and retain every `idempotencyKey`. A logical replay reuses the same key. Existing-Handoff mutations require a positive `expectedVersion`; the SDK never converts a version conflict into a hidden retry. `accepted`, `rejected`, `conflict`, and `temporarily_unavailable` are ordinary `OperationResult.operation_status` values.
 
-For a Capability Target, an external person, rule service, or Agent Brain chooses the target and calls `resolveTarget` with exactly one Actor or Endpoint. The SDK and Work Fabric do not rank or select candidates.
+For a Capability Target, the default `external_resolution` path lets an external person, rule service, or Agent Brain choose the target and call `resolveTarget` with exactly one Actor or Endpoint. When the Offer explicitly requests `eligible_pool_claim`, a represented Endpoint calls `endpoints.listClaimableHandoffs`, then explicitly calls `handoffs.claim` and fenced `handoffs.accept`. The SDK and Work Fabric do not rank or select candidates, and the SDK never auto-claims or auto-accepts.
 
 ## Query and operations visibility
 

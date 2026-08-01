@@ -3,7 +3,9 @@ import {
   WorkFabricTransportError,
   type AckResult,
   type EndpointClient,
+  type EndpointClaimableHandoffPage,
   type EndpointHeartbeatInput,
+  type EndpointInboxPartitionInput,
   type EndpointSession,
   type EventDelivery,
   type HandoffClient,
@@ -30,12 +32,13 @@ export interface AgentGatewayClient {
     | "heartbeat"
     | "closeSession"
     | "listInboxPartitions"
+    | "listClaimableHandoffs"
   >;
   readonly subscriptions: Pick<
     SubscriptionClient,
     "get" | "put" | "acknowledgeDelivery" | "stream"
   >;
-  readonly queries: Pick<QueryClient, "getHandoff">;
+  readonly queries: Pick<QueryClient, "getHandoff" | "listHandoffEvents">;
   readonly handoffs: HandoffClient;
 }
 
@@ -57,6 +60,13 @@ export interface AgentEndpointSession {
   }>;
   incoming(): AsyncIterable<IncomingHandoff>;
   close(options?: { readonly signal?: AbortSignal }): Promise<void>;
+}
+
+export interface ClaimCapableAgentEndpointSession extends AgentEndpointSession {
+  claimableHandoffs(
+    input?: EndpointInboxPartitionInput,
+    options?: RequestOptions,
+  ): Promise<EndpointClaimableHandoffPage>;
 }
 
 export interface AgentGatewayStartOptions {
@@ -118,7 +128,7 @@ function fenced(error: unknown): boolean {
     ["session_fenced", "stale_sequence"].includes(error.code);
 }
 
-class AgentEndpointSessionImpl implements AgentEndpointSession {
+class AgentEndpointSessionImpl implements ClaimCapableAgentEndpointSession {
   readonly session_id: string;
   readonly handoffs: HandoffClient;
   readonly closed: Promise<{
@@ -159,16 +169,25 @@ class AgentEndpointSessionImpl implements AgentEndpointSession {
       maxPartitions: config.max_active_partitions,
       queue: this.queue,
       sleep,
-      incoming: (partitionId, delivery, handoff) => ({
+      incoming: (partitionId, delivery, handoff, deliveryAcknowledged, terminalAcknowledged) => ({
         partition_id: partitionId,
         delivery,
         handoff,
-        acknowledgeSignal: (outcome, options = {}) =>
-          this.client.subscriptions.acknowledgeDelivery(
+        acknowledgeSignal: async (outcome, options = {}) => {
+          const acknowledgement = await this.client.subscriptions.acknowledgeDelivery(
             delivery,
             outcome,
             options,
-          ),
+          );
+          if (
+            acknowledgement.kind === "acknowledged" ||
+            acknowledgement.kind === "rejected"
+          ) {
+            deliveryAcknowledged?.(acknowledgement.cursor);
+            terminalAcknowledged?.();
+          }
+          return acknowledgement;
+        },
       }),
       failed: (error) => { void this.fail("failed", error); },
     });
@@ -190,6 +209,17 @@ class AgentEndpointSessionImpl implements AgentEndpointSession {
 
   incoming(): AsyncIterable<IncomingHandoff> {
     return this.queue;
+  }
+
+  claimableHandoffs(
+    input: EndpointInboxPartitionInput = {},
+    options: RequestOptions = {},
+  ): Promise<EndpointClaimableHandoffPage> {
+    return this.client.endpoints.listClaimableHandoffs(
+      this.config.endpoint_id,
+      input,
+      options,
+    );
   }
 
   async close(options: { readonly signal?: AbortSignal } = {}): Promise<void> {
@@ -337,7 +367,7 @@ export class AgentGateway {
 
   async start(
     options: AgentGatewayStartOptions = {},
-  ): Promise<AgentEndpointSession> {
+  ): Promise<ClaimCapableAgentEndpointSession> {
     if (this.started) {
       throw new AgentGatewayError(
         "invalid_config",

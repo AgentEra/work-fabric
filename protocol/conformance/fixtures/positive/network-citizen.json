@@ -1,0 +1,141 @@
+[
+  {
+    "name": "valid network citizen provisioning",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-provisioning",
+    "expected_valid": true,
+    "instance": {
+      "citizen_id": "feishu-document-actions",
+      "citizen_kind": "capability-provider",
+      "principal_id": "principal-feishu-provider",
+      "allowed_actor": {
+        "actor_id": "actor-feishu-provider",
+        "actor_type": "system"
+      },
+      "allowed_endpoint_id": "endpoint-feishu-provider",
+      "allowed_declaration_namespaces": ["feishu"],
+      "maximum_risk": "high",
+      "administrative_state": "enabled",
+      "registration_version": 1
+    }
+  },
+  {
+    "name": "valid empty network citizen discovery page",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-discovery-page",
+    "expected_valid": true,
+    "instance": {
+      "items": []
+    }
+  },
+  {
+    "name": "valid network citizen declaration",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-declaration",
+    "expected_valid": true,
+    "instance": {
+      "declaration_id": "feishu.document.create",
+      "declaration_kind": "capability",
+      "version": "1.0.0",
+      "name": "Create document",
+      "description": "Create one simple document.",
+      "interaction_modes": ["asynchronous"],
+      "risk": "medium",
+      "confirmation": "none",
+      "constraints": {},
+      "extensions": {}
+    }
+  },
+  {
+    "name": "valid network citizen descriptor",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-descriptor",
+    "expected_valid": true,
+    "instance": {
+      "citizen_id": "feishu-document-actions",
+      "citizen_kind": "capability-provider",
+      "version": "1.0.0",
+      "identity": {
+        "principal_id": "principal-feishu-provider",
+        "actor": {
+          "actor_id": "actor-feishu-provider",
+          "actor_type": "system"
+        },
+        "endpoint_id": "endpoint-feishu-provider"
+      },
+      "protocol": {
+        "versions": ["1"],
+        "bindings": ["workfabric+https"]
+      },
+      "declarations": {
+        "count": 0,
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "availability": "available",
+      "extensions": {}
+    }
+  },
+  {
+    "name": "valid network citizen session open",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-session-open",
+    "expected_valid": true,
+    "instance": {
+      "client_session_id": "client-session-1",
+      "descriptor": {
+        "citizen_id": "feishu-document-actions",
+        "citizen_kind": "capability-provider",
+        "version": "1.0.0",
+        "identity": null,
+        "protocol": {
+          "versions": ["1"],
+          "bindings": []
+        },
+        "declarations": {
+          "count": 0,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "availability": "available",
+        "extensions": {}
+      },
+      "declarations": [],
+      "requested_lease_seconds": 60,
+      "expected_registration_version": 1
+    }
+  },
+  {
+    "name": "valid network citizen heartbeat",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-heartbeat",
+    "expected_valid": true,
+    "instance": {
+      "fencing_token": 1,
+      "heartbeat_sequence": 1,
+      "availability": "available",
+      "expected_registration_version": 1
+    }
+  },
+  {
+    "name": "valid network citizen declaration replacement",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-declaration-replace",
+    "expected_valid": true,
+    "instance": {
+      "fencing_token": 1,
+      "expected_registration_version": 1,
+      "expected_declaration_version": 1,
+      "declarations": []
+    }
+  },
+  {
+    "name": "valid network citizen session close",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-session-close",
+    "expected_valid": true,
+    "instance": {
+      "fencing_token": 1,
+      "heartbeat_sequence": 2,
+      "expected_registration_version": 1
+    }
+  },
+  {
+    "name": "valid empty network citizen declaration page",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-declaration-page",
+    "expected_valid": true,
+    "instance": {
+      "items": []
+    }
+  }
+]

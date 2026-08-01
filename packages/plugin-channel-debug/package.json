@@ -1,0 +1,24 @@
+{
+  "name": "@work-fabric/plugin-channel-debug",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/admission-spi": "0.1.0",
+    "@work-fabric/channel-spi": "0.1.0",
+    "@work-fabric/connector-runtime": "0.1.0",
+    "@work-fabric/connector-spi": "0.1.0",
+    "@work-fabric/debug-channel-spi": "0.1.0",
+    "@work-fabric/exchange-spi": "0.1.0",
+    "@work-fabric/operations-spi": "0.1.0",
+    "@work-fabric/plugin-spi": "0.1.0"
+  },
+  "devDependencies": {
+    "@work-fabric/adapter-connector-memory": "0.1.0",
+    "@work-fabric/adapter-debug-channel-memory": "0.1.0",
+    "@work-fabric/adapter-storage-memory": "0.1.0",
+    "@work-fabric/exchange-runtime": "0.1.0"
+  }
+}

@@ -92,6 +92,16 @@ const capabilityPackage: HandoffPackage = {
   },
 };
 
+const poolClaimPackage: HandoffPackage = {
+  ...handoffPackage,
+  target: {
+    capability_requirement: {
+      capability_id: "software.implementation",
+      assignment_mode: "eligible_pool_claim",
+    },
+  },
+};
+
 function offeredEvent(
   overrides: Partial<
     Extract<
@@ -267,6 +277,403 @@ describe("Handoff lifecycle decisions", () => {
     expect(state.lifecycle_state).toBe("target_resolution_pending");
     expect(state.current_responsible_actor).toEqual(initiator);
     expect(state.target_binding).toBeNull();
+  });
+
+  it("opens an explicit eligible pool without changing the default resolution mode", () => {
+    const decision = decideHandoff(
+      null,
+      {
+        kind: "offer",
+        handoff_id: "handoff_pool",
+        thread_id: "thread_01",
+        actor: initiator,
+        package: poolClaimPackage,
+        parent_handoff_id: null,
+      },
+      allowedContext,
+    );
+    const event = requireAccepted(decision);
+
+    expect(event.event_type).toBe("workfabric.handoff.claim_pool_opened.v1");
+    const state = evolveHandoff(null, event, 1);
+    expect(state.lifecycle_state).toBe("claimable");
+    expect(state.current_responsible_actor).toEqual(initiator);
+    expect(state.target_binding).toBeNull();
+    expect(state.active_claim).toBeNull();
+    expect(state.claim_fencing_token).toBe(0);
+  });
+
+  it("atomically reserves a claimable Handoff for one eligible Endpoint", () => {
+    const claimable = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.claim_pool_opened.v1",
+        handoff_id: "handoff_pool",
+        thread_id: "thread_01",
+        initiator,
+        package: poolClaimPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const claimContext = {
+      ...allowedContext,
+      claimant_eligible: true,
+      claim_lease: {
+        accepted_lease_seconds: 60,
+        expires_at: "2026-07-14T07:01:00Z",
+        renew_after: "2026-07-14T07:00:40Z",
+      },
+    } as HandoffDecisionContext;
+    const decision = decideHandoff(
+      claimable,
+      {
+        kind: "claim",
+        handoff_id: "handoff_pool",
+        actor: recipient,
+        endpoint_id: "endpoint_recipient",
+        claim_id: "claim_client_01",
+        requested_lease_seconds: 60,
+      } as HandoffCommand,
+      claimContext,
+    );
+    const claimed = evolveHandoff(claimable, requireAccepted(decision), 2);
+
+    expect(claimed.lifecycle_state).toBe("claimed");
+    expect(claimed.current_responsible_actor).toEqual(initiator);
+    expect(claimed.claim_fencing_token).toBe(1);
+    expect(claimed.active_claim).toEqual({
+      claim_id: "claim_client_01",
+      actor: recipient,
+      endpoint_id: "endpoint_recipient",
+      fencing_token: 1,
+      heartbeat_sequence: 0,
+      accepted_lease_seconds: 60,
+      expires_at: "2026-07-14T07:01:00Z",
+      renew_after: "2026-07-14T07:00:40Z",
+    });
+  });
+
+  it("renews only the active fenced Claim with a monotonic heartbeat", () => {
+    const claimable = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.claim_pool_opened.v1",
+        handoff_id: "handoff_pool",
+        thread_id: "thread_01",
+        initiator,
+        package: poolClaimPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const claimed = evolveHandoff(
+      claimable,
+      {
+        event_type: "workfabric.handoff.claimed.v1",
+        handoff_id: "handoff_pool",
+        claim: {
+          claim_id: "claim_client_01",
+          actor: recipient,
+          endpoint_id: "endpoint_recipient",
+          fencing_token: 1,
+          heartbeat_sequence: 0,
+          accepted_lease_seconds: 60,
+          expires_at: "2026-07-14T07:01:00Z",
+          renew_after: "2026-07-14T07:00:40Z",
+        },
+        occurred_at: "2026-07-14T07:00:00Z",
+      },
+      2,
+    );
+    const renewedContext = {
+      ...allowedContext,
+      now: "2026-07-14T07:00:30Z",
+      claim_lease: {
+        accepted_lease_seconds: 60,
+        expires_at: "2026-07-14T07:01:30Z",
+        renew_after: "2026-07-14T07:01:10Z",
+      },
+    } as HandoffDecisionContext;
+    const renewal = {
+      kind: "renew_claim",
+      handoff_id: "handoff_pool",
+      actor: recipient,
+      endpoint_id: "endpoint_recipient",
+      claim_id: "claim_client_01",
+      fencing_token: 1,
+      heartbeat_sequence: 1,
+    } as HandoffCommand;
+    const renewed = evolveHandoff(
+      claimed,
+      requireAccepted(decideHandoff(claimed, renewal, renewedContext)),
+      3,
+    );
+
+    expect(renewed.lifecycle_state).toBe("claimed");
+    expect(renewed.active_claim).toMatchObject({
+      fencing_token: 1,
+      heartbeat_sequence: 1,
+      expires_at: "2026-07-14T07:01:30Z",
+    });
+    expectRejected(
+      decideHandoff(
+        renewed,
+        { ...renewal, heartbeat_sequence: 1 } as HandoffCommand,
+        renewedContext,
+      ),
+      "precondition_failed",
+    );
+  });
+
+  it("releases a fenced Claim back to the eligible pool without resetting its fence", () => {
+    const claimable = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.claim_pool_opened.v1",
+        handoff_id: "handoff_pool",
+        thread_id: "thread_01",
+        initiator,
+        package: poolClaimPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const claimed = evolveHandoff(
+      claimable,
+      {
+        event_type: "workfabric.handoff.claimed.v1",
+        handoff_id: "handoff_pool",
+        claim: {
+          claim_id: "claim_client_01",
+          actor: recipient,
+          endpoint_id: "endpoint_recipient",
+          fencing_token: 1,
+          heartbeat_sequence: 0,
+          accepted_lease_seconds: 60,
+          expires_at: "2026-07-14T07:01:00Z",
+          renew_after: "2026-07-14T07:00:40Z",
+        },
+        occurred_at: "2026-07-14T07:00:00Z",
+      },
+      2,
+    );
+    const decision = decideHandoff(
+      claimed,
+      {
+        kind: "release_claim",
+        handoff_id: "handoff_pool",
+        actor: recipient,
+        endpoint_id: "endpoint_recipient",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+        heartbeat_sequence: 1,
+      } as HandoffCommand,
+      { ...allowedContext, now: "2026-07-14T07:00:30Z" },
+    );
+    const released = evolveHandoff(claimed, requireAccepted(decision), 3);
+
+    expect(released.lifecycle_state).toBe("claimable");
+    expect(released.active_claim).toBeNull();
+    expect(released.claim_fencing_token).toBe(1);
+  });
+
+  it("mechanically expires a Claim lease and makes the Handoff claimable again", () => {
+    const claimable = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.claim_pool_opened.v1",
+        handoff_id: "handoff_pool",
+        thread_id: "thread_01",
+        initiator,
+        package: poolClaimPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const claimed = evolveHandoff(
+      claimable,
+      {
+        event_type: "workfabric.handoff.claimed.v1",
+        handoff_id: "handoff_pool",
+        claim: {
+          claim_id: "claim_client_01",
+          actor: recipient,
+          endpoint_id: "endpoint_recipient",
+          fencing_token: 1,
+          heartbeat_sequence: 0,
+          accepted_lease_seconds: 60,
+          expires_at: "2026-07-14T07:01:00Z",
+          renew_after: "2026-07-14T07:00:40Z",
+        },
+        occurred_at: "2026-07-14T07:00:00Z",
+      },
+      2,
+    );
+    const expire = {
+      kind: "expire_claim",
+      handoff_id: "handoff_pool",
+      actor: resolver,
+      claim_id: "claim_client_01",
+      fencing_token: 1,
+    } as HandoffCommand;
+
+    expectRejected(
+      decideHandoff(
+        claimed,
+        expire,
+        { ...allowedContext, now: "2026-07-14T07:00:59Z" },
+      ),
+      "precondition_failed",
+    );
+    const expired = evolveHandoff(
+      claimed,
+      requireAccepted(decideHandoff(
+        claimed,
+        expire,
+        { ...allowedContext, now: "2026-07-14T07:01:00Z" },
+      )),
+      3,
+    );
+    expect(expired.lifecycle_state).toBe("claimable");
+    expect(expired.active_claim).toBeNull();
+    expect(expired.claim_fencing_token).toBe(1);
+  });
+
+  it("requires the active Claim fence before responsibility can be accepted", () => {
+    const claimable = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.claim_pool_opened.v1",
+        handoff_id: "handoff_pool",
+        thread_id: "thread_01",
+        initiator,
+        package: poolClaimPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const claimed = evolveHandoff(
+      claimable,
+      {
+        event_type: "workfabric.handoff.claimed.v1",
+        handoff_id: "handoff_pool",
+        claim: {
+          claim_id: "claim_client_01",
+          actor: recipient,
+          endpoint_id: "endpoint_recipient",
+          fencing_token: 1,
+          heartbeat_sequence: 0,
+          accepted_lease_seconds: 60,
+          expires_at: "2026-07-14T07:01:00Z",
+          renew_after: "2026-07-14T07:00:40Z",
+        },
+        occurred_at: "2026-07-14T07:00:00Z",
+      },
+      2,
+    );
+    const acceptClaim = {
+      kind: "accept",
+      handoff_id: "handoff_pool",
+      actor: recipient,
+      endpoint_id: "endpoint_recipient",
+      claim_id: "claim_client_01",
+      fencing_token: 1,
+    } as HandoffCommand;
+    expectRejected(
+      decideHandoff(
+        claimed,
+        { ...acceptClaim, fencing_token: 0 } as HandoffCommand,
+        { ...allowedContext, now: "2026-07-14T07:00:30Z" },
+      ),
+      "precondition_failed",
+    );
+
+    const accepted = evolveHandoff(
+      claimed,
+      requireAccepted(decideHandoff(
+        claimed,
+        acceptClaim,
+        { ...allowedContext, now: "2026-07-14T07:00:30Z" },
+      )),
+      3,
+    );
+    expect(accepted.lifecycle_state).toBe("accepted");
+    expect(accepted.recipient).toEqual(recipient);
+    expect(accepted.current_responsible_actor).toEqual(recipient);
+    expect(accepted.active_claim).toBeNull();
+    expect(accepted.target_binding).toMatchObject({
+      target: { endpoint_id: "endpoint_recipient" },
+      resolved_by: recipient,
+      resolver_endpoint_id: "endpoint_recipient",
+    });
+  });
+
+  it("expires a claimable Handoff and cancels a claimed Handoff without leaving a live Claim", () => {
+    const claimable = evolveHandoff(
+      null,
+      {
+        event_type: "workfabric.handoff.claim_pool_opened.v1",
+        handoff_id: "handoff_pool",
+        thread_id: "thread_01",
+        initiator,
+        package: poolClaimPackage,
+        parent_handoff_id: null,
+        occurred_at: "2026-07-14T01:00:00Z",
+      },
+      1,
+    );
+    const expired = evolveHandoff(
+      claimable,
+      requireAccepted(decideHandoff(
+        claimable,
+        {
+          kind: "expire",
+          handoff_id: "handoff_pool",
+          actor: resolver,
+        },
+        { ...allowedContext, now: "2026-07-14T08:00:00Z" },
+      )),
+      2,
+    );
+    expect(expired.lifecycle_state).toBe("expired");
+    expect(expired.active_claim).toBeNull();
+
+    const claimed = evolveHandoff(
+      claimable,
+      {
+        event_type: "workfabric.handoff.claimed.v1",
+        handoff_id: "handoff_pool",
+        claim: {
+          claim_id: "claim_client_01",
+          actor: recipient,
+          endpoint_id: "endpoint_recipient",
+          fencing_token: 1,
+          heartbeat_sequence: 0,
+          accepted_lease_seconds: 60,
+          expires_at: "2026-07-14T07:01:00Z",
+          renew_after: "2026-07-14T07:00:40Z",
+        },
+        occurred_at: "2026-07-14T07:00:00Z",
+      },
+      2,
+    );
+    const cancelled = evolveHandoff(
+      claimed,
+      requireAccepted(decideHandoff(
+        claimed,
+        { ...cancelCommand, handoff_id: "handoff_pool" },
+        allowedContext,
+      )),
+      3,
+    );
+    expect(cancelled.lifecycle_state).toBe("cancelled");
+    expect(cancelled.active_claim).toBeNull();
   });
 
   it("binds one eligible explicit target before the Handoff becomes offered", () => {

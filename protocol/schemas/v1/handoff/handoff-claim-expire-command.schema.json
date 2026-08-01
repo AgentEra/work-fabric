@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:handoff-claim-expire-command",
+  "title": "Handoff Claim Expire Command Payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["handoff_id", "claim_id", "fencing_token"],
+  "properties": {
+    "handoff_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "claim_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "fencing_token": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "extensions": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/extensions"
+    }
+  }
+}

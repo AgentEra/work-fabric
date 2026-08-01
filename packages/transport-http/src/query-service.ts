@@ -2,11 +2,14 @@ import type {
   DeliveryAttempt,
   DeliveryStateStore,
   EventJournal,
+  ContextReference,
+  ContextRepository,
   HandoffReadModel,
   HandoffReadModelStore,
   ProjectionFailureRecord,
   ProjectionFailureStore,
   ProtocolEvent,
+  JsonObject,
   RuntimeSubscription,
   SubscriptionStore,
 } from "@work-fabric/exchange-spi";
@@ -14,6 +17,12 @@ import { buildProtocolEvent } from "@work-fabric/exchange-runtime";
 
 export interface ExchangeQueryService {
   getHandoff(tenantId: string, handoffId: string): Promise<HandoffReadModel | null>;
+  getContextBundle(
+    tenantId: string,
+    actorId: string,
+    endpointId: string,
+    reference: ContextReference,
+  ): Promise<JsonObject | null>;
   readHandoffEvents(tenantId: string, handoffId: string, fromVersion: number, limit: number): Promise<readonly ProtocolEvent[]>;
   listPartitionHandoffs(tenantId: string, partitionId: string, limit: number): Promise<readonly HandoffReadModel[]>;
   readPartitionEvents(tenantId: string, partitionId: string, afterPosition: number, limit: number): Promise<readonly ProtocolEvent[]>;
@@ -38,6 +47,7 @@ export class StoreBackedExchangeQueryService implements ExchangeQueryService {
     private readonly subscriptions: SubscriptionStore,
     private readonly projectionFailures: ProjectionFailureStore,
     private readonly deliveryState: DeliveryStateStore,
+    private readonly context?: ContextRepository,
   ) {}
 
   async getHandoff(tenantId: string, handoffId: string) {
@@ -46,6 +56,24 @@ export class StoreBackedExchangeQueryService implements ExchangeQueryService {
       return null;
     }
     return structuredClone(model);
+  }
+
+  async getContextBundle(
+    tenantId: string,
+    actorId: string,
+    endpointId: string,
+    reference: ContextReference,
+  ) {
+    if (this.context === undefined) return null;
+    const result = await this.context.readBundle({
+      tenant_id: tenantId,
+      actor_id: actorId,
+      endpoint_id: endpointId,
+      reference,
+    });
+    return result.kind === "available"
+      ? structuredClone(result.bundle)
+      : null;
   }
 
   async readHandoffEvents(tenantId: string, handoffId: string, fromVersion: number, limit: number) {

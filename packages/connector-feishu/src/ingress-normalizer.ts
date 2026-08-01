@@ -78,6 +78,7 @@ function messageEnvelope(
   const eventTime = occurredAt(header, scope.received_at);
   const rootId = optionalString(message.root_id, "root_id");
   const parentId = optionalString(message.parent_id, "parent_id");
+  const threadId = optionalString(message.thread_id, "thread_id");
   return {
     tenant_id: scope.tenant_id,
     connector_id: scope.connector_id,
@@ -100,6 +101,7 @@ function messageEnvelope(
       mentions: mentions(message.mentions),
       ...(rootId === undefined ? {} : { root_id: rootId }),
       ...(parentId === undefined ? {} : { parent_id: parentId }),
+      ...(threadId === undefined ? {} : { thread_id: threadId }),
     },
     trace_context: {
       correlation_id: string(header.event_id, "event_id"),

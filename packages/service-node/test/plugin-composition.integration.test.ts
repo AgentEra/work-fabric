@@ -4,6 +4,7 @@ import type {
   FeishuLongConnectionState,
 } from "@work-fabric/connector-feishu";
 import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
+import { createServer } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
 import type { AdmissionConfigurationSection } from "@work-fabric/adapter-admission-configuration";
@@ -169,7 +170,137 @@ async function composeLongConnectionService(client: FeishuLongConnectionClient) 
   });
 }
 
+async function freeLoopbackPort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = server.address();
+  if (address === null || typeof address === "string") {
+    throw new Error("test listener has no TCP port");
+  }
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return address.port;
+}
+
 describe("service plugin composition", () => {
+  it("composes and starts the development-only Debug Channel", async () => {
+    const port = await freeLoopbackPort();
+    const service = await composeNodeService(serviceConfig(), {
+      configuration_revision: "test:debug-channel",
+      plugins: {
+        "debug-local": {
+          type: "collaboration-channel.debug",
+          enabled: true,
+          config: {
+            connector_id: "debug-local",
+            external_tenant_id: "debug-local",
+            listen: { host: "127.0.0.1", port },
+            credentials: { bearer_token: "token" },
+            intake_target: {
+              actor_id: "actor-agent",
+              endpoint_id: "endpoint-agent",
+            },
+            participants: {
+              "internal-user": {
+                mode: "static",
+                external_subject_type: "human",
+                external_subject_id: "local-human",
+                actor_id: "actor-human",
+                actor_type: "human",
+                endpoint_id: "endpoint-human",
+              },
+            },
+            limits: {
+              max_request_bytes: 262_144,
+              max_content_parts: 32,
+              max_text_bytes: 131_072,
+              max_json_depth: 32,
+              max_page_size: 100,
+            },
+            retention: {
+              max_age_days: 14,
+              cleanup_batch_size: 500,
+            },
+          },
+        },
+      },
+    });
+    try {
+      await service.start();
+      await expect((await fetch(`http://127.0.0.1:${port}/health`)).json())
+        .resolves.toEqual({ state: "healthy", code: "listening" });
+    } finally {
+      await service.close();
+    }
+  });
+
+  it("composes a Debug Channel Admission participant against a scoped policy", async () => {
+    const port = await freeLoopbackPort();
+    const service = await composeNodeService(admissionServiceConfig(), {
+      plugins: {
+        "debug-local": {
+          type: "collaboration-channel.debug",
+          enabled: true,
+          config: {
+            connector_id: "debug-local",
+            external_tenant_id: "debug-local",
+            listen: { host: "127.0.0.1", port },
+            credentials: { bearer_token: "token" },
+            intake_target: {
+              actor_id: "actor-agent",
+              endpoint_id: "endpoint-agent",
+            },
+            participants: {
+              "admitted-user": {
+                mode: "admission",
+                external_subject_type: "human",
+                external_subject_id: "local-admitted-human",
+                policy_id: "debug-local-participants",
+              },
+            },
+            limits: {
+              max_request_bytes: 262_144,
+              max_content_parts: 32,
+              max_text_bytes: 131_072,
+              max_json_depth: 32,
+              max_page_size: 100,
+            },
+            retention: {
+              max_age_days: 14,
+              cleanup_batch_size: 500,
+            },
+          },
+        },
+      },
+      admission: {
+        evidence_providers: {},
+        policies: {
+          "debug-local-participants": {
+            policy_id: "debug-local-participants",
+            revision: "1",
+            tenant_id: "tenant-local",
+            connector_id: "debug-local",
+            source_system: "workfabric-debug",
+            external_tenant_id: "debug-local",
+            default: "deny",
+            allow: {
+              all_internal_members: false,
+              external_subject_ids: ["local-admitted-human"],
+            },
+            deny: { external_subject_ids: [] },
+            binding: {
+              actor_type: "human",
+              store_ref: "participant-bindings",
+            },
+          },
+        },
+      },
+    });
+    await service.close();
+  });
+
   it("fails before plugin prepare when an Admission-backed plugin has no policy", async () => {
     await expect(composeNodeService(admissionServiceConfig(), {
       plugins: {

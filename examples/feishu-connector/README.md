@@ -1,5 +1,14 @@
 # Feishu Connector composition example
 
+## Calendar capability path
+
+The collaboration Channel does not execute calendar operations. Local
+scheduling uses separately leased Feishu Message and Calendar Capability
+Citizens: the Agent queries group members, verifies their Capability Result,
+queries free/busy facts, then optionally creates an event. Required scopes,
+registration commands and failure semantics are in the
+[Feishu Capability Provider guide](../../docs/guides/feishu-capability-provider.md#51-calendar-facet注册与权限).
+
 This example describes the production composition boundary for Phase 4B. It is
 not a runnable Feishu application and contains no credentials. Deployment code
 must resolve the opaque references in `config.example.json` through its own

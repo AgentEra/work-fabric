@@ -7,6 +7,7 @@ import type {
 import type { EventRecord, OutboxRecord, OutboxStore } from "@work-fabric/exchange-spi";
 import {
   CollaborationProjectionHandler,
+  EndpointInboxProjectionHandler,
   HandoffProjectionHandler,
   OutboxWakeupHandler,
   SignalDeliveryHandler,
@@ -85,7 +86,7 @@ function outboxStore(record: OutboxRecord) {
 }
 
 describe("cluster owner handlers", () => {
-  it("publishes only three metadata wakeups before fencing settlement", async () => {
+  it("publishes every mechanical downstream wakeup before fencing settlement", async () => {
     const values: unknown[] = [];
     const store = outboxStore(outboxRecord());
     const assertOwnership = vi.fn(async () => {});
@@ -115,6 +116,7 @@ describe("cluster owner handlers", () => {
     )).resolves.toEqual({ outcome: "advanced", processed: 1 });
     expect(values.map((value) => (value as { kind: string }).kind)).toEqual([
       "handoff_projection",
+      "endpoint_inbox_projection",
       "collaboration_projection",
       "signal_delivery",
     ]);
@@ -161,7 +163,7 @@ describe("cluster owner handlers", () => {
     expect(store.markPublished).not.toHaveBeenCalled();
   });
 
-  it("maps the three existing owner ports without adding owner logic", async () => {
+  it("maps the projection and delivery ports without adding owner logic", async () => {
     const fence = vi.fn(async () => {});
     const handoff = new HandoffProjectionHandler({
       runPartition: vi.fn(async () => ({
@@ -178,6 +180,12 @@ describe("cluster owner handlers", () => {
         required_stream_version: 2,
       })),
     });
+    const endpointInbox = new EndpointInboxProjectionHandler({
+      runPartition: vi.fn(async () => ({
+        kind: "blocked" as const,
+        position: 1,
+      })),
+    });
     const signal = new SignalDeliveryHandler({
       dispatchPartitionTurn: vi.fn(async () => ({ processed: 1 })),
     });
@@ -188,6 +196,10 @@ describe("cluster owner handlers", () => {
       context("collaboration_projection", fence),
       10,
     )).resolves.toEqual({ outcome: "waiting", processed: 0 });
+    await expect(endpointInbox.run(
+      context("endpoint_inbox_projection", fence),
+      10,
+    )).resolves.toEqual({ outcome: "blocked", processed: 0 });
     await expect(signal.run(context("signal_delivery", fence), 10))
       .resolves.toEqual({ outcome: "advanced", processed: 1 });
   });

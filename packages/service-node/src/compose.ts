@@ -2,6 +2,11 @@ import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto
 
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
 import { MemoryDiscoveryPeerBindingStore, MemoryDiscoveryStore } from "@work-fabric/adapter-discovery-memory";
+import { MemoryDebugChannelStore } from "@work-fabric/adapter-debug-channel-memory";
+import {
+  SqliteDebugChannelStore,
+  migrateDebugChannelSqlite,
+} from "@work-fabric/adapter-debug-channel-sqlite";
 import { MemoryChannelRouteStore } from "@work-fabric/adapter-storage-memory";
 import {
   ConfigurationAdmissionPolicyProvider,
@@ -23,6 +28,10 @@ import {
   CompositeAuthorityPolicy,
   type AdmissionAuthorityRule,
 } from "@work-fabric/adapter-authority-admission";
+import {
+  AgentRuntimeAuthorityPolicy,
+  type AgentRuntimeAuthorityConfigurationSection,
+} from "@work-fabric/adapter-authority-agent-runtime";
 import { FeishuDirectoryEvidenceProvider } from "@work-fabric/adapter-directory-feishu";
 import {
   AdmissionIdentityProvider,
@@ -40,6 +49,8 @@ import type {
 } from "@work-fabric/admission-spi";
 
 import { MemoryContextRepository } from "@work-fabric/adapter-context-memory";
+import { MemoryNetworkCitizenStore } from "@work-fabric/adapter-network-citizen-memory";
+import { SqliteNetworkCitizenStore } from "@work-fabric/adapter-network-citizen-sqlite";
 import {
   MemoryEndpointDirectoryStore,
   MemoryEndpointInboxStore,
@@ -54,6 +65,7 @@ import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
 import {
   ClusterHost,
   CollaborationProjectionHandler,
+  EndpointInboxProjectionHandler,
   HandoffProjectionHandler,
   OutboxWakeupHandler,
   PartitionWorker,
@@ -94,10 +106,18 @@ import {
   type Clock,
   type IdGenerator,
 } from "@work-fabric/exchange-core";
-import { EndpointDirectoryService } from "@work-fabric/endpoint-directory";
 import {
+  DirectoryTargetEligibilityVerifier,
+  EndpointDirectoryService,
+  NetworkCitizenBindingConstraintEvaluator,
+} from "@work-fabric/endpoint-directory";
+import { NetworkCitizenDirectoryService } from "@work-fabric/network-citizen-directory";
+import type { NetworkCitizenStore } from "@work-fabric/network-citizen-spi";
+import {
+  ClaimLeaseExpiryRunner,
   CursorPullService,
   DefaultSubscriptionDeliveryPolicy,
+  EndpointInboxProjector,
   EndpointInboxQueryService,
   HandoffProjector,
   MemoryHandoffReadModelStore,
@@ -107,6 +127,7 @@ import {
 } from "@work-fabric/exchange-runtime";
 import type {
   ContextRepository,
+  CapabilityConstraintEvaluator,
   DeliveryStateStore,
   EndpointDirectoryStore,
   EndpointInboxStore,
@@ -115,14 +136,17 @@ import type {
   ProjectionCheckpointStore,
   ProjectionFailureStore,
   SubscriptionStore,
-  TargetEligibilityVerifier,
   OutboxStore,
   WorkerLeaseStore,
 } from "@work-fabric/exchange-spi";
 import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 import type { ConnectorIngressStore } from "@work-fabric/connector-spi";
+import type { DebugChannelStore } from "@work-fabric/debug-channel-spi";
 import type { ConnectorCommandExecution, ConnectorCommandResult, ConnectorCommandSink } from "@work-fabric/connector-spi";
-import type { ChannelRouteStore } from "@work-fabric/channel-spi";
+import type {
+  ChannelHandoffSnapshotSource,
+  ChannelRouteStore,
+} from "@work-fabric/channel-spi";
 import type { ConnectorDiscrepancyStore } from "@work-fabric/connector-runtime";
 import {
   CollaborationProjector,
@@ -157,29 +181,23 @@ import {
 import { BearerTokenProvider, ConnectorSdkCommandSink, WorkFabricClient } from "@work-fabric/sdk-typescript";
 import { NodeFeishuLongConnectionClientFactory } from "@work-fabric/adapter-feishu-long-connection-node";
 import type { FeishuLongConnectionClientFactory } from "@work-fabric/connector-feishu";
-import { FeishuPluginFactory, FeishuWebhookRegistry, validateFeishuPluginConfig, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import { FeishuPluginFactory, FeishuWebhookRegistry, validateFeishuPluginConfig, type FeishuConversationContextProviderFactory, type FeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import {
+  DebugPluginFactory,
+  validateDebugPluginConfig,
+  type DebugPluginConfig,
+} from "@work-fabric/plugin-channel-debug";
+import { FeishuConversationContextProvider } from "@work-fabric/provider-feishu";
 import { FeishuOpenApiClient, FeishuTenantAccessTokenProvider, type FeishuTenantTokenProvider } from "@work-fabric/connector-feishu";
 import { ChannelSignalRouter, LocalMechanicalPump, PluginHost, PluginRegistry, type PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 
 import { NodeConfigurationError, type NodeServiceConfig } from "./config.js";
+import { StoreBackedChannelHandoffSnapshotSource } from "./channel-handoff-snapshot-source.js";
 import { assertFeishuPluginRole } from "./feishu-plugin-composition.js";
 
 const defaultClock: Clock = { now: () => new Date().toISOString() };
 const defaultIds: IdGenerator = {
   nextId(kind) { return `${kind}_${randomUUID()}`; },
-};
-
-const explicitTargetEligibility: TargetEligibilityVerifier = {
-  manifest: {
-    profile: "exchange.target-eligibility.v1",
-    adapter: "explicit-target-boundary",
-    capabilities: {
-      explicit_target_only: true,
-      no_candidate_selection: true,
-      fail_closed: true,
-    },
-  },
-  async verify() { return { kind: "eligible" }; },
 };
 
 export interface NodeStorageComposition {
@@ -192,6 +210,8 @@ export interface NodeStorageComposition {
   readonly endpointDirectory: EndpointDirectoryStore;
   readonly endpointInbox: EndpointInboxStore;
   readonly connectorIngress: ConnectorIngressStore;
+  /** Required only when a Debug Channel plugin is enabled. */
+  readonly debugChannel?: DebugChannelStore;
   readonly admissionBindings: ParticipantBindingStore;
   readonly admissionDecisions: AdmissionDecisionStore;
   readonly channelRoutes?: ChannelRouteStore;
@@ -210,6 +230,17 @@ export interface NodeServiceCompositionOptions {
   readonly postgres_storage?: NodeStorageComposition;
   /** Deployment-owned generator; useful for deterministic integration profiles. */
   readonly ids?: IdGenerator;
+  /**
+   * Deployment-owned Citizen persistence adapter. Memory and SQLite profiles
+   * have native defaults; external storage profiles inject this port to expose
+   * the Citizen catalog without coupling service-node to a vendor database.
+   */
+  readonly network_citizen_store?: NetworkCitizenStore;
+  /**
+   * Deployment-owned vocabulary for Capability target constraints. The
+   * default understands only the exact Network Citizen + Contract binding.
+   */
+  readonly target_constraint_evaluator?: CapabilityConstraintEvaluator;
   /** Deployment-owned clock; useful for deterministic integration profiles. */
   readonly clock?: Clock;
   readonly cluster_worker?: NodeClusterWorkerDependencies;
@@ -217,6 +248,7 @@ export interface NodeServiceCompositionOptions {
   readonly configuration_revision?: string;
   readonly plugins?: PluginHostConfiguration;
   readonly admission?: AdmissionConfigurationSection;
+  readonly agent_runtime_authority?: AgentRuntimeAuthorityConfigurationSection;
   /** Deployment-owned Admission persistence ports; defaults to the selected storage profile. */
   readonly admission_stores?: {
     readonly bindings: ParticipantBindingStore;
@@ -263,6 +295,7 @@ function memoryStorage(config: NodeServiceConfig): NodeStorageComposition {
     endpointDirectory: new MemoryEndpointDirectoryStore(),
     endpointInbox: new MemoryEndpointInboxStore(),
     connectorIngress: new MemoryConnectorIngressStore(),
+    debugChannel: new MemoryDebugChannelStore(),
     admissionBindings: new MemoryParticipantBindingStore(),
     admissionDecisions: new MemoryAdmissionDecisionStore(),
     channelRoutes: new MemoryChannelRouteStore(),
@@ -293,6 +326,7 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
       ? SQLITE_MIGRATIONS
       : [...SQLITE_MIGRATIONS, SQLITE_ADMISSION_MIGRATION],
   );
+  migrateDebugChannelSqlite(session);
   const persistence = new SqliteExchangePersistence(session, config.tenant_id);
   const operations = createSqliteOperationsStores(
     session,
@@ -309,6 +343,7 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
     endpointDirectory: createSqliteEndpointDirectoryStore(session, config.tenant_id),
     endpointInbox: createSqliteEndpointInboxStore(session, config.tenant_id),
     connectorIngress: createSqliteConnectorIngressStore(session, config.tenant_id),
+    debugChannel: new SqliteDebugChannelStore(session),
     admissionBindings: new SqliteParticipantBindingStore(session, config.tenant_id),
     admissionDecisions: new SqliteAdmissionDecisionStore(session, config.tenant_id),
     channelRoutes: new SqliteChannelRouteStore(session),
@@ -399,6 +434,24 @@ function handoffPartitionId(tenantId: string, handoffId: string): string {
   return `partition:${createHash("sha256").update(canonicalJson({ tenant_id: tenantId, root_handoff_id: handoffId }), "utf8").digest("hex")}`;
 }
 
+export function claimExpiryIdempotencyKey(
+  tenantId: string,
+  handoffId: string,
+  claimId: string,
+  fencingToken: number,
+): string {
+  const digest = createHash("sha256")
+    .update(tenantId)
+    .update("\u0000")
+    .update(handoffId)
+    .update("\u0000")
+    .update(claimId)
+    .update("\u0000")
+    .update(String(fencingToken))
+    .digest("base64url");
+  return `claim-expiry_${digest}`;
+}
+
 class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
   readonly manifest = { profile: "connector.command-sink.v1", adapter: "deferred-work-fabric-typescript-sdk", capabilities: { public_sdk_only: true, representation_binding: true, outcome_classification: true } } as const;
   private readonly sinks = new Map<string, ConnectorSdkCommandSink>();
@@ -410,11 +463,20 @@ class DeferredConnectorSdkCommandSink implements ConnectorCommandSink {
   ) {}
   activate(origin: string): void {
     for (const [instanceId, instance] of Object.entries(this.plugins)) {
-      if (!instance.enabled || instance.type !== "collaboration-channel.feishu") continue;
-      const plugin = instance.config as FeishuPluginConfig;
+      if (!instance.enabled) continue;
+      let accessToken: string;
+      if (instance.type === "collaboration-channel.feishu") {
+        accessToken = validateFeishuPluginConfig(instance.config)
+          .credentials.work_fabric_access_token;
+      } else if (instance.type === "collaboration-channel.debug") {
+        accessToken = validateDebugPluginConfig(instance.config)
+          .credentials.bearer_token;
+      } else {
+        continue;
+      }
       const client = new WorkFabricClient({
         baseUrl: origin,
-        authentication: new BearerTokenProvider(plugin.credentials.work_fabric_access_token),
+        authentication: new BearerTokenProvider(accessToken),
         representation: { actorId: "connector-bootstrap", endpointId: `connector:${instanceId}` },
         tenantId: this.config.tenant_id,
         exchangeId: this.config.exchange_id,
@@ -482,6 +544,31 @@ function enabledFeishuAdmissionPlugins(configuration: PluginHostConfiguration): 
   return result;
 }
 
+function enabledDebugAdmissionPlugins(
+  configuration: PluginHostConfiguration,
+): ReadonlyMap<string, {
+  readonly config: DebugPluginConfig;
+  readonly policy_ids: readonly string[];
+}> {
+  const result = new Map<string, {
+    readonly config: DebugPluginConfig;
+    readonly policy_ids: readonly string[];
+  }>();
+  for (const [instanceId, instance] of Object.entries(configuration)) {
+    if (!instance.enabled || instance.type !== "collaboration-channel.debug") {
+      continue;
+    }
+    const debug = validateDebugPluginConfig(instance.config);
+    const policyIds = [...new Set(Object.values(debug.participants)
+      .filter((participant) => participant.mode === "admission")
+      .map((participant) => participant.policy_id))].sort();
+    if (policyIds.length > 0) {
+      result.set(instanceId, { config: debug, policy_ids: policyIds });
+    }
+  }
+  return result;
+}
+
 function composeAdmission(
   config: NodeServiceConfig,
   storage: NodeStorageComposition,
@@ -491,7 +578,12 @@ function composeAdmission(
   clock: Clock,
 ): AdmissionComposition | undefined {
   const plugins = enabledFeishuAdmissionPlugins(pluginConfiguration);
-  if (plugins.size === 0 && config.admission === undefined) return undefined;
+  const debugPlugins = enabledDebugAdmissionPlugins(pluginConfiguration);
+  if (
+    plugins.size === 0
+    && debugPlugins.size === 0
+    && config.admission === undefined
+  ) return undefined;
   if (config.admission === undefined) {
     return compositionError("service_admission_missing", "service.admission");
   }
@@ -620,6 +712,49 @@ function composeAdmission(
       action: "workfabric.handoff.offer.v1",
     });
   }
+  for (const [, debug] of debugPlugins) {
+    for (const policyId of debug.policy_ids) {
+      const policyPath = `admission.policies.${policyId}`;
+      const policy = Object.hasOwn(admissionSection.policies, policyId)
+        ? admissionSection.policies[policyId]
+        : undefined;
+      if (policy === undefined) {
+        return compositionError("admission_policy_missing", policyPath);
+      }
+      const checks = [
+        ["tenant_id", policy.tenant_id, config.tenant_id],
+        ["connector_id", policy.connector_id, debug.config.connector_id],
+        ["source_system", policy.source_system, "workfabric-debug"],
+        [
+          "external_tenant_id",
+          policy.external_tenant_id,
+          debug.config.external_tenant_id,
+        ],
+      ] as const;
+      const mismatch = checks.find(([, actual, expected]) => actual !== expected);
+      if (mismatch !== undefined) {
+        return compositionError(
+          "admission_policy_scope_mismatch",
+          `${policyPath}.${mismatch[0]}`,
+        );
+      }
+      if (policy.allow.all_internal_members) {
+        const providerRef = policy.internal_membership?.evidence_provider_ref;
+        if (providerRef === undefined || !evidenceProviders.has(providerRef)) {
+          return compositionError(
+            "admission_evidence_provider_missing",
+            `admission.evidence_providers.${providerRef ?? "missing"}`,
+          );
+        }
+      }
+    }
+    authorityRules.push({
+      tenant_id: config.tenant_id,
+      connector_id: debug.config.connector_id,
+      principal_id: `admission:${debug.config.connector_id}`,
+      action: "workfabric.handoff.offer.v1",
+    });
+  }
 
   const grants = new HmacRepresentationGrants({
     active_key_id: config.admission.grant_active_key_id,
@@ -667,6 +802,7 @@ export interface ComposedNodeService {
   readonly admission: CollaborationAdmissionService | null;
   runProjection(partitionId: string, limit: number): Promise<{
     readonly handoff: Awaited<ReturnType<HandoffProjector["runPartition"]>>;
+    readonly endpoint_inbox: Awaited<ReturnType<EndpointInboxProjector["runPartition"]>>;
     readonly collaboration: Awaited<ReturnType<CollaborationProjector["runPartition"]>>;
   }>;
   rebuildProjection(partitionId: string, limit: number): Promise<void>;
@@ -709,9 +845,25 @@ export async function composeNodeService(
   }
   const ownedSqlite = config.storage_profile === "sqlite-local" ? storage.sqlite : null;
   try {
+  const networkCitizenStore = options.network_citizen_store
+    ?? (config.storage_profile === "memory-demo"
+      ? new MemoryNetworkCitizenStore()
+      : config.storage_profile === "sqlite-local" && storage.sqlite !== null
+        ? new SqliteNetworkCitizenStore({
+            database: storage.sqlite.database,
+          })
+        : undefined);
   const enabledPlugins = Object.values(pluginConfiguration).filter((item) => item.enabled);
   if (enabledPlugins.length > 0 && storage.channelRoutes === undefined) {
     throw new Error("enabled collaboration-channel plugins require a deployment-owned ChannelRouteStore");
+  }
+  const debugEnabled = enabledPlugins.some(
+    (item) => item.type === "collaboration-channel.debug",
+  );
+  if (debugEnabled && storage.debugChannel === undefined) {
+    throw new Error(
+      "enabled Debug Channel plugins require a deployment-owned DebugChannelStore",
+    );
   }
   const channelRoutes = storage.channelRoutes ?? new MemoryChannelRouteStore();
   const channelSignalRouter = options.channel_signal_router ?? new ChannelSignalRouter();
@@ -736,14 +888,73 @@ export async function composeNodeService(
     schemas,
     "protocol/spec/interaction-payloads.json",
   );
-  const localIdentity = new LocalIdentityProvider(config.identities);
+  const claimExpiryToken = randomUUID();
+  const claimExpiryPrincipalId = "workfabric-claim-expiry";
+  const claimExpiryActorId = "workfabric-claim-expiry";
+  const claimExpiryEndpointId = "workfabric-claim-expiry";
+  const claimExpiryEvidence = { claim_expiry_token: claimExpiryToken };
+  const localIdentity = new LocalIdentityProvider([
+    ...config.identities,
+    {
+      authentication_evidence: claimExpiryEvidence,
+      principal: {
+        principal_id: claimExpiryPrincipalId,
+        tenant_id: config.tenant_id,
+        actor_claims: [{
+          actor_id: claimExpiryActorId,
+          actor_type: "system",
+          endpoint_ids: [claimExpiryEndpointId],
+        }],
+        attributes: {},
+      },
+    },
+  ]);
+  const runtimeAuthority = new AgentRuntimeAuthorityPolicy(
+    Object.values(options.agent_runtime_authority?.grants ?? {}),
+    storage.handoffs,
+  );
   const localAuthority = new LocalAuthorityPolicy(config.authority_rules);
+  const claimExpiryAuthority = {
+    manifest: {
+      profile: "exchange.authority.v1",
+      adapter: "claim-expiry-mechanical",
+      capabilities: {
+        explicit_decision: true,
+        default_deny: true,
+        resource_scoping: true,
+      },
+    },
+    async authorize(request: {
+      readonly principal: { readonly principal_id: string; readonly tenant_id: string };
+      readonly actor_id: string;
+      readonly actor_type: "human" | "agent" | "system";
+      readonly endpoint_id: string;
+      readonly delegation_id: string | null;
+      readonly action: string;
+      readonly resource_id: string | null;
+    }) {
+      return request.principal.tenant_id === config.tenant_id
+        && request.principal.principal_id === claimExpiryPrincipalId
+        && request.actor_id === claimExpiryActorId
+        && request.actor_type === "system"
+        && request.endpoint_id === claimExpiryEndpointId
+        && request.delegation_id === null
+        && request.action === "workfabric.handoff.expire_claim.v1"
+        && typeof request.resource_id === "string"
+        && request.resource_id.length > 0
+        ? { kind: "allow" as const }
+        : { kind: "deny" as const, reason: "Not a mechanical Claim expiry request" };
+    },
+  };
   const identity = admissionComposition === undefined
     ? localIdentity
     : new CompositeIdentityProvider([admissionComposition.identity, localIdentity]);
-  const authority = admissionComposition === undefined
-    ? localAuthority
-    : new CompositeAuthorityPolicy([admissionComposition.authority, localAuthority]);
+  const authority = new CompositeAuthorityPolicy([
+    ...(admissionComposition === undefined ? [] : [admissionComposition.authority]),
+    runtimeAuthority,
+    claimExpiryAuthority,
+    localAuthority,
+  ]);
   const application = new ExchangeApplication({
     persistence: storage.persistence,
     identity,
@@ -752,13 +963,26 @@ export async function composeNodeService(
     validator,
     clock,
     ids: options.ids ?? defaultIds,
-    target_eligibility: explicitTargetEligibility,
+    target_eligibility: new DirectoryTargetEligibilityVerifier({
+      store: storage.endpointDirectory,
+      clock,
+      constraintEvaluator:
+        options.target_constraint_evaluator ??
+        new NetworkCitizenBindingConstraintEvaluator(),
+    }),
   });
   const handoffProjector = new HandoffProjector(
     storage.persistence,
     storage.persistence,
     storage.persistence,
     storage.handoffs,
+    clock,
+  );
+  const endpointInboxProjector = new EndpointInboxProjector(
+    storage.endpointInbox,
+    storage.persistence,
+    storage.persistence,
+    storage.persistence,
     clock,
   );
   const collaborationProjector = new CollaborationProjector(
@@ -782,26 +1006,118 @@ export async function composeNodeService(
     schemas,
   );
   let localPump: LocalMechanicalPump | undefined;
-  if (config.cluster === undefined && config.storage_profile !== "postgres") {
+  if (config.cluster === undefined) {
     localPump = new LocalMechanicalPump({
       poll_interval_ms: 100,
       max_work_keys: 10_000,
       turn_limit: 100,
       async turn(partitionId, limit) {
         await handoffProjector.runPartition(partitionId, limit);
+        await endpointInboxProjector.runPartition(partitionId, limit);
         await collaborationProjector.runPartition(partitionId, limit);
         await localSignalDispatcher.dispatchPartitionTurn(partitionId, config.tenant_id, limit);
       },
     });
   }
+  const applicationWithLocalWake = {
+    async handle(...args: Parameters<ExchangeApplication["handle"]>) {
+      const result = await application.handle(...args);
+      const resourceId = result.resource?.resource_id;
+      if (
+        localPump !== undefined &&
+        result.operation_status === "accepted" &&
+        result.resource?.resource_type === "handoff" &&
+        typeof resourceId === "string"
+      ) {
+        try {
+          const firstRecord = (
+            await storage.persistence.readStream(resourceId)
+          )[0];
+          if (firstRecord !== undefined) {
+            const partitionId = firstRecord.partition_id;
+            await handoffProjector.runPartition(partitionId, 10_000);
+            await endpointInboxProjector.runPartition(partitionId, 10_000);
+            localPump.wake(partitionId);
+          }
+        } catch {
+          // The authoritative command is already committed. Local projection
+          // acceleration is best-effort and the durable journal remains the
+          // recovery source.
+        }
+      }
+      return result;
+    },
+  };
+  const claimExpiryRunner = new ClaimLeaseExpiryRunner({
+    tenant_id: config.tenant_id,
+    inbox: storage.endpointInbox,
+    clock,
+    poll_interval_ms: 1_000,
+    page_limit: 100,
+    max_pages_per_run: 10,
+    async expire(claim) {
+      const result = await applicationWithLocalWake.handle(
+        {
+          spec_version: "1.0",
+          message_id: `message_${randomUUID()}`,
+          message_type: "workfabric.handoff.expire_claim.v1",
+          sent_at: clock.now(),
+          tenant_id: config.tenant_id,
+          exchange_id: config.exchange_id,
+          actor_id: claimExpiryActorId,
+          endpoint_id: claimExpiryEndpointId,
+          idempotency_key: claimExpiryIdempotencyKey(
+            config.tenant_id,
+            claim.handoff_id,
+            claim.claim_id,
+            claim.fencing_token,
+          ),
+          expected_version: claim.resource_version,
+          payload: {
+            handoff_id: claim.handoff_id,
+            claim_id: claim.claim_id,
+            fencing_token: claim.fencing_token,
+          },
+        },
+        claimExpiryEvidence,
+      );
+      if (result.operation_status === "accepted") return "expired";
+      if (
+        result.error?.code === "version_conflict" ||
+        result.error?.code === "invalid_state_transition" ||
+        result.error?.code === "precondition_failed" ||
+        result.error?.code === "not_found"
+      ) return "stale";
+      return "retry";
+    },
+  });
   const pluginServices = new Map<string, unknown>([
     ["workfabric.tenant_id", config.tenant_id],
+    ["workfabric.development_mode", config.development_mode],
     ["channel.routes", channelRoutes],
+    [
+      "channel.handoff_snapshot_source",
+      new StoreBackedChannelHandoffSnapshotSource(
+        config.tenant_id,
+        storage.handoffs,
+      ) satisfies ChannelHandoffSnapshotSource,
+    ],
     ["exchange.subscriptions", storage.subscriptions],
     ["connector.ingress", storage.connectorIngress],
     ["connector.command_sink", connectorCommandSink],
     ["channel.signal_registry", channelSignalRouter],
+    ...(storage.debugChannel === undefined
+      ? []
+      : [["debug.channel_store", storage.debugChannel] as const]),
     ["feishu.webhook_registry", webhookRegistry],
+    [
+      "feishu.conversation_context_provider_factory",
+      {
+        create(input) {
+          return new FeishuConversationContextProvider(input);
+        },
+      } satisfies FeishuConversationContextProviderFactory,
+    ],
     ...(admissionComposition === undefined
       ? []
       : [["collaboration.admission", admissionComposition.service] as const]),
@@ -814,11 +1130,22 @@ export async function composeNodeService(
         ?? new NodeFeishuLongConnectionClientFactory(),
     ],
     ["runtime.clock", { now: clock.now, nowEpochSeconds: () => Math.floor(Date.parse(clock.now()) / 1000) }],
+    [
+      "runtime.debug_ids",
+      {
+        requestId: () => `debug_request_${randomUUID()}`,
+        submissionId: () => `debug_submission_${randomUUID()}`,
+      },
+    ],
+    ["runtime.debug_cursor", operationsCursor(config.cursor_secret)],
     ["runtime.fetch", runtimeFetch],
     ["runtime.handoff_wakeup", (handoffId: string) => localPump?.wake(handoffPartitionId(config.tenant_id, handoffId))],
   ]);
   const pluginHost = new PluginHost({
-    registry: new PluginRegistry([new FeishuPluginFactory()]),
+    registry: new PluginRegistry([
+      new FeishuPluginFactory(),
+      new DebugPluginFactory(),
+    ]),
     context: {
       configuration_revision: options.configuration_revision ?? "direct-composition",
       service: { get<T>(capability: string): T { if (!pluginServices.has(capability)) throw new Error(`plugin service unavailable: ${capability}`); return pluginServices.get(capability) as T; } },
@@ -847,6 +1174,7 @@ export async function composeNodeService(
         row_lease_seconds: config.cluster.lease_seconds,
       }),
       new HandoffProjectionHandler(handoffProjector),
+      new EndpointInboxProjectionHandler(endpointInboxProjector),
       new CollaborationProjectionHandler(collaborationProjector),
       new SignalDeliveryHandler(workerDependencies.signal_dispatcher),
     ];
@@ -895,6 +1223,7 @@ export async function composeNodeService(
     storage.subscriptions,
     storage.persistence,
     storage.persistence,
+    storage.context,
   );
   const collaboration = new StoreBackedCollaborationQueryService(
     storage.collaboration,
@@ -938,9 +1267,28 @@ export async function composeNodeService(
       max_page_limit: 100,
     },
   });
+  const networkCitizenDirectory = networkCitizenStore === undefined
+    ? undefined
+    : new NetworkCitizenDirectoryService({
+        store: networkCitizenStore,
+        clock,
+        ids: {
+          sessionId: () => `citizen_session_${randomUUID()}`,
+        },
+        limits: {
+          min_lease_seconds: 30,
+          default_lease_seconds: 60,
+          max_lease_seconds: 3_600,
+          renew_ahead_seconds: 10,
+          max_declarations: 100,
+          default_page_limit: 25,
+          max_page_limit: 100,
+        },
+      });
   const endpointInbox = new EndpointInboxQueryService({
     directory: storage.endpointDirectory,
     inbox: storage.endpointInbox,
+    clock,
     defaultPageLimit: 25,
     maxPageLimit: 100,
   });
@@ -980,7 +1328,7 @@ export async function composeNodeService(
     30,
   );
   const http = createHttpService({
-    application,
+    application: applicationWithLocalWake,
     authenticator: new BearerAuthenticationEvidenceMapper(),
     identity,
     authority,
@@ -993,6 +1341,9 @@ export async function composeNodeService(
     recovery,
     endpoint_directory: endpointDirectory,
     endpoint_inbox: endpointInbox,
+    ...(networkCitizenDirectory === undefined
+      ? {}
+      : { citizen_directory: networkCitizenDirectory }),
     delivery,
     ...(discoveryQuery === undefined ? {} : {
       discovery: discoveryQuery,
@@ -1042,6 +1393,7 @@ export async function composeNodeService(
   async function stopExecutionResources(): Promise<void> {
     let failure: unknown;
     try { await pluginHost.stop(); } catch (error) { failure = error; }
+    try { await claimExpiryRunner.stop(); } catch (error) { failure ??= error; }
     try { await localPump?.stop(); } catch (error) { failure ??= error; }
     try { await clusterHost?.drain(); } catch (error) { failure ??= error; }
     if (failure !== undefined) throw failure;
@@ -1064,6 +1416,7 @@ export async function composeNodeService(
       try {
         if (config.role === "worker" || config.role === "all") {
           clusterHost?.start();
+          claimExpiryRunner.start();
         }
         localPump?.start();
         await pluginHost.start();
@@ -1104,14 +1457,27 @@ export async function composeNodeService(
     admission: admissionComposition?.service ?? null,
     async runProjection(partitionId, limit) {
       const handoff = await handoffProjector.runPartition(partitionId, limit);
+      const endpointInbox = await endpointInboxProjector.runPartition(
+        partitionId,
+        limit,
+      );
       const collaborationResult = await collaborationProjector.runPartition(
         partitionId,
         limit,
       );
-      return { handoff, collaboration: collaborationResult };
+      return {
+        handoff,
+        endpoint_inbox: endpointInbox,
+        collaboration: collaborationResult,
+      };
     },
     async rebuildProjection(partitionId, limit) {
       await handoffProjector.rebuildPartition(partitionId, limit);
+      await endpointInboxProjector.rebuildPartition(
+        config.tenant_id,
+        partitionId,
+        limit,
+      );
       await collaborationProjector.rebuildPartition(config.tenant_id, partitionId, limit);
     },
     start: startService,

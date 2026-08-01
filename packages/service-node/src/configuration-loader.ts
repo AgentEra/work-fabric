@@ -1,7 +1,21 @@
 import { YamlConfigurationProvider } from "@work-fabric/adapter-configuration-yaml";
 import { admissionConfigurationValidator, type AdmissionConfigurationSection } from "@work-fabric/adapter-admission-configuration";
-import { ConfigurationService, EnvironmentSecretResolver, resolveDeclaredSecrets } from "@work-fabric/configuration-runtime";
+import {
+  agentRuntimeAuthorityConfigurationValidator,
+  type AgentRuntimeAuthorityConfigurationSection,
+} from "@work-fabric/adapter-authority-agent-runtime";
+import {
+  ConfigurationService,
+  ConfigurationViewProvider,
+  EnvironmentSecretResolver,
+  resolveDeclaredSecrets,
+} from "@work-fabric/configuration-runtime";
 import { FeishuPluginFactory, feishuSecretPaths, validateFeishuPluginConfig } from "@work-fabric/plugin-channel-feishu";
+import {
+  DebugPluginFactory,
+  debugSecretPaths,
+  validateDebugPluginConfig,
+} from "@work-fabric/plugin-channel-debug";
 import type { PluginHostConfiguration } from "@work-fabric/plugin-runtime";
 import { parseServiceConfig, serviceAdmissionSecretPaths, type NodeServiceConfig } from "./config.js";
 
@@ -10,11 +24,15 @@ export interface LoadedNodeConfiguration {
   readonly service: NodeServiceConfig;
   readonly plugins: PluginHostConfiguration;
   readonly admission: AdmissionConfigurationSection;
+  readonly agent_runtime_authority: AgentRuntimeAuthorityConfigurationSection;
 }
 
 const emptyAdmissionConfiguration: AdmissionConfigurationSection = Object.freeze({
   policies: Object.freeze({}),
   evidence_providers: Object.freeze({}),
+});
+const emptyAgentRuntimeAuthorityConfiguration: AgentRuntimeAuthorityConfigurationSection = Object.freeze({
+  grants: Object.freeze({}),
 });
 
 function object(value: unknown, field: string): Record<string, unknown> {
@@ -40,9 +58,16 @@ export function collectDeclaredSecretPaths(root: Record<string, unknown>): reado
   for (const [instanceId, candidate] of Object.entries(instances)) {
     const instance = object(candidate, `plugins.instances.${instanceId}`);
     if (instance.enabled !== true) continue;
-    if (instance.type !== "collaboration-channel.feishu") continue;
-    const config = validateFeishuPluginConfig(instance.config);
-    paths.push(...feishuSecretPaths(`plugins.instances.${instanceId}.config`, config));
+    if (instance.type === "collaboration-channel.feishu") {
+      const config = validateFeishuPluginConfig(instance.config);
+      paths.push(...feishuSecretPaths(`plugins.instances.${instanceId}.config`, config));
+    } else if (instance.type === "collaboration-channel.debug") {
+      const config = validateDebugPluginConfig(instance.config);
+      paths.push(...debugSecretPaths(
+        `plugins.instances.${instanceId}.config`,
+        config,
+      ));
+    }
   }
   return paths;
 }
@@ -51,7 +76,10 @@ export async function loadNodeConfiguration(environment: Readonly<Record<string,
   const path = environment.WORK_FABRIC_CONFIG;
   if (path === undefined || path.trim() === "") throw new Error("WORK_FABRIC_CONFIG must point to an explicit YAML configuration file");
   const yaml = new YamlConfigurationProvider({ path, max_bytes: 4 * 1024 * 1024, max_depth: 64 });
-  const document = await yaml.load();
+  const document = await new ConfigurationViewProvider({
+    provider: yaml,
+    application_id: environment.WORK_FABRIC_CONFIG_APPLICATION ?? "work-fabric",
+  }).load();
   const root = object(document.value, "configuration");
   const serviceRaw = object(root.service, "service");
   const resolved = await resolveDeclaredSecrets(document.value, collectDeclaredSecretPaths(root), {
@@ -59,19 +87,25 @@ export async function loadNodeConfiguration(environment: Readonly<Record<string,
     allow_literals: serviceRaw.development_mode === true,
   });
   const feishu = new FeishuPluginFactory();
+  const debug = new DebugPluginFactory();
   const configuration = new ConfigurationService({
     provider: { async load() { return { revision: document.revision, value: resolved }; } },
     clock: { now: () => new Date().toISOString() },
     validate_service: (value) => parseServiceConfig(value),
-    plugin_validators: [{ type: feishu.type, validate: (value) => feishu.validate(value) }],
-    section_validators: [admissionConfigurationValidator],
+    plugin_validators: [
+      { type: feishu.type, validate: (value) => feishu.validate(value) },
+      { type: debug.type, validate: (value) => debug.validate(value) },
+    ],
+    section_validators: [admissionConfigurationValidator, agentRuntimeAuthorityConfigurationValidator],
   });
   const snapshot = await configuration.load();
   const admission = snapshot.value.sections.admission ?? emptyAdmissionConfiguration;
+  const agentRuntimeAuthority = snapshot.value.sections.agent_runtime_authority ?? emptyAgentRuntimeAuthorityConfiguration;
   return {
     revision: snapshot.revision,
     service: snapshot.value.service,
     plugins: snapshot.value.plugins.instances,
     admission: admission as AdmissionConfigurationSection,
+    agent_runtime_authority: agentRuntimeAuthority as AgentRuntimeAuthorityConfigurationSection,
   };
 }

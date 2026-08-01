@@ -26,6 +26,7 @@ export async function runNodeService(
     configuration_revision: loaded.revision,
     plugins: loaded.plugins,
     admission: loaded.admission,
+    agent_runtime_authority: loaded.agent_runtime_authority,
   });
   if (config.role === "api" || config.role === "all") {
     const { origin } = await service.listen();

@@ -7,6 +7,13 @@ export const SIGNAL_REQUIRED_CAPABILITIES = [
   "payload_isolation",
 ] as const;
 
+export function signalMediaTypeCapability(mediaType: string): string {
+  if (!/^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(mediaType)) {
+    throw new TypeError("media_type is invalid");
+  }
+  return `media_type:${mediaType.toLowerCase()}`;
+}
+
 export interface ProtocolEvent {
   readonly specversion: "1.0";
   readonly id: string;

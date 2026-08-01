@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:citizen-session-open",
+  "title": "Network Citizen Session Open",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "client_session_id",
+    "descriptor",
+    "declarations",
+    "expected_registration_version"
+  ],
+  "properties": {
+    "client_session_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "descriptor": {
+      "$ref": "urn:work-fabric:schema:v1:citizen-descriptor"
+    },
+    "declarations": {
+      "type": "array",
+      "maxItems": 1024,
+      "items": {
+        "$ref": "urn:work-fabric:schema:v1:citizen-declaration"
+      }
+    },
+    "requested_lease_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400
+    },
+    "expected_registration_version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

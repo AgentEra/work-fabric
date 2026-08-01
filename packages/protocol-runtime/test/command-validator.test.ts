@@ -76,6 +76,57 @@ describe("shared WFPP command validation", () => {
     );
   });
 
+  it.each([
+    [
+      "workfabric.handoff.claim.v1",
+      {
+        handoff_id: "handoff_01",
+        claim_id: "claim_client_01",
+        requested_lease_seconds: 60,
+      },
+    ],
+    [
+      "workfabric.handoff.renew_claim.v1",
+      {
+        handoff_id: "handoff_01",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+        heartbeat_sequence: 1,
+      },
+    ],
+    [
+      "workfabric.handoff.release_claim.v1",
+      {
+        handoff_id: "handoff_01",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+        heartbeat_sequence: 2,
+      },
+    ],
+    [
+      "workfabric.handoff.expire_claim.v1",
+      {
+        handoff_id: "handoff_01",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+      },
+    ],
+    [
+      "workfabric.handoff.accept.v1",
+      {
+        handoff_id: "handoff_01",
+        claim_id: "claim_client_01",
+        fencing_token: 1,
+      },
+    ],
+  ] as const)("accepts the Claim interaction %s", (messageType, payload) => {
+    expect(commands.validate(envelope({
+      message_type: messageType,
+      expected_version: 1,
+      payload,
+    }))).toEqual({ valid: true });
+  });
+
   it("rejects an invalid Envelope before looking up its Payload mapping", () => {
     const errors = expectInvalid(
       commands.validate({

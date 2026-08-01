@@ -25,7 +25,7 @@ describe("Handoff lifecycle model", () => {
     expect(
       (lifecycle as LifecycleModel & { initial_states?: readonly string[] })
         .initial_states,
-    ).toEqual(["target_resolution_pending", "offered"]);
+    ).toEqual(["target_resolution_pending", "claimable", "offered"]);
     expect(lifecycle.terminal_states).toEqual([
       "target_unavailable",
       "closed",
@@ -79,7 +79,7 @@ describe("Handoff lifecycle model", () => {
       lifecycle,
       null,
       "handoff.offer",
-      conditions("capability_target"),
+      conditions("capability_target", "external_resolution"),
     );
     const offered = applyTransition(
       lifecycle,
@@ -224,6 +224,7 @@ describe("Handoff lifecycle model", () => {
         "recipient_authorized",
         "redelegation_allowed",
         "child_capability_target",
+        "external_resolution",
       ),
     );
 
@@ -234,6 +235,30 @@ describe("Handoff lifecycle model", () => {
     expect(transfer.effects).toContainEqual({
       type: "create_child_handoff",
       child_initial_state: "target_resolution_pending",
+    });
+  });
+
+  it("opens a Claim pool for an eligible-pool capability child", async () => {
+    const lifecycle = await model();
+    const transfer = applyTransition(
+      lifecycle,
+      "accepted",
+      "handoff.transfer",
+      conditions(
+        "recipient_authorized",
+        "redelegation_allowed",
+        "child_capability_target",
+        "eligible_pool_claim",
+      ),
+    );
+
+    expect(transfer.next_state).toBe("accepted");
+    expect(transfer.event_type).toBe(
+      "workfabric.handoff.claim_pool_opened.v1",
+    );
+    expect(transfer.effects).toContainEqual({
+      type: "create_child_handoff",
+      child_initial_state: "claimable",
     });
   });
 

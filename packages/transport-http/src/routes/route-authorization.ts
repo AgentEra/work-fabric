@@ -31,6 +31,7 @@ function resourceKind(action: string): string {
   if (action.includes("partition") || action.includes("responsibility") ||
       action.includes("timeline") || action.includes("relationship")) return "partition";
   if (action.includes("endpoint")) return "endpoint";
+  if (action.includes("context")) return "context";
   if (action.includes("subscription")) return "subscription";
   if (action.includes("delivery")) return "delivery";
   return "tenant";

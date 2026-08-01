@@ -10,6 +10,17 @@ import type {
 } from "./agent-endpoint-session.js";
 import type { BoundedAsyncQueue } from "./bounded-async-queue.js";
 
+const TERMINAL_HANDOFF_EVENTS = new Set([
+  "workfabric.handoff.closed.v1",
+  "workfabric.handoff.declined.v1",
+  "workfabric.handoff.expired.v1",
+  "workfabric.handoff.cancelled.v1",
+  "workfabric.handoff.transferred.v1",
+  "workfabric.handoff.target_unavailable.v1",
+  "workfabric.handoff.result_returned.v1",
+  "workfabric.handoff.verified.v1",
+]);
+
 export interface MultiplexerDependencies {
   readonly client: AgentGatewayClient;
   readonly endpointId: string;
@@ -22,6 +33,8 @@ export interface MultiplexerDependencies {
     partitionId: string,
     delivery: EventDelivery,
     handoff: HandoffReadModel,
+    deliveryAcknowledged?: (cursor: string) => void,
+    terminalAcknowledged?: () => void,
   ) => IncomingHandoff;
   readonly failed: (error: unknown) => void;
 }
@@ -90,9 +103,13 @@ export class PartitionMultiplexer {
   }
 
   private synchronize(partitions: readonly string[]): void {
-    const desired = new Set(partitions);
     for (const partition of partitions) {
       if (this.streams.has(partition)) continue;
+      // `streams` includes a partition removed from the active Inbox whose
+      // terminal Delivery remains unacknowledged.  It still owns a transport
+      // slot until that Delivery advances the cursor, so it shares the same
+      // hard cap as currently active partitions.
+      if (this.streams.size >= this.dependencies.maxPartitions) break;
       const controller = new AbortController();
       const abort = () => controller.abort(this.controller.signal.reason);
       this.controller.signal.addEventListener("abort", abort, { once: true });
@@ -108,12 +125,10 @@ export class PartitionMultiplexer {
         });
       this.streams.set(partition, { controller, running });
     }
-    for (const [partition, stream] of this.streams) {
-      if (!desired.has(partition)) {
-        stream.controller.abort("partition_inactive");
-        this.cursors.delete(partition);
-      }
-    }
+    // A terminal projection is removed from the active Inbox before its
+    // terminal Delivery can be durably Acked. Keep an already-open stream
+    // alive through that one final delivery; `terminalAcknowledged` below
+    // retires it only after the subscription cursor advances.
   }
 
   private async runStream(
@@ -130,7 +145,6 @@ export class PartitionMultiplexer {
       },
       { signal },
     )) {
-      this.cursors.set(partitionId, delivery.next_cursor);
       const handoffId = delivery.events.at(-1)?.wfhandoff;
       if (handoffId === undefined) {
         throw new AgentGatewayError(
@@ -142,10 +156,36 @@ export class PartitionMultiplexer {
         handoffId,
         { signal },
       );
+      // The public Handoff projection can already be terminal while this is
+      // still an earlier Delivery. Retiring on its snapshot would skip the
+      // actual terminal Delivery, so only the delivered protocol Event may
+      // drain an inactive Inbox partition.
+      const terminal = delivery.events.some((event) =>
+        event.wfhandoff === handoffId && TERMINAL_HANDOFF_EVENTS.has(event.type),
+      );
       await this.dependencies.queue.push(
-        this.dependencies.incoming(partitionId, delivery, handoff),
+        this.dependencies.incoming(
+          partitionId,
+          delivery,
+          handoff,
+          (cursor) => this.advanceCursor(partitionId, cursor),
+          terminal ? () => this.retireAfterTerminalAck(partitionId) : undefined,
+        ),
         signal,
       );
     }
+  }
+
+  private retireAfterTerminalAck(partitionId: string): void {
+    const stream = this.streams.get(partitionId);
+    if (stream === undefined) return;
+    this.cursors.delete(partitionId);
+    stream.controller.abort("terminal_delivery_acknowledged");
+  }
+
+  private advanceCursor(partitionId: string, cursor: string): void {
+    const stream = this.streams.get(partitionId);
+    if (stream === undefined || stream.controller.signal.aborted) return;
+    this.cursors.set(partitionId, cursor);
   }
 }

@@ -16,8 +16,18 @@
     "initial_state": null,
     "expected_valid": true,
     "steps": [
-      { "interaction": "handoff.offer", "conditions": ["capability_target"], "expected_state": "target_resolution_pending", "expected_event_type": "workfabric.handoff.target_resolution_requested.v1" },
+      { "interaction": "handoff.offer", "conditions": ["capability_target", "external_resolution"], "expected_state": "target_resolution_pending", "expected_event_type": "workfabric.handoff.target_resolution_requested.v1" },
       { "interaction": "handoff.resolve_target", "conditions": ["resolver_authorized", "target_eligible"], "expected_state": "offered", "expected_event_type": "workfabric.handoff.target_resolved.v1" }
+    ]
+  },
+  {
+    "name": "eligible endpoint claims and accepts a pooled Capability handoff",
+    "initial_state": null,
+    "expected_valid": true,
+    "steps": [
+      { "interaction": "handoff.offer", "conditions": ["capability_target", "eligible_pool_claim"], "expected_state": "claimable", "expected_event_type": "workfabric.handoff.claim_pool_opened.v1" },
+      { "interaction": "handoff.claim", "conditions": ["claimant_authorized", "claimant_eligible", "claim_lease_available"], "expected_state": "claimed", "expected_event_type": "workfabric.handoff.claimed.v1" },
+      { "interaction": "handoff.accept", "conditions": ["claim_fence_current", "claim_lease_active", "context_available"], "expected_state": "accepted", "expected_event_type": "workfabric.handoff.accepted.v1" }
     ]
   },
   {

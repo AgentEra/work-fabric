@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   WorkFabricHttpError,
   type AckResult,
+  type EndpointClaimableHandoff,
   type EndpointSession,
   type EventDelivery,
   type HandoffReadModel,
@@ -86,6 +87,32 @@ const handoff: HandoffReadModel = {
   latest_status: null,
 };
 
+const terminalHandoff: HandoffReadModel = {
+  ...handoff,
+  state: { lifecycle_state: "cancelled" },
+};
+
+const terminalDelivery: EventDelivery = {
+  ...delivery,
+  delivery_id: "delivery_terminal",
+  next_cursor: "cursor_terminal",
+  events: [{
+    ...delivery.events[0]!,
+    id: "event_terminal",
+    type: "workfabric.handoff.cancelled.v1",
+  }],
+};
+
+const claimableHandoff: EndpointClaimableHandoff = {
+  partition_id: "handoff:handoff_claimable",
+  handoff_id: "handoff_claimable",
+  resource_version: 1,
+  lifecycle_state: "claimable",
+  capability_ids: ["software.implementation"],
+  last_event_id: "event_claimable",
+  observed_position: 1,
+};
+
 function waitForAbort(signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve();
   return new Promise((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
@@ -114,6 +141,7 @@ function fakeClient(options: {
       heartbeat,
       closeSession: vi.fn(async () => ({ ...endpointSession, state: "closed" as const })),
       listInboxPartitions: vi.fn(async () => ({ items: [{ partition_id: partitionId, latest_position: 1, active_handoff_count: 1 }] })),
+      listClaimableHandoffs: vi.fn(async () => ({ items: [structuredClone(claimableHandoff)] })),
     },
     subscriptions: {
       get: vi.fn(async () => structuredClone(subscription)),
@@ -125,7 +153,10 @@ function fakeClient(options: {
         await waitForAbort(request?.signal);
       },
     },
-    queries: { getHandoff: vi.fn(async () => structuredClone(handoff)) },
+    queries: {
+      getHandoff: vi.fn(async () => structuredClone(handoff)),
+      listHandoffEvents: vi.fn(async () => []),
+    },
     handoffs: { accept },
   } as unknown as AgentGatewayClient;
   return { client, acknowledge, heartbeat, accept };
@@ -153,6 +184,14 @@ function config() {
 }
 
 describe("AgentGateway", () => {
+  it("exposes only public Handoff query operations", () => {
+    const client = fakeClient().client;
+    expect(Object.keys(client.queries).sort()).toEqual([
+      "getHandoff", "listHandoffEvents",
+    ]);
+    expect(client.queries).not.toHaveProperty("persistence");
+  });
+
   it("delivers incoming Handoffs without implicit Ack or Accept", async () => {
     const fake = fakeClient();
     const gateway = new AgentGateway(fake.client, config());
@@ -166,6 +205,26 @@ describe("AgentGateway", () => {
     expect(fake.accept).not.toHaveBeenCalled();
     await incoming.value?.acknowledgeSignal("acknowledged");
     expect(fake.acknowledge).toHaveBeenCalledOnce();
+    expect(fake.accept).not.toHaveBeenCalled();
+    await session.close();
+  });
+
+  it("exposes the authorized Claim pool without automatically claiming or accepting", async () => {
+    const fake = fakeClient();
+    const claim = vi.fn();
+    Reflect.set(fake.client.handoffs, "claim", claim);
+    const gateway = new AgentGateway(fake.client, config());
+    const session = await gateway.start();
+
+    await expect(session.claimableHandoffs({ limit: 10 })).resolves.toEqual({
+      items: [claimableHandoff],
+    });
+    expect(fake.client.endpoints.listClaimableHandoffs).toHaveBeenCalledWith(
+      "endpoint_agent",
+      { limit: 10 },
+      {},
+    );
+    expect(claim).not.toHaveBeenCalled();
     expect(fake.accept).not.toHaveBeenCalled();
     await session.close();
   });
@@ -190,6 +249,142 @@ describe("AgentGateway", () => {
     const session = await gateway.start();
 
     await expect(session.closed).resolves.toEqual({ reason: "failed" });
+  });
+
+  it("keeps a terminal partition stream through an Inbox refresh and retires it only after a successful Ack", async () => {
+    let listCalls = 0;
+    let streamAborted = false;
+    const acknowledge = vi.fn(async (): Promise<AckResult> => ({ kind: "acknowledged", cursor: "cursor_terminal" }));
+    const client = {
+      endpoints: {
+        openSession: vi.fn(async () => structuredClone(endpointSession)),
+        heartbeat: vi.fn(async () => ({ ...endpointSession, heartbeat_sequence: 1 })),
+        closeSession: vi.fn(async () => ({ ...endpointSession, state: "closed" as const })),
+        listInboxPartitions: vi.fn(async () => ({
+          items: ++listCalls === 1 ? [{ partition_id: partitionId, latest_position: 2, active_handoff_count: 1 }] : [],
+        })),
+      },
+      subscriptions: {
+        get: vi.fn(async () => structuredClone(subscription)),
+        put: vi.fn(async () => structuredClone(subscription)),
+        acknowledgeDelivery: acknowledge,
+        async *stream(_id: string, _input: unknown, request?: { signal?: AbortSignal }) {
+          yield structuredClone(terminalDelivery);
+          await waitForAbort(request?.signal);
+          streamAborted = true;
+        },
+      },
+      queries: {
+        getHandoff: vi.fn(async () => structuredClone(terminalHandoff)),
+        listHandoffEvents: vi.fn(async () => []),
+      },
+      handoffs: { accept: vi.fn() },
+    } as unknown as AgentGatewayClient;
+    const gateway = new AgentGateway(client, { ...config(), inbox_refresh_ms: 1 });
+    const session = await gateway.start();
+    const incoming = await session.incoming()[Symbol.asyncIterator]().next();
+
+    await vi.waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(2));
+    expect(streamAborted).toBe(false);
+    await incoming.value?.acknowledgeSignal("acknowledged");
+    await vi.waitFor(() => expect(streamAborted).toBe(true));
+    await incoming.value?.acknowledgeSignal("acknowledged");
+    expect(acknowledge).toHaveBeenCalledTimes(2);
+    await session.close();
+  });
+
+  it("counts an inactive unacknowledged terminal stream against the hard partition cap", async () => {
+    const firstPartition = "handoff:handoff_a";
+    const secondPartition = "handoff:handoff_b";
+    const startedPartitions: string[] = [];
+    let listCalls = 0;
+    const firstDelivery: EventDelivery = {
+      ...terminalDelivery,
+      delivery_id: "delivery_a_terminal",
+      events: [{ ...terminalDelivery.events[0]!, wfhandoff: "handoff_a" }],
+    };
+    const client = {
+      endpoints: {
+        openSession: vi.fn(async () => structuredClone(endpointSession)),
+        heartbeat: vi.fn(async () => ({ ...endpointSession, heartbeat_sequence: 1 })),
+        closeSession: vi.fn(async () => ({ ...endpointSession, state: "closed" as const })),
+        listInboxPartitions: vi.fn(async () => ({
+          items: ++listCalls === 1
+            ? [{ partition_id: firstPartition, latest_position: 2, active_handoff_count: 1 }]
+            : [{ partition_id: secondPartition, latest_position: 1, active_handoff_count: 1 }],
+        })),
+      },
+      subscriptions: {
+        get: vi.fn(async () => structuredClone(subscription)),
+        put: vi.fn(async () => structuredClone(subscription)),
+        acknowledgeDelivery: vi.fn(async (): Promise<AckResult> => ({ kind: "acknowledged", cursor: "cursor_terminal" })),
+        async *stream(_id: string, input: { partitionId: string }, request?: { signal?: AbortSignal }) {
+          startedPartitions.push(input.partitionId);
+          if (input.partitionId === firstPartition) {
+            yield structuredClone(firstDelivery);
+          }
+          await waitForAbort(request?.signal);
+        },
+      },
+      queries: {
+        getHandoff: vi.fn(async (handoffId: string) => ({
+          ...terminalHandoff,
+          partition_id: `handoff:${handoffId}`,
+          handoff_id: handoffId,
+        })),
+        listHandoffEvents: vi.fn(async () => []),
+      },
+      handoffs: { accept: vi.fn() },
+    } as unknown as AgentGatewayClient;
+    const gateway = new AgentGateway(client, { ...config(), inbox_refresh_ms: 1, max_active_partitions: 1 });
+    const session = await gateway.start();
+    const incoming = await session.incoming()[Symbol.asyncIterator]().next();
+
+    await vi.waitFor(() => expect(listCalls).toBeGreaterThanOrEqual(2));
+    expect(startedPartitions).toEqual([firstPartition]);
+
+    await incoming.value?.acknowledgeSignal("acknowledged");
+    await vi.waitFor(() => expect(startedPartitions).toEqual([firstPartition, secondPartition]));
+    await session.close();
+  });
+
+  it("does not advance the Gateway resume cursor before an unacknowledged terminal Delivery can be drained after reconnect", async () => {
+    const streamInputs: unknown[] = [];
+    let connections = 0;
+    const client = {
+      endpoints: {
+        openSession: vi.fn(async () => structuredClone(endpointSession)),
+        heartbeat: vi.fn(async () => ({ ...endpointSession, heartbeat_sequence: 1 })),
+        closeSession: vi.fn(async () => ({ ...endpointSession, state: "closed" as const })),
+        listInboxPartitions: vi.fn(async () => ({ items: [{ partition_id: partitionId, latest_position: 2, active_handoff_count: 1 }] })),
+      },
+      subscriptions: {
+        get: vi.fn(async () => structuredClone(subscription)),
+        put: vi.fn(async () => structuredClone(subscription)),
+        acknowledgeDelivery: vi.fn(async (): Promise<AckResult> => ({ kind: "acknowledged", cursor: "cursor_terminal" })),
+        async *stream(_id: string, input: unknown, request?: { signal?: AbortSignal }) {
+          streamInputs.push(input);
+          if (++connections === 1) {
+            yield structuredClone(terminalDelivery);
+            return;
+          }
+          await waitForAbort(request?.signal);
+        },
+      },
+      queries: {
+        getHandoff: vi.fn(async () => structuredClone(terminalHandoff)),
+        listHandoffEvents: vi.fn(async () => []),
+      },
+      handoffs: { accept: vi.fn() },
+    } as unknown as AgentGatewayClient;
+    const gateway = new AgentGateway(client, { ...config(), inbox_refresh_ms: 1 });
+    const session = await gateway.start();
+
+    await session.incoming()[Symbol.asyncIterator]().next();
+    await vi.waitFor(() => expect(streamInputs).toHaveLength(2));
+    expect(streamInputs[1]).toMatchObject({ partitionId });
+    expect(streamInputs[1]).not.toHaveProperty("cursor");
+    await session.close();
   });
 });
 

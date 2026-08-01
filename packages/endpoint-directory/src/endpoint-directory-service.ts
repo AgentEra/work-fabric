@@ -1,12 +1,20 @@
+import { isDeepStrictEqual } from "node:util";
+
 import {
   EndpointStoreError,
   addUtcTimestampSeconds,
   type CapabilityDescriptor,
+  type CapabilitySummary,
   type EndpointActorRef,
   type EndpointAvailability,
+  type EndpointCapabilityCard,
+  type EndpointCapabilityContract,
+  type EndpointCapabilityPage,
   type EndpointDescriptor,
   type EndpointDirectoryStore,
   type EndpointDiscoveryPage,
+  type EndpointIdentityCard,
+  type EndpointIdentityPage,
   type EndpointRegistration,
   type EndpointSession,
   type StoredEndpointRegistration,
@@ -78,6 +86,37 @@ export interface EndpointDiscoveryInput {
   readonly limit?: number;
 }
 
+function identityCard(value: EndpointDescriptor): EndpointIdentityCard {
+  return {
+    endpoint_id: value.endpoint_id,
+    actor: structuredClone(value.actor),
+    endpoint_type: value.endpoint_type,
+    display_name: value.display_name,
+    protocol_versions: [...value.protocol_versions],
+    availability: value.availability,
+    lease: structuredClone(value.lease),
+  };
+}
+
+function capabilitySummary(value: CapabilityDescriptor): CapabilitySummary {
+  return {
+    capability_id: value.capability_id,
+    version: value.version,
+    name: value.name,
+    description: value.description,
+  };
+}
+
+function pageWithItems<T>(
+  page: EndpointDiscoveryPage,
+  items: readonly T[],
+): { readonly items: readonly T[]; readonly next_cursor?: string } {
+  return {
+    items,
+    ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }),
+  };
+}
+
 function publicRegistration(value: StoredEndpointRegistration): EndpointRegistration {
   const { tenant_id: _tenant, created_at: _created, updated_at: _updated, ...publicValue } = value;
   return publicValue;
@@ -121,6 +160,13 @@ export class EndpointDirectoryService {
     const existing = await this.dependencies.store.getRegistration(context.tenant_id, input.endpoint_id);
     if (existing !== null && !sameActor(existing.actor, input.actor)) {
       throw new EndpointDirectoryError("immutable_binding", "Endpoint Actor binding is immutable");
+    }
+    if (
+      existing !== null &&
+      existing.registration_version === input.registration_version &&
+      isDeepStrictEqual(publicRegistration(existing), input)
+    ) {
+      return publicRegistration(existing);
     }
     const now = this.dependencies.clock.now();
     try {
@@ -255,6 +301,47 @@ export class EndpointDirectoryService {
       throw new EndpointDirectoryError("invalid_request", "discovery limit is outside configured bounds");
     }
     return this.dependencies.store.discover({ ...input, tenant_id: context.tenant_id, limit, now: this.dependencies.clock.now() });
+  }
+
+  async discoverIdentities(
+    context: EndpointCallContext,
+    input: EndpointDiscoveryInput = {},
+  ): Promise<EndpointIdentityPage> {
+    const page = await this.discover(context, input);
+    return pageWithItems(page, page.items.map(identityCard));
+  }
+
+  async discoverCapabilityCards(
+    context: EndpointCallContext,
+    input: EndpointDiscoveryInput = {},
+  ): Promise<EndpointCapabilityPage> {
+    const page = await this.discover(context, input);
+    const items: EndpointCapabilityCard[] = page.items.map((endpoint) => ({
+      ...identityCard(endpoint),
+      capabilities: endpoint.capabilities.map(capabilitySummary),
+    }));
+    return pageWithItems(page, items);
+  }
+
+  async getCapability(
+    context: EndpointCallContext,
+    endpointId: string,
+    capabilityId: string,
+  ): Promise<EndpointCapabilityContract> {
+    assertOpaqueId(capabilityId, "capability_id");
+    const endpoint = await this.getEndpoint(context, endpointId);
+    const capability = endpoint.capabilities.find(
+      (candidate) => candidate.capability_id === capabilityId,
+    );
+    if (capability === undefined) {
+      throw new EndpointDirectoryError("not_found", "Endpoint Capability was not found");
+    }
+    return {
+      endpoint_id: endpoint.endpoint_id,
+      actor: structuredClone(endpoint.actor),
+      availability: endpoint.availability,
+      capability: structuredClone(capability),
+    };
   }
 
   private assertSessionDeclaration(

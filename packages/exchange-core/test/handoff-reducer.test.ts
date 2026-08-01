@@ -76,6 +76,16 @@ const capabilityPackage: HandoffPackage = {
   },
 };
 
+const poolClaimPackage: HandoffPackage = {
+  ...handoffPackage,
+  target: {
+    capability_requirement: {
+      capability_id: "software.implementation",
+      assignment_mode: "eligible_pool_claim",
+    },
+  },
+};
+
 const storedAuthorityScope: JsonObject = {
   delegation_id: "delegation_01",
   scopes: ["repo:write"],
@@ -366,6 +376,48 @@ describe("Handoff event replay", () => {
     expect(state?.current_responsible_actor).toBeNull();
   });
 
+  it.each([
+    {
+      event_type: "workfabric.handoff.expired.v1",
+      handoff_id: "handoff_pool",
+      occurred_at: "2026-07-14T08:00:00Z",
+    },
+    {
+      event_type: "workfabric.handoff.cancelled.v1",
+      handoff_id: "handoff_pool",
+      reason: [{ kind: "text", text: "No longer required" }],
+      occurred_at: "2026-07-14T07:00:30Z",
+    },
+  ] satisfies readonly HandoffEvent[])("clears an active Claim on $event_type", (terminalEvent) => {
+    const poolOpened: HandoffEvent = {
+      event_type: "workfabric.handoff.claim_pool_opened.v1",
+      handoff_id: "handoff_pool",
+      thread_id: "thread_01",
+      initiator,
+      package: poolClaimPackage,
+      parent_handoff_id: null,
+      occurred_at: "2026-07-14T01:00:00Z",
+    };
+    const claimed: HandoffEvent = {
+      event_type: "workfabric.handoff.claimed.v1",
+      handoff_id: "handoff_pool",
+      claim: {
+        claim_id: "claim_01",
+        actor: recipient,
+        endpoint_id: "endpoint_recipient",
+        fencing_token: 1,
+        heartbeat_sequence: 0,
+        accepted_lease_seconds: 60,
+        expires_at: "2026-07-14T07:01:00Z",
+        renew_after: "2026-07-14T07:00:40Z",
+      },
+      occurred_at: "2026-07-14T07:00:00Z",
+    };
+
+    const state = replayHandoff(versioned(poolOpened, claimed, terminalEvent));
+    expect(state?.active_claim).toBeNull();
+  });
+
   it("replays result_returned -> rework_requested -> accepted", () => {
     const reworkRequested: HandoffEvent = {
       event_type: "workfabric.handoff.rework_requested.v1",
@@ -516,6 +568,64 @@ describe("Handoff stored JSON boundary", () => {
   const allEvents: readonly HandoffEvent[] = [
     offered(),
     targetResolutionRequested(),
+    {
+      event_type: "workfabric.handoff.claim_pool_opened.v1",
+      handoff_id: "handoff_pool",
+      thread_id: "thread_01",
+      initiator,
+      package: poolClaimPackage,
+      parent_handoff_id: null,
+      occurred_at: "2026-07-14T01:00:00Z",
+    },
+    {
+      event_type: "workfabric.handoff.claimed.v1",
+      handoff_id: "handoff_pool",
+      claim: {
+        claim_id: "claim_01",
+        actor: recipient,
+        endpoint_id: "endpoint_recipient",
+        fencing_token: 1,
+        heartbeat_sequence: 0,
+        accepted_lease_seconds: 60,
+        expires_at: "2026-07-14T01:01:00Z",
+        renew_after: "2026-07-14T01:00:40Z",
+      },
+      occurred_at: "2026-07-14T01:00:00Z",
+    },
+    {
+      event_type: "workfabric.handoff.claim_renewed.v1",
+      handoff_id: "handoff_pool",
+      claim: {
+        claim_id: "claim_01",
+        actor: recipient,
+        endpoint_id: "endpoint_recipient",
+        fencing_token: 1,
+        heartbeat_sequence: 1,
+        accepted_lease_seconds: 60,
+        expires_at: "2026-07-14T01:01:30Z",
+        renew_after: "2026-07-14T01:01:10Z",
+      },
+      occurred_at: "2026-07-14T01:00:30Z",
+    },
+    {
+      event_type: "workfabric.handoff.claim_released.v1",
+      handoff_id: "handoff_pool",
+      claim_id: "claim_01",
+      actor: recipient,
+      endpoint_id: "endpoint_recipient",
+      fencing_token: 1,
+      heartbeat_sequence: 2,
+      occurred_at: "2026-07-14T01:00:35Z",
+    },
+    {
+      event_type: "workfabric.handoff.claim_expired.v1",
+      handoff_id: "handoff_pool",
+      claim_id: "claim_01",
+      actor: recipient,
+      endpoint_id: "endpoint_recipient",
+      fencing_token: 1,
+      occurred_at: "2026-07-14T01:01:30Z",
+    },
     targetResolved(),
     {
       event_type: "workfabric.handoff.target_unavailable.v1",
@@ -594,6 +704,17 @@ describe("Handoff stored JSON boundary", () => {
     expect(decoded).toEqual(state);
     expect(decoded.package.target).toEqual(capabilityPackage.target);
     expect(decoded.target_binding).toEqual(state.target_binding);
+  });
+
+  it("round-trips an active Claim without losing its lease or fencing state", () => {
+    const state = replayHandoff(versioned(
+      allEvents[2]!,
+      allEvents[3]!,
+    ));
+    expect(state).not.toBeNull();
+    if (state === null) throw new Error("Expected claimed state");
+
+    expect(handoffStateFromJson(handoffStateToJson(state))).toEqual(state);
   });
 
   it.each(allEvents)("round-trips $event_type", (event) => {

@@ -12,12 +12,100 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import type {
+  FeishuLongConnectionAcceptance,
+  FeishuLongConnectionClient,
+  FeishuLongConnectionHandler,
+  FeishuLongConnectionStatus,
+} from "@work-fabric/connector-feishu";
+import type { JsonObject } from "@work-fabric/exchange-spi";
 import { describe, expect, it } from "vitest";
-import { collectDeclaredSecretPaths, loadNodeConfiguration } from "../src/index.js";
+import {
+  collectDeclaredSecretPaths,
+  composeNodeService,
+  loadNodeConfiguration,
+} from "../src/index.js";
 
 const execFileAsync = promisify(execFile);
 
+class CapturingLongConnection implements FeishuLongConnectionClient {
+  private handler: FeishuLongConnectionHandler | undefined;
+  private current: FeishuLongConnectionStatus = {
+    state: "connecting",
+    code: "connecting",
+    reconnect_attempts: 0,
+    changed_at: "2026-07-27T00:00:00.000Z",
+  };
+
+  async start(handler: FeishuLongConnectionHandler): Promise<void> {
+    this.handler = handler;
+    this.current = { ...this.current, state: "connected", code: "connected" };
+  }
+
+  status(): FeishuLongConnectionStatus { return { ...this.current }; }
+
+  async stop(): Promise<void> {
+    this.current = { ...this.current, state: "stopped", code: "stopped" };
+  }
+
+  emit(event: JsonObject): Promise<FeishuLongConnectionAcceptance> {
+    if (this.handler === undefined) throw new Error("long_connection_not_started");
+    return this.handler(event);
+  }
+}
+
+async function waitFor<T>(read: () => T | undefined, timeoutMs = 4_000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = read();
+    if (value !== undefined) return value;
+    if (Date.now() >= deadline) throw new Error("timed_out_waiting_for_example_command");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+}
+
 describe("global node configuration", () => {
+  it("selects only the work-fabric application from a shared configuration bundle", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wf-config-bundle-"));
+    const path = join(directory, "work-fabric.yaml");
+    await writeFile(path, `api_version: workfabric.config-bundle/v1
+applications:
+  work-fabric:
+    api_version: workfabric.config/v1
+    service:
+      storage_profile: memory-demo
+      development_mode: true
+      tenant_id: tenant-local
+      exchange_id: exchange-local
+      cursor_secret: \${CURSOR_SECRET}
+      identities:
+        - authentication_evidence: {bearer_token: token}
+          principal:
+            principal_id: p
+            tenant_id: tenant-local
+            actor_claims:
+              - {actor_id: a, actor_type: human, endpoint_ids: [e]}
+            attributes: {}
+      authority_rules:
+        - {tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}
+  daily-assistant:
+    api_version: workfabric.config/v1
+    service:
+      sibling_secret: \${MUST_NOT_BE_RESOLVED}
+`, "utf8");
+
+    try {
+      const loaded = await loadNodeConfiguration({
+        WORK_FABRIC_CONFIG: path,
+        CURSOR_SECRET: "x".repeat(32),
+      });
+      expect(loaded.service.tenant_id).toBe("tenant-local");
+      expect(loaded.revision).toMatch(/#work-fabric$/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("starts the real SQLite long-connection example from an isolated repository root", async () => {
     const repository = await mkdtemp(join(tmpdir(), "wf-feishu-checkout-"));
     const source = fileURLToPath(new URL(
@@ -58,6 +146,8 @@ describe("global node configuration", () => {
             FEISHU_APP_SECRET: "synthetic-app-secret",
             FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
             INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
+            WORK_FABRIC_ADMIN_TOKEN: "synthetic-admin-token",
+            WORK_FABRIC_TEST_LISTEN_PORT: "0",
           },
         },
       );
@@ -86,6 +176,7 @@ describe("global node configuration", () => {
       FEISHU_APP_SECRET: "synthetic-app-secret",
       FEISHU_CONNECTOR_ACCESS_TOKEN: "synthetic-connector-token",
       INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
+      WORK_FABRIC_ADMIN_TOKEN: "synthetic-admin-token",
     });
 
     expect(loaded.service).toMatchObject({
@@ -104,7 +195,116 @@ describe("global node configuration", () => {
     expect(plugin).not.toHaveProperty("credentials.verification_token");
     expect(plugin).not.toHaveProperty("credentials.encrypt_key");
     expect(plugin).not.toHaveProperty("inbound.route_id");
+    expect(loaded.agent_runtime_authority.grants["daily-assistant"]).toMatchObject({
+      principal_id: "principal-intake-agent",
+      actor_id: "actor-intake-agent",
+      endpoint_id: "endpoint-intake-agent",
+      subscription_id: "subscription-intake-agent",
+    });
   });
+
+  it("authenticates the checked-in connector bootstrap while admitting a real long-connection mention", async () => {
+    const path = fileURLToPath(new URL(
+      "../../../examples/config/service-feishu-long-connection.yaml",
+      import.meta.url,
+    ));
+    const connectorToken = "checked-in-connector-token";
+    const loaded = await loadNodeConfiguration({
+      WORK_FABRIC_CONFIG: path,
+      WORK_FABRIC_CURSOR_SECRET: "x".repeat(32),
+      WORK_FABRIC_ADMISSION_FINGERPRINT_KEY: "f".repeat(32),
+      WORK_FABRIC_ADMISSION_GRANT_KEY: "g".repeat(32),
+      FEISHU_APP_ID: "cli_0123456789abcdef",
+      FEISHU_APP_SECRET: "synthetic-app-secret",
+      FEISHU_CONNECTOR_ACCESS_TOKEN: connectorToken,
+      INTAKE_AGENT_ACCESS_TOKEN: "synthetic-intake-token",
+      WORK_FABRIC_ADMIN_TOKEN: "synthetic-admin-token",
+    });
+    const longConnection = new CapturingLongConnection();
+    const commands: Array<{ readonly authorization: string | null; readonly status: number }> = [];
+    const databaseDirectory = await mkdtemp(join(tmpdir(), "wf-checked-in-feishu-example-"));
+    const systemFetch = globalThis.fetch.bind(globalThis);
+    const fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.hostname === "open.feishu.cn") {
+        if (url.pathname.includes("tenant_access_token")) {
+          return new Response(JSON.stringify({ code: 0, tenant_access_token: "tenant-token", expire: 7_200 }));
+        }
+        if (url.pathname.includes("/contact/v3/users/batch")) {
+          return new Response(JSON.stringify({
+            code: 0,
+            data: { items: [{ open_id: "ou-member-example", status: { is_activated: true, is_exited: false } }] },
+          }));
+        }
+        throw new Error(`unexpected_feishu_request_${url.pathname}`);
+      }
+      const response = await systemFetch(request);
+      if (url.pathname === "/v1/commands") {
+        commands.push({ authorization: request.headers.get("authorization"), status: response.status });
+      }
+      return response;
+    }) as typeof globalThis.fetch;
+    const service = await composeNodeService({
+      ...loaded.service,
+      listen: { ...loaded.service.listen, port: 0 },
+      sqlite: {
+        ...loaded.service.sqlite!,
+        location: join(databaseDirectory, "work-fabric.db"),
+      },
+    }, {
+      configuration_revision: loaded.revision,
+      plugins: loaded.plugins,
+      admission: loaded.admission,
+      fetch,
+      feishu_long_connection_client_factory: { create: () => longConnection },
+    });
+    await service.listen();
+    await service.start();
+    try {
+      await expect(longConnection.emit({
+        schema: "2.0",
+        header: {
+          event_id: "checked-in-example-mention",
+          event_type: "im.message.receive_v1",
+          create_time: "1784505600000",
+          tenant_key: "tenant-key-example",
+        },
+        event: {
+          sender: { sender_id: { open_id: "ou-member-example" }, sender_type: "user" },
+          message: {
+            message_id: "om-checked-in-example-mention",
+            chat_id: "oc-origin-example",
+            chat_type: "group",
+            message_type: "text",
+            content: '{"text":"@_bot create a requirement"}',
+            mentions: [{ key: "@_bot", id: { open_id: "ou-bot-example" }, name: "Work Fabric" }],
+          },
+        },
+      })).resolves.toMatchObject({ accepted: true, duplicate: false });
+
+      const command = await waitFor(() => commands[0]);
+      expect(command).toMatchObject({ status: 200 });
+      expect(command.authorization).not.toBe(`Bearer ${connectorToken}`);
+
+      const ingress = await service.http.dispatch({
+        method: "GET",
+        url: "/v1/operations/connectors/feishu-primary/ingress",
+        headers: {
+          authorization: `Bearer ${connectorToken}`,
+          "x-wf-actor-id": "actor-feishu-user",
+          "x-wf-endpoint-id": "endpoint-feishu-user",
+        },
+      });
+      expect(ingress.status_code).toBe(200);
+      expect(ingress.json()).toMatchObject({
+        items: [{ external_event_id: "checked-in-example-mention", state: "completed" }],
+      });
+    } finally {
+      await service.close();
+      await rm(databaseDirectory, { recursive: true, force: true });
+    }
+  }, 10_000);
 
   it("loads service and plugin instances from one YAML Provider with declared environment secrets", async () => {
     const path = join(await mkdtemp(join(tmpdir(), "wf-config-")), "work-fabric.yaml");
@@ -171,6 +371,86 @@ plugins:
     expect(loaded.revision).toMatch(/^sha256:/);
   });
 
+  it("validates Debug Channel configuration and resolves only its declared token", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wf-config-debug-"));
+    const path = join(directory, "work-fabric.yaml");
+    await writeFile(path, `
+api_version: workfabric.config/v1
+service:
+  storage_profile: memory-demo
+  development_mode: true
+  tenant_id: tenant-local
+  exchange_id: exchange-local
+  cursor_secret: \${CURSOR_SECRET}
+  identities:
+    - authentication_evidence: { bearer_token: "\${DEBUG_TOKEN}" }
+      principal:
+        principal_id: principal-human
+        tenant_id: tenant-local
+        actor_claims:
+          - { actor_id: actor-human, actor_type: human, endpoint_ids: [endpoint-human] }
+        attributes: {}
+  authority_rules:
+    - { tenant_id: tenant-local, principal_id: principal-human, actor_id: actor-human, actor_type: human, endpoint_id: endpoint-human, action: workfabric.handoff.offer.v1, resource_id: null }
+plugins:
+  instances:
+    debug-local:
+      type: collaboration-channel.debug
+      enabled: true
+      config:
+        connector_id: debug-local
+        external_tenant_id: debug-local
+        listen: { host: 127.0.0.1, port: 8791 }
+        credentials: { bearer_token: "\${DEBUG_TOKEN}" }
+        intake_target: { actor_id: actor-agent, endpoint_id: endpoint-agent }
+        participants:
+          internal-user:
+            mode: static
+            external_subject_type: human
+            external_subject_id: local-human
+            actor_id: actor-human
+            actor_type: human
+            endpoint_id: endpoint-human
+        limits:
+          max_request_bytes: 262144
+          max_content_parts: 32
+          max_text_bytes: 131072
+          max_json_depth: 32
+          max_page_size: 100
+        retention: { max_age_days: 14, cleanup_batch_size: 500 }
+`, "utf8");
+    try {
+      const loaded = await loadNodeConfiguration({
+        WORK_FABRIC_CONFIG: path,
+        CURSOR_SECRET: "x".repeat(32),
+        DEBUG_TOKEN: "local-debug-token",
+      });
+      expect(loaded.plugins["debug-local"]?.config).toMatchObject({
+        credentials: { bearer_token: "local-debug-token" },
+        worker: { max_attempts: 8 },
+      });
+      expect(collectDeclaredSecretPaths({
+        service: {
+          cursor_secret: "${CURSOR_SECRET}",
+          identities: [],
+        },
+        plugins: {
+          instances: {
+            "debug-local": {
+              type: "collaboration-channel.debug",
+              enabled: true,
+              config: loaded.plugins["debug-local"]?.config,
+            },
+          },
+        },
+      })).toContain(
+        "plugins.instances.debug-local.config.credentials.bearer_token",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not resolve or validate a disabled unknown plugin", async () => {
     const path = join(await mkdtemp(join(tmpdir(), "wf-config-disabled-")), "work-fabric.yaml");
     await writeFile(path, `api_version: workfabric.config/v1\nservice:\n  storage_profile: memory-demo\n  development_mode: true\n  tenant_id: tenant-local\n  exchange_id: exchange-local\n  cursor_secret: \${CURSOR_SECRET}\n  identities: [{authentication_evidence: {bearer_token: token}, principal: {principal_id: p, tenant_id: tenant-local, actor_claims: [{actor_id: a, actor_type: human, endpoint_ids: [e]}], attributes: {}}}]\n  authority_rules: [{tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}]\nplugins:\n  instances:\n    future:\n      type: future.channel\n      enabled: false\n      config: {secret: "\${MISSING}"}\n`, "utf8");
@@ -183,6 +463,37 @@ plugins:
     const loaded = await loadNodeConfiguration({ WORK_FABRIC_CONFIG: path, CURSOR_SECRET: "x".repeat(32) });
     expect(loaded.admission).toEqual({ policies: {}, evidence_providers: {} });
     expect(() => { (loaded.admission.policies as Record<string, unknown>).later = {}; }).toThrow();
+  });
+
+  it("validates and exposes the optional Agent Runtime authority grants", async () => {
+    const path = join(await mkdtemp(join(tmpdir(), "wf-config-agent-runtime-authority-")), "work-fabric.yaml");
+    await writeFile(path, `api_version: workfabric.config/v1
+service:
+  storage_profile: memory-demo
+  development_mode: true
+  tenant_id: tenant-local
+  exchange_id: exchange-local
+  cursor_secret: \${CURSOR_SECRET}
+  identities: [{authentication_evidence: {bearer_token: token}, principal: {principal_id: p, tenant_id: tenant-local, actor_claims: [{actor_id: a, actor_type: human, endpoint_ids: [e]}], attributes: {}}}]
+  authority_rules: [{tenant_id: tenant-local, principal_id: p, actor_id: a, actor_type: human, endpoint_id: e, action: workfabric.operations.health.read.v1, resource_id: null}]
+agent_runtime_authority:
+  grants:
+    daily-assistant:
+      tenant_id: tenant-local
+      principal_id: principal-intake-agent
+      actor_id: actor-intake-agent
+      endpoint_id: endpoint-intake-agent
+      subscription_id: subscription-intake-agent
+`, "utf8");
+    const loaded = await loadNodeConfiguration({ WORK_FABRIC_CONFIG: path, CURSOR_SECRET: "x".repeat(32) });
+    expect(loaded.agent_runtime_authority.grants["daily-assistant"]).toEqual({
+      tenant_id: "tenant-local",
+      principal_id: "principal-intake-agent",
+      actor_id: "actor-intake-agent",
+      endpoint_id: "endpoint-intake-agent",
+      subscription_id: "subscription-intake-agent",
+    });
+    expect(() => { (loaded.agent_runtime_authority.grants as Record<string, unknown>).later = {}; }).toThrow();
   });
 
   it("resolves every service Admission secret through the global secret Provider", async () => {

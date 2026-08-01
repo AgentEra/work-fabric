@@ -51,6 +51,10 @@ export interface FeishuCommonInboundConfig {
   };
   readonly accept_within_seconds: number;
   readonly result_due_within_seconds: number;
+  readonly delegation: {
+    readonly scopes: readonly string[];
+    readonly may_redelegate: boolean;
+  };
 }
 
 export interface FeishuWebhookInboundConfig extends FeishuCommonInboundConfig {
@@ -76,10 +80,20 @@ export interface FeishuPluginWorkerConfig {
   readonly max_attempts: number;
 }
 
+export type FeishuConversationContextConfig =
+  | { readonly mode: "disabled" | "agent_managed" }
+  | {
+      readonly mode: "bootstrap";
+      readonly lookback_seconds: number;
+      readonly maximum_messages: number;
+      readonly maximum_bytes: number;
+    };
+
 interface FeishuPluginConfigBase {
   readonly connector_id: string;
   readonly external_tenant_id: string;
   readonly bot_open_id: string;
+  readonly conversation_context: FeishuConversationContextConfig;
   readonly outbound: FeishuPluginOutboundConfig;
   readonly worker: FeishuPluginWorkerConfig;
 }
@@ -152,6 +166,13 @@ function id(value: unknown, field: string, maximum = 255): string {
 }
 function bool(value: unknown, field: string): boolean { if (typeof value !== "boolean") throw new TypeError(`${field} is invalid`); return value; }
 function integer(value: unknown, field: string, fallback: number, max: number): number { const n = value ?? fallback; if (!Number.isSafeInteger(n) || (n as number) <= 0 || (n as number) > max) throw new RangeError(`${field} is outside its bound`); return n as number; }
+function rangedInteger(value: unknown, field: string, fallback: number, minimum: number, maximum: number): number {
+  const result = value ?? fallback;
+  if (!Number.isSafeInteger(result) || (result as number) < minimum || (result as number) > maximum) {
+    throw new RangeError(`${field} is outside its bound`);
+  }
+  return result as number;
+}
 function namedRecord(value: unknown, field: string, maximum: number): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`${field} must be an object`);
   const result = value as Record<string, unknown>;
@@ -168,20 +189,23 @@ function stringList(value: unknown, field: string): readonly string[] {
 }
 
 export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
-  const root = object(value, "Feishu plugin config", ["connector_id", "external_tenant_id", "bot_open_id", "credentials", "inbound", "outbound", "identities", "identity_admission", "worker"]);
+  const root = object(value, "Feishu plugin config", ["connector_id", "external_tenant_id", "bot_open_id", "credentials", "inbound", "outbound", "conversation_context", "identities", "identity_admission", "worker"]);
   const identitiesDescriptor = ownDataDescriptor(root, "identities", "identities");
   const admissionDescriptor = ownDataDescriptor(root, "identity_admission", "identity_admission");
   if ((identitiesDescriptor === undefined) === (admissionDescriptor === undefined)) throw new TypeError("exactly one of identities or identity_admission is required");
-  const inboundCandidate = object(root.inbound, "inbound", ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]);
+  const inboundCandidate = object(root.inbound, "inbound", ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds", "delegation"]);
   if (inboundCandidate.transport !== "webhook" && inboundCandidate.transport !== "long_connection") throw new TypeError("inbound.transport is invalid");
   const transport = inboundCandidate.transport;
   const inbound = object(root.inbound, "inbound", transport === "webhook"
-    ? ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]
-    : ["enabled", "transport", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds"]);
+    ? ["enabled", "transport", "route_id", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds", "delegation"]
+    : ["enabled", "transport", "mention_only", "intake_target", "accept_within_seconds", "result_due_within_seconds", "delegation"]);
   const credentials = object(root.credentials, "credentials", transport === "webhook"
     ? ["app_id", "app_secret", "verification_token", "encrypt_key", "work_fabric_access_token"]
     : ["app_id", "app_secret", "work_fabric_access_token"]);
   const target = object(inbound.intake_target, "inbound.intake_target", ["actor_id", "endpoint_id"]);
+  const delegation = inbound.delegation === undefined
+    ? { scopes: ["work:read"], may_redelegate: false }
+    : object(inbound.delegation, "inbound.delegation", ["scopes", "may_redelegate"]);
   if (inbound.mention_only !== true) throw new TypeError("inbound.mention_only must be true");
   const outbound = object(root.outbound, "outbound", ["enabled", "default_render_mode", "channels", "subscriptions"]);
   if (outbound.default_render_mode !== "text" && outbound.default_render_mode !== "card") throw new TypeError("outbound.default_render_mode is invalid");
@@ -222,8 +246,57 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
     participantConfig = { identity_admission: { policy_id: id(identityAdmission.policy_id, "identity_admission.policy_id", 128) } };
   }
   const worker = object(root.worker, "worker", ["poll_interval_ms", "lease_seconds", "batch_limit", "max_attempts"]);
+  const conversationContext = object(
+    root.conversation_context ?? {},
+    "conversation_context",
+    ["mode", "enabled", "lookback_seconds", "maximum_messages", "maximum_bytes"],
+  );
+  if (
+    conversationContext.mode !== undefined &&
+    conversationContext.enabled !== undefined
+  ) {
+    throw new TypeError(
+      "conversation_context cannot combine mode with legacy enabled",
+    );
+  }
+  let conversationContextMode: FeishuConversationContextConfig["mode"];
+  if (conversationContext.mode === undefined) {
+    conversationContextMode = conversationContext.enabled === undefined
+      ? "disabled"
+      : bool(conversationContext.enabled, "conversation_context.enabled")
+        ? "bootstrap"
+        : "disabled";
+  } else if (
+    conversationContext.mode === "disabled" ||
+    conversationContext.mode === "bootstrap" ||
+    conversationContext.mode === "agent_managed"
+  ) {
+    conversationContextMode = conversationContext.mode;
+  } else {
+    throw new TypeError("conversation_context.mode is invalid");
+  }
+  if (
+    conversationContextMode !== "bootstrap" &&
+    (
+      conversationContext.lookback_seconds !== undefined ||
+      conversationContext.maximum_messages !== undefined ||
+      conversationContext.maximum_bytes !== undefined
+    )
+  ) {
+    throw new TypeError(
+      "conversation_context bounds are available only in bootstrap mode",
+    );
+  }
   const base: FeishuPluginConfigBase = {
     connector_id: id(root.connector_id, "connector_id", 128), external_tenant_id: id(root.external_tenant_id, "external_tenant_id"), bot_open_id: id(root.bot_open_id, "bot_open_id"),
+    conversation_context: conversationContextMode === "bootstrap"
+      ? {
+          mode: "bootstrap",
+          lookback_seconds: rangedInteger(conversationContext.lookback_seconds, "conversation_context.lookback_seconds", 86_400, 60, 604_800),
+          maximum_messages: rangedInteger(conversationContext.maximum_messages, "conversation_context.maximum_messages", 20, 1, 50),
+          maximum_bytes: rangedInteger(conversationContext.maximum_bytes, "conversation_context.maximum_bytes", 65_536, 1_024, 131_072),
+        }
+      : { mode: conversationContextMode },
     outbound: { enabled: bool(outbound.enabled, "outbound.enabled"), default_render_mode: outbound.default_render_mode, channels, subscriptions },
     worker: { poll_interval_ms: integer(worker.poll_interval_ms, "worker.poll_interval_ms", 1000, 60_000), lease_seconds: integer(worker.lease_seconds, "worker.lease_seconds", 30, 3600), batch_limit: integer(worker.batch_limit, "worker.batch_limit", 100, 1000), max_attempts: integer(worker.max_attempts, "worker.max_attempts", 8, 100) },
   };
@@ -233,6 +306,10 @@ export function validateFeishuPluginConfig(value: unknown): FeishuPluginConfig {
     intake_target: { actor_id: id(target.actor_id, "inbound.intake_target.actor_id", 128), endpoint_id: id(target.endpoint_id, "inbound.intake_target.endpoint_id", 128) },
     accept_within_seconds: integer(inbound.accept_within_seconds, "inbound.accept_within_seconds", 86_400, 2_592_000),
     result_due_within_seconds: integer(inbound.result_due_within_seconds, "inbound.result_due_within_seconds", 604_800, 31_536_000),
+    delegation: {
+      scopes: stringList(delegation.scopes, "inbound.delegation.scopes"),
+      may_redelegate: bool(delegation.may_redelegate, "inbound.delegation.may_redelegate"),
+    },
   } satisfies FeishuCommonInboundConfig;
   const commonCredentials = {
     app_id: id(credentials.app_id, "credentials.app_id", 512),

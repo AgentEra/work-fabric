@@ -73,6 +73,15 @@ const longConnectionBody: JsonObject = {
   },
 };
 
+const channelSnapshotSource = () => ({
+  manifest: {
+    profile: "channel.handoff-snapshot-source.v1",
+    adapter: "fake",
+    capabilities: {},
+  },
+  async get() { return { kind: "not_found" as const }; },
+});
+
 function participantClaim(ingressId = "ingress-admission-1"): ConnectorIngressClaim {
   return {
     ingress_id: ingressId,
@@ -138,6 +147,7 @@ function createLongConnectionFixture(options: {
   const services = new Map<string, unknown>([
     ["workfabric.tenant_id", "tenant-1"],
     ["channel.routes", new MemoryChannelRouteStore()],
+    ["channel.handoff_snapshot_source", channelSnapshotSource()],
     ["exchange.subscriptions", new MemorySubscriptionStore()],
     ["connector.ingress", ingress],
     ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -166,6 +176,56 @@ afterEach(() => {
 });
 
 describe("FeishuPluginFactory", () => {
+  it("composes enabled conversation context through an injected Provider factory", async () => {
+    const fixture = createLongConnectionFixture();
+    const materializer = { materialize: vi.fn() };
+    const create = vi.fn(() => materializer);
+    const context = {
+      ...fixture.context,
+      service: {
+        get<T>(key: string): T {
+          if (key === "feishu.conversation_context_provider_factory") {
+            return { create } as T;
+          }
+          return fixture.context.service.get<T>(key);
+        },
+      },
+    };
+    const configured = {
+      ...longConnectionConfig(),
+      conversation_context: { enabled: true },
+    };
+
+    await new FeishuPluginFactory().create(context, {
+      instance_id: "feishu-primary",
+      type: "collaboration-channel.feishu",
+      config: configured,
+    });
+
+    expect(create).toHaveBeenCalledWith({
+      api: expect.any(Object),
+      credential_ref: "feishu:feishu-primary",
+      now: expect.any(Function),
+    });
+  });
+
+  it("keeps Agent-managed history retrieval out of the Channel composition", async () => {
+    const fixture = createLongConnectionFixture();
+
+    await new FeishuPluginFactory().create(fixture.context, {
+      instance_id: "feishu-primary",
+      type: "collaboration-channel.feishu",
+      config: {
+        ...longConnectionConfig(),
+        conversation_context: { mode: "agent_managed" },
+      },
+    });
+
+    expect(fixture.requested).not.toContain(
+      "feishu.conversation_context_provider_factory",
+    );
+  });
+
   it("keeps legacy exact mapping local and never creates a representation grant", async () => {
     const resolver = new LegacyFeishuParticipantResolver({
       tenant_id: "tenant-1",
@@ -476,6 +536,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", subscriptions],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -658,6 +719,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", subscriptions],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -695,6 +757,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", new MemorySubscriptionStore()],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -781,6 +844,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", new MemorySubscriptionStore()],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],
@@ -808,6 +872,7 @@ describe("FeishuPluginFactory", () => {
     const services = new Map<string, unknown>([
       ["workfabric.tenant_id", "tenant-1"],
       ["channel.routes", new MemoryChannelRouteStore()],
+      ["channel.handoff_snapshot_source", channelSnapshotSource()],
       ["exchange.subscriptions", subscriptions],
       ["connector.ingress", new MemoryConnectorIngressStore()],
       ["connector.command_sink", { manifest: { profile: "connector.command-sink.v1", adapter: "fake", capabilities: {} }, async execute() { return { kind: "accepted" as const, receipt_id: "r", event_ids: [] }; } }],

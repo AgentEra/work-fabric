@@ -11,8 +11,15 @@ import {
 import type {
   CapabilityDescriptor,
   EndpointAvailability,
+  EndpointCapabilityCard,
+  EndpointCapabilityContract,
+  EndpointCapabilityPage,
+  EndpointClaimableHandoff,
+  EndpointClaimableHandoffPage,
   EndpointDescriptor,
   EndpointDiscoveryPage,
+  EndpointIdentityCard,
+  EndpointIdentityPage,
   EndpointInboxPartitionPage,
   EndpointRegistration,
   EndpointSession,
@@ -99,6 +106,31 @@ function endpointRegistration(value: unknown): EndpointRegistration {
 function endpointDescriptor(value: unknown): EndpointDescriptor {
   const result = decodeObject<EndpointDescriptor>(value);
   identifier(result.endpoint_id, "endpoint_id");
+  return result;
+}
+
+function endpointIdentityCard(value: unknown): EndpointIdentityCard {
+  const result = decodeObject<EndpointIdentityCard>(value);
+  identifier(result.endpoint_id, "endpoint_id");
+  return result;
+}
+
+function endpointCapabilityCard(value: unknown): EndpointCapabilityCard {
+  const result = decodeObject<EndpointCapabilityCard>(value);
+  identifier(result.endpoint_id, "endpoint_id");
+  if (!Array.isArray(result.capabilities)) {
+    throw new TypeError("capabilities must be an array");
+  }
+  return result;
+}
+
+function endpointCapabilityContract(value: unknown): EndpointCapabilityContract {
+  const result = decodeObject<EndpointCapabilityContract>(value);
+  identifier(result.endpoint_id, "endpoint_id");
+  const capability = decodeObject<{ readonly capability_id: string }>(
+    result.capability,
+  );
+  identifier(capability.capability_id, "capability_id");
   return result;
 }
 
@@ -196,6 +228,50 @@ export class EndpointClient {
     });
   }
 
+  discoverIdentities(
+    input: EndpointDiscoveryInput = {},
+    options: RequestOptions = {},
+  ): Promise<EndpointIdentityPage> {
+    return this.discoverProgressively(
+      "identity",
+      input,
+      options,
+      endpointIdentityCard,
+    );
+  }
+
+  discoverCapabilityCards(
+    input: EndpointDiscoveryInput = {},
+    options: RequestOptions = {},
+  ): Promise<EndpointCapabilityPage> {
+    return this.discoverProgressively(
+      "summary",
+      input,
+      options,
+      endpointCapabilityCard,
+    );
+  }
+
+  getCapability(
+    endpointId: string,
+    capabilityId: string,
+    options: RequestOptions = {},
+  ): Promise<EndpointCapabilityContract> {
+    return this.transport.request({
+      method: "GET",
+      path: [
+        "v1",
+        "endpoints",
+        identifier(endpointId, "endpointId"),
+        "capabilities",
+        identifier(capabilityId, "capabilityId"),
+      ],
+      retry: "query",
+      ...requestOptions(this.representation, options),
+      decode: endpointCapabilityContract,
+    });
+  }
+
   openSession(
     endpointId: string,
     input: EndpointSessionOpenInput,
@@ -261,6 +337,73 @@ export class EndpointClient {
       decode: (value) => page(value, (item: { readonly partition_id: string }) =>
         identifier(item.partition_id, "partition_id"),
       ) as EndpointInboxPartitionPage,
+    });
+  }
+
+  listClaimableHandoffs(
+    endpointId: string,
+    input: EndpointInboxPartitionInput = {},
+    options: RequestOptions = {},
+  ): Promise<EndpointClaimableHandoffPage> {
+    const limit = positive(input.limit, "limit");
+    return this.transport.request({
+      method: "GET",
+      path: [
+        "v1",
+        "endpoints",
+        identifier(endpointId, "endpointId"),
+        "claimable-handoffs",
+      ],
+      query: {
+        ...(input.cursor === undefined
+          ? {}
+          : { cursor: bounded(input.cursor, "cursor") }),
+        ...(limit === undefined ? {} : { limit }),
+      },
+      retry: "query",
+      ...requestOptions(this.representation, options),
+      decode: (value) => page<EndpointClaimableHandoff>(
+        value,
+        (item) => identifier(item.handoff_id, "handoff_id"),
+      ) as EndpointClaimableHandoffPage,
+    });
+  }
+
+  private discoverProgressively<T extends EndpointIdentityCard>(
+    disclosure: "identity" | "summary",
+    input: EndpointDiscoveryInput,
+    options: RequestOptions,
+    decodeItem: (value: unknown) => T,
+  ): Promise<{ readonly items: readonly T[]; readonly next_cursor?: string }> {
+    const limit = positive(input.limit, "limit");
+    const inputMedia = strings(input.required_input_media_types, "required_input_media_types");
+    const outputMedia = strings(input.required_output_media_types, "required_output_media_types");
+    const availability = strings(input.availability, "availability");
+    return this.transport.request({
+      method: "GET",
+      path: ["v1", "endpoints"],
+      query: {
+        disclosure,
+        ...(input.capability_id === undefined ? {} : { capability_id: input.capability_id }),
+        ...(input.version_constraint === undefined ? {} : { version_constraint: input.version_constraint }),
+        ...(inputMedia === undefined ? {} : { input_media_type: inputMedia }),
+        ...(outputMedia === undefined ? {} : { output_media_type: outputMedia }),
+        ...(availability === undefined ? {} : { availability }),
+        ...(input.cursor === undefined ? {} : { cursor: bounded(input.cursor, "cursor") }),
+        ...(limit === undefined ? {} : { limit }),
+      },
+      retry: "query",
+      ...requestOptions(this.representation, options),
+      decode: (value) => {
+        const decoded = page<T>(value, (item) => {
+          const card = decodeItem(item);
+          return identifier(card.endpoint_id, "endpoint_id");
+        });
+        return {
+          ...decoded,
+          items: decoded.items.map((item) => decodeItem(item)),
+        };
+      },
     });
   }
 }

@@ -10,6 +10,11 @@ const TERMINAL_STATES: ReadonlySet<HandoffLifecycleState> = new Set([
   "transferred",
 ]);
 
+/** Domain lifecycle terminality; result_returned and verified can still evolve. */
+export function isTerminalHandoffLifecycle(state: HandoffLifecycleState): boolean {
+  return TERMINAL_STATES.has(state);
+}
+
 function requireStreamVersion(
   state: HandoffState | null,
   streamVersion: number,
@@ -35,6 +40,21 @@ function eventAllowedFrom(
       return [
         "workfabric.handoff.target_resolved.v1",
         "workfabric.handoff.target_unavailable.v1",
+        "workfabric.handoff.expired.v1",
+        "workfabric.handoff.cancelled.v1",
+      ].includes(eventType);
+    case "claimable":
+      return [
+        "workfabric.handoff.claimed.v1",
+        "workfabric.handoff.expired.v1",
+        "workfabric.handoff.cancelled.v1",
+      ].includes(eventType);
+    case "claimed":
+      return [
+        "workfabric.handoff.claim_renewed.v1",
+        "workfabric.handoff.claim_released.v1",
+        "workfabric.handoff.claim_expired.v1",
+        "workfabric.handoff.accepted.v1",
         "workfabric.handoff.expired.v1",
         "workfabric.handoff.cancelled.v1",
       ].includes(eventType);
@@ -79,6 +99,7 @@ function evolveExisting(
     | {
         readonly event_type: "workfabric.handoff.target_resolution_requested.v1";
       }
+    | { readonly event_type: "workfabric.handoff.claim_pool_opened.v1" }
   >,
   streamVersion: number,
 ): HandoffState {
@@ -89,6 +110,25 @@ function evolveExisting(
   };
 
   switch (event.event_type) {
+    case "workfabric.handoff.claimed.v1":
+      return {
+        ...common,
+        lifecycle_state: "claimed",
+        active_claim: event.claim,
+        claim_fencing_token: event.claim.fencing_token,
+      };
+    case "workfabric.handoff.claim_renewed.v1":
+      return {
+        ...common,
+        active_claim: event.claim,
+      };
+    case "workfabric.handoff.claim_released.v1":
+    case "workfabric.handoff.claim_expired.v1":
+      return {
+        ...common,
+        lifecycle_state: "claimable",
+        active_claim: null,
+      };
     case "workfabric.handoff.target_resolved.v1":
       return {
         ...common,
@@ -107,6 +147,8 @@ function evolveExisting(
         lifecycle_state: "accepted",
         recipient: event.recipient,
         current_responsible_actor: event.recipient,
+        active_claim: null,
+        ...(event.binding === undefined ? {} : { target_binding: event.binding }),
       };
     case "workfabric.handoff.declined.v1":
       return {
@@ -119,12 +161,14 @@ function evolveExisting(
         ...common,
         lifecycle_state: "expired",
         current_responsible_actor: null,
+        active_claim: null,
       };
     case "workfabric.handoff.cancelled.v1":
       return {
         ...common,
         lifecycle_state: "cancelled",
         current_responsible_actor: null,
+        active_claim: null,
       };
     case "workfabric.handoff.status_reported.v1":
       return common;
@@ -174,7 +218,8 @@ export function evolveHandoff(
     if (
       event.event_type !== "workfabric.handoff.offered.v1" &&
       event.event_type !==
-        "workfabric.handoff.target_resolution_requested.v1"
+        "workfabric.handoff.target_resolution_requested.v1" &&
+      event.event_type !== "workfabric.handoff.claim_pool_opened.v1"
     ) {
       throw new Error(
         `First Handoff event must create a Handoff, received ${event.event_type}`,
@@ -188,12 +233,16 @@ export function evolveHandoff(
       lifecycle_state:
         event.event_type === "workfabric.handoff.offered.v1"
           ? "offered"
-          : "target_resolution_pending",
+          : event.event_type === "workfabric.handoff.claim_pool_opened.v1"
+            ? "claimable"
+            : "target_resolution_pending",
       initiator: event.initiator,
       recipient: null,
       verifier: event.package.verifier,
       current_responsible_actor: event.initiator,
       target_binding: null,
+      active_claim: null,
+      claim_fencing_token: 0,
       package: event.package,
       result: null,
       parent_handoff_id: event.parent_handoff_id,
@@ -208,12 +257,13 @@ export function evolveHandoff(
       `Handoff event ID mismatch: expected ${state.handoff_id}, received ${event.handoff_id}`,
     );
   }
-  if (TERMINAL_STATES.has(state.lifecycle_state)) {
+  if (isTerminalHandoffLifecycle(state.lifecycle_state)) {
     throw new Error(`Handoff is terminal in state ${state.lifecycle_state}`);
   }
   if (
     event.event_type === "workfabric.handoff.offered.v1" ||
-    event.event_type === "workfabric.handoff.target_resolution_requested.v1"
+    event.event_type === "workfabric.handoff.target_resolution_requested.v1" ||
+    event.event_type === "workfabric.handoff.claim_pool_opened.v1"
   ) {
     throw new Error("Handoff cannot be created more than once");
   }

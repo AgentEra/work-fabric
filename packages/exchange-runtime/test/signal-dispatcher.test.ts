@@ -224,6 +224,18 @@ async function fixture(
 }
 
 describe("SignalDispatcher", () => {
+  it("leaves SSE subscriptions for Cursor Pull delivery", async () => {
+    const { dispatcher, state, signal } = await fixture(
+      [event(1)],
+      [subscription("subscription_sse", { delivery_mode: "sse" })],
+    );
+
+    await dispatcher.dispatchPartition(partitionId, tenantId, 10);
+
+    expect(signal.observed).toEqual([]);
+    expect(await state.loadDeliveryPosition("subscription_sse", partitionId)).toBe(0);
+  });
+
   it("emits bounded delivery outcome semantics", async () => {
     const observed: SemanticObservation[] = [];
     const { dispatcher } = await fixture(

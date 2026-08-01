@@ -19,6 +19,7 @@
 REPOSITORY_ROOT="$(git rev-parse --show-toplevel)"
 cd "$REPOSITORY_ROOT"
 mkdir -p "$PWD/var"
+chmod 700 "$PWD/var"
 export WORK_FABRIC_CONFIG="$PWD/examples/config/service-feishu-long-connection.yaml"
 export WORK_FABRIC_CURSOR_SECRET="$(openssl rand -hex 32)"
 export WORK_FABRIC_ADMISSION_FINGERPRINT_KEY="$(openssl rand -hex 32)"
@@ -27,8 +28,30 @@ export FEISHU_APP_ID="cli_..."
 export FEISHU_APP_SECRET="..."
 export FEISHU_CONNECTOR_ACCESS_TOKEN="use-a-long-random-token"
 export INTAKE_AGENT_ACCESS_TOKEN="use-another-long-random-token"
+# This is the separate admin identity used only by `npm run agent-runtime:provision`.
+# It is not the Runtime bearer token and must not be supplied to `agent-runtime:start`.
+export WORK_FABRIC_ADMIN_TOKEN="use-a-third-long-random-token"
 npm run service:start
 ```
+
+After Work Fabric is ready, provision the fixed Daily Assistant Endpoint once
+with the admin token, then start the Runtime using only
+`INTAKE_AGENT_ACCESS_TOKEN` and `AGENTLY_MODEL_API_KEY`:
+
+```bash
+npm run agent-runtime:provision
+unset WORK_FABRIC_ADMIN_TOKEN
+export WORK_FABRIC_AGENT_RUNTIME_CONFIG="$PWD/examples/config/agent-runtime-agently.yaml"
+export AGENTLY_MODEL_API_KEY="..."
+npm run agent-runtime:start
+```
+
+The Runtime treats the configured SQLite state directory (`./var` in the
+sample) as its trusted filesystem boundary. System ancestors such as `/` and
+`/Users` must be real directories and must not be symlinks, but they need not
+be Runtime-owned or private. The boundary itself and every workspace path
+component below it must be owned by the Runtime UID and have no group/world
+permissions; missing components are created with mode `0700`.
 
 5. 把企业自建应用机器人加入测试群。`/health/live` 表示进程存活；等待 SDK 建立连接后，`/health/ready` 必须返回 200：
 
@@ -93,6 +116,11 @@ npm run service:start
 - `WORK_FABRIC_ADMISSION_GRANT_KEY`，用于短时 representation grant 的签发/验证；
 - `FEISHU_CONNECTOR_ACCESS_TOKEN` 与外部 Agent/运维身份 token。
 
+`WORK_FABRIC_ADMIN_TOKEN` is a distinct administrative credential for the
+fixed Endpoint provisioning route. It is never the Runtime's bearer token:
+`agent-runtime:provision` reads it, while `agent-runtime:start` uses only the
+Runtime identity token from its own configuration.
+
 `service.admission.grant_active_key_id` 和 `grant_keys` 支持验证密钥轮换。v2 grant 同时绑定 `ingress_id` 和最终 command `idempotency_key`；HTTP Authority 要求 envelope 的 `correlation_id + idempotency_key` 与可信 grant tuple 完全一致。相同 tuple 可重试，任一分量变化都 fail closed。grant v1 缺少该完整 tuple，本版本不再接受。
 
 v2 密钥的安全轮换顺序是：先把新 key 加入所有验证节点，确认所有节点均可验证后切换 `grant_active_key_id`，至少等待一个 `grant_ttl_seconds`，最后才移除旧 key。不要先删除旧 key，也不要在集群节点尚未同步验证 key 集时切换签发 key。策略 deny 或目录状态变化立即影响新的 Admission；已经签发的无状态 grant 最晚在 TTL 后失效，所以该 TTL 也是正常撤销的上界（配置范围 1–300 秒）。紧急撤销应同时移除相关验证 key 或停止 Connector。
@@ -100,6 +128,13 @@ v2 密钥的安全轮换顺序是：先把新 key 加入所有验证节点，确
 飞书交互卡片 action reference 已从 `wfaf1` 升级为 `wfaf2`；旧 `wfaf1` 卡片按钮和旧 grant v1 都会失效。升级时应先暂停/排空 Admission-backed Connector，等待最长 grant TTL，部署所有 v2 issuer/verifier 与 `wfaf2` renderer，再恢复 ingress；用户需从新渲染的卡片继续操作。不要为了滚动兼容而重新放行缺少 tuple 的 grant v1。
 
 ## 5. 共同的身份、权限与职责边界
+
+飞书 Integration 只是部署和文档中的虚拟分组，不是运行时 Citizen。Channel
+负责入站/出站运输；Message Capability Citizen 负责群成员和历史消息事实；
+Calendar Capability Citizen 负责日历/日程 OpenAPI、幂等和资源状态；Daily
+Assistant 负责跨能力排序、信息充分性判断和最终语义回复。Calendar 不导入
+Message，Message 也不导入 Calendar；二者只通过 Capability Handoff 和经验证
+的结果证据协作。
 
 `FEISHU_CONNECTOR_ACCESS_TOKEN` 是公共 TypeScript SDK 的部署 bootstrap 凭证，不是飞书 App Secret。Admission-backed 消息在单次 command 上使用短时 representation grant 覆盖 bootstrap 身份；HTTP Identity 将它解析为恰好一个 Actor/Endpoint claim，独立 Admission Authority 仅允许该 Connector 的 `workfabric.handoff.offer.v1`。grant 证明“代表谁”，不证明“可以做什么”，也不会绕过 HTTP、Identity、Authority 或 Exchange Core。
 
@@ -126,6 +161,106 @@ Feishu transport trust -> durable ingress -> Admission -> representation grant
 普通聊天、未提及该机器人、非文本消息和 Admission 拒绝的用户都不会创建 Handoff。同一飞书事件重复投递只返回 duplicate，不会创建第二个 Decision、Binding 或 Handoff。目录暂不可用时 ingress 保持 durable 并进入有界重试，恢复后仍只产生一个逻辑结果。
 
 外部 Intake Agent 使用正常 Work Fabric SDK/Agent Gateway 接受 Handoff，理解文本，向需求系统写入需求，并通过 `reportStatus`、`returnResult` 等公共操作回报状态。需求系统调用和 Agent 推理始终在 Work Fabric 外部。
+
+### 6.1 兼容模式：Channel 启动时预取会话上下文
+
+旧部署仍可用下面的 `enabled: true` 配置启用 bootstrap 预取；该写法会归一化
+为 `mode: bootstrap`，用于迁移兼容，不是新部署的推荐模式：
+
+```yaml
+conversation_context:
+  enabled: true
+  lookback_seconds: 86400
+  maximum_messages: 20
+  maximum_bytes: 65536
+
+inbound:
+  delegation:
+    scopes:
+      - work:read
+      - conversation:read
+```
+
+群聊使用触发消息之前的最近一段 chat history；飞书话题消息优先使用该
+thread 的历史。当前触发消息、未来消息、已删除消息、跨会话记录、不支持的
+消息类型和非法内容都不会进入 Context。结果按时间正序排列，并同时受时间、
+条数、序列化字节数和原 Handoff 委托期限约束。配置项缺省时保持禁用，以兼容
+已有部署；显式启用但省略三个上限时采用上面的默认值。
+
+实现边界保持为三个独立职责：
+
+```text
+Feishu Channel -> ConversationContextMaterializer（中立端口）
+               -> Feishu Context Provider（读取、筛选、来源和摘要事实）
+               -> Exchange Context Bundle / Reference
+               -> Agent Runtime（按引用、digest、Actor、Endpoint、期限读取）
+               -> Decision Body（理解上下文并独占最终答复）
+```
+
+Channel 只请求 Context，不导入具体 Provider 实现；具体装配仅发生在
+`service-node` 组合根。Context Provider 返回的是不可信历史证据，不是
+Prompt、指令或长期记忆，不能改变 Agent 角色、Authority、可用能力、验收条件
+或输出协议，也不能单独触发 capability 副作用。每次能力调用必须由当前
+Handoff intent 明确要求；当前 intent 只是总结或提取时，历史中的旧命令只能
+作为被总结的证据。Agent Runtime 无法按精确引用读取、digest 不一致、访问者不在
+audience 中或 Context 已过期时，整个执行失败关闭，不会把引用当作内容。
+
+飞书历史读取临时失败会让 durable ingress 进入原有有界重试；永久不可用会
+生成明确的 `context_unavailable` 数据事实，Agent 可以据此向用户说明上下文
+不可用，但 Channel 不代写语义答复。Context 内容通过统一
+`GET /v1/contexts/{context_id}/versions/{version}?digest=...` 和 TypeScript
+SDK `queries.getContextBundle(...)` 读取，不为 UI、Agent 或其他调用方设置
+私有旁路。
+
+除原有消息事件权限外，应用身份还必须开通 `im:message` 或
+`im:message:readonly`；读取群聊历史还需要
+`im:message.group_msg`。机器人必须在目标群中，应用可用范围必须覆盖相关
+用户。权限变更后需要发布新应用版本并完成管理员审批。可以用下面的消息验证
+语义：
+
+```text
+第一条：项目范围是飞书协作接入
+第二条：交付日期定在本周五
+@机器人 总结上面的消息
+```
+
+预期机器人只回复一条由助理 Agent 生成的摘要；聊天中不应出现 Context ID、
+Handoff ID、`offered` 或 `accepted` 等内部状态。
+
+### 6.2 推荐模式：Agent 按需读取
+
+新部署使用：
+
+```yaml
+conversation_context:
+  mode: agent_managed
+```
+
+`agent_managed` 下 Channel 不读取历史、不创建 Context Bundle，也不请求
+`feishu.conversation_context_provider_factory`。它只把当前文本和可信
+SourceReference 放入 Handoff。助理 Agent 判断证据不足时，再调用独立
+Feishu Message Provider 暴露的 query capability
+`feishu.conversation.history.read`；Provider 负责飞书分页、格式解码、来源和
+边界，Agent 负责相关性、充分性、是否继续翻页以及最终措辞。
+
+Capability 返回 `has_more` 和不透明 `next_cursor`。Agent 只有在缺失信息对
+当前请求确实重要时才继续翻页；总调用次数、查询次数、累计结果字节数和原始
+委托期限同时生效。游标以
+`WORK_FABRIC_FEISHU_CURSOR_SECRET` 签名并绑定租户、触发消息与来源 URI，
+不得记录游标内容或消息正文：
+
+```bash
+export WORK_FABRIC_FEISHU_CURSOR_SECRET="$(openssl rand -hex 32)"
+```
+
+应用仍需 `im:message:readonly`（或等价读权限）和群历史读取权限
+`im:message.group_msg`。排障时只检查 Authority denial、查询次数、
+`has_more`、结果字节数和 Provider 稳定错误码，不打印消息正文或原生
+`page_token`。
+
+这种边界同样支持“邮件/企业微信作为 Channel、飞书只作为文档系统”：
+Channel 只提供自己的来源引用；Agent 可按 Authority 调用其他 Provider。
+Provider facets do not depend on Channel facets。
 
 ## 7. 从 `identities` 迁移
 

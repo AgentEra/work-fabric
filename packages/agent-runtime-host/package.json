@@ -1,0 +1,16 @@
+{
+  "name": "@work-fabric/agent-runtime-host",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@work-fabric/adapter-configuration-yaml": "0.1.0",
+    "@work-fabric/agent-gateway": "0.1.0",
+    "@work-fabric/agent-runtime-spi": "0.1.0",
+    "@work-fabric/configuration-runtime": "0.1.0",
+    "@work-fabric/protocol-runtime": "0.1.0",
+    "@work-fabric/sdk-typescript": "0.1.0"
+  }
+}

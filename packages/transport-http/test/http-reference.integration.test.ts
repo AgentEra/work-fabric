@@ -264,6 +264,7 @@ describe("Phase 3B public HTTP reference", () => {
     );
     const query: ExchangeQueryService = {
       ...storedQueries,
+      getContextBundle: storedQueries.getContextBundle.bind(storedQueries),
       async getHandoff(requestTenantId, handoffId) {
         const records = await persistence.readStream(handoffId);
         const partitionId = records[0]?.partition_id;

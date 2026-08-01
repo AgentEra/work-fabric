@@ -37,7 +37,7 @@ describe("HmacWakeupSubjectCodec", () => {
 
   it("returns sorted exact Tenant by work-kind filters", () => {
     const filters = codec().filterSubjects();
-    expect(filters).toHaveLength(8);
+    expect(filters).toHaveLength(10);
     expect(filters).toEqual([...filters].sort());
     expect(new Set(filters).size).toBe(filters.length);
   });

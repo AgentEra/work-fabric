@@ -179,6 +179,61 @@ describe("MemoryContextRepository", () => {
     ).resolves.toMatchObject({ kind: "unavailable" });
   });
 
+  it("returns an isolated Context body only to its exact audience", async () => {
+    const repository = new MemoryContextRepository();
+    const bundle = contextBundle();
+    const reference = await repository.putBundle("tenant_01", bundle);
+
+    const available = await repository.readBundle(accessRequest(reference));
+    expect(available).toEqual({ kind: "available", bundle });
+    if (available.kind !== "available") throw new Error("expected bundle");
+    (available.bundle as { summary: string }).summary = "mutated-output";
+
+    await expect(
+      repository.readBundle(accessRequest(reference)),
+    ).resolves.toEqual({ kind: "available", bundle });
+    await expect(
+      repository.readBundle(accessRequest(reference, {
+        tenant_id: "tenant_02",
+      })),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+    await expect(
+      repository.readBundle(accessRequest(reference, {
+        actor_id: "actor_hidden",
+      })),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+    await expect(
+      repository.readBundle(accessRequest(reference, {
+        endpoint_id: "endpoint_hidden",
+      })),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+  });
+
+  it("does not return an expired Context body", async () => {
+    const repository = new MemoryContextRepository({
+      now: () => "2026-07-28T12:00:00.000Z",
+    });
+    const reference = await repository.putBundle(
+      "tenant_01",
+      contextBundle({
+        context_id: "context_expired",
+        digest: { algorithm: "sha-256", value: "expired" },
+        visibility_scope: {
+          actor_ids: ["actor_01"],
+          endpoint_ids: ["endpoint_01"],
+          expires_at: "2026-07-28T11:59:59.999Z",
+        },
+      }),
+    );
+
+    await expect(
+      repository.checkAvailability(accessRequest(reference)),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+    await expect(
+      repository.readBundle(accessRequest(reference)),
+    ).resolves.toMatchObject({ kind: "unavailable" });
+  });
+
   it("isolates stored Context and returned references from caller mutation", async () => {
     const repository = new MemoryContextRepository();
     const mutableBundle = structuredClone(contextBundle()) as {

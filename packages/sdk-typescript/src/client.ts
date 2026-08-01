@@ -15,6 +15,7 @@ import { SdkTransport } from "./transport.js";
 import { CollaborationClient } from "./collaboration-client.js";
 import type { AuthenticationProvider } from "./authentication.js";
 import { DiscoveryClient } from "./discovery-client.js";
+import { CitizenClient } from "./citizen-client.js";
 
 export class WorkFabricClient {
   readonly commands!: CommandClient;
@@ -25,6 +26,7 @@ export class WorkFabricClient {
   readonly endpoints!: EndpointClient;
   readonly collaboration!: CollaborationClient;
   readonly discovery!: DiscoveryClient;
+  readonly citizens!: CitizenClient;
   private readonly config!: NormalizedClientOptions;
   private readonly transport!: SdkTransport;
   private readonly representation!: Readonly<RepresentationContext>;
@@ -74,6 +76,7 @@ export class WorkFabricClient {
       endpoints: { value: Object.freeze(new EndpointClient(transport, representation)), enumerable: true },
       collaboration: { value: Object.freeze(new CollaborationClient(transport, representation)), enumerable: true },
       discovery: { value: Object.freeze(new DiscoveryClient(transport, representation)), enumerable: true },
+      citizens: { value: Object.freeze(new CitizenClient(transport, representation)), enumerable: true },
     });
     return Object.freeze(client) as WorkFabricClient;
   }

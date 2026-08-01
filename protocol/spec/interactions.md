@@ -10,7 +10,7 @@
 
 ### `handoff.offer`
 
-从无状态创建 Handoff。Actor/Endpoint Target 需要满足 `explicit_target` 条件并直接进入 `offered`，记录 `workfabric.handoff.offered.v1`。Capability Requirement Target 需要满足 `capability_target` 条件并进入 `target_resolution_pending`，记录 `workfabric.handoff.target_resolution_requested.v1`。两种路径都不转移责任。
+从无状态创建 Handoff。Actor/Endpoint Target 直接进入 `offered`。Capability Requirement 默认采用 `external_resolution` 并进入 `target_resolution_pending`；只有显式指定 `eligible_pool_claim` 才进入 `claimable` 并记录 `workfabric.handoff.claim_pool_opened.v1`。所有路径都不转移责任。
 
 ### `handoff.resolve_target`
 
@@ -20,9 +20,17 @@
 
 仅允许前态为 `target_resolution_pending`。经过授权的外部 Resolver 报告无法形成合格 Target Binding，记录原因与证据，进入终态 `target_unavailable` 并发布 `workfabric.handoff.target_unavailable.v1`。这是透明的解析结果，不是 Exchange 调度算法的输出。
 
+### `handoff.claim`
+
+仅允许前态为 `claimable`。Endpoint 必须通过 Authority 与原始 Capability Requirement 的资格校验。成功后进入 `claimed`，分配单调递增 fencing token 与有界 Lease，并签发 `claim_acquired` Receipt。Claim 是占用权，不是执行责任。
+
+### `handoff.renew_claim` / `handoff.release_claim` / `handoff.expire_claim`
+
+续租和主动释放必须携带当前 Claim ID、fencing token 与下一 heartbeat sequence；机械过期必须携带当前 Claim ID 与 fencing token，且 Lease 已到期。Release 或 Expire 后重新进入 `claimable`，下一次 Claim 使用更大的 fencing token。
+
 ### `handoff.accept`
 
-允许前态为 `offered` 或 `rework_requested`。Recipient 必须被授权且能访问必要 Context。成功后进入 `accepted`，签发 `responsibility_accepted` Receipt。
+允许前态为 `offered`、`claimed` 或 `rework_requested`。从 `claimed` 接受时必须携带当前 Claim ID 与 fencing token，且 Lease 仍有效。Recipient 必须被授权且能访问必要 Context。成功后进入 `accepted`，此时才转移责任并签发 `responsibility_accepted` Receipt。
 
 ### `handoff.decline`
 
@@ -30,11 +38,11 @@
 
 ### `handoff.expire`
 
-允许前态 `target_resolution_pending` 或 `offered`，并要求 `accept_by` 已过。成功后进入终态 `expired`。
+允许前态 `target_resolution_pending`、`claimable`、`claimed` 或 `offered`，并要求 `accept_by` 已过。成功后进入终态 `expired`；若存在活动 Claim，则同时使其失效。
 
 ### `handoff.cancel`
 
-允许前态 `target_resolution_pending`、`offered` 或 `accepted`，并要求策略允许。成功后进入终态 `cancelled`。取消不会自动补偿已经发生的外部副作用。
+允许前态 `target_resolution_pending`、`claimable`、`claimed`、`offered` 或 `accepted`，并要求策略允许。成功后进入终态 `cancelled`；若存在活动 Claim，则同时使其失效。取消不会自动补偿已经发生的外部副作用。
 
 ### `handoff.report_status`
 
@@ -58,7 +66,12 @@
 
 ### `handoff.transfer`
 
-仅允许前态 `accepted`。当前 Recipient 必须被授权且允许再委托。操作原子创建子 Handoff：明确 Actor/Endpoint Target 的子 Handoff 初始为 `offered`，Capability Target 的子 Handoff 初始为 `target_resolution_pending`。父 Handoff 保持 `accepted`，原 Recipient 继续负责。
+仅允许前态 `accepted`。当前 Recipient 必须被授权且允许再委托。操作原子创建子 Handoff，
+并与根 Offer 使用完全相同的 assignment mode 语义：明确 Actor/Endpoint Target 初始为
+`offered`；默认或显式 `external_resolution` 的 Capability Target 初始为
+`target_resolution_pending`；显式 `eligible_pool_claim` 的 Capability Target 初始为
+`claimable`。父 Handoff 保持 `accepted`，原 Recipient 继续负责。Claim 子 Handoff 只有
+携带当前 Claim fence 的 Accept 才能与父级 `transferred` 在同一事务提交。
 
 ### `handoff.child_accepted`
 

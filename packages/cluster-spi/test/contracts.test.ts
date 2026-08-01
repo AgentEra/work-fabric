@@ -22,6 +22,7 @@ describe("cluster contracts", () => {
     expect(PARTITION_WORK_KINDS).toEqual([
       "outbox_wakeup",
       "handoff_projection",
+      "endpoint_inbox_projection",
       "collaboration_projection",
       "signal_delivery",
     ]);

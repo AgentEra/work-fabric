@@ -1,0 +1,77 @@
+[
+  {
+    "name": "database is not a network citizen kind",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-provisioning",
+    "expected_valid": false,
+    "expected_keyword": "enum",
+    "instance": {
+      "citizen_id": "storage-primary",
+      "citizen_kind": "database",
+      "principal_id": "principal-storage",
+      "allowed_declaration_namespaces": [],
+      "maximum_risk": "low",
+      "administrative_state": "enabled",
+      "registration_version": 1
+    }
+  },
+  {
+    "name": "declaration replacement requires declaration CAS",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-declaration-replace",
+    "expected_valid": false,
+    "expected_keyword": "required",
+    "instance": {
+      "fencing_token": 1,
+      "expected_registration_version": 1,
+      "declarations": []
+    }
+  },
+  {
+    "name": "network citizen declaration must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-declaration",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "network citizen descriptor must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-descriptor",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "network citizen session open must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-session-open",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "network citizen heartbeat must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-heartbeat",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "network citizen session close must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-session-close",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "network citizen discovery page must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-discovery-page",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  },
+  {
+    "name": "network citizen declaration page must be an object",
+    "schema_id": "urn:work-fabric:schema:v1:citizen-declaration-page",
+    "expected_valid": false,
+    "expected_keyword": "type",
+    "instance": null
+  }
+]

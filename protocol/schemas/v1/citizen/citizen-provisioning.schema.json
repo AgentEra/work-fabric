@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:citizen-provisioning",
+  "title": "Network Citizen Provisioning",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "citizen_id",
+    "citizen_kind",
+    "principal_id",
+    "allowed_declaration_namespaces",
+    "maximum_risk",
+    "administrative_state",
+    "registration_version"
+  ],
+  "dependentRequired": {
+    "allowed_endpoint_id": ["allowed_actor"]
+  },
+  "properties": {
+    "citizen_id": {
+      "$ref": "urn:work-fabric:schema:v1:citizen-descriptor#/$defs/citizen_id"
+    },
+    "citizen_kind": {
+      "$ref": "urn:work-fabric:schema:v1:citizen-descriptor#/$defs/citizen_kind"
+    },
+    "principal_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "allowed_actor": {
+      "$ref": "urn:work-fabric:schema:v1:actor-ref"
+    },
+    "allowed_endpoint_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "allowed_declaration_namespaces": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9_]*$",
+        "maxLength": 64
+      }
+    },
+    "maximum_risk": {
+      "enum": ["low", "medium", "high", "destructive"]
+    },
+    "administrative_state": {
+      "enum": ["enabled", "disabled"]
+    },
+    "registration_version": {
+      "type": "integer",
+      "minimum": 1
+    }
+  }
+}

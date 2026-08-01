@@ -2,6 +2,7 @@ import type { JsonObject } from "@work-fabric/exchange-spi";
 
 import type {
   ActorRef,
+  HandoffClaim,
   HandoffPackage,
   TargetBinding,
 } from "./handoff-types.js";
@@ -27,6 +28,14 @@ export interface HandoffTargetResolutionRequestedEvent extends HandoffEventBase 
   readonly parent_handoff_id: string | null;
 }
 
+export interface HandoffClaimPoolOpenedEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.claim_pool_opened.v1";
+  readonly thread_id: string;
+  readonly initiator: ActorRef;
+  readonly package: HandoffPackage;
+  readonly parent_handoff_id: string | null;
+}
+
 export interface HandoffTargetResolvedEvent extends HandoffEventBase {
   readonly event_type: "workfabric.handoff.target_resolved.v1";
   readonly binding: TargetBinding;
@@ -46,9 +55,37 @@ export interface HandoffTargetUnavailableEvent extends HandoffEventBase {
   readonly evidence: readonly JsonObject[];
 }
 
+export interface HandoffClaimedEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.claimed.v1";
+  readonly claim: HandoffClaim;
+}
+
+export interface HandoffClaimRenewedEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.claim_renewed.v1";
+  readonly claim: HandoffClaim;
+}
+
+export interface HandoffClaimReleasedEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.claim_released.v1";
+  readonly claim_id: string;
+  readonly actor: ActorRef;
+  readonly endpoint_id: string;
+  readonly fencing_token: number;
+  readonly heartbeat_sequence: number;
+}
+
+export interface HandoffClaimExpiredEvent extends HandoffEventBase {
+  readonly event_type: "workfabric.handoff.claim_expired.v1";
+  readonly claim_id: string;
+  readonly actor: ActorRef;
+  readonly endpoint_id: string;
+  readonly fencing_token: number;
+}
+
 export interface HandoffAcceptedEvent extends HandoffEventBase {
   readonly event_type: "workfabric.handoff.accepted.v1";
   readonly recipient: ActorRef;
+  readonly binding?: TargetBinding;
 }
 
 export interface HandoffDeclinedEvent extends HandoffEventBase {
@@ -99,8 +136,13 @@ export interface HandoffTransferredEvent extends HandoffEventBase {
 export type HandoffEvent =
   | HandoffOfferedEvent
   | HandoffTargetResolutionRequestedEvent
+  | HandoffClaimPoolOpenedEvent
   | HandoffTargetResolvedEvent
   | HandoffTargetUnavailableEvent
+  | HandoffClaimedEvent
+  | HandoffClaimRenewedEvent
+  | HandoffClaimReleasedEvent
+  | HandoffClaimExpiredEvent
   | HandoffAcceptedEvent
   | HandoffDeclinedEvent
   | HandoffExpiredEvent

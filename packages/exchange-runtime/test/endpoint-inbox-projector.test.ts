@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { MemoryEndpointInboxStore } from "@work-fabric/adapter-endpoint-memory";
-import type { EventRecord } from "@work-fabric/exchange-spi";
+import { MemoryExchangePersistence } from "@work-fabric/adapter-storage-memory";
+import type { EventJournal, EventRecord } from "@work-fabric/exchange-spi";
 
-import { EndpointInboxProjector } from "../src/index.js";
+import { ENDPOINT_INBOX_PROJECTOR_ID, EndpointInboxProjector } from "../src/index.js";
 
 function event(
   overrides: Partial<EventRecord> = {},
@@ -53,7 +54,36 @@ const query = {
   limit: 10,
 };
 
+class StaticJournal implements EventJournal {
+  constructor(private readonly records: readonly EventRecord[]) {}
+  async readStream() { return []; }
+  async readPartition(partitionId: string, afterPosition: number, limit: number) {
+    return this.records.filter((record) => record.partition_id === partitionId && record.partition_position > afterPosition).slice(0, limit);
+  }
+}
+
 describe("EndpointInboxProjector", () => {
+  it("owns a checkpoint, records a partial projection block, and rebuilds its partition", async () => {
+    const store = new MemoryEndpointInboxStore();
+    const persistence = new MemoryExchangePersistence();
+    const projector = new EndpointInboxProjector(
+      store,
+      new StaticJournal([
+        event(),
+        event({ event_id: "event_02", partition_position: 2, stream_version: 2, protocol_data: { resource_version: 1, change: { change_type: "invalid", from_state: "offered", to_state: "accepted", changed_fields: [], details: {} }, receipt: null } }),
+      ]),
+      persistence,
+      persistence,
+      { now: () => "2026-07-15T00:00:00Z" },
+    );
+
+    await expect(projector.runPartition("handoff:handoff_01", 10)).resolves.toMatchObject({ kind: "blocked", position: 1, event_id: "event_02" });
+    expect(await persistence.loadProjectionCheckpoint(ENDPOINT_INBOX_PROJECTOR_ID, "handoff:handoff_01")).toBe(1);
+    expect(await persistence.listProjectionFailures(ENDPOINT_INBOX_PROJECTOR_ID, "handoff:handoff_01")).toHaveLength(1);
+
+    await expect(projector.rebuildPartition("tenant_01", "handoff:handoff_01", 1)).rejects.toThrow(/blocked/);
+  });
+
   it("projects only routing facts for every visible audience", async () => {
     const store = new MemoryEndpointInboxStore();
     const projector = new EndpointInboxProjector(store);
@@ -74,6 +104,42 @@ describe("EndpointInboxProjector", () => {
     })).resolves.toEqual({ items: [] });
   });
 
+  it("projects capability-scoped claimable Handoffs into the candidate pool", async () => {
+    const store = new MemoryEndpointInboxStore();
+    const projector = new EndpointInboxProjector(store);
+
+    await projector.apply(event({
+      event_type: "workfabric.handoff.claim_pool_opened.v1",
+      protocol_data: {
+        resource_version: 1,
+        change: {
+          change_type: "created",
+          from_state: null,
+          to_state: "claimable",
+          changed_fields: ["lifecycle_state"],
+          details: {
+            lifecycle_state: "claimable",
+            capability_ids: ["software.implementation"],
+          },
+        },
+        receipt: null,
+      },
+    }));
+
+    await expect(store.listClaimableHandoffs({
+      tenant_id: "tenant_01",
+      endpoint_id: "endpoint_agent",
+      capability_ids: ["software.implementation"],
+      limit: 10,
+    })).resolves.toMatchObject({
+      items: [{
+        handoff_id: "handoff_01",
+        lifecycle_state: "claimable",
+        capability_ids: ["software.implementation"],
+      }],
+    });
+  });
+
   it("ignores non-Handoff events", async () => {
     const store = new MemoryEndpointInboxStore();
     const projector = new EndpointInboxProjector(store);
@@ -83,30 +149,32 @@ describe("EndpointInboxProjector", () => {
     await expect(store.listPartitions(query)).resolves.toEqual({ items: [] });
   });
 
-  it("deactivates terminal Handoffs", async () => {
+  it.each(["target_unavailable", "closed", "declined", "expired", "cancelled", "transferred"])("deactivates the domain-terminal %s Handoff", async (terminal) => {
     const store = new MemoryEndpointInboxStore();
     const projector = new EndpointInboxProjector(store);
     await projector.apply(event());
-
     await projector.apply(event({
-      event_id: "event_02",
-      event_type: "workfabric.handoff.closed.v1",
+      event_id: `event_${terminal}`,
+      event_type: `workfabric.handoff.${terminal}.v1`,
       stream_version: 2,
       partition_position: 2,
-      protocol_data: {
-        resource_version: 2,
-        change: {
-          change_type: "closed",
-          from_state: "verified",
-          to_state: "closed",
-          changed_fields: ["lifecycle_state"],
-          details: {},
-        },
-        receipt: null,
-      },
+      protocol_data: { resource_version: 2, change: { change_type: terminal, from_state: "offered", to_state: terminal, changed_fields: ["lifecycle_state"], details: {} }, receipt: null },
     }));
-
     await expect(store.listPartitions(query)).resolves.toEqual({ items: [] });
+  });
+
+  it.each(["result_returned", "verified"])("keeps transitional %s Handoffs visible", async (transitional) => {
+    const store = new MemoryEndpointInboxStore();
+    const projector = new EndpointInboxProjector(store);
+    await projector.apply(event());
+    await projector.apply(event({
+      event_id: `event_${transitional}`,
+      event_type: `workfabric.handoff.${transitional}.v1`,
+      stream_version: 2,
+      partition_position: 2,
+      protocol_data: { resource_version: 2, change: { change_type: transitional, from_state: "accepted", to_state: transitional, changed_fields: ["lifecycle_state"], details: {} }, receipt: null },
+    }));
+    await expect(store.listPartitions(query)).resolves.toMatchObject({ items: [{ partition_id: "handoff:handoff_01" }] });
   });
 
   it("rebuilds one Tenant deterministically from committed records", async () => {

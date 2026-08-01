@@ -9,7 +9,8 @@
   "types": "./src/index.ts",
   "dependencies": {
     "@work-fabric/connector-spi": "0.1.0",
-    "@work-fabric/exchange-spi": "0.1.0"
+    "@work-fabric/exchange-spi": "0.1.0",
+    "marked": "18.0.7"
   },
   "devDependencies": {
     "@work-fabric/adapter-connector-memory": "0.1.0",
@@ -17,8 +18,8 @@
     "@work-fabric/adapter-identity-local": "0.1.0",
     "@work-fabric/adapter-storage-memory": "0.1.0",
     "@work-fabric/connector-runtime": "0.1.0",
-    "@work-fabric/exchange-core": "0.1.0",
     "@work-fabric/exchange-conformance": "0.1.0",
+    "@work-fabric/exchange-core": "0.1.0",
     "@work-fabric/exchange-runtime": "0.1.0",
     "@work-fabric/protocol-runtime": "0.1.0",
     "@work-fabric/sdk-typescript": "0.1.0",

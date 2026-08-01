@@ -55,6 +55,13 @@ const items: readonly PartitionWorkItem[] = [
   {
     tenant_id: tenant,
     partition_id: partition,
+    kind: "endpoint_inbox_projection",
+    observed_position: 5,
+    available_at: "2026-07-16T00:00:00.000Z",
+  },
+  {
+    tenant_id: tenant,
+    partition_id: partition,
     kind: "collaboration_projection",
     observed_position: 5,
     available_at: "2026-07-16T00:00:00.000Z",
@@ -171,11 +178,13 @@ describe("Phase 6B NATS outage fallback", () => {
       await settle(hosts);
       expect(projected).toEqual(new Map([
         ["handoff_projection", 5],
+        ["endpoint_inbox_projection", 5],
         ["collaboration_projection", 5],
         ["signal_delivery", 5],
       ]));
       expect(advances).toEqual(new Map([
         ["handoff_projection", 1],
+        ["endpoint_inbox_projection", 1],
         ["collaboration_projection", 1],
         ["signal_delivery", 1],
       ]));
@@ -189,6 +198,7 @@ describe("Phase 6B NATS outage fallback", () => {
       await settle(hosts);
 
       expect(projected.get("handoff_projection")).toBe(5);
+      expect(projected.get("endpoint_inbox_projection")).toBe(5);
       expect(advances.get("handoff_projection")).toBe(1);
       expect(advances.get("signal_delivery")).toBe(1);
     } finally {

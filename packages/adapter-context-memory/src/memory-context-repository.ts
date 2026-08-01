@@ -4,6 +4,7 @@ import type {
   CapabilityManifest,
   ContextAccessRequest,
   ContextAvailability,
+  ContextReadResult,
   ContextReference,
   ContextRepository,
   JsonObject,
@@ -15,6 +16,7 @@ interface StoredBundle {
   readonly reference: ContextReference;
   readonly actorIds: readonly string[];
   readonly endpointIds: readonly string[];
+  readonly expiresAt: string | null;
 }
 
 const manifest: CapabilityManifest = {
@@ -86,8 +88,25 @@ function stringArray(value: JsonValue | undefined, field: string): readonly stri
   return value;
 }
 
+function expiry(value: JsonValue | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !Number.isFinite(Date.parse(value))) {
+    throw new TypeError("visibility_scope.expires_at must be a timestamp or null");
+  }
+  return value;
+}
+
+export interface MemoryContextRepositoryOptions {
+  readonly now?: () => string;
+}
+
 export class MemoryContextRepository implements ContextRepository {
   private readonly bundles = new Map<string, StoredBundle>();
+  private readonly now: () => string;
+
+  constructor(options: MemoryContextRepositoryOptions = {}) {
+    this.now = options.now ?? (() => new Date().toISOString());
+  }
 
   get manifest(): CapabilityManifest {
     return clone(manifest);
@@ -113,6 +132,7 @@ export class MemoryContextRepository implements ContextRepository {
       visibility.endpoint_ids,
       "visibility_scope.endpoint_ids",
     );
+    const expiresAt = expiry(visibility.expires_at);
     const bundleKey = key(tenantId, contextId, version);
     const existing = this.bundles.get(bundleKey);
     if (existing !== undefined) {
@@ -134,16 +154,17 @@ export class MemoryContextRepository implements ContextRepository {
       reference,
       actorIds: clone(actorIds),
       endpointIds: clone(endpointIds),
+      expiresAt,
     });
     return clone(reference);
   }
 
-  async checkAvailability(
-    request: ContextAccessRequest,
-  ): Promise<ContextAvailability> {
+  private lookup(request: ContextAccessRequest):
+    | { readonly kind: "available"; readonly stored: StoredBundle }
+    | { readonly kind: "unavailable"; readonly reason: string } {
     const clonedRequest = clone(request);
     if (clonedRequest.reference === null) {
-      return { kind: "available" };
+      return { kind: "unavailable", reason: "Context reference is required" };
     }
     const reference = clonedRequest.reference;
     const stored = this.bundles.get(
@@ -157,6 +178,15 @@ export class MemoryContextRepository implements ContextRepository {
       reference.digest !== stored.reference.digest
     ) {
       return { kind: "unavailable", reason: "Context digest does not match" };
+    }
+    if (stored.expiresAt !== null) {
+      const current = Date.parse(this.now());
+      if (!Number.isFinite(current)) {
+        throw new TypeError("Context repository clock is invalid");
+      }
+      if (Date.parse(stored.expiresAt) <= current) {
+        return { kind: "unavailable", reason: "Context has expired" };
+      }
     }
     if (stored.actorIds.length === 0 && stored.endpointIds.length === 0) {
       return { kind: "unavailable", reason: "Context declares no audience" };
@@ -176,6 +206,21 @@ export class MemoryContextRepository implements ContextRepository {
         reason: "Endpoint is outside the Context audience",
       };
     }
+    return { kind: "available", stored };
+  }
+
+  async checkAvailability(
+    request: ContextAccessRequest,
+  ): Promise<ContextAvailability> {
+    if (request.reference === null) return { kind: "available" };
+    const result = this.lookup(request);
+    if (result.kind === "unavailable") return result;
     return { kind: "available" };
+  }
+
+  async readBundle(request: ContextAccessRequest): Promise<ContextReadResult> {
+    const result = this.lookup(request);
+    if (result.kind === "unavailable") return result;
+    return { kind: "available", bundle: clone(result.stored.bundle) };
   }
 }

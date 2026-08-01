@@ -11,7 +11,7 @@ function fixture(tenantId = "tenant_01") {
   const tenantPrincipal = { ...principal, tenant_id: tenantId };
   const observed: number[] = [];
   const query: ExchangeQueryService = {
-    async getHandoff() { return null; }, async readHandoffEvents() { return []; },
+    async getHandoff() { return null; }, async getContextBundle() { return null; }, async readHandoffEvents() { return []; },
     async listPartitionHandoffs(_tenant, _partition, limit) { observed.push(limit); return []; },
     async readPartitionEvents() { return []; }, async getSubscription() { return null; }, async listSubscriptions() { return [{ subscription_id: "subscription_01" } as never]; },
     async listProjectionFailures() { return [{ event_id: "event_failed" } as never]; }, async listDeliveryAttempts() { return [{ event_id: "event_01", attempt: 1 } as never]; }, async getDeliveryPosition() { return 7; },

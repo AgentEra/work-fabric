@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:work-fabric:schema:v1:endpoint-capability-contract",
+  "title": "Endpoint Capability Contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["endpoint_id", "actor", "availability", "capability"],
+  "properties": {
+    "endpoint_id": {
+      "$ref": "urn:work-fabric:schema:v1:definitions#/$defs/opaque_id"
+    },
+    "actor": {
+      "$ref": "urn:work-fabric:schema:v1:actor-ref"
+    },
+    "availability": {
+      "enum": ["available", "busy", "draining", "unavailable"]
+    },
+    "capability": {
+      "$ref": "urn:work-fabric:schema:v1:capability-descriptor"
+    }
+  }
+}

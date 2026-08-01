@@ -22,6 +22,7 @@ import {
 
 import {
   ENDPOINT_BOUNDARY_MIGRATION,
+  CLAIM_POOL_INDEX_MIGRATION,
   PostgresEndpointDirectoryStore,
   PostgresEndpointInboxStore,
 } from "../src/index.js";
@@ -102,6 +103,7 @@ describe("PostgreSQL Endpoint boundary", () => {
     await runMigrations(setup, [
       TENANT_CONTEXT_MIGRATION,
       ENDPOINT_BOUNDARY_MIGRATION,
+      CLAIM_POOL_INDEX_MIGRATION,
     ]);
     setup.release();
 

@@ -2,6 +2,11 @@
 
 本文是 Work Fabric 的 canonical 架构说明，面向协议设计者、系统实现者、Connector/Agent 开发者和技术决策者。更详细的设计推导与验收标准见[协作对接与工作交接详细设计](superpowers/specs/2026-07-13-collaboration-handoff-fabric-design.md)。
 
+所有后续 Spec、计划和实现必须先遵守
+[Work Fabric 项目章程](../PROJECT_CHARTER.md) 并完成其中的
+`Architecture Boundary Check`。局部功能需求不能覆盖这些底线；发生冲突时
+必须停止实现并重新划分到外部 Citizen，不能先在 Core 中实现后再抽离。
+
 ## 1. 定位与系统边界
 
 > **A protocol-driven collaboration interconnect for humans, agents, and work systems.**
@@ -22,6 +27,13 @@ Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联�
 - 飞书、CRM、Git、知识库、部署和监控平台继续运行自身业务逻辑。
 
 Work Fabric 只拥有这些执行主体之间的协作事实和交接状态，不拥有其内部执行过程。
+
+因此 Work Fabric 在领域语义上是**逻辑有状态**的：Handoff、责任、参与方
+声明的浅层状态、事件、订阅位置和审计事实必须可持久化。HTTP、Worker 和
+Projection 进程在部署上可以保持无状态并横向扩容，通过内部技术中立 Port
+访问这些事实。具体 SQLite、PostgreSQL、Memory Store、Broker 或索引实现
+不进入协议，也不构成 Network Citizen。完整约束见
+[协作状态与数据所有权](architecture/coordination-state-and-data-ownership.md)。
 
 Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A/4B 增加 Endpoint/Agent 与 Connector 边界；阶段 6A/6B 增加数据库权威的集群机械所有权与可选 Wakeup；阶段 7 在 Core 外增加显式 Exchange 间的签名 Federation Profile。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
 
@@ -124,9 +136,41 @@ flowchart LR
 8. **逻辑图与物理存储分离**：协作关系可以投影为图，但权威事务状态不绑定单一图数据库。
 9. **最小授权**：交接携带与当前工作绑定的授权范围，不向 Agent 或 Adapter 发放租户级长期权限。
 10. **自动化来自端点可替换性**：人类端点可以逐步替换为 Agent 端点，而协议、治理和交接链保持稳定。
-11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、目标解析协议和可靠派发；目标选择与执行计划由外部人、规则或 Agent Brain 决定。
-12. **联邦式去中心化**：参与方、系统和 Exchange 保持各自权威，通过可验证协议互联，不建立全局共享状态或中央执行权。
-13. **AI 一等参与、智能外置**：协议原生服务 Agent 的机器可读协作需要，但不把模型、推理或工具执行吸收到 Fabric 内部。
+11. **连接层不是大脑**：Work Fabric 提供 Endpoint 与 Capability 事实、受限候选池、机械认领、目标解析协议和可靠派发；复杂的排名、推荐、成本/负载决策与执行计划由外部人、规则或 Agent Brain 决定。
+12. **模块职责闭环**：每个模块必须完整拥有并完成自身职责，只通过稳定协议或 SPI 与其他模块交换事实；不得跨层代偿另一个模块的业务语义、决策或执行。
+13. **依赖面向契约**：Core、Runtime、Agent、Connector 和 Channel 模块不得依赖彼此的具体存储、进程或供应商实现。组合层可以把实现适配到窄接口，但不能把具体实现泄漏到消费模块。
+14. **动态能力是运行事实**：配置只 Provision 可信身份与安全上限；模块通过带租约和 fencing 的 Network Citizen Session 声明当前能力。声明能力不授予调用 Authority。
+15. **调试入口不绕过网络**：开发用 Debug Channel 也必须经过 Connector
+    Ingress、Identity/Admission、Authority、Handoff 和 Signal；它只能模拟
+    Channel 边界，不能直接驱动模型或伪造 Agent Result。
+16. **责任分类与 Actor 正交**：Actor type 表达谁参与，Citizen kind 表达模块对外闭环的责任。一个 Citizen 注册只有一个 kind，一个进程可以托管多个独立注册。
+17. **浅层协作状态归 Fabric、业务会话归参与方**：Fabric 持久化自身协议事实和参与方声明的状态；Agent、Provider 与外部系统继续拥有等待条件、恢复决策、执行状态和业务资产。
+18. **持久化实现内部化**：部署可以替换 Memory、SQLite、PostgreSQL、Broker、对象或索引实现，但公共协议、SDK、Capability 和 Citizen Discovery 不暴露物理存储。
+19. **网络传播而不主动编排**：Citizen 通过 Handoff、Event 和 Subscription 发布、接收并认领工作；Fabric 负责校验、可靠传播和记录，不调用 Citizen、不匹配业务条件、不主动唤醒或推进业务流程。
+20. **联邦式去中心化**：参与方、系统和 Exchange 保持各自权威，通过可验证协议互联，不建立全局共享状态或中央执行权。
+21. **AI 一等参与、智能外置**：协议原生服务 Agent 的机器可读协作需要，但不把模型、推理或工具执行吸收到 Fabric 内部。
+
+### 2.1 职责闭环与依赖方向
+
+| 模块 | 必须在本模块闭环的职责 | 只向外交换 |
+|---|---|---|
+| Exchange Core / Fabric Runtime | 权威交接状态、责任迁移、事件与可靠投递 | WFPP 事实、Receipt、Delivery |
+| Agent / Agent Runtime | 业务语义答复、推理、模型与工具执行、Agent 自身失败语义 | Status、Result、Artifact、Evidence |
+| Connector | 外部系统事件与 WFPP 操作的双向映射、幂等和对账 | 归一化命令与外部系统回执 |
+| Channel Adapter | 目标渠道格式、寻址、投递和渠道错误分类 | 已有内容的传输结果 |
+| Console / Query | 状态呈现和只读观察 | 公共查询结果 |
+
+允许的依赖方向是“消费稳定契约并注入实现”。禁止的依赖包括：
+
+- Fabric 或 Channel Adapter 在 Agent 失败或字段缺失时自行创作业务答复；
+- Channel Adapter 根据 `accepted`、`status_reported` 等生命周期事实推断业务语义；
+- Agent 绕过 Handoff Result 直接调用某个具体消息渠道完成协作回复；
+- Plugin 直接读取其他模块的数据库表、私有状态或进程内对象；
+- 为方便单一集成而把供应商字段、模型结构或存储技术加入稳定 Core。
+
+必要的跨模块读取必须抽象为最小 SPI，由组合层适配实现，并保持来源模块
+对其数据和语义的所有权。模块可以传输、校验和呈现另一模块已经产生的
+事实，但不能替它生产这些事实。
 
 ## 3. 系统上下文
 
@@ -150,6 +194,7 @@ flowchart TB
         Directory["Endpoint Directory<br/>Local facts / Lease"]
         Discovery["Participation Discovery<br/>Signed facts / Cache / Bounded query"]
         Federation["Federation Gateway<br/>Explicit selected target"]
+        CitizenCatalog["Network Citizen Catalog<br/>Kind / Declarations / Lease"]
         Protocol["Unified Participation Protocol"]
         Exchange["Collaboration & Handoff Exchange"]
         Signal["Signal / Subscription / Notification"]
@@ -169,10 +214,12 @@ flowchart TB
     AgentGateway <--> Protocol
     AgentGateway <--> Directory
     AgentGateway <--> Discovery
+    AgentGateway <--> CitizenCatalog
     Directory --> Discovery
     Discovery <--> Federation
     Federation --> Protocol
     Directory <--> Protocol
+    CitizenCatalog <--> Protocol
     Protocol --> Connector
     Protocol <--> Exchange
     Exchange <--> Signal
@@ -191,7 +238,49 @@ Participation Discovery 位于 Endpoint Directory 与外部 Resolver 之间，�
 
 Agent Endpoint 声明身份、能力、协议版本、可用性和回调方式。阶段 4A 的 Endpoint Directory 保存这些可验证事实和单活 fenced Session；Agent Gateway 只通过统一 TypeScript SDK 维护租约、发现收件分区并接收 Durable SSE。Runtime 自己持久化 Delivery、显式 Ack，再自行决定是否接受责任、如何执行、何时报告状态和返回结果。
 
+`@work-fabric/agent-runtime-host` is one external Runtime Host implementation. Its Role Profile and Capability declarations are Runtime extension points; they do not make Exchange Core a model, tool, memory, scheduling, or execution engine.
+
 Codex 可以作为 Agent Runtime 暴露的代码实施能力，也可以在具备独立身份、交接状态和回调能力时作为独立 Endpoint。无论采用哪种模式，代码执行过程都不进入 Work Fabric。
+
+日常助理的多轮排期是该边界的参考实现：Agent Runtime 在自身私有、乐观并发
+状态中保存候选参与人、缺失信息、提案版本、提案摘要和确认来源；这些数据既
+不是 Citizen，也不通过 Fabric 暴露为通用存储。Channel 只提供可信发送人、
+会话及回复关系并渲染 Agent 已选择的提醒对象；Message/Calendar Provider
+只返回或执行各自的类型化能力。Agent 必须先形成提案并通过普通 Result 在原
+会话中 @ 原始发起人，后续只有同一 Human 的新 Handoff 才能确认当前版本。
+Calendar Authority 机械核验初始 Handoff、确认 Handoff、会话身份、提案摘要
+及成员查询结果后才签发调用委托，但不解释自然语言。完整设计与验收要求见
+[Agent-owned Calendar Proposal and Confirmation](superpowers/specs/2026-07-30-agent-owned-calendar-confirmation-design.md)。
+
+### Network Citizens
+
+Network Citizen 是所有网络接入模块的统一责任分类与动态声明面。六类 Citizen
+分别是 `decision-body`、`capability-provider`、`channel`、
+`context-provider`、`governance-provider` 和 `observer`。它与 Human、
+Agent、System 的 Actor type 正交；数据库、缓存、Broker、transport、SDK、
+YAML 和进程内队列等基础设施不是 Citizen。
+
+管理员 Provision 身份绑定、声明 namespace、最大风险和启停状态，外部
+Runtime 再通过单活 fenced Session 提交当前 descriptor 与 declarations。
+Catalog 依次披露列表、描述、声明摘要和完整 Contract，每层单独授权。能力
+声明是发现事实，不是调用授权，也不会触发自动选择或执行。完整规范与接入
+示例见 [Network Citizen 架构与接入](architecture/network-citizens.md)。
+
+模块边界、Citizen 身份与部署进程是三个独立维度。`Feishu Integration`
+只是把同一厂商下的 Channel、Message Provider、Document Provider 和
+Directory Provider 归档在一起的虚拟分组；它不拥有身份、租约、状态或执行
+循环。**Integration is not a Citizen or runtime.** 每个对外承担责任的
+Facet 都以独立 Citizen 注册、声明、授权、扩缩和审计，即使多个 Facet
+暂时由同一进程托管。**Provider facets do not depend on Channel facets.**
+因此飞书可以只作为文档 Provider，消息入口也可以替换为邮件、企业微信或
+其他 Channel，而无需修改 Fabric Core。
+
+Channel 只把当前消息、可信来源锚点和派发身份送入 Handoff。推荐的
+`agent_managed` 模式不在 Channel 内预取或理解历史；Decision Body 判断证据
+是否充分，并通过有权访问的 Message Provider query capability 分页读取、
+过滤和继续推理。Provider 只返回类型化事实和 opaque cursor，Context Store
+只被动保存显式提交的上下文。旧的 bootstrap materializer 仅作为兼容模式，
+不是新的默认架构，也不形成中心化 Context Manager。
 
 ### Legacy & AI-native Systems
 
@@ -298,17 +387,18 @@ extension_fields
 | Deadline / Expiry | 接收责任和返回结果的时间边界 |
 | Correlation / Causation | 所属协作链及直接上游原因 |
 
-### 5.3 Target Resolution、Handoff Dispatch 与 Execution Scheduling
+### 5.3 Capability Discovery、Target Assignment、Handoff Dispatch 与 Execution Scheduling
 
-三者必须保持独立：
+四者必须保持独立：
 
-- **Target Resolution** 决定 Handoff 应绑定到哪个 Actor 或 Endpoint。它可以由发起方直接完成，也可以由外部人工选择器、规则服务或 AI Scheduling Brain 完成。Work Fabric 提供候选 Endpoint 的事实查询和解析结果提交协议，但不实现排名、推荐或选择算法。
+- **Capability Discovery** 通过身份卡片、能力摘要、能力契约和受保护 Binding 渐进披露参与实体，不把内部 Module、Skill 实现或凭据暴露为协作事实。
+- **Target Assignment** 决定 Handoff 应绑定到哪个 Actor 或 Endpoint。它支持 Direct Target、经过权限过滤的 Pool Claim，以及外部人工选择器、规则服务或 AI Scheduling Brain 提交的 Resolution。Pool Claim 只实现排他预留、Lease 与 fencing，不实现候选排名、推荐或智能选择。
 - **Handoff Dispatch** 在目标确定后选择兼容 Binding，可靠投递 Handoff，维护 Delivery、Ack、重试、死信与恢复，并验证接收方是否有资格代表目标承担责任。这是 Work Fabric 的原生连接职责。
 - **Execution Scheduling** 决定任务如何拆分、何时执行、使用哪些模型、工具或内部 Worker，完全属于接收方 Runtime、Workflow 或外部系统。
 
-Capability Target 表达尚未解析的能力需求。未得到经过授权的解析结果前，Work Fabric 不得把并发抢占或“首个响应者”当作默认分派策略。底层乐观并发只用于保证同一 Handoff 的权威状态不会被多个写入同时提交，不代表业务调度决策。
+Capability Target 表达尚未绑定的能力需求。为保持兼容，未显式声明 Assignment Mode 时继续使用 `external_resolution`；只有显式选择 `eligible_pool_claim` 的 Handoff 才允许合法候选 Endpoint 自主认领。全网广播和无权限的“首个响应者胜出”始终禁止。
 
-3A 已提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容；4A 已补齐 Endpoint Directory、未排序事实查询和基于 Directory 的显式目标资格校验。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析 fail-closed 且不产生权威写入。具体 Resolver 仍是外部参与方，不进入 Work Fabric。
+3A 已提供 `target_resolution_pending` / `target_unavailable` 状态、解析与不可用命令、`TargetEligibilityVerifier` SPI、独立 `TargetBinding`、公共事件和投影兼容；4A 已补齐 Endpoint Directory、未排序事实查询和基于 Directory 的显式目标资格校验。Candidate Claim 已实现显式 `eligible_pool_claim`、`claimable` / `claimed` 生命周期、权限与 Capability 过滤的候选视图、原子 Claim Lease、fencing、续租/释放/过期命令、HTTP/SDK、Agent Gateway 显式认领接入，以及部署宿主内有界、可多实例竞争的机械过期 Runner，详见[能力发现、候选认领与外部调度](capability-discovery-and-claim.md)。原始 Capability Requirement 永不被绑定结果覆盖；资格校验缺失或不可用时解析/认领 fail-closed 且不产生权威写入。具体 Resolver、候选排名和智能调度仍是外部参与方，不进入 Work Fabric。
 
 ```mermaid
 flowchart LR
@@ -353,6 +443,7 @@ Receipt 至少区分：
 
 - `DELIVERED`
 - `RECEIVED`
+- `CLAIM_ACQUIRED`
 - `RESPONSIBILITY_ACCEPTED`
 - `RESULT_RECEIVED`
 - `RESULT_VERIFIED`
@@ -474,6 +565,38 @@ ContextItem 可以是：
 
 知识检索、向量搜索和摘要模型可以作为外部服务接入，Context Exchange 不绑定具体实现。
 
+### 9.1 Agent 与 Capability Provider 的辅助交接
+
+Agent 的结构化能力请求仍使用 Handoff，不成为 Host 内部工具调用。Agent
+Runtime 通过 Catalog 渐进发现、完整 Contract、Schema digest 和独立
+Authority 后，创建 `external_resolution` 的辅助 Handoff，并显式绑定所选
+Provider Endpoint。原始 Handoff 的 responsible Actor 不改变。
+
+Provider 通过普通 Endpoint Delivery/Ack/Accept 接收辅助 Handoff，在自己的
+边界执行外部操作并返回类型化事实。Agent 对这些事实继续推理，最终由 Agent
+为原始 Handoff 生成面向人的 Result。Provider 不写对话文案，Channel 不解释
+Provider 状态，Fabric Core 不执行厂商操作。调用状态、Provider 状态、Agent
+Runtime 状态分别持久化，可独立重试和恢复。
+
+辅助 Handoff 的目标约束冻结 `selected_citizen_id` 与
+`contract_digest`。默认 Directory evaluator 只解释这组标准约束；其他约束
+词汇通过组合根注入，不耦合存储或 Provider。部署必须显式授予 Agent
+`handoff.offer`；Runtime 的附加策略只允许 Agent 解析和查询自己发起的辅助
+Handoff，不扩大到其他参与者的工作。目标绑定证据使用正式 WFPP Evidence
+结构，事件的 `changed_fields` 去重后才进入 SSE，确保所有公共 Binding 得到
+同一份可验证事实。
+
+首个 Feishu 实现把动作和文档 Context 注册为两个 Citizen；飞书凭据、OpenAPI、
+幂等、文档所有权和 revision 完全封装在 Provider，删除确认由独立 Governance
+模块负责。该实现验证模块可以新增而无需修改 Exchange Core。
+
+文档系统自身是资源权限的唯一权威。Fabric 只携带原始派发人、委托谱系、
+操作范围和期限；Invocation Authority 从已接受的原 Handoff 派生更窄的子
+委托。Document Provider 在每次增删改查前，通过可替换的 Identity Broker
+与原生 ACL Gateway 验证被代理人的权限；Provider 的技术凭据、资源所有权或
+固定目录都不能绕过该检查。文档位置由 opaque resource URI 或使用侧动态
+策略解析，空间类型、目录结构、模板和内容规范不进入 Core 或部署 ACL。
+
 ## 10. Identity、Delegation 与 Trust
 
 - 所有写操作关联 Principal、Actor 和 Endpoint。
@@ -576,6 +699,19 @@ Work Graph 是逻辑查询视图，不是架构中心，也不要求使用图数
 
 权威 Handoff 状态和 Outbox 使用本地事务保证一致；对象、索引和投影通过事件异步更新。
 
+本节的数据组件都是 Fabric 部署内部的物理实现或派生读模型，不是 Network
+Citizen，也不向其他参与方提供通用存储接口。外部只能依赖 Handoff、Receipt、
+Event、Subscription、Context Reference 和查询一致性等协议语义，不能依赖
+表结构、数据库类型、内部 Cursor 或 Adapter 名称。
+
+数据所有权按领域划分：Fabric 拥有协作协议事实；Agent 和 Capability Provider
+拥有各自决策与执行状态；飞书、CRM、Git、文档和日历系统继续拥有外部领域
+资产。Fabric 默认只保存引用、摘要和必要审计事实，不复制外部内容成为新的
+主库。等待外部输入时，Agent 保存等待条件、回复关联、业务会话和恢复决策，
+Fabric 只记录 Agent 声明的 `WAITING` 状态及正常 Handoff/Event/Receipt
+事实。详细边界与当前实现审计见
+[协作状态与数据所有权](architecture/coordination-state-and-data-ownership.md)。
+
 Phase 1 的 Memory Storage Adapter 只用于参考行为、集成测试和一致性验证，不具备生产持久性声明。当前 PostgreSQL Adapter 已通过既有 SPI 提供 authority、outbox、runtime state、delivery/lease 与 Context 元数据持久化；PostgreSQL 不进入 Core/SPI 依赖，其他符合相同行为 Profile 的存储实现可以等价替换。迁移、RLS 和运维边界见 [PostgreSQL 部署文档](postgresql-deployment.md)。
 
 ## 13. 可靠性与失败处理
@@ -673,6 +809,7 @@ Target Resolver 是通过统一协议接入的可选外部模块。它订阅待�
 采用“模块化事务核心 + 独立 Worker”：
 
 - 一个模块化 Core Service 提供协议入口和事务状态。
+- Core 在领域语义上有状态；Service/Worker 实例不持有仅存在于进程内的权威状态。
 - Signal Consumer、Notification Worker、Connector Worker 和 Projection Worker 独立进程运行。
 - Transaction Store 与 Outbox 保证核心一致性。
 - Object Store 和可选索引按需求启用。
@@ -874,6 +1011,32 @@ flowchart LR
 
 运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，Exchange 间交接见 [Federation 文档](federation.md)，发现网络见 [Participation Discovery](participation-discovery.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md)、[Phase 6B](performance-nats-wakeup-baseline.md) 与 [Discovery](performance-discovery-baseline.md) 基线。
 
+### 渠道中立的消息内容
+
+用户可见回复的业务语义仍由 Agent 或其它内容生产模块闭环负责。生产方通过
+既有 `media_type` 声明表示形式：普通富文本默认使用 `text/markdown`，
+明确无格式内容使用 `text/plain`。Fabric 只验证、持久化和路由，不把内容
+转换成任何厂商私有语法，也不在投递失败时重新编写答复。
+
+Channel Adapter 动态声明自己可呈现的媒体类型，并负责目标渠道的原生转换、
+长度限制和安全链接策略。飞书当前把 `text/plain` 映射为 `text`，把
+`text/markdown` 映射为 `post` 中的 `md` 富文本；只有结构化交互才使用
+`interactive` 卡片。未知媒体类型和不安全链接显式失败，不能猜测格式、
+静默丢失交互语义或把消息正文与 URL 写入可观测数据。
+
+文本 Result 可以在既有 content `extensions` 中携带有界的
+`workfabric.dev/recipient_references` 注解，内容生产方用它声明“这条消息
+需要谁关注”，但不生成渠道私有的 @ 语法。注解只能引用当前 Result 委托范围
+中已有的资源 URI。Channel 负责校验引用并机械映射到目标渠道；例如飞书把
+已授权的 `feishu://user/open-id/...` 引用渲染为原生 `at`。Fabric 不选择
+收件人、不解释提醒目的，也不会因为某人被 @ 而推进业务流程。
+
+Result 权威正文不复制进全局协议事件。原会话回复路径通过
+`ChannelHandoffSnapshotSource` 按租户、Handoff 和最低版本装配规范快照，
+再由渠道 Renderer 呈现。这保持了事件总线的有界事实边界，同时避免
+Channel 从生命周期码制造业务答复。完整规则见
+[渠道中立消息内容设计](superpowers/specs/2026-07-29-channel-neutral-message-content-design.md)。
+
 ## 20. 阶段路线与执行状态
 
 | 阶段 | 范围 | 状态 |
@@ -891,6 +1054,12 @@ flowchart LR
 | 7 | 跨 Exchange Federation Profile | 已完成 |
 | 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
 | 9 | Collaboration Admission、稳定参与方绑定与短时表示 | 已完成 |
-| 10 | Participation Discovery、直接 Peer 同步与有预算查询 | 已完成 |
+| 10 | Network Citizen 动态目录、租约、渐进披露与 Runtime 基础 | 已完成 |
+| 11 | Agent 能力调用与 Feishu Capability/Context Provider | 已完成 |
+| 12 | Agent Handoff 的受权有界会话上下文 | 已完成 |
+| 13 | 渠道中立消息表示与飞书原生富文本呈现 | 已完成 |
+| 14 | 本地 Debug Channel 与确定性 Agent E2E | 已完成 |
+| 15 | 飞书消息/日历能力与 Agent 驱动群日程 | 已完成 |
+| 16 | Participation Discovery、直接 Peer 同步与有预算查询 | 已完成 |
 
-阶段 1–10 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 提供可验证、无广播且调用者范围化的参与发现。后续 Binding、Adapter 或 Connector 必须继续保持连接/发现/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–16 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10–15 建立 Network Citizen、Agent 能力调用、受权上下文、渠道中立消息、Debug Channel 与日历协作闭环；16 提供可验证、无广播且调用者范围化的参与发现。具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/发现/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。

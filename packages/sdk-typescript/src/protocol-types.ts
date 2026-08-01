@@ -22,8 +22,15 @@ export type {
   CapabilityDescriptor,
   EndpointActorRef,
   EndpointAvailability,
+  EndpointCapabilityCard,
+  EndpointCapabilityContract,
+  EndpointCapabilityPage,
+  EndpointClaimableHandoff,
+  EndpointClaimableHandoffPage,
   EndpointDescriptor,
   EndpointDiscoveryPage,
+  EndpointIdentityCard,
+  EndpointIdentityPage,
   EndpointInboxPartition,
   EndpointInboxPartitionPage,
   EndpointLimits,
@@ -61,6 +68,22 @@ export type {
   DiscoveryRecord,
   DiscoveryRecordKind,
 } from "@work-fabric/discovery-spi";
+export type {
+  CitizenAvailability,
+  CitizenCardPage,
+  CitizenDeclaration,
+  CitizenDeclarationContract,
+  CitizenDeclarationReplaceInput,
+  CitizenDeclarationSummary,
+  CitizenDeclarationSummaryPage,
+  CitizenHeartbeatInput,
+  CitizenProvisioning,
+  CitizenSessionCloseInput,
+  CitizenSessionOpenInput,
+  NetworkCitizenDescriptor,
+  NetworkCitizenKind,
+  PublicCitizenSession,
+} from "@work-fabric/network-citizen-spi";
 
 export interface SubscriptionDocument {
   readonly subscription_id: string;

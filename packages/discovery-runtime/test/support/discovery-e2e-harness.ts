@@ -316,6 +316,7 @@ async function startExchange(input: {
       if (partitionId !== undefined) await projector.runPartition(partitionId, 100);
       return stored.getHandoff(requestTenantId, handoffId);
     },
+    getContextBundle: stored.getContextBundle.bind(stored),
     readHandoffEvents: stored.readHandoffEvents.bind(stored),
     listPartitionHandoffs: stored.listPartitionHandoffs.bind(stored),
     readPartitionEvents: stored.readPartitionEvents.bind(stored),
@@ -344,6 +345,7 @@ async function startExchange(input: {
   const endpointInbox = new EndpointInboxQueryService({
     directory,
     inbox: inboxStore,
+    clock,
     defaultPageLimit: 20,
     maxPageLimit: 100,
   });

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 
+import { addUtcTimestampSeconds } from "@work-fabric/exchange-spi";
 import type {
   AtomicCommitResult,
   ContextReference,
@@ -10,6 +11,7 @@ import type {
 } from "@work-fabric/exchange-spi";
 
 import type { DomainError } from "../domain/domain-error.js";
+import type { HandoffCommand } from "../domain/handoff-commands.js";
 import { decideHandoff } from "../domain/handoff-decider.js";
 import type { HandoffEvent } from "../domain/handoff-events.js";
 import { replayHandoff } from "../domain/handoff-reducer.js";
@@ -33,6 +35,10 @@ const MULTI_STREAM_MESSAGE_TYPES = new Set([
   "workfabric.handoff.transfer.v1",
   "workfabric.handoff.child_accepted.v1",
 ]);
+const DEFAULT_CLAIM_LEASE_SECONDS = 60;
+const MIN_CLAIM_LEASE_SECONDS = 10;
+const MAX_CLAIM_LEASE_SECONDS = 300;
+const CLAIM_RENEW_AHEAD_SECONDS = 20;
 
 class StoredStreamScopeError extends Error {}
 
@@ -103,6 +109,7 @@ function jsonObject(value: unknown, field: string): JsonObject {
 
 function receiptRequired(event: HandoffEvent): boolean {
   return [
+    "workfabric.handoff.claimed.v1",
     "workfabric.handoff.accepted.v1",
     "workfabric.handoff.result_returned.v1",
     "workfabric.handoff.verified.v1",
@@ -405,6 +412,7 @@ export class ExchangeApplication {
       ) {
         return await this.handleChildAccept(
           envelope,
+          command,
           actor,
           actorClaim.endpoint_ids,
           payloadDigest,
@@ -436,7 +444,61 @@ export class ExchangeApplication {
         }
         targetEligible = eligibility.kind === "eligible";
       }
+      let claimantEligible = false;
+      if (
+        command.kind === "claim" &&
+        currentState?.lifecycle_state === "claimable" &&
+        "capability_requirement" in currentState.package.target
+      ) {
+        const targetEligibility = this.dependencies.target_eligibility;
+        if (targetEligibility === undefined) {
+          return toOperationResult(envelope.message_id, temporaryFailure());
+        }
+        const eligibility = await targetEligibility.verify({
+          tenant_id: envelope.tenant_id,
+          exchange_id: envelope.exchange_id,
+          handoff_id: handoffId,
+          requirement: currentState.package.target.capability_requirement,
+          proposed_target: { endpoint_id: envelope.endpoint_id },
+          principal,
+        });
+        if (eligibility.kind === "unavailable") {
+          return toOperationResult(envelope.message_id, temporaryFailure());
+        }
+        claimantEligible = eligibility.kind === "eligible";
+      }
       const now = this.dependencies.clock.now();
+      let claimLease:
+        | {
+            readonly accepted_lease_seconds: number;
+            readonly expires_at: string;
+            readonly renew_after: string;
+          }
+        | undefined;
+      if (command.kind === "claim" || command.kind === "renew_claim") {
+        const requested = command.kind === "claim"
+          ? command.requested_lease_seconds ?? DEFAULT_CLAIM_LEASE_SECONDS
+          : currentState?.active_claim?.accepted_lease_seconds;
+        if (
+          requested === undefined ||
+          !Number.isSafeInteger(requested) ||
+          requested < MIN_CLAIM_LEASE_SECONDS ||
+          requested > MAX_CLAIM_LEASE_SECONDS
+        ) {
+          return toOperationResult(
+            envelope.message_id,
+            rejected("invalid_argument", "Claim lease is outside configured bounds"),
+          );
+        }
+        claimLease = {
+          accepted_lease_seconds: requested,
+          expires_at: addUtcTimestampSeconds(now, requested),
+          renew_after: addUtcTimestampSeconds(
+            now,
+            requested - Math.min(CLAIM_RENEW_AHEAD_SECONDS, requested - 1),
+          ),
+        };
+      }
       const decision = decideHandoff(currentState, command, {
         now,
         recipient_authorized: true,
@@ -448,6 +510,8 @@ export class ExchangeApplication {
           command.kind === "resolve_target" ||
           command.kind === "report_target_unavailable",
         target_eligible: targetEligible,
+        claimant_eligible: claimantEligible,
+        ...(claimLease === undefined ? {} : { claim_lease: claimLease }),
       });
       let outcome: NormalizedOperationOutcome;
       let appends: readonly {
@@ -680,6 +744,7 @@ export class ExchangeApplication {
 
   private async handleChildAccept(
     envelope: CommandEnvelope,
+    command: Extract<HandoffCommand, { readonly kind: "accept" }>,
     actor: ActorRef,
     authorizedEndpointIds: readonly string[],
     payloadDigest: string,
@@ -712,7 +777,7 @@ export class ExchangeApplication {
     const decision = acceptChildAndTransferParent(
       parentState,
       childState,
-      actor,
+      command,
       {
         now,
         recipient_authorized: true,

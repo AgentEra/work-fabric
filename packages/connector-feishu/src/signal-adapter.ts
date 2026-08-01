@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 
 import {
   SIGNAL_REQUIRED_CAPABILITIES,
+  signalMediaTypeCapability,
   type ProtocolEvent,
   type SignalAdapter,
   type SignalDeliveryResult,
@@ -9,6 +10,7 @@ import {
 } from "@work-fabric/exchange-spi";
 
 import {
+  FeishuRenderError,
   parseFeishuDestination,
   type FeishuEventRenderer,
 } from "./event-renderer.js";
@@ -37,7 +39,11 @@ export class FeishuSignalAdapter implements SignalAdapter {
     profile: "exchange.signal.v1",
     adapter: "feishu",
     capabilities: Object.fromEntries(
-      SIGNAL_REQUIRED_CAPABILITIES.map((capability) => [capability, true]),
+      [
+        ...SIGNAL_REQUIRED_CAPABILITIES,
+        signalMediaTypeCapability("text/plain"),
+        signalMediaTypeCapability("text/markdown"),
+      ].map((capability) => [capability, true]),
     ),
   } as const;
 
@@ -69,6 +75,9 @@ export class FeishuSignalAdapter implements SignalAdapter {
       if (result.kind === "accepted") return { kind: "accepted" };
       return { kind: result.kind, detail: result.error_code.slice(0, 512) };
     } catch (error) {
+      if (error instanceof FeishuRenderError) {
+        return { kind: "permanent_failure", detail: error.code };
+      }
       return error instanceof TypeError || error instanceof RangeError
         ? { kind: "permanent_failure", detail: "invalid_feishu_destination" }
         : { kind: "retryable_failure", detail: "feishu_adapter_failure" };

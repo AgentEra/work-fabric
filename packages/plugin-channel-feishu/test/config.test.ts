@@ -11,6 +11,10 @@ const valid = () => ({
   inbound: {
     enabled: true, transport: "webhook", route_id: "primary", mention_only: true,
     intake_target: { actor_id: "actor-agent", endpoint_id: "endpoint-agent" },
+    delegation: {
+      scopes: ["work:read", "document:read", "document:write"],
+      may_redelegate: true,
+    },
   },
   outbound: { enabled: true, default_render_mode: "card", channels: {}, subscriptions: {} },
   identities: [{ external_open_id: "ou-human", actor_id: "actor-human", actor_type: "human", endpoint_id: "endpoint-human" }],
@@ -49,9 +53,78 @@ const admission = () => {
 };
 
 describe("Feishu plugin configuration", () => {
+  it("keeps conversation context disabled when absent and applies bounded defaults when enabled", () => {
+    expect(validateFeishuPluginConfig(valid())).toMatchObject({
+      conversation_context: {
+        mode: "disabled",
+      },
+    });
+    expect(validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { enabled: true },
+    })).toMatchObject({
+      conversation_context: {
+        mode: "bootstrap",
+        lookback_seconds: 86_400,
+        maximum_messages: 20,
+        maximum_bytes: 65_536,
+      },
+    });
+  });
+
+  it("supports Agent-managed retrieval without bootstrap history bounds", () => {
+    expect(validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { mode: "agent_managed" },
+    })).toMatchObject({
+      conversation_context: {
+        mode: "agent_managed",
+      },
+    });
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: {
+        mode: "agent_managed",
+        maximum_messages: 20,
+      },
+    })).toThrow(/bootstrap/i);
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: {
+        mode: "agent_managed",
+        enabled: true,
+      },
+    })).toThrow(/legacy|combine/i);
+  });
+
+  it.each([
+    ["lookback_seconds", 59],
+    ["lookback_seconds", 604_801],
+    ["maximum_messages", 0],
+    ["maximum_messages", 51],
+    ["maximum_bytes", 1_023],
+    ["maximum_bytes", 131_073],
+  ])("rejects out-of-range conversation context %s=%s", (field, value) => {
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { enabled: true, [field]: value },
+    })).toThrow(new RegExp(field));
+  });
+
+  it("rejects unknown conversation context keys", () => {
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      conversation_context: { enabled: true, semantic_summary: true },
+    })).toThrow(/conversation_context.*unknown/i);
+  });
+
   it("keeps valid Webhook configuration source-compatible", () => {
     const parsed = validateFeishuPluginConfig(valid());
     expect(parsed.inbound.intake_target.actor_id).toBe("actor-agent");
+    expect(parsed.inbound.delegation).toEqual({
+      scopes: ["work:read", "document:read", "document:write"],
+      may_redelegate: true,
+    });
     expect(feishuSecretPaths("plugins.instances.feishu-primary.config", parsed)).toEqual([
       "plugins.instances.feishu-primary.config.credentials.app_id",
       "plugins.instances.feishu-primary.config.credentials.app_secret",
@@ -171,6 +244,20 @@ describe("Feishu plugin configuration", () => {
     expect(() => validateFeishuPluginConfig({ ...valid(), surprise: true })).toThrow(/unknown/);
     expect(() => validateFeishuPluginConfig({ ...valid(), identities: [...valid().identities, ...valid().identities] })).toThrow(/duplicate/);
     expect(() => validateFeishuPluginConfig({ ...valid(), worker: { ...valid().worker, batch_limit: 1001 } })).toThrow(/batch_limit/);
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      inbound: {
+        ...valid().inbound,
+        delegation: { scopes: ["document:write", "document:write"], may_redelegate: true },
+      },
+    })).toThrow(/duplicate/i);
+    expect(() => validateFeishuPluginConfig({
+      ...valid(),
+      inbound: {
+        ...valid().inbound,
+        delegation: { scopes: ["document:write"], may_redelegate: "yes" },
+      },
+    })).toThrow(/may_redelegate/i);
   });
 
   it("normalizes strict static channels and canonical subscription filters", () => {
