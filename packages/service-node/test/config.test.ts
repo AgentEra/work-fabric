@@ -195,4 +195,54 @@ describe("Node service configuration", () => {
       cluster: { ...cluster, max_concurrent_turns: 0 },
     })).toThrow(/max_concurrent_turns/);
   });
+
+  it("accepts only a closed bounded discovery configuration without credentials", () => {
+    const discovery = {
+      enabled: true,
+      tenant_view_id: "default-view",
+      record_ttl_seconds: 60,
+      default_page_limit: 20,
+      max_page_limit: 100,
+      max_records_per_origin: 10_000,
+      sync_page_size: 100,
+      query_max_hops: 2,
+      query_max_fanout: 4,
+      query_max_bytes: 32_768,
+    };
+    const config = parseServiceConfig({ ...base, discovery });
+    expect(config.discovery).toEqual(discovery);
+    expect(Object.isFrozen(config.discovery)).toBe(true);
+    expect(JSON.stringify(config.discovery)).not.toMatch(/private|secret|credential|token/i);
+
+    for (const invalid of [
+      { ...discovery, unknown: true },
+      { ...discovery, tenant_view_id: "" },
+      { ...discovery, record_ttl_seconds: 301 },
+      { ...discovery, default_page_limit: 101, max_page_limit: 100 },
+      { ...discovery, query_max_hops: 9 },
+      { ...discovery, query_max_fanout: 33 },
+      { ...discovery, query_max_bytes: 65_537 },
+      { ...discovery, private_key: "must-not-be-configurable" },
+    ]) expect(() => parseServiceConfig({ ...base, discovery: invalid })).toThrow(/discovery/i);
+  });
+
+  it("rejects enabled discovery on a worker-only role", () => {
+    expect(() => parseServiceConfig({
+      ...base,
+      storage_profile: "postgres",
+      development_mode: false,
+      role: "worker",
+      postgres: { connection_string: "postgres://deployment-owned" },
+      cluster: {
+        worker_owner_id: "worker-a", tenant_ids: ["tenant-local"], max_concurrent_turns: 4,
+        max_ready_items: 100, catalog_page_size: 25, turn_item_limit: 100, lease_seconds: 30,
+        drain_timeout_seconds: 30, poll_interval_ms: 1_000, max_tenants_per_host: 10,
+      },
+      discovery: {
+        enabled: true, tenant_view_id: "default-view", record_ttl_seconds: 60,
+        default_page_limit: 20, max_page_limit: 100, max_records_per_origin: 10_000,
+        sync_page_size: 100, query_max_hops: 2, query_max_fanout: 4, query_max_bytes: 32_768,
+      },
+    })).toThrow(/discovery.*worker/i);
+  });
 });
