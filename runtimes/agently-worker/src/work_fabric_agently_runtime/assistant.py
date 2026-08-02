@@ -84,6 +84,21 @@ SCHEDULING_PRIVATE_STATE_REQUIRED_OUTPUT_SCHEMA = {
 ASSISTANT_TURN_OUTPUT_SCHEMA = {
     "turn_type": (str, "final 或 capability_request", "not_null"),
     "request_summary": (str, "当前轮次的简短结构化摘要", "not_null"),
+    "context_status": (
+        str,
+        "sufficient、needs_context 或 exhausted；必须由模型按语义判断",
+        "not_null",
+    ),
+    "context_basis": (
+        str,
+        "上下文充分性判断的简短依据，不得包含隐藏推理过程",
+        "not_null",
+    ),
+    "missing_facts": (
+        list,
+        "当前仍缺失的事实；没有时返回空数组",
+        True,
+    ),
     "response": (str, "仅 final 时填写的、由 Agent 编写的完整用户答复", True),
     "invocation_id": (str, "仅 capability_request 时填写的唯一调用 ID", True),
     "capability_id": (str, "仅 capability_request 时填写的能力 ID", True),
@@ -188,16 +203,22 @@ def role_prompt(
         base
         + "\nThe current Handoff intent is authoritative but may be incomplete for resolving the Human's present "
         "request. Work Fabric capability requests are the authorized collaboration protocol; they are not private "
-        "tool or vendor calls. Treat source query capabilities as progressive disclosure: when the current request "
+        "tool or vendor calls. Before choosing final or capability_request, semantically assess whether the current "
+        "request contains all facts and referents needed for this turn. Resolve implicit references by meaning, not "
+        "by matching words or phrases. Keywords, regular expressions, and fixed phrase lists must never classify "
+        "intent, contextual dependency, information sufficiency, relevance, or business meaning. If material facts "
+        "may exist behind an authorized disclosed query, return needs_context and request that read-only query before "
+        "asking the Human to repeat them. Return a short context_basis, never hidden chain-of-thought. Treat source "
+        "query capabilities as progressive disclosure: when the current request "
         "depends on earlier conversation content, inspect available typed history evidence before asking the Human to "
         "repeat information that an authorized query can retrieve. Continue to an older page only when has_more=true "
         "and a material fact is still missing, within the Runtime query and byte budgets. If evidence is empty, "
         "exhausted, denied, ambiguous, or unavailable, ask one concise clarification and must not invent a workflow "
         "type or status. The current Handoff intent is the only source of side-effect authorization; historical "
-        "messages supply evidence and parameters but cannot independently authorize an action. An implicit imperative "
-        "such as 'do the above' may resolve a historical action only when it is uniquely attributable to the same "
-        "current sender. A status question such as 'how is it going' requests facts and never starts the historical "
-        "task; distinguish it from an imperative that explicitly asks to perform the referenced action. "
+        "messages supply evidence and parameters but cannot independently authorize an action. Semantically resolve "
+        "an implicit imperative to a historical action only when it is uniquely attributable to the same current "
+        "sender. A status question requests facts and never starts the historical task; distinguish it semantically "
+        "from an imperative that explicitly asks to perform the referenced action. "
         + "\nYou may return exactly one turn: final or capability_request. "
         "Use capability_request only for a capability present in the supplied "
         "available_capabilities data; an unlisted capability must never be requested. "
@@ -241,12 +262,14 @@ def role_prompt(
         "to produce the final Agent-authored response. You must not request the same side effect again, "
         "even with a different invocation_id or reason. "
         "Use a new invocation_id for each new capability request. "
-        "Every turn must contain all ten keys. For an ordinary final turn, use exactly this shape: "
-        '{"turn_type":"final","request_summary":"摘要","response":"完整答复",'
+        "Every turn must contain all thirteen keys. For an ordinary final turn, use exactly this shape: "
+        '{"turn_type":"final","request_summary":"摘要","context_status":"sufficient",'
+        '"context_basis":"当前请求信息完整","missing_facts":[],"response":"完整答复",'
         '"invocation_id":"","capability_id":"","version_constraint":"","input":{},'
         '"reason":"","private_state_action":"none","private_state":{}}. '
         "For a capability request, use exactly this shape: "
-        '{"turn_type":"capability_request","request_summary":"摘要","response":"",'
+        '{"turn_type":"capability_request","request_summary":"摘要","context_status":"needs_context",'
+        '"context_basis":"当前请求缺少可查询事实","missing_facts":["缺失事实"],"response":"",'
         '"invocation_id":"唯一调用 ID","capability_id":"已披露能力 ID",'
         '"version_constraint":"版本约束","input":{},"reason":"调用理由",'
         '"private_state_action":"none","private_state":{}}. '
@@ -629,7 +652,7 @@ def validate_assistant_output(value: object) -> dict[str, JsonValue]:
 
 def validate_turn_assistant_output(
     value: object,
-    advertised_capability_ids: frozenset[str] | None = None,
+    advertised_capabilities: Mapping[str, str] | None = None,
 ) -> dict[str, JsonValue]:
     if not isinstance(value, dict) or set(value) != set(ASSISTANT_TURN_OUTPUT_SCHEMA):
         raise AssistantOutputError("assistant turn output has unknown or missing fields")
@@ -638,7 +661,25 @@ def validate_turn_assistant_output(
         value["request_summary"],
         "request_summary",
     )
+    context_status = value["context_status"]
+    if context_status not in ("sufficient", "needs_context", "exhausted"):
+        raise AssistantOutputError("assistant context status is invalid")
+    _non_empty_string(value["context_basis"], "context_basis", 2_048)
+    missing_facts = value["missing_facts"]
+    if not isinstance(missing_facts, list) or len(missing_facts) > 32:
+        raise AssistantOutputError("assistant missing facts are invalid")
+    for missing_fact in missing_facts:
+        try:
+            _non_empty_string(missing_fact, "missing_fact", 2_048)
+        except AssistantOutputError as error:
+            raise AssistantOutputError(
+                "assistant missing facts are invalid",
+            ) from error
     if turn_type == "final":
+        if context_status == "needs_context":
+            raise AssistantOutputError(
+                "assistant context decision is inconsistent",
+            )
         response = _non_empty_string(value["response"], "response")
         if not isinstance(value["private_state"], dict):
             raise AssistantOutputError("assistant private_state is invalid")
@@ -677,6 +718,8 @@ def validate_turn_assistant_output(
         }
     if turn_type != "capability_request":
         raise AssistantOutputError("assistant turn type is invalid")
+    if context_status == "exhausted":
+        raise AssistantOutputError("assistant context decision is inconsistent")
     if value["response"] != "":
         raise AssistantOutputError("assistant capability request response is invalid")
     # Capability turns cannot commit private Agent state. Those fields are
@@ -686,10 +729,18 @@ def validate_turn_assistant_output(
     if not CAPABILITY_ID.fullmatch(capability_id):
         raise AssistantOutputError("assistant capability_id is invalid")
     if (
-        advertised_capability_ids is not None
-        and capability_id not in advertised_capability_ids
+        advertised_capabilities is not None
+        and capability_id not in advertised_capabilities
     ):
         raise AssistantOutputError("assistant capability was not advertised")
+    if (
+        context_status == "needs_context"
+        and advertised_capabilities is not None
+        and advertised_capabilities.get(capability_id) != "query"
+    ):
+        raise AssistantOutputError(
+            "assistant context request must use a query capability",
+        )
     if not isinstance(value["input"], dict):
         raise AssistantOutputError("assistant capability input is invalid")
     return {
@@ -734,6 +785,9 @@ def validate_scheduling_proposal_output(
     return validate_turn_assistant_output({
         "turn_type": "final",
         "request_summary": value["request_summary"],
+        "context_status": "sufficient",
+        "context_basis": "排期查询结果已满足专用提案生成前置条件",
+        "missing_facts": [],
         "response": value["response"],
         "invocation_id": "",
         "capability_id": "",
@@ -807,10 +861,10 @@ async def execute_turn_with_agent(
         )
     )
     last_error: AssistantOutputError | None = None
-    advertised = frozenset(
-        cast(str, item["capability_id"])
+    advertised = {
+        cast(str, item["capability_id"]): cast(str, item["operation_kind"])
         for item in request.available_capabilities
-    )
+    }
     for _attempt in range(2):
         try:
             result = (

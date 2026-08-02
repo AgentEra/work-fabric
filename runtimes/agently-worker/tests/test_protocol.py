@@ -24,7 +24,12 @@ def test_v3_request_accepts_only_summaries_and_a_normalized_transcript() -> None
     value = valid_request_v3()
     parsed = parse_request(value)
     assert parsed.protocol == "workfabric.agent-runtime/3"
-    assert parsed.available_capabilities[0]["capability_id"] == "feishu.document.create"
+    capabilities = {
+        item["capability_id"]: item
+        for item in parsed.available_capabilities
+    }
+    assert "feishu.conversation.history.read" in capabilities
+    assert "feishu.document.create" in capabilities
     assert parsed.capability_transcript is None
 
     value["capability_transcript"] = {"entries": [{

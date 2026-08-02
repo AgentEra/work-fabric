@@ -66,6 +66,36 @@ def valid_request_v3() -> dict[str, Any]:
     value["protocol"] = "workfabric.agent-runtime/3"
     value["available_capabilities"] = [
         {
+            "citizen_id": "citizen-feishu-message",
+            "capability_id": "feishu.conversation.history.read",
+            "version": "1.0.0",
+            "name": "Read conversation history",
+            "description": (
+                "Read one bounded page from the authorized conversation."
+            ),
+            "operation_kind": "query",
+            "input_schema": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["conversation", "maximum_messages"],
+                "properties": {
+                    "conversation": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "required": ["kind"],
+                        "properties": {
+                            "kind": {"const": "current_conversation"}
+                        },
+                    },
+                    "maximum_messages": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                    },
+                },
+            },
+        },
+        {
             "citizen_id": "citizen-feishu",
             "capability_id": "feishu.document.create",
             "version": "1.0.0",

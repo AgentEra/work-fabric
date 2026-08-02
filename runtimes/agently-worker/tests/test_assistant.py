@@ -56,6 +56,21 @@ class FakeAgent:
         }
 
 
+def contextual_turn(
+    value: dict[str, object],
+    *,
+    status: str = "sufficient",
+    basis: str = "当前请求包含完成本轮决策所需的信息",
+    missing: list[str] | None = None,
+) -> dict[str, object]:
+    return {
+        **value,
+        "context_status": status,
+        "context_basis": basis,
+        "missing_facts": [] if missing is None else missing,
+    }
+
+
 @pytest.mark.asyncio
 async def test_executes_a_single_structured_request_in_the_supplied_workspace() -> None:
     request = parse_request(valid_request())
@@ -191,7 +206,11 @@ def test_turn_prompt_requires_provider_owned_input_contract() -> None:
     assert "Never invent optional identifiers or policy references" in prompt
     assert "After a command or destructive capability succeeds" in prompt
     assert "must not request the same side effect again" in prompt
-    assert supplied["available_capabilities"][0]["input_schema"]["required"] == [
+    document = next(
+        item for item in supplied["available_capabilities"]
+        if item["capability_id"] == "feishu.document.create"
+    )
+    assert document["input_schema"]["required"] == [
         "title",
         "content",
     ]
@@ -217,6 +236,17 @@ def test_turn_prompt_requires_progressive_context_before_clarification_or_invent
     assert "same current sender" in prompt
     assert "status question" in prompt
     assert "imperative" in prompt
+
+
+def test_turn_prompt_requires_model_owned_context_assessment() -> None:
+    prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
+
+    assert "semantically assess" in prompt
+    assert "not by matching words or phrases" in prompt
+    assert "Keywords, regular expressions, and fixed phrase lists" in prompt
+    assert "thirteen keys" in prompt
+    assert '"context_status":"sufficient"' in prompt
+    assert '"missing_facts":[]' in prompt
 
 
 def test_turn_prompt_teaches_the_disclosed_current_group_calendar_flow() -> None:
@@ -255,7 +285,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
     }
     assert isinstance(private_state_schema["proposal"][0], dict)
 
-    final = validate_turn_assistant_output({
+    final = validate_turn_assistant_output(contextual_turn({
         "turn_type": "final",
         "request_summary": "已处理",
         "response": "当前飞书服务不可用，请稍后重试。",
@@ -269,7 +299,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
             "namespace": "daily-assistant.scheduling/v1",
             "expected_version": 0,
         },
-    })
+    }))
     assert final["kind"] == "final"
     assert final["response"]["summary"][0]["media_type"] == "text/markdown"
     assert final["response"]["summary"][0]["text"] == "当前飞书服务不可用，请稍后重试。"
@@ -278,7 +308,7 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "expected_version": 0,
     }
 
-    capability = validate_turn_assistant_output({
+    capability = validate_turn_assistant_output(contextual_turn({
         "turn_type": "capability_request",
         "request_summary": "需要创建文档",
         "response": "",
@@ -289,11 +319,11 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "reason": "创建团队文档",
         "private_state_action": "none",
         "private_state": {},
-    })
+    }))
     assert capability["kind"] == "capability_request"
     assert capability["request"]["capability_id"] == "feishu.document.create"
 
-    capability_without_reason = validate_turn_assistant_output({
+    capability_without_reason = validate_turn_assistant_output(contextual_turn({
         "turn_type": "capability_request",
         "request_summary": "需要创建飞书文档",
         "response": "",
@@ -304,8 +334,124 @@ def test_turn_output_is_a_strict_final_or_capability_request_union() -> None:
         "reason": "",
         "private_state_action": "none",
         "private_state": {},
-    })
+    }))
     assert capability_without_reason["request"]["reason"] == "需要创建飞书文档"
+
+
+def test_context_assessment_accepts_valid_turn_combinations() -> None:
+    capabilities = {
+        "feishu.conversation.history.read": "query",
+        "feishu.document.create": "command",
+    }
+    history = contextual_turn({
+        "turn_type": "capability_request",
+        "request_summary": "需要读取当前会话中的报错信息",
+        "response": "",
+        "invocation_id": "invocation-history-1",
+        "capability_id": "feishu.conversation.history.read",
+        "version_constraint": "1.0.0",
+        "input": {
+            "conversation": {"kind": "current_conversation"},
+            "maximum_messages": 8,
+        },
+        "reason": "当前请求引用了尚未提供的报错详情",
+        "private_state_action": "none",
+        "private_state": {},
+    }, status="needs_context", missing=["要写入文档的报错详情"])
+    assert (
+        validate_turn_assistant_output(history, capabilities)["kind"]
+        == "capability_request"
+    )
+
+    final = contextual_turn({
+        "turn_type": "final",
+        "request_summary": "当前请求可以直接回答",
+        "response": "已完成信息整理。",
+        "invocation_id": "",
+        "capability_id": "",
+        "version_constraint": "",
+        "input": {},
+        "reason": "",
+        "private_state_action": "none",
+        "private_state": {},
+    })
+    assert validate_turn_assistant_output(final, capabilities)["kind"] == "final"
+
+    exhausted = contextual_turn(
+        {**final, "response": "我无法取得所需历史，请补充报错详情。"},
+        status="exhausted",
+        missing=["报错详情"],
+    )
+    assert (
+        validate_turn_assistant_output(exhausted, capabilities)["kind"]
+        == "final"
+    )
+
+
+def test_context_assessment_rejects_inconsistent_turns() -> None:
+    capabilities = {
+        "feishu.conversation.history.read": "query",
+        "feishu.document.create": "command",
+    }
+    base_request = {
+        "turn_type": "capability_request",
+        "request_summary": "需要读取当前会话中的报错信息",
+        "response": "",
+        "invocation_id": "invocation-context-1",
+        "capability_id": "feishu.conversation.history.read",
+        "version_constraint": "1.0.0",
+        "input": {
+            "conversation": {"kind": "current_conversation"},
+            "maximum_messages": 8,
+        },
+        "reason": "当前请求缺少报错详情",
+        "private_state_action": "none",
+        "private_state": {},
+    }
+
+    with pytest.raises(AssistantOutputError, match="context"):
+        validate_turn_assistant_output(contextual_turn(
+            {
+                **base_request,
+                "turn_type": "final",
+                "response": "请重复报错详情。",
+                "invocation_id": "",
+                "capability_id": "",
+                "version_constraint": "",
+                "input": {},
+                "reason": "",
+            },
+            status="needs_context",
+            missing=["报错详情"],
+        ), capabilities)
+
+    with pytest.raises(AssistantOutputError, match="context"):
+        validate_turn_assistant_output(contextual_turn(
+            {
+                **base_request,
+                "capability_id": "feishu.document.create",
+            },
+            status="needs_context",
+            missing=["报错详情"],
+        ), capabilities)
+
+    with pytest.raises(AssistantOutputError, match="context"):
+        validate_turn_assistant_output(contextual_turn(
+            base_request,
+            status="exhausted",
+            missing=["报错详情"],
+        ), capabilities)
+
+    for invalid in (
+        contextual_turn(base_request, status="unknown"),
+        contextual_turn(base_request, basis=""),
+        {
+            **contextual_turn(base_request),
+            "missing_facts": [1],
+        },
+    ):
+        with pytest.raises(AssistantOutputError, match="context|missing"):
+            validate_turn_assistant_output(invalid, capabilities)
 
 
 def test_scheduling_proposal_has_a_dedicated_required_output_contract() -> None:
@@ -393,7 +539,7 @@ async def test_executes_a_v3_turn_with_the_dedicated_schema() -> None:
     agent = FakeAgent()
 
     async def capability_start() -> object:
-        return {
+        return contextual_turn({
             "turn_type": "capability_request",
             "request_summary": "需要创建文档",
             "response": "",
@@ -404,7 +550,7 @@ async def test_executes_a_v3_turn_with_the_dedicated_schema() -> None:
             "reason": "创建团队文档",
             "private_state_action": "none",
             "private_state": {},
-        }
+        })
 
     agent.async_start = capability_start  # type: ignore[method-assign]
     turn = await execute_turn_with_agent(request, agent)
@@ -674,7 +820,7 @@ async def test_rejects_a_capability_request_that_was_not_advertised() -> None:
     agent = FakeAgent()
 
     async def capability_start() -> object:
-        return {
+        return contextual_turn({
             "turn_type": "capability_request",
             "request_summary": "需要创建文档",
             "response": "",
@@ -685,7 +831,7 @@ async def test_rejects_a_capability_request_that_was_not_advertised() -> None:
             "reason": "创建团队文档",
             "private_state_action": "none",
             "private_state": {},
-        }
+        })
 
     agent.async_start = capability_start  # type: ignore[method-assign]
     with pytest.raises(AssistantOutputError, match="advertised"):
@@ -780,14 +926,17 @@ def test_capability_turn_prompt_defines_complete_discriminated_json_shapes() -> 
     )
 
     assert (
-        '{"turn_type":"final","request_summary":"摘要","response":"完整答复",'
+        '{"turn_type":"final","request_summary":"摘要",'
+        '"context_status":"sufficient","context_basis":"当前请求信息完整",'
+        '"missing_facts":[],"response":"完整答复",'
         '"invocation_id":"","capability_id":"","version_constraint":"",'
         '"input":{},"reason":"","private_state_action":"none",'
         '"private_state":{}}'
     ) in prompt
     assert (
         '{"turn_type":"capability_request","request_summary":"摘要",'
-        '"response":"","invocation_id":"唯一调用 ID",'
+        '"context_status":"needs_context","context_basis":"当前请求缺少可查询事实",'
+        '"missing_facts":["缺失事实"],"response":"","invocation_id":"唯一调用 ID",'
         '"capability_id":"已披露能力 ID","version_constraint":"版本约束",'
         '"input":{},"reason":"调用理由","private_state_action":"none",'
         '"private_state":{}}'
@@ -795,7 +944,7 @@ def test_capability_turn_prompt_defines_complete_discriminated_json_shapes() -> 
 
 
 def test_turn_output_normalizes_an_empty_private_state_update_to_noop() -> None:
-    turn = validate_turn_assistant_output({
+    turn = validate_turn_assistant_output(contextual_turn({
         "turn_type": "final",
         "request_summary": "请确认排期",
         "response": "请确认明天下午两点的评审日程。",
@@ -806,7 +955,7 @@ def test_turn_output_normalizes_an_empty_private_state_update_to_noop() -> None:
         "reason": "",
         "private_state_action": "update",
         "private_state": {},
-    })
+    }))
 
     assert (
         turn["response"]["extensions"]["workfabric.agent/private_state"]
@@ -815,7 +964,7 @@ def test_turn_output_normalizes_an_empty_private_state_update_to_noop() -> None:
 
 
 def test_capability_request_discards_private_state_fields() -> None:
-    turn = validate_turn_assistant_output({
+    turn = validate_turn_assistant_output(contextual_turn({
         "turn_type": "capability_request",
         "request_summary": "创建已确认的日程",
         "response": "",
@@ -826,7 +975,7 @@ def test_capability_request_discards_private_state_fields() -> None:
         "reason": "创建团队文档",
         "private_state_action": "update",
         "private_state": {"untrusted": "mutation"},
-    }, frozenset({"feishu.document.create"}))
+    }), {"feishu.document.create": "command"})
 
     assert turn["kind"] == "capability_request"
     assert "private_state" not in turn["request"]
@@ -904,7 +1053,7 @@ def test_scheduling_private_context_requires_atomic_proposal_cancellation() -> N
 
 
 def test_cancelled_private_state_output_survives_strict_validation() -> None:
-    turn = validate_turn_assistant_output({
+    turn = validate_turn_assistant_output(contextual_turn({
         "turn_type": "final",
         "request_summary": "取消尚未创建的日程提案",
         "response": "已取消这份尚未创建的日程提案。",
@@ -924,7 +1073,7 @@ def test_cancelled_private_state_output_survives_strict_validation() -> None:
             "calendar_result_uri": None,
             "capability_result_handoff_ids": [],
         },
-    })
+    }))
 
     assert (
         turn["response"]["extensions"]["workfabric.agent/private_state"]["phase"]
