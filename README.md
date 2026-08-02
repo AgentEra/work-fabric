@@ -2,6 +2,12 @@
 
 > **A protocol-driven collaboration interconnect for humans, agents, and work systems.**
 
+从愿景上，Work Fabric 可以浓缩为：
+
+> **一个去中心化、AI 友好的智能与信息万物互联方案。**
+
+这里的“去中心化”是指不同参与方、工作系统与 Work Fabric Exchange 各自保持独立权威，通过协议和签名交接形成联邦式协作网络，而不是依赖一个全局数据库或中央执行大脑；“AI 友好”是指 Agent 作为一等参与者，能够通过机器可读的身份、能力、上下文、授权、状态和结果契约加入协作；“万物互联”聚焦人、Agent、工作系统及其工作引用与协作事实。智能决策和专业执行仍由外部 Agent、Resolver、人或业务系统负责，Work Fabric 提供互联、信任、交接和追踪基础设施。
+
 Work Fabric 是面向人、AI Agent 与各类工作系统的协作对接和工作交接服务。它通过统一参与协议，让不同参与方能够发现彼此、接受委托、传递上下文、移交责任、同步状态、返回结果并完成验收。
 
 Work Fabric 不执行参与方的专业工作。人的实际工作、Agent 的规划与推理、Codex 的代码实施，以及飞书、CRM、Git、知识库和运维平台的业务逻辑，始终发生在各自系统内部。
@@ -25,6 +31,20 @@ Fabric 只做公民接入、协议校验、可靠传播、浅层协作状态记�
 
 Work Fabric 聚焦这些“协作对接”问题，使人、Agent 与系统可以在统一语义下互相替换、组合和协同。
 
+## 协作网络中的三类公民
+
+Work Fabric 将所有能够独立参与协作、承担责任并返回结果的主体视为**协作公民**。这是产品层的统一视角；在 WFPP v1 中，它对应 `Actor`，并由 `actor_type` 明确分为三类：
+
+| 公民类型 | 协议类型 | 典型形态 | 参与方式 |
+|---|---|---|---|
+| 人类公民 | `human` | 员工、专家、审批人、客户 | 通过飞书、Console、API 或其他 Human Adapter 参与 |
+| 智能体公民 | `agent` | Daily Assistant、Codex、本地或远程 Agent | 通过 Agent Endpoint 声明能力、接收交接并返回结果 |
+| 系统公民 | `system` | CRM、Git、知识库、部署、监控或自动化服务 | 通过 Connector 暴露工作引用、状态、动作和结果 |
+
+三类公民共享同一套身份、能力、上下文、授权、Handoff、状态、结果和验收语义，不因入口不同而产生协议特权。差异只体现在身份凭据、Endpoint、Capability、Admission Policy 和实际执行方式。
+
+“公民类型”和“协作角色”必须分开：同一个 Human、Agent 或 System Actor 在不同 Handoff 中都可以成为发起方 `Initiator`、接收方 `Recipient` 或验收方 `Verifier`；可选的 `Target Resolver` 是一次目标解析中的动态角色，不是第四类公民。认证调用者 `Principal`、责任主体 `Actor` 和收发入口 `Endpoint` 也必须分别建模。
+
 ## 核心思想
 
 Work Fabric 的中心不是内部工作流引擎，而是两个稳定能力：
@@ -47,6 +67,43 @@ Work Fabric 的中心不是内部工作流引擎，而是两个稳定能力：
 持久化框架真正拥有的协作事实：谁把什么交给了谁、接收方是否承担责任、附带了哪些上下文和授权、当前报告了什么状态、结果返回到哪里，以及是否通过验收。
 
 全局事件、订阅、通知、Context 和关系视图都服务于这条交接主线。
+
+### Participation Discovery
+
+`workfabric.discovery.v1` 让新接入的通用 Agent 查询其被授权看到的 Exchange、聚合能力、参与者、Endpoint 和安全 Binding。它采用显式 Peer、签名短 TTL 记录、增量拉取和有预算的按需查询，不使用全网广播、匿名 Gossip 或全局注册中心。
+
+Discovery 只返回带来源、版本、新鲜度和签名证明的未排序事实。候选比较与目标选择由 Agent、人或外部 Resolver 完成；实际调用继续经过目标 Exchange 的 Identity、Authority、Federation 与 Handoff 流程。公开一项发现记录不等于授权调用，也不等于目标已经接受责任。
+
+### 任务派发与认领
+
+Work Fabric 将“找到接收方”“可靠送达”和“承担责任”拆成三个独立事实：
+
+1. **目标解析**：发起方可以直接指定 Actor/Endpoint；如果只声明 Capability Requirement，则由外部人、规则服务或 Agent Brain 解析出唯一明确目标。
+2. **任务派发**：Exchange 校验目标和授权，记录不可变 Target Binding，再通过兼容 Endpoint 可靠投递，处理 Delivery、Ack、重试和恢复。
+3. **任务认领**：指定 Recipient 明确执行 `handoff.accept` 后，责任才从 Initiator 转移给 Recipient。收到消息、读取通知或发送 Delivery Ack 都不等于认领。
+
+```mermaid
+flowchart LR
+    Initiator["Initiator<br/>提出任务与验收条件"]
+    Offer["Handoff Offer<br/>Intent + Context + Authority"]
+    Target{"目标是否明确？"}
+    Resolver["External Resolver<br/>解析 Capability Target"]
+    Binding["Target Binding<br/>Actor / Endpoint"]
+    Dispatch["Handoff Dispatch<br/>Delivery / Ack / Retry"]
+    Recipient["Recipient<br/>Accept 或 Decline"]
+    Execute["外部执行<br/>Status + Result"]
+    Verifier["Verifier<br/>Verify / Rework / Close"]
+
+    Initiator --> Offer --> Target
+    Target -->|"明确目标"| Binding
+    Target -->|"能力目标"| Resolver --> Binding
+    Binding --> Dispatch --> Recipient
+    Recipient -->|"handoff.accept<br/>责任转移"| Execute --> Verifier
+    Recipient -->|"handoff.decline<br/>未承担责任"| Initiator
+    Verifier -->|"request rework<br/>重新认领"| Recipient
+```
+
+因此，“认领”不是无目标的公开抢单或首个响应者获胜，而是已经完成目标绑定的接收方对责任作出显式、可审计、可授权校验的承诺。若未来需要任务市场或竞争式认领，应由外部 Resolver 定义选择规则，再把唯一结果提交给 Work Fabric。
 
 ## 职责边界
 
@@ -465,6 +522,7 @@ Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目�
 - Console 仅使用公共 SDK；SSE 只使查询失效且不自动 Ack，轮询有间隔、抖动、Abort 和单并发上限。
 - Federation 只连接显式 Source/Target Exchange；每方只对本地记录权威，签名 Receipt 不能覆盖本地状态，Bridge 必须使用公共 API/SDK 且以 Transfer ID 幂等。
 - Federation 不做 Peer discovery/ranking、目标选择、状态复制、两阶段提交、全局顺序、Agent 推理或工作执行；生产 Transport、持久 Replay Store 与密钥托管保持可插拔。
+- Participation Discovery 只同步经发布/导出策略允许的签名事实；读取、转发和实际调用各自重新授权，停止发布后必须发送 Tombstone 或等待短 TTL 到期，不能把“停止同步”误当成立即撤回。
 
 可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
 
@@ -473,7 +531,7 @@ npm run verify
 npm run verify:exchange
 ```
 
-阶段 1–11 的当前架构闭环已经完成，包括技术中立的 Agent `CapabilityInvocationPort`、独立 Feishu Provider Facets 与 Agent 驱动的按需上下文查询；具体厂商调用仍未进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Connector 或 A2A/MCP Binding 可以独立扩展，但不能改变 Exchange 权威与“连接/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
+阶段 1–16 的当前架构闭环已经完成，包括 Network Citizen、技术中立的 Agent `CapabilityInvocationPort`、独立 Feishu Provider Facets、Agent 驱动的按需上下文查询，以及可验证、无广播且调用者范围化的 Participation Discovery；具体厂商调用仍未进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Peer Transport、Connector 或 A2A/MCP Binding 可以独立扩展，但不能改变 Exchange 权威与“连接/发现/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
 
 ## 文档
 
@@ -499,6 +557,8 @@ npm run verify:exchange
 - [NATS Wakeup 部署](docs/nats-wakeup-deployment.md)
 - [Phase 6B NATS Wakeup 性能基线](docs/performance-nats-wakeup-baseline.md)
 - [跨 Exchange Federation](docs/federation.md)
+- [Participation Discovery 部署与边界](docs/participation-discovery.md)
+- [Participation Discovery 性能基线](docs/performance-discovery-baseline.md)
 - [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
 - [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
 - [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)

@@ -11,6 +11,12 @@
 
 > **A protocol-driven collaboration interconnect for humans, agents, and work systems.**
 
+愿景级定位：
+
+> **一个去中心化、AI 友好的智能与信息万物互联方案。**
+
+这一定义中的“去中心化”采用联邦式独立权威，而不是无中心节点或纯 P2P：参与方与外部系统保留自身业务事实，每个 Work Fabric Exchange 只拥有本地协作事实，Exchange 之间通过显式选择、签名 Offer/Receipt 和本地 Bridge 完成交接，不共享全局状态或事务。“AI 友好”意味着 Agent 是协议中的一等参与者，身份、能力、上下文、授权、责任、状态和结果均有机器可读契约，但推理、目标选择、模型和工具调用仍在 Fabric 之外。“万物互联”的对象是人、Agent、工作系统及其工作引用与协作事实，不表示 Work Fabric 是通用 IoT 平台、内容主库或内置智能大脑。
+
 Work Fabric 是面向人、AI Agent 与工作系统的协议驱动协作互联与交接层。它让异构参与方以统一方式接受委托、传递上下文、移交责任、同步状态、返回结果并完成验收。
 
 执行发生在 Work Fabric 之外：
@@ -30,6 +36,70 @@ Projection 进程在部署上可以保持无状态并横向扩容，通过内部
 [协作状态与数据所有权](architecture/coordination-state-and-data-ownership.md)。
 
 Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A/4B 增加 Endpoint/Agent 与 Connector 边界；阶段 6A/6B 增加数据库权威的集群机械所有权与可选 Wakeup；阶段 7 在 Core 外增加显式 Exchange 间的签名 Federation Profile。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
+
+### 1.1 协作公民分类
+
+“协作公民”是 Work Fabric 的产品级参与模型，对应协议中能够独立承担协作责任的 `Actor`。WFPP v1 的 `actor_type` 是闭合分类：
+
+| 协作公民 | `actor_type` | 核心特征 | 典型入口 |
+|---|---|---|---|
+| 人类公民 | `human` | 以自然人身份承担、移交或验收责任 | Human Adapter、飞书、Console、API |
+| 智能体公民 | `agent` | 以独立 Agent 身份声明能力，通过外部 Runtime 执行 | Agent Endpoint、Agent Gateway、SDK |
+| 系统公民 | `system` | 以工作系统或自动化服务身份提供事实、动作和结果 | Connector、Webhook、SDK |
+
+三类公民在协议权利和责任语义上同构：都可以在授权范围内创建 Handoff、成为明确 Target、接受或拒绝责任、报告状态、返回结果或执行验收。入口、认证方式、能力声明和内部执行机制可以不同，但不能形成 Human 专用、Agent 专用或 System 专用的旁路状态机。
+
+公民类型不等于协作角色。`Initiator`、`Recipient`、`Verifier` 和可选 `Target Resolver` 是一个 Handoff 上下文中的动态角色，任意类型的 Actor 都可以在满足 Authority Policy 时承担其中一个角色。`Principal` 是经过 Binding 认证的调用身份，`Actor` 是责任主体，`Endpoint` 是该 Actor 收发协议消息的入口；三者必须分离，不能因一个 Runtime 或 Adapter 托管多个公民而合并身份和责任。
+
+### 1.2 公民之间的协作协议
+
+所有公民通过同一个 Unified Participation Protocol 协作。协议不是聊天格式，而是一套可验证的责任协定：
+
+```text
+参与：Identity + Delegation + Endpoint + Capability
+提出：WorkReference + Intent + Context + Authority + Acceptance Criteria
+交接：Target Resolution + Offer + Dispatch + Accept / Decline
+执行透明：Status + Checkpoint + Correlation + Causation
+结果闭环：Result + Receipt + Verify / Rework / Transfer / Close
+可靠传播：Event + Subscription + Delivery + Ack + Replay
+```
+
+协议保证不同公民可以相互替换和组合，但不要求它们采用相同的内部工作方式。一个 Human 在飞书点击接受、一个 Agent 通过 SDK 调用 `handoff.accept`、一个 System Connector 提交相同命令，都表达同一个权威事实：该 Actor 明确承担了责任。
+
+### 1.3 任务派发、认领与责任迁移
+
+任务进入协作网络后依次经历四个互不替代的阶段：
+
+| 阶段 | 权威事实 | 责任语义 |
+|---|---|---|
+| 提出 | Initiator 创建包含目标、上下文、授权和验收条件的 Handoff Offer | Initiator 仍负责 |
+| 目标绑定 | 直接指定 Actor/Endpoint，或由外部 Resolver 将 Capability Target 解析为唯一 Target Binding | 尚未转移责任 |
+| 可靠派发 | Exchange 校验目标，通过 Endpoint 投递并记录 Delivery/Ack/Retry | 送达或 Ack 不代表认领 |
+| 显式认领 | 指定 Recipient 执行 `handoff.accept`，Exchange 签发 `responsibility_accepted` Receipt | 责任原子转移给 Recipient |
+
+```mermaid
+flowchart LR
+    I["Initiator<br/>Offer"]
+    T{"Target"}
+    R["External Resolver<br/>Human / Rule / Agent Brain"]
+    B["Explicit Target Binding<br/>Actor / Endpoint"]
+    D["Exchange Dispatch<br/>Deliver / Ack / Retry"]
+    C{"Recipient Decision"}
+    A["Accept<br/>责任转移"]
+    X["External Execution<br/>Status / Result"]
+    V["Verifier<br/>Verify / Rework / Close"]
+    N["Decline / Expire / Cancel<br/>无接收方责任"]
+
+    I --> T
+    T -->|"Actor / Endpoint"| B
+    T -->|"Capability"| R --> B
+    B --> D --> C
+    C -->|"handoff.accept"| A --> X --> V
+    C -->|"decline"| N
+    V -->|"request rework"| C
+```
+
+“认领”在当前协议中不是面向未知参与者的竞争式抢单。Capability Target 可以暴露待解析需求，但 Work Fabric 不采用首个响应者、最高分或最低成本作为内置选择规则；外部 Resolver 负责选择，Exchange 只校验、记录并派发唯一结果。这条边界保证调度智能可以演进，而责任事实始终确定、可审计且可重放。
 
 ### Work Fabric 原生负责
 
@@ -77,6 +147,8 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 17. **浅层协作状态归 Fabric、业务会话归参与方**：Fabric 持久化自身协议事实和参与方声明的状态；Agent、Provider 与外部系统继续拥有等待条件、恢复决策、执行状态和业务资产。
 18. **持久化实现内部化**：部署可以替换 Memory、SQLite、PostgreSQL、Broker、对象或索引实现，但公共协议、SDK、Capability 和 Citizen Discovery 不暴露物理存储。
 19. **网络传播而不主动编排**：Citizen 通过 Handoff、Event 和 Subscription 发布、接收并认领工作；Fabric 负责校验、可靠传播和记录，不调用 Citizen、不匹配业务条件、不主动唤醒或推进业务流程。
+20. **联邦式去中心化**：参与方、系统和 Exchange 保持各自权威，通过可验证协议互联，不建立全局共享状态或中央执行权。
+21. **AI 一等参与、智能外置**：协议原生服务 Agent 的机器可读协作需要，但不把模型、推理或工具执行吸收到 Fabric 内部。
 
 ### 2.1 职责闭环与依赖方向
 
@@ -119,7 +191,9 @@ flowchart TB
             Admission["Collaboration Admission<br/>Policy / Binding / tuple-bound Grant"]
         end
         AgentGateway["Agent Gateway<br/>Session / Inbox / SSE"]
-        Directory["Endpoint Directory<br/>Facts / Lease / Discovery"]
+        Directory["Endpoint Directory<br/>Local facts / Lease"]
+        Discovery["Participation Discovery<br/>Signed facts / Cache / Bounded query"]
+        Federation["Federation Gateway<br/>Explicit selected target"]
         CitizenCatalog["Network Citizen Catalog<br/>Kind / Declarations / Lease"]
         Protocol["Unified Participation Protocol"]
         Exchange["Collaboration & Handoff Exchange"]
@@ -131,14 +205,19 @@ flowchart TB
     Human <--> HumanAdapter
     Agent <--> AgentGateway
     System <--> Connector
-    Resolver <--> Protocol
+    Resolver <--> Discovery
+    Resolver --> Protocol
     HumanAdapter --> Admission
     Connector --> Admission
     Admission --> Protocol
     Protocol --> HumanAdapter
     AgentGateway <--> Protocol
     AgentGateway <--> Directory
+    AgentGateway <--> Discovery
     AgentGateway <--> CitizenCatalog
+    Directory --> Discovery
+    Discovery <--> Federation
+    Federation --> Protocol
     Directory <--> Protocol
     CitizenCatalog <--> Protocol
     Protocol --> Connector
@@ -146,6 +225,8 @@ flowchart TB
     Exchange <--> Signal
     Exchange <--> Support
 ```
+
+Participation Discovery 位于 Endpoint Directory 与外部 Resolver 之间，并与 Federation 并列：Directory 是本地 Endpoint/Session 权威，Discovery 发布和缓存经策略过滤的短 TTL 事实，Resolver 在 Fabric 外选择目标，Federation 只连接已经明确选定的 Exchange。Discovery 结果不能写 Handoff，Federation Receipt 也不能替代目标 Actor 的显式 Accept。
 
 ### Human Workplaces
 
@@ -535,6 +616,8 @@ flowchart TB
         HA["Human Adapter"]
         AG["Agent Gateway"]
         CG["Connector Gateway"]
+        PD["Participation Discovery"]
+        FG["Federation Gateway"]
     end
 
     Protocol["Protocol & Contract<br/>Schema / State Machine / Version / Binding"]
@@ -565,6 +648,10 @@ flowchart TB
     HA --> Protocol
     AG --> Protocol
     CG --> Protocol
+    AG --> PD
+    Directory --> PD
+    PD --> FG
+    FG --> Protocol
     Protocol --> Directory
     Protocol --> Registry
     Protocol --> Thread
@@ -583,7 +670,7 @@ flowchart TB
 
 ### 11.1 Participation Edge
 
-适配不同参与方的渠道、认证、传输和外部对象，同时保持统一协议语义。
+适配不同参与方的渠道、认证、传输和外部对象，同时保持统一协议语义。Participation Discovery 和 Federation Gateway 也在 Core 外：前者给出经授权的未排序候选事实，后者连接已经显式选定的目标。
 
 ### 11.2 Protocol & Contract
 
@@ -872,6 +959,28 @@ flowchart LR
     SG -. "no discovery / scheduling / execution" .-> Outside7["External people / Agents / systems"]
 ```
 
+阶段 10 增加独立的 Participation Discovery Profile：
+
+- Endpoint Session 仍是本地状态权威；Exporter 只按公开语义摘要生成 `exchange`、`capability_route`、`participant` 或 `endpoint` 记录，不外发 fencing、heartbeat、session、Tenant、凭据、Context 或业务正文。
+- 记录具有 Origin、Revision、TTL、Visibility、Audience、Hop 上限和 Ed25519 证明；读取策略、导出策略、Peer Import/Export/Query/Transit 和最终调用 Authority 是不同决策。
+- Peer 必须显式配置并预置信任。同步是定向、条件式、分页增量拉取；按需查询受 Deadline、Hop、Fan-out、Result、Byte、并发、去重和负缓存限制，没有广播或全网 Gossip。
+- `coverage` 明确表达 complete/partial/authoritative；任何 Exchange 都不能声称知道开放网络的全局完整成员表。
+- Memory、SQLite 和 PostgreSQL Store 实现同一技术中立契约；HTTP/SDK 只暴露调用者有权读取的事实，默认组合只披露 Exchange 和聚合 Capability Route。
+- Discovery 停止或故障不影响本地 Endpoint/Handoff 和显式寻址 Federation。撤回已发布事实必须签发 Tombstone，或由接收端在最长 300 秒 TTL 后自然失效。
+
+```mermaid
+flowchart LR
+    ED["Endpoint Directory<br/>local authority"] --> EX["Policy-filtered Exporter"]
+    EX --> DS["Discovery Store<br/>local + verified cache"]
+    DS --> DQ["Authorized Query Service"]
+    DS --> DG["Discovery Gateway<br/>delta pull + budgets"]
+    DG <--> PG["Explicit trusted Peer"]
+    DQ --> ER["External Resolver / Agent choice"]
+    ER --> FG["Federation Gateway"]
+    FG --> HF["Target local Handoff"]
+    HF --> AC["Explicit Accept"]
+```
+
 ```mermaid
 flowchart LR
     API6["API role<br/>public HTTP + SDK"] --> Facts6["Authoritative Handoff facts<br/>Journal + Outbox"]
@@ -900,7 +1009,7 @@ flowchart LR
     Owners -. "never participant execution" .-> External["External work systems and Agent runtimes"]
 ```
 
-运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，Exchange 间交接见 [Federation 文档](federation.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md) 与 [Phase 6B](performance-nats-wakeup-baseline.md) 基线。
+运维、恢复和审计见 [Operations 文档](operations.md)，SQLite 见 [本地部署文档](sqlite-deployment.md)，Console 见 [Console 文档](console.md)，集群所有权见 [Phase 6A 集群运行时](cluster-runtime.md)，NATS 加速见 [Phase 6B 部署文档](nats-wakeup-deployment.md)，Exchange 间交接见 [Federation 文档](federation.md)，发现网络见 [Participation Discovery](participation-discovery.md)，可复现性能范围见 [Phase 5](performance-baseline.md)、[Phase 6A](performance-cluster-baseline.md)、[Phase 6B](performance-nats-wakeup-baseline.md) 与 [Discovery](performance-discovery-baseline.md) 基线。
 
 ### 渠道中立的消息内容
 
@@ -949,5 +1058,8 @@ Channel 从生命周期码制造业务答复。完整规则见
 | 11 | Agent 能力调用与 Feishu Capability/Context Provider | 已完成 |
 | 12 | Agent Handoff 的受权有界会话上下文 | 已完成 |
 | 13 | 渠道中立消息表示与飞书原生富文本呈现 | 已完成 |
+| 14 | 本地 Debug Channel 与确定性 Agent E2E | 已完成 |
+| 15 | 飞书消息/日历能力与 Agent 驱动群日程 | 已完成 |
+| 16 | Participation Discovery、直接 Peer 同步与有预算查询 | 已完成 |
 
-阶段 1–13 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10 建立模块公民分类、动态声明、租约目录和渐进披露基础；11 通过辅助 Handoff 完成 Agent 到独立 Capability Provider 的类型化调用闭环；12 允许 Channel 向 Handoff 附加受权、有界且不参与决策的历史证据；13 保留生产方媒体类型并由 Channel 转换为目标渠道原生格式。具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。
+阶段 1–16 已按顺序完成：3A–5 建立公共连接、Agent/Connector 边界与操作性；6A/6B 证明数据库权威的集群机械所有权与可选 Broker 提示；7 证明独立 Exchange 可通过签名 Offer/Receipt 对接而不共享权威；8 建立可替换配置与插件边界；9 保护外部参与方进入协作网络时的 Admission、稳定绑定与短时表示；10–15 建立 Network Citizen、Agent 能力调用、受权上下文、渠道中立消息、Debug Channel 与日历协作闭环；16 提供可验证、无广播且调用者范围化的参与发现。具体厂商调用仍不进入 Fabric Core。后续 Binding、Adapter 或 Connector 必须继续保持连接/发现/交接定位，不得把 Peer 选择、调度、推理或执行放入 Fabric。单独维护的阶段状态见 [Roadmap](roadmap.md)。

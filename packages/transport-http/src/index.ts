@@ -11,3 +11,4 @@ export type { OperationsQueryService } from "@work-fabric/operations-runtime";
 export * from "./request-authorization.js";
 export * from "./sse-connection-manager.js";
 export * from "./subscription-codec.js";
+export * from "./routes/discovery-routes.js";

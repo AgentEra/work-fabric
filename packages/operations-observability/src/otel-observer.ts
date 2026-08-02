@@ -21,6 +21,7 @@ function metricAttributes(observation: SemanticObservation): Attributes {
     "workfabric.operation": observation.operation,
     "workfabric.outcome": observation.outcome,
     "workfabric.category": observation.category,
+    ...(observation.reason === undefined ? {} : { "workfabric.reason": observation.reason }),
   };
 }
 

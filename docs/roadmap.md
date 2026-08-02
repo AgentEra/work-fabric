@@ -25,6 +25,15 @@ and repository verification are implemented.
 | 13 | Channel-neutral message representations and Feishu native rich text | Complete |
 | 14 | Long-lived local Debug Channel and deterministic Agent E2E | Complete |
 | 15 | Feishu Message/Calendar capabilities and Agent-authored group scheduling | Complete |
+| 16 | Participation Discovery, direct Peer sync and bounded federated query | Complete |
+
+## Phase 16 completion boundary
+
+Phase 16 adds the independent `workfabric.discovery.v1` profile so an authenticated generic Agent can obtain its caller-authorized view of Exchanges, aggregate capabilities, participants, Endpoints and safe Binding facts. Endpoint Sessions remain locally authoritative; policy-filtered exporters produce signed short-TTL records, and explicitly configured Peers exchange conditional deltas or bounded queries without broadcast, anonymous Gossip or a central global registry.
+
+Memory, SQLite and PostgreSQL records/Peer stores share conformance semantics. Ed25519 verification, origin/revision conflict handling, tombstones, disclosure/export/transit policy, deadline/hop/fan-out/result/byte budgets, deduplication, negative caching, coalescing, HTTP routes, immutable SDK methods and bounded operations views are executable. A two-Exchange test proves discovery → external target choice → Federation → target-local offered Handoff → explicit Accept; a no-Discovery test proves local Handoff and explicitly addressed Federation remain independent.
+
+Phase 16 does not promise a globally complete node list, build a registry authority, trust unknown Peers, rank or recommend candidates, select a target, invoke tools/APIs, bypass target Authority, accept responsibility, copy business content or execute participant work. See [Participation Discovery](participation-discovery.md) and its [performance baseline](performance-discovery-baseline.md).
 
 ## Phase 15 completion boundary
 

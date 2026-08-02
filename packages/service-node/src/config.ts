@@ -18,6 +18,19 @@ export interface NodeAdmissionConfig {
   readonly max_evidence_cache_entries: number;
 }
 
+export interface NodeDiscoveryConfig {
+  readonly enabled: boolean;
+  readonly tenant_view_id: string;
+  readonly record_ttl_seconds: number;
+  readonly default_page_limit: number;
+  readonly max_page_limit: number;
+  readonly max_records_per_origin: number;
+  readonly sync_page_size: number;
+  readonly query_max_hops: number;
+  readonly query_max_fanout: number;
+  readonly query_max_bytes: number;
+}
+
 export class NodeConfigurationError extends TypeError {
   constructor(
     readonly code: string,
@@ -40,6 +53,7 @@ export interface NodeServiceConfig {
   readonly exchange_id: string;
   readonly cursor_secret: string;
   readonly admission?: NodeAdmissionConfig;
+  readonly discovery?: NodeDiscoveryConfig;
   readonly listen: { readonly host: string; readonly port: number };
   readonly identities: readonly LocalIdentityRecord[];
   readonly authority_rules: readonly LocalAuthorityAllowRule[];
@@ -56,6 +70,11 @@ const ADMISSION_KEYS = [
   "max_evidence_cache_entries",
 ] as const;
 const PROTOTYPE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+const DISCOVERY_KEYS = [
+  "enabled", "tenant_view_id", "record_ttl_seconds", "default_page_limit",
+  "max_page_limit", "max_records_per_origin", "sync_page_size", "query_max_hops",
+  "query_max_fanout", "query_max_bytes",
+] as const;
 
 function admissionError(path: string): never {
   throw new NodeConfigurationError("service_admission_invalid", path);
@@ -226,6 +245,51 @@ function integer(value: unknown, fallback: number, field: string, maximum: numbe
   return normalized as number;
 }
 
+function discoveryInteger(value: unknown, field: string, minimum: number, maximum: number): number {
+  if (!Number.isSafeInteger(value) || (value as number) < minimum || (value as number) > maximum) {
+    throw new NodeConfigurationError("service_discovery_invalid", `service.discovery.${field}`);
+  }
+  return value as number;
+}
+
+function parseDiscoveryConfig(value: unknown, role: ServiceRole): NodeDiscoveryConfig {
+  const path = "service.discovery";
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new NodeConfigurationError("service_discovery_invalid", path);
+  }
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== DISCOVERY_KEYS.length || keys.some((key) => typeof key !== "string" || !DISCOVERY_KEYS.includes(key as never))) {
+    throw new NodeConfigurationError("service_discovery_invalid", path);
+  }
+  const raw: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
+  for (const key of DISCOVERY_KEYS) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new NodeConfigurationError("service_discovery_invalid", `${path}.${key}`);
+    }
+    raw[key] = descriptor.value;
+  }
+  if (typeof raw.enabled !== "boolean") throw new NodeConfigurationError("service_discovery_invalid", `${path}.enabled`);
+  if (raw.enabled && role === "worker") throw new TypeError("discovery is not available on worker-only role");
+  let tenantViewId: string;
+  try { tenantViewId = identifier(raw.tenant_view_id, "discovery.tenant_view_id"); }
+  catch { throw new NodeConfigurationError("service_discovery_invalid", `${path}.tenant_view_id`); }
+  const defaultPageLimit = discoveryInteger(raw.default_page_limit, "default_page_limit", 1, 100);
+  const maxPageLimit = discoveryInteger(raw.max_page_limit, "max_page_limit", defaultPageLimit, 1_000);
+  return Object.freeze({
+    enabled: raw.enabled,
+    tenant_view_id: tenantViewId,
+    record_ttl_seconds: discoveryInteger(raw.record_ttl_seconds, "record_ttl_seconds", 1, 300),
+    default_page_limit: defaultPageLimit,
+    max_page_limit: maxPageLimit,
+    max_records_per_origin: discoveryInteger(raw.max_records_per_origin, "max_records_per_origin", 1, 100_000),
+    sync_page_size: discoveryInteger(raw.sync_page_size, "sync_page_size", 1, 1_000),
+    query_max_hops: discoveryInteger(raw.query_max_hops, "query_max_hops", 0, 8),
+    query_max_fanout: discoveryInteger(raw.query_max_fanout, "query_max_fanout", 0, 32),
+    query_max_bytes: discoveryInteger(raw.query_max_bytes, "query_max_bytes", 1_024, 65_536),
+  });
+}
+
 function port(value: unknown): number {
   const normalized = value ?? 8787;
   if (!Number.isSafeInteger(normalized) || (normalized as number) < 0 || (normalized as number) > 65_535) {
@@ -325,6 +389,7 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
   if (role === "worker" && cluster === undefined) {
     throw new TypeError("worker role requires cluster configuration");
   }
+  const discovery = raw.discovery === undefined ? undefined : parseDiscoveryConfig(raw.discovery, role);
   let admission: NodeAdmissionConfig | undefined;
   let admissionDescriptor: PropertyDescriptor | undefined;
   try {
@@ -352,6 +417,7 @@ export function parseServiceConfig(input: unknown): NodeServiceConfig {
     exchange_id: exchangeId,
     cursor_secret: cursorSecret,
     ...(admission === undefined ? {} : { admission }),
+    ...(discovery === undefined ? {} : { discovery }),
     listen,
     identities,
     authority_rules: authorityRules,

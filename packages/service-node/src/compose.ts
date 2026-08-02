@@ -1,6 +1,7 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 import { MemoryConnectorIngressStore } from "@work-fabric/adapter-connector-memory";
+import { MemoryDiscoveryPeerBindingStore, MemoryDiscoveryStore } from "@work-fabric/adapter-discovery-memory";
 import { MemoryDebugChannelStore } from "@work-fabric/adapter-debug-channel-memory";
 import {
   SqliteDebugChannelStore,
@@ -90,7 +91,15 @@ import {
   createSqliteOperationsStores,
   SqliteChannelRouteStore,
   migrateSqlite,
+  createSqliteDiscoveryPeerBindingStore,
+  createSqliteDiscoveryStore,
 } from "@work-fabric/adapter-storage-sqlite";
+import { DiscoveryOperationsService, DiscoveryQueryService, type DiscoveryGateway } from "@work-fabric/discovery-runtime";
+import type {
+  DiscoveryDisclosurePolicy,
+  DiscoveryPeerBindingStore,
+  DiscoveryStore,
+} from "@work-fabric/discovery-spi";
 import {
   ExchangeApplication,
   canonicalJson,
@@ -212,6 +221,8 @@ export interface NodeStorageComposition {
   /** Adapter-native high-water lookup; avoids scanning the journal on reads. */
   readonly journalPositions?: PartitionJournalPositionSource;
   readonly sqlite: SqliteSession | null;
+  readonly discoveryRecords?: DiscoveryStore;
+  readonly discoveryPeers?: DiscoveryPeerBindingStore;
 }
 
 export interface NodeServiceCompositionOptions {
@@ -248,6 +259,14 @@ export interface NodeServiceCompositionOptions {
   readonly feishu_long_connection_client_factory?: FeishuLongConnectionClientFactory;
   /** @internal Optional stable seam for composition-failure verification. */
   readonly protocol_schema_loader?: typeof loadWfppSchemaValidator;
+  /** Deployment-owned signed gateway; trust material never comes from service YAML. */
+  readonly discovery_gateway?: DiscoveryGateway;
+  readonly discovery_manifest?: () => Promise<Uint8Array>;
+  /** Caller-scoped disclosure; defaults to Exchange and aggregate capability facts only. */
+  readonly discovery_disclosure_policy?: DiscoveryDisclosurePolicy;
+  /** Optional deployment/test override for the selected storage profile. */
+  readonly discovery_records?: DiscoveryStore;
+  readonly discovery_peers?: DiscoveryPeerBindingStore;
 }
 
 export interface NodeClusterWorkerDependencies {
@@ -263,7 +282,7 @@ export interface NodeClusterWorkerDependencies {
   readonly signal_dispatcher: SignalDispatcherPort;
 }
 
-function memoryStorage(): NodeStorageComposition {
+function memoryStorage(config: NodeServiceConfig): NodeStorageComposition {
   const persistence = new MemoryExchangePersistence();
   const operations = new MemoryOperationsFixture();
   return {
@@ -283,6 +302,13 @@ function memoryStorage(): NodeStorageComposition {
     discrepancies: new MemoryDiscrepancyStore(),
     recoveries: new MemoryRecoveryStore(),
     sqlite: null,
+    ...(config.discovery?.enabled !== true ? {} : {
+      discoveryRecords: new MemoryDiscoveryStore({
+        max_records_per_origin: config.discovery.max_records_per_origin,
+        tombstone_retention_seconds: Math.min(360, config.discovery.record_ttl_seconds + 30),
+      }),
+      discoveryPeers: new MemoryDiscoveryPeerBindingStore(),
+    }),
   };
 }
 
@@ -329,6 +355,18 @@ function sqliteStorage(config: NodeServiceConfig): NodeStorageComposition {
       config.tenant_id,
     ),
     sqlite: session,
+    ...(config.discovery?.enabled !== true ? {} : {
+      discoveryRecords: createSqliteDiscoveryStore(
+        session, config.tenant_id, config.discovery.tenant_view_id,
+        {
+          max_records_per_origin: config.discovery.max_records_per_origin,
+          tombstone_retention_seconds: Math.min(360, config.discovery.record_ttl_seconds + 30),
+        },
+      ),
+      discoveryPeers: createSqliteDiscoveryPeerBindingStore(
+        session, config.tenant_id, config.discovery.tenant_view_id,
+      ),
+    }),
   };
   } catch (error) {
     try { session.close(); } catch { /* preserve the composition failure */ }
@@ -784,7 +822,7 @@ export async function composeNodeService(
   const pluginConfiguration = options.plugins ?? {};
   assertFeishuPluginRole(config.role, pluginConfiguration);
   const selectedStorage = config.storage_profile === "memory-demo"
-    ? memoryStorage()
+    ? memoryStorage(config)
     : config.storage_profile === "sqlite-local"
       ? sqliteStorage(config)
       : options.postgres_storage;
@@ -800,6 +838,11 @@ export async function composeNodeService(
         admissionBindings: options.admission_stores.bindings,
         admissionDecisions: options.admission_stores.decisions,
       };
+  const discoveryRecords = options.discovery_records ?? storage.discoveryRecords;
+  const discoveryPeers = options.discovery_peers ?? storage.discoveryPeers;
+  if (config.discovery?.enabled === true && (discoveryRecords === undefined || discoveryPeers === undefined)) {
+    throw new Error("enabled discovery requires deployment-owned record and PeerBinding stores for the selected profile");
+  }
   const ownedSqlite = config.storage_profile === "sqlite-local" ? storage.sqlite : null;
   try {
   const networkCitizenStore = options.network_citizen_store
@@ -1249,6 +1292,30 @@ export async function composeNodeService(
     defaultPageLimit: 25,
     maxPageLimit: 100,
   });
+  const discoveryQuery = config.discovery?.enabled === true && discoveryRecords !== undefined
+    ? new DiscoveryQueryService({
+        store: discoveryRecords,
+        policy: options.discovery_disclosure_policy ?? {
+          async canRead({ record }) {
+            return (record.record_kind === "exchange" || record.record_kind === "capability_route") &&
+              (record.visibility === "public" || record.audiences.includes(config.exchange_id));
+          },
+        },
+        clock,
+        cursor_secret: config.cursor_secret,
+        default_page_limit: config.discovery.default_page_limit,
+        max_page_limit: config.discovery.max_page_limit,
+        max_scan_results: Math.min(100_000, config.discovery.max_records_per_origin),
+      })
+    : undefined;
+  const discoveryOperations = config.discovery?.enabled === true && discoveryRecords !== undefined && discoveryPeers !== undefined
+    ? new DiscoveryOperationsService({
+        store: discoveryRecords,
+        peers: discoveryPeers,
+        clock,
+        max_peer_samples: config.discovery.max_page_limit,
+      })
+    : undefined;
   const delivery = new CursorPullService(
     storage.persistence,
     storage.persistence,
@@ -1278,6 +1345,22 @@ export async function composeNodeService(
       ? {}
       : { citizen_directory: networkCitizenDirectory }),
     delivery,
+    ...(discoveryQuery === undefined ? {} : {
+      discovery: discoveryQuery,
+      discovery_tenant_view_id: config.discovery!.tenant_view_id,
+    }),
+    ...(discoveryOperations === undefined ? {} : {
+      discovery_operations: {
+        service: discoveryOperations,
+        tenant_view_id: config.discovery!.tenant_view_id,
+      },
+    }),
+    ...(config.discovery?.enabled !== true || options.discovery_gateway === undefined
+      ? {}
+      : { discovery_gateway: options.discovery_gateway }),
+    ...(config.discovery?.enabled !== true || options.discovery_manifest === undefined
+      ? {}
+      : { discovery_manifest: options.discovery_manifest }),
     feishu_webhook: {
       ingress: storage.connectorIngress,
       credential_provider: webhookRegistry,

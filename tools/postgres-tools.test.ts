@@ -17,6 +17,11 @@ describe("PostgreSQL tooling", () => {
       .resolves.toMatchObject({ ordered_ids: expect.arrayContaining(["009_channel_routes"]) });
   });
 
+  it("includes discovery records, changes, and Peer bindings in the production migration plan", async () => {
+    await expect(migratePostgres({ connection_string: "postgres://unused", dry_run: true }))
+      .resolves.toMatchObject({ ordered_ids: expect.arrayContaining(["010_discovery"]) });
+  });
+
   it("includes Admission authority tables after the base storage migrations", async () => {
     const result = await migratePostgres({ connection_string: "postgres://unused", dry_run: true });
     expect(result.ordered_ids).toContain("010_admission");

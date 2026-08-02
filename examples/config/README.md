@@ -21,6 +21,31 @@ subscriptions are trusted deployment bootstrap state; event audience checks
 still run for every delivery, and participant-managed subscription changes keep
 using the public Authority-protected API.
 
+Discovery is opt-in through a closed `service.discovery` object. A bounded local
+example is:
+
+```yaml
+discovery:
+  enabled: true
+  tenant_view_id: default-view
+  record_ttl_seconds: 60
+  default_page_limit: 20
+  max_page_limit: 100
+  max_records_per_origin: 10000
+  sync_page_size: 100
+  query_max_hops: 2
+  query_max_fanout: 4
+  query_max_bytes: 32768
+```
+
+This section intentionally contains no signing key, Peer credential, bootstrap
+address, or trust root. It enables the local authorized query surface and the
+selected memory/SQLite discovery stores. Public-network sync, export signing,
+and Peer transports must be injected by deployment composition. Worker-only
+roles cannot enable the discovery HTTP surface. The built-in disclosure default
+returns only Exchange and aggregate CapabilityRoute records; individual Actor
+and Endpoint records require an explicit deployment policy.
+
 `local-feishu-assistant.bundle.yaml` also enables independent Message,
 Document and Calendar Provider Citizens. The Calendar block contains identity
 only: calendar IDs and defaults are dynamic Provider state. Bootstrap with

@@ -14,6 +14,7 @@ import { SubscriptionClient } from "./subscription-client.js";
 import { SdkTransport } from "./transport.js";
 import { CollaborationClient } from "./collaboration-client.js";
 import type { AuthenticationProvider } from "./authentication.js";
+import { DiscoveryClient } from "./discovery-client.js";
 import { CitizenClient } from "./citizen-client.js";
 
 export class WorkFabricClient {
@@ -24,6 +25,7 @@ export class WorkFabricClient {
   readonly subscriptions!: SubscriptionClient;
   readonly endpoints!: EndpointClient;
   readonly collaboration!: CollaborationClient;
+  readonly discovery!: DiscoveryClient;
   readonly citizens!: CitizenClient;
   private readonly config!: NormalizedClientOptions;
   private readonly transport!: SdkTransport;
@@ -73,6 +75,7 @@ export class WorkFabricClient {
       subscriptions: { value: Object.freeze(new SubscriptionClient(config, transport, representation)), enumerable: true },
       endpoints: { value: Object.freeze(new EndpointClient(transport, representation)), enumerable: true },
       collaboration: { value: Object.freeze(new CollaborationClient(transport, representation)), enumerable: true },
+      discovery: { value: Object.freeze(new DiscoveryClient(transport, representation)), enumerable: true },
       citizens: { value: Object.freeze(new CitizenClient(transport, representation)), enumerable: true },
     });
     return Object.freeze(client) as WorkFabricClient;

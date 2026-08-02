@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import type { AuthorityPolicy, IdentityProvider, ResolvedPrincipal } from "@work-fabric/exchange-spi";
 import type { ConnectorIngressState } from "@work-fabric/connector-spi";
 import type { OperationsQueryService } from "@work-fabric/operations-runtime";
+import type { DiscoveryOperationsService } from "@work-fabric/discovery-runtime";
 
 import type { HttpServiceConfig } from "../config.js";
 import { createProblemDetails } from "../problem-details.js";
@@ -15,6 +16,10 @@ interface Dependencies {
   readonly authenticator: HttpRequestAuthenticator;
   readonly identity: IdentityProvider;
   readonly authority: AuthorityPolicy;
+  readonly discovery?: {
+    readonly service: DiscoveryOperationsService;
+    readonly tenant_view_id: string;
+  };
 }
 
 const ingressStates: readonly ConnectorIngressState[] = [
@@ -109,6 +114,19 @@ export function registerOperationsRoutes(
   dependencies: Dependencies,
   config: HttpServiceConfig,
 ): void {
+  if (dependencies.discovery !== undefined) {
+    server.get("/v1/operations/discovery", async (request, reply) => {
+      const auth = await authorized(
+        request, reply, dependencies, "workfabric.operations.discovery.read.v1",
+        (resolved) => resolved.tenant_id,
+      );
+      if (auth === null) return;
+      return reply.send(await dependencies.discovery!.service.snapshot({
+        tenant_id: auth.principal.tenant_id,
+        tenant_view_id: dependencies.discovery!.tenant_view_id,
+      }));
+    });
+  }
   server.get("/v1/operations/cluster", async (request, reply) => {
     const auth = await authorized(
       request,

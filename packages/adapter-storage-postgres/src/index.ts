@@ -11,4 +11,5 @@ export * from "./postgres-recovery-store.js";
 export * from "./postgres-partition-position-source.js";
 export * from "./postgres-partition-work-catalog.js";
 export * from "./postgres-channel-route-store.js";
+export * from "./postgres-discovery-store.js";
 export * from "./postgres-claim-pool-migration.js";

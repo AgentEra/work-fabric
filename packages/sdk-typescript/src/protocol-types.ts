@@ -60,6 +60,15 @@ export type {
   TimelineEntry,
 } from "@work-fabric/operations-spi";
 export type {
+  DiscoveryCoverage,
+  DiscoveryFederatedQueryResponse,
+  DiscoveryPage,
+  DiscoveryQuery,
+  DiscoveryQueryBudget,
+  DiscoveryRecord,
+  DiscoveryRecordKind,
+} from "@work-fabric/discovery-spi";
+export type {
   CitizenAvailability,
   CitizenCardPage,
   CitizenDeclaration,

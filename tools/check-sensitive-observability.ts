@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { checkAdmissionSensitiveSinks } from "./check-admission-boundaries.js";
 const allowedOtelAttributes = new Set([
   "workfabric.operation", "workfabric.outcome", "workfabric.category", "workfabric.correlation_id",
+  "workfabric.reason",
 ]);
 
 export interface ObservabilitySafetyReport {
