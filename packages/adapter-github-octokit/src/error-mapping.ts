@@ -78,9 +78,15 @@ function mapped(
   return new GitHubProviderError(code, metadata(headers, retryable));
 }
 
+function isGitHubNotFoundErrorCode(
+  code: unknown,
+): code is GitHubNotFoundErrorCode {
+  return code === "github_repository_not_found" || code === "github_pull_request_not_found";
+}
+
 export function mapGitHubApiError(
   error: unknown,
-  notFoundCode: GitHubNotFoundErrorCode,
+  notFoundCode?: GitHubNotFoundErrorCode,
 ): GitHubProviderError {
   const failure = apiFailure(error);
   if (failure === undefined) {
@@ -96,7 +102,11 @@ export function mapGitHubApiError(
       ? mapped("github_rate_limited", headers)
       : mapped("github_forbidden", headers);
   }
-  if (status === 404) return mapped(notFoundCode, headers);
+  if (status === 404) {
+    return isGitHubNotFoundErrorCode(notFoundCode)
+      ? mapped(notFoundCode, headers)
+      : mapped("github_response_invalid", headers);
+  }
   if (status === 422) return mapped("github_invalid_request", headers);
   if (status === 429) return mapped("github_rate_limited", headers);
   if (status >= 500 && status <= 599) {

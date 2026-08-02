@@ -29,6 +29,34 @@ describe("GitHub App authentication", () => {
   });
 
   it.each([
+    "-----BEGIN PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+    "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+    "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----\n-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+  ])("rejects a mismatched or repeated private-key envelope", (private_key) => {
+    let constructions = 0;
+
+    expect(() => createGitHubAppOctokit({ ...credentials, private_key }, () => {
+      constructions += 1;
+      return { request: async () => ({ data: {}, headers: {} }) } as unknown as OctokitRequestClient;
+    })).toThrowError("github_invalid_request");
+    expect(constructions).toBe(0);
+  });
+
+  it("accepts an RSA private-key envelope", () => {
+    const observed: GitHubAppOctokitOptions[] = [];
+
+    createGitHubAppOctokit({
+      ...credentials,
+      private_key: "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+    }, (options) => {
+      observed.push(options);
+      return { request: async () => ({ data: {}, headers: {} }) } as unknown as OctokitRequestClient;
+    });
+
+    expect(observed).toHaveLength(1);
+  });
+
+  it.each([
     { ...credentials, app_id: "" },
     { ...credentials, app_id: "12a" },
     { ...credentials, installation_id: " 67890" },

@@ -23,6 +23,16 @@ describe("GitHub API error mapping", () => {
       .toMatchObject({ code: "github_pull_request_not_found", retryable: false });
   });
 
+  it("maps non-not-found statuses without a not-found override", () => {
+    expect(mapGitHubApiError({ status: 401 }))
+      .toMatchObject({ code: "github_authentication_failed", retryable: false });
+  });
+
+  it("rejects an unclassified not-found response without a not-found override", () => {
+    expect(mapGitHubApiError({ status: 404 }))
+      .toMatchObject({ code: "github_response_invalid", retryable: false });
+  });
+
   it("maps exhausted secondary rate limits and preserves only safe metadata", () => {
     const secret = "-----BEGIN PRIVATE KEY-----\ndo-not-leak\n-----END PRIVATE KEY-----";
     const result = mapGitHubApiError({

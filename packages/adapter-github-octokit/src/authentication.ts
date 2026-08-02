@@ -39,7 +39,11 @@ function isDecimalIdentifier(value: string): boolean {
 }
 
 function isPrivateKeyPem(value: string): boolean {
-  return /^-----BEGIN (?:RSA )?PRIVATE KEY-----\r?\n[\s\S]+\r?\n-----END (?:RSA )?PRIVATE KEY-----\r?\n?$/.test(value);
+  const body = "[A-Za-z0-9+/=]+(?:\\r?\\n[A-Za-z0-9+/=]+)*";
+  return new RegExp(
+    `^-----BEGIN PRIVATE KEY-----\\r?\\n${body}\\r?\\n-----END PRIVATE KEY-----\\r?\\n?$|` +
+    `^-----BEGIN RSA PRIVATE KEY-----\\r?\\n${body}\\r?\\n-----END RSA PRIVATE KEY-----\\r?\\n?$`,
+  ).test(value);
 }
 
 function validateCredentials(credentials: GitHubAppCredentials): void {
