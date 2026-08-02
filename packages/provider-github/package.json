@@ -8,6 +8,7 @@
   },
   "types": "./src/index.ts",
   "dependencies": {
+    "@work-fabric/network-citizen-runtime": "0.1.0",
     "@work-fabric/network-citizen-spi": "0.1.0"
   }
 }
