@@ -14,7 +14,11 @@ import type {
   GitHubReadApi,
   GitHubRepositoryRef,
 } from "./contracts.js";
-import type { GitHubCursorCodec } from "./cursor.js";
+import type {
+  GitHubCommentMergeCursorSourceState,
+  GitHubCommentMergeCursorState,
+  GitHubCursorCodec,
+} from "./cursor.js";
 import { GITHUB_READ_CAPABILITY_IDS } from "./declarations.js";
 import { GitHubProviderError } from "./errors.js";
 import { GitHubPolicyEvaluator } from "./policy.js";
@@ -215,11 +219,15 @@ function pageResult<T>(
   });
 }
 
-function pullRequestPageInput(parsed: GitHubParsedCapabilityInput): GitHubApiPullRequestPageInput {
+function pullRequestPageInput(
+  parsed: GitHubParsedCapabilityInput,
+  page = parsed.page,
+): GitHubApiPullRequestPageInput {
   return {
     repository: parsed.input.repository as unknown as GitHubRepositoryRef,
     pull_request_number: parsed.input.pull_request_number as number,
-    ...apiInput(parsed),
+    page_size: parsed.page_size,
+    ...(page === 1 ? {} : { cursor: String(page) }),
   };
 }
 
@@ -229,43 +237,279 @@ function compareComments(left: GitHubCommentRecord, right: GitHubCommentRecord):
     left.id.localeCompare(right.id);
 }
 
-function combinedCommentPage(
-  issue: GitHubApiPage<GitHubCommentRecord>,
-  review: GitHubApiPage<GitHubCommentRecord>,
-  parsed: GitHubParsedCapabilityInput,
-): GitHubApiPage<GitHubCommentRecord> {
-  if (
-    !Array.isArray(issue.items) || issue.items.length > parsed.page_size ||
-    !Array.isArray(review.items) || review.items.length > parsed.page_size
-  ) invalidResponse();
-  const combined = [...issue.items, ...review.items].sort(compareComments);
-  if (combined.length > parsed.page_size) {
-    return { items: combined.slice(0, parsed.page_size), next_cursor: "ceiling" };
-  }
-  const candidates = [issue.next_cursor, review.next_cursor].filter(
-    (value): value is string => value !== undefined,
-  );
-  for (const candidate of candidates) nextPage(candidate, parsed.page);
-  if (new Set(candidates).size > 1) invalidResponse();
+interface LoadedCommentSource {
+  readonly items: readonly GitHubCommentRecord[];
+  readonly page_item_count: number;
+  readonly state: GitHubCommentMergeCursorSourceState;
+  readonly calls: number;
+}
+
+const initialCommentSource = (): GitHubCommentMergeCursorSourceState => ({
+  page: 1,
+  offset: 0,
+  next_page: null,
+  complete: false,
+});
+
+function normalizedCommentPage(
+  page: GitHubApiPage<GitHubCommentRecord>,
+  pageSize: number,
+  currentPage: number,
+): { readonly items: readonly GitHubCommentRecord[]; readonly next_page: number | null } {
+  if (!Array.isArray(page.items) || page.items.length > pageSize) invalidResponse();
+  if (page.items.length === 0 && page.next_cursor !== undefined) invalidResponse();
   return {
-    items: combined,
-    ...(candidates[0] === undefined ? {} : { next_cursor: candidates[0] }),
+    items: [...page.items].sort(compareComments),
+    next_page: page.next_cursor === undefined
+      ? null
+      : nextPage(page.next_cursor, currentPage),
   };
 }
 
-function combinedCommentResult(
-  page: GitHubApiPage<GitHubCommentRecord>,
+async function loadCommentSource(
+  read: (
+    input: GitHubApiPullRequestPageInput,
+    signal: AbortSignal,
+  ) => Promise<GitHubApiPage<GitHubCommentRecord>>,
+  parsed: GitHubParsedCapabilityInput,
+  state: GitHubCommentMergeCursorSourceState,
+  continuation: boolean,
+  signal: AbortSignal,
+): Promise<LoadedCommentSource> {
+  if (state.complete) return { items: [], page_item_count: 0, state, calls: 0 };
+  const current = normalizedCommentPage(
+    await read(pullRequestPageInput(parsed, state.page), signal),
+    parsed.page_size,
+    state.page,
+  );
+  if (continuation && current.next_page !== state.next_page) invalidResponse();
+  if (state.offset > current.items.length) invalidResponse();
+  if (state.offset < current.items.length) {
+    return {
+      items: current.items.slice(state.offset),
+      page_item_count: current.items.length,
+      calls: 1,
+      state: {
+        page: state.page,
+        offset: state.offset,
+        next_page: current.next_page,
+        complete: false,
+      },
+    };
+  }
+  if (current.next_page === null) {
+    return {
+      items: [],
+      page_item_count: 0,
+      calls: 1,
+      state: { page: state.page, offset: 0, next_page: null, complete: true },
+    };
+  }
+  const next = normalizedCommentPage(
+    await read(pullRequestPageInput(parsed, current.next_page), signal),
+    parsed.page_size,
+    current.next_page,
+  );
+  if (next.items.length === 0) {
+    return {
+      items: [],
+      page_item_count: 0,
+      calls: 2,
+      state: { page: current.next_page, offset: 0, next_page: null, complete: true },
+    };
+  }
+  return {
+    items: next.items,
+    page_item_count: next.items.length,
+    calls: 2,
+    state: {
+      page: current.next_page,
+      offset: 0,
+      next_page: next.next_page,
+      complete: false,
+    },
+  };
+}
+
+async function loadNextCommentSource(
+  read: (
+    input: GitHubApiPullRequestPageInput,
+    signal: AbortSignal,
+  ) => Promise<GitHubApiPage<GitHubCommentRecord>>,
+  parsed: GitHubParsedCapabilityInput,
+  state: GitHubCommentMergeCursorSourceState,
+  signal: AbortSignal,
+): Promise<LoadedCommentSource> {
+  if (state.complete || state.next_page === null) invalidResponse();
+  const next = normalizedCommentPage(
+    await read(pullRequestPageInput(parsed, state.next_page), signal),
+    parsed.page_size,
+    state.next_page,
+  );
+  if (next.items.length === 0) {
+    return {
+      items: [],
+      page_item_count: 0,
+      calls: 1,
+      state: { page: state.next_page, offset: 0, next_page: null, complete: true },
+    };
+  }
+  return {
+    items: next.items,
+    page_item_count: next.items.length,
+    calls: 1,
+    state: {
+      page: state.next_page,
+      offset: 0,
+      next_page: next.next_page,
+      complete: false,
+    },
+  };
+}
+
+function advanceCommentSource(
+  source: LoadedCommentSource,
+  consumed: number,
+): GitHubCommentMergeCursorSourceState {
+  if (source.state.complete) return source.state;
+  const offset = source.state.offset + consumed;
+  if (offset > source.page_item_count) invalidResponse();
+  if (offset < source.page_item_count) return { ...source.state, offset };
+  if (source.state.next_page === null) {
+    return {
+      page: source.state.page,
+      offset: 0,
+      next_page: null,
+      complete: true,
+    };
+  }
+  return { ...source.state, offset, complete: false };
+}
+
+async function mergedCommentResult(
   options: GitHubQueryServiceOptions,
   parsed: GitHubParsedCapabilityInput,
   context: QueryContext,
-): CapabilityExecutionResult {
-  if (page.next_cursor !== "ceiling") {
-    return pageResult(page, options, parsed, context);
+): Promise<CapabilityExecutionResult> {
+  const opaque = parsed.input.cursor;
+  const continuation = opaque !== undefined;
+  const state: GitHubCommentMergeCursorState = opaque === undefined
+    ? {
+        version: 1,
+        kind: "comment_merge",
+        scope_hash: parsed.scope_hash,
+        issue: initialCommentSource(),
+        review: initialCommentSource(),
+      }
+    : options.cursor.decodeMerge(opaque as string, parsed.scope_hash);
+  const reads = {
+    issue: (input: GitHubApiPullRequestPageInput, signal: AbortSignal) =>
+      options.api.listIssueComments(input, signal),
+    review: (input: GitHubApiPullRequestPageInput, signal: AbortSignal) =>
+      options.api.listReviewComments(input, signal),
+  };
+  const [issueLoaded, reviewLoaded] = await Promise.all([
+    loadCommentSource(
+      reads.issue,
+      parsed,
+      state.issue,
+      continuation,
+      context.signal,
+    ),
+    loadCommentSource(
+      reads.review,
+      parsed,
+      state.review,
+      continuation,
+      context.signal,
+    ),
+  ]);
+  type SourceName = "issue" | "review";
+  type MutableSource = {
+    loaded: LoadedCommentSource;
+    consumed: number;
+    calls: number;
+    blocked: boolean;
+  };
+  const sources: Record<SourceName, MutableSource> = {
+    issue: { loaded: issueLoaded, consumed: 0, calls: issueLoaded.calls, blocked: false },
+    review: { loaded: reviewLoaded, consumed: 0, calls: reviewLoaded.calls, blocked: false },
+  };
+  const prepare = async (name: SourceName): Promise<void> => {
+    const source = sources[name];
+    if (source.loaded.items[source.consumed] !== undefined || source.loaded.state.complete) return;
+    const advanced = advanceCommentSource(source.loaded, source.consumed);
+    if (advanced.complete) {
+      source.loaded = { items: [], page_item_count: 0, state: advanced, calls: 0 };
+      source.consumed = 0;
+      return;
+    }
+    if (source.calls >= 2) {
+      source.loaded = { items: [], page_item_count: 0, state: advanced, calls: 0 };
+      source.consumed = 0;
+      source.blocked = true;
+      return;
+    }
+    const next = await loadNextCommentSource(
+      reads[name],
+      parsed,
+      advanced,
+      context.signal,
+    );
+    source.loaded = next;
+    source.consumed = 0;
+    source.calls += next.calls;
+  };
+  const selected: Array<{ readonly source: SourceName; readonly item: GitHubCommentRecord }> = [];
+  while (selected.length < parsed.page_size) {
+    await Promise.all([prepare("issue"), prepare("review")]);
+    if (sources.issue.blocked || sources.review.blocked) break;
+    const issueHead = sources.issue.loaded.items[sources.issue.consumed];
+    const reviewHead = sources.review.loaded.items[sources.review.consumed];
+    if (issueHead === undefined && reviewHead === undefined) break;
+    const source: SourceName = issueHead === undefined
+      ? "review"
+      : reviewHead === undefined
+        ? "issue"
+        : compareComments(issueHead, reviewHead) <= 0 ? "issue" : "review";
+    const item = sources[source].loaded.items[sources[source].consumed];
+    if (item === undefined) invalidResponse();
+    selected.push({ source, item });
+    sources[source].consumed += 1;
   }
+  const finalState = (source: MutableSource): GitHubCommentMergeCursorSourceState =>
+    source.blocked
+      ? source.loaded.state
+      : advanceCommentSource(source.loaded, source.consumed);
+  const nextState: GitHubCommentMergeCursorState = {
+    version: 1,
+    kind: "comment_merge",
+    scope_hash: parsed.scope_hash,
+    issue: finalState(sources.issue),
+    review: finalState(sources.review),
+  };
+  const complete = nextState.issue.complete && nextState.review.complete;
+  const items = selected.map((entry) => entry.item);
+  if (items.length === 0) {
+    if (!complete) invalidResponse();
+    return succeeded({
+      state: "empty",
+      items: [],
+      evidence: evidence(options, parsed, context, true),
+    });
+  }
+  if (complete) {
+    return succeeded({
+      state: "complete",
+      items,
+      evidence: evidence(options, parsed, context, true),
+    });
+  }
+  const nextCursor = options.cursor.encodeMerge(nextState);
   return succeeded({
     state: "truncated",
-    items: page.items,
-    evidence: evidence(options, parsed, context, false),
+    items,
+    evidence: evidence(options, parsed, context, false, nextCursor),
   });
 }
 
@@ -281,10 +525,16 @@ export class GitHubQueryService {
     context: QueryContext,
   ): Promise<CapabilityExecutionResult> {
     aborted(context.signal);
-    const parsed = withDecodedCursor(
-      parseGitHubCapabilityInput(capabilityId, input, this.options.policy),
-      this.options.cursor,
+    const normalized = parseGitHubCapabilityInput(
+      capabilityId,
+      input,
+      this.options.policy,
     );
+    const mergeComments = capabilityId === "github.pull_request.comments.list" &&
+      normalized.input.kind === "all";
+    const parsed = mergeComments
+      ? normalized
+      : withDecodedCursor(normalized, this.options.cursor);
     let result: CapabilityExecutionResult;
     switch (capabilityId) {
       case "github.identity.get":
@@ -364,16 +614,7 @@ export class GitHubQueryService {
             context,
           );
         } else {
-          const [issue, review] = await Promise.all([
-            this.options.api.listIssueComments(request, context.signal),
-            this.options.api.listReviewComments(request, context.signal),
-          ]);
-          result = combinedCommentResult(
-            combinedCommentPage(issue, review, parsed),
-            this.options,
-            parsed,
-            context,
-          );
+          result = await mergedCommentResult(this.options, parsed, context);
         }
         break;
       }

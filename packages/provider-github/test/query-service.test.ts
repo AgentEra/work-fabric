@@ -322,6 +322,134 @@ describe("GitHubQueryService", () => {
     expect(reviewCalled).toBe(false);
   });
 
+  it("resumes an interleaved all-comments merge without loss or duplication", async () => {
+    const issuePages = new Map([
+      [1, page([
+        comment("issue-3", "issue", "2026-08-02T09:05:00.000Z"),
+        comment("issue-1", "issue", "2026-08-02T09:01:00.000Z"),
+      ], "2")],
+      [2, page([
+        comment("issue-5", "issue", "2026-08-02T09:09:00.000Z"),
+      ])],
+    ]);
+    const reviewPages = new Map([
+      [1, page([
+        comment("review-2", "review", "2026-08-02T09:03:00.000Z"),
+        comment("review-1", "review", "2026-08-02T09:02:00.000Z"),
+      ], "2")],
+      [2, page([
+        comment("review-3", "review", "2026-08-02T09:04:00.000Z"),
+        comment("review-4", "review", "2026-08-02T09:06:00.000Z"),
+      ], "3")],
+      [3, page([
+        comment("review-5", "review", "2026-08-02T09:07:00.000Z"),
+        comment("review-6", "review", "2026-08-02T09:08:00.000Z"),
+      ])],
+    ]);
+    let calls = 0;
+    const paged = <T>(pages: ReadonlyMap<number, GitHubApiPage<T>>) =>
+      async (input: { readonly page_size: number; readonly cursor?: string }) => {
+        calls += 1;
+        expect(input.page_size).toBe(2);
+        const result = pages.get(input.cursor === undefined ? 1 : Number(input.cursor));
+        if (result === undefined) throw new Error("unexpected comment page");
+        return result;
+      };
+    const query = service(api({
+      listIssueComments: paged(issuePages),
+      listReviewComments: paged(reviewPages),
+    }));
+    const collected: string[] = [];
+    let next: string | undefined;
+    let pages = 0;
+    do {
+      const before = calls;
+      const result = await query.execute("github.pull_request.comments.list", {
+        repository,
+        pull_request_number: 42,
+        kind: "all",
+        page_size: 2,
+        ...(next === undefined ? {} : { cursor: next }),
+      }, context);
+      expect(result.outcome).toBe("succeeded");
+      if (result.outcome !== "succeeded") throw new Error("expected comment page");
+      const data = result.data as unknown as {
+        readonly state: "complete" | "truncated";
+        readonly items: readonly { readonly id: string }[];
+        readonly evidence: { readonly next_cursor?: string };
+      };
+      expect(data.items.length).toBeLessThanOrEqual(2);
+      expect(calls - before).toBeLessThanOrEqual(4);
+      collected.push(...data.items.map((item) => item.id));
+      pages += 1;
+      next = data.evidence.next_cursor;
+      if (next !== undefined) {
+        expect(data.state).toBe("truncated");
+      } else {
+        expect(data.state).toBe("complete");
+      }
+    } while (next !== undefined);
+
+    expect(pages).toBeGreaterThanOrEqual(3);
+    expect(collected).toEqual([
+      "issue-1",
+      "review-1",
+      "review-2",
+      "review-3",
+      "issue-3",
+      "review-4",
+      "review-5",
+      "review-6",
+      "issue-5",
+    ]);
+    expect(new Set(collected).size).toBe(collected.length);
+  });
+
+  it("rejects tampered and cross-scope all-comments continuations before refetch", async () => {
+    let calls = 0;
+    const query = service(api({
+      listIssueComments: async () => {
+        calls += 1;
+        return page([
+          comment("issue-1", "issue", "2026-08-02T09:01:00.000Z"),
+          comment("issue-2", "issue", "2026-08-02T09:03:00.000Z"),
+        ]);
+      },
+      listReviewComments: async () => {
+        calls += 1;
+        return page([
+          comment("review-1", "review", "2026-08-02T09:02:00.000Z"),
+          comment("review-2", "review", "2026-08-02T09:04:00.000Z"),
+        ]);
+      },
+    }));
+    const first = await query.execute("github.pull_request.comments.list", {
+      repository,
+      pull_request_number: 42,
+      kind: "all",
+      page_size: 2,
+    }, context);
+    if (first.outcome !== "succeeded") throw new Error("expected first merge page");
+    const next = (first.data.evidence as { next_cursor: string }).next_cursor;
+    const before = calls;
+
+    await expect(query.execute("github.pull_request.comments.list", {
+      repository,
+      pull_request_number: 42,
+      kind: "all",
+      page_size: 2,
+      cursor: `${next}x`,
+    }, context)).rejects.toThrowError("github_invalid_request");
+    await expect(query.execute("github.pull_request.comments.list", {
+      repository,
+      pull_request_number: 43,
+      kind: "all",
+      page_size: 2,
+      cursor: next,
+    }, context)).rejects.toThrowError("github_invalid_request");
+    expect(calls).toBe(before);
+  });
+
   it("dispatches every declared capability and returns only normalized facts", async () => {
     const inputs: Record<(typeof GITHUB_READ_CAPABILITY_IDS)[number], CitizenJsonObject> = {
       "github.identity.get": {},
