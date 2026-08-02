@@ -1,22 +1,11 @@
 import { createHash } from "node:crypto";
 
 import type { GitHubRepositoryRef } from "./contracts.js";
+import { GITHUB_READ_CAPABILITY_IDS } from "./declarations.js";
 import { GitHubProviderError } from "./errors.js";
 import { GitHubPolicyEvaluator } from "./policy.js";
 
-type GitHubCapabilityId =
-  | "github.identity.get"
-  | "github.repository.list"
-  | "github.repository.get"
-  | "github.pull_request.list"
-  | "github.pull_request.get"
-  | "github.pull_request.reviews.list"
-  | "github.pull_request.comments.list"
-  | "github.pull_request.files.list"
-  | "github.pull_request.commits.list"
-  | "github.pull_request.checks.get"
-  | "github.actions.workflow_runs.list"
-  | "github.commit.list";
+type GitHubCapabilityId = (typeof GITHUB_READ_CAPABILITY_IDS)[number];
 
 export interface GitHubParsedCapabilityInput {
   readonly capability_id: GitHubCapabilityId;
@@ -66,7 +55,23 @@ function integer(value: unknown, minimum: number, maximum = Number.MAX_SAFE_INTE
 
 function dateTime(value: unknown): string {
   const result = text(value, 64);
-  if (!Number.isFinite(Date.parse(result))) invalid();
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(result);
+  if (match === null || !Number.isFinite(Date.parse(result))) invalid();
+  const [, year, month, day, hour, minute, second] = match;
+  if (
+    year === undefined || month === undefined || day === undefined ||
+    hour === undefined || minute === undefined || second === undefined
+  ) invalid();
+  const monthNumber = Number(month);
+  const dayNumber = Number(day);
+  const daysInMonth = [31, Number(year) % 4 === 0 && (Number(year) % 100 !== 0 || Number(year) % 400 === 0) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (
+    monthNumber < 1 || monthNumber > 12 || dayNumber < 1 ||
+    dayNumber > daysInMonth[monthNumber - 1]! || Number(hour) > 23 ||
+    Number(minute) > 59 || Number(second) > 59
+  ) invalid();
+  const zone = result.slice(-1) === "Z" ? "Z" : result.slice(-6);
+  if (zone !== "Z" && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4, 6)) > 59)) invalid();
   return result;
 }
 
@@ -168,12 +173,13 @@ function parseTarget(value: unknown, policy: GitHubPolicyEvaluator): Record<stri
   }
   if ("repositories" in target) {
     if (!Array.isArray(target.repositories)) invalid();
+    if (target.repositories.length === 0 || target.repositories.length > 100) invalid();
     return Object.freeze({ repositories: policy.authorizeRepositories(
       target.repositories.map((item) => repository(item, policy)),
     ) });
   }
   if ("owner" in target) {
-    return Object.freeze({ owner: policy.authorizeOwner(text(target.owner, 100, true)) });
+    return policy.authorizeOwnerTarget(text(target.owner, 100, true));
   }
   invalid();
 }

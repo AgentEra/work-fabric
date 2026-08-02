@@ -8,6 +8,10 @@ export interface GitHubProviderPolicy {
   readonly maximum_aggregate_repositories: number;
 }
 
+export type GitHubAuthorizedOwnerTarget =
+  | { readonly owner: string }
+  | { readonly repositories: readonly GitHubRepositoryRef[] };
+
 function invalid(): never {
   throw new GitHubProviderError("github_invalid_request");
 }
@@ -30,6 +34,16 @@ function repository(value: GitHubRepositoryRef): GitHubRepositoryRef {
 
 function equal(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
+}
+
+function compareRepositories(left: GitHubRepositoryRef, right: GitHubRepositoryRef): number {
+  const leftName = left.name.toLowerCase();
+  const rightName = right.name.toLowerCase();
+  if (leftName < rightName) return -1;
+  if (leftName > rightName) return 1;
+  if (left.name < right.name) return -1;
+  if (left.name > right.name) return 1;
+  return 0;
 }
 
 function positiveInteger(value: unknown, maximum: number): number {
@@ -71,6 +85,19 @@ export class GitHubPolicyEvaluator {
     const normalized = text(owner, 100);
     if (!this.allowedOwners.some((allowed) => equal(allowed, normalized))) forbidden();
     return normalized;
+  }
+
+  authorizeOwnerTarget(owner: string): GitHubAuthorizedOwnerTarget {
+    const normalized = this.authorizeOwner(owner);
+    if (this.allowedRepositories.length === 0) {
+      return Object.freeze({ owner: normalized });
+    }
+    const repositories = this.allowedRepositories
+      .filter((repository) => equal(repository.owner, normalized))
+      .slice()
+      .sort(compareRepositories);
+    if (repositories.length === 0) forbidden();
+    return Object.freeze({ repositories: this.authorizeRepositories(repositories) });
   }
 
   authorizeRepository(value: GitHubRepositoryRef): GitHubRepositoryRef {
