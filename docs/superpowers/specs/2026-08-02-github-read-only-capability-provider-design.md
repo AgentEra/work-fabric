@@ -166,13 +166,15 @@ plugins:
       app_id_env: GITHUB_APP_ID
       installation_id_env: GITHUB_APP_INSTALLATION_ID
       private_key_env: GITHUB_APP_PRIVATE_KEY
+    cursor_signing_key: ${WORK_FABRIC_GITHUB_CURSOR_SECRET}
     policy:
       allowed_owners: [AgentEra]
       maximum_page_size: 100
       maximum_aggregate_repositories: 100
 ```
 
-The YAML contains environment-variable names, not secret values. The existing
+The YAML contains environment-variable names or secret references, not secret
+values. The existing
 replaceable global Configuration Provider remains the only consumer-facing
 configuration boundary. A future database-backed source does not change the
 GitHub Provider contract.
