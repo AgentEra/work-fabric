@@ -160,7 +160,11 @@ describe("parseGitHubCapabilityInput", () => {
   it("requires valid RFC3339 date-times for declared date-time filters", () => {
     const input = { repository: { owner: "AgentEra", name: "work-fabric" } };
 
-    for (const since of ["2026-08-02", "2026-02-30T00:00:00Z"]) {
+    for (const since of [
+      "2026-08-02",
+      "2026-02-30T00:00:00Z",
+      "2026-08-02T01:02:03+24:00",
+    ]) {
       expect(() => parseGitHubCapabilityInput(
         "github.commit.list", { ...input, since }, policy,
       )).toThrowError("github_invalid_request");
@@ -172,6 +176,18 @@ describe("parseGitHubCapabilityInput", () => {
     ).input).toMatchObject({
       since: "2026-08-02T01:02:03Z",
       until: "2026-08-02T09:02:03+08:00",
+    });
+    expect(parseGitHubCapabilityInput(
+      "github.commit.list",
+      {
+        ...input,
+        since: "2026-08-02t01:02:03z",
+        until: "2016-12-31T23:59:60Z",
+      },
+      policy,
+    ).input).toMatchObject({
+      since: "2026-08-02t01:02:03z",
+      until: "2016-12-31T23:59:60Z",
     });
   });
 

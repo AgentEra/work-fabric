@@ -55,12 +55,13 @@ function integer(value: unknown, minimum: number, maximum = Number.MAX_SAFE_INTE
 
 function dateTime(value: unknown): string {
   const result = text(value, 64);
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(result);
-  if (match === null || !Number.isFinite(Date.parse(result))) invalid();
-  const [, year, month, day, hour, minute, second] = match;
+  const match = /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/.exec(result);
+  if (match === null) invalid();
+  const [, year, month, day, hour, minute, second, zone] = match;
   if (
     year === undefined || month === undefined || day === undefined ||
-    hour === undefined || minute === undefined || second === undefined
+    hour === undefined || minute === undefined || second === undefined ||
+    zone === undefined
   ) invalid();
   const monthNumber = Number(month);
   const dayNumber = Number(day);
@@ -68,10 +69,12 @@ function dateTime(value: unknown): string {
   if (
     monthNumber < 1 || monthNumber > 12 || dayNumber < 1 ||
     dayNumber > daysInMonth[monthNumber - 1]! || Number(hour) > 23 ||
-    Number(minute) > 59 || Number(second) > 59
+    Number(minute) > 59 || Number(second) > 60
   ) invalid();
-  const zone = result.slice(-1) === "Z" ? "Z" : result.slice(-6);
-  if (zone !== "Z" && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4, 6)) > 59)) invalid();
+  if (
+    zone !== "Z" && zone !== "z" &&
+    (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4, 6)) > 59)
+  ) invalid();
   return result;
 }
 
