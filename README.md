@@ -127,6 +127,11 @@ Channel Adapter 只负责把已经产生的结果映射到目标渠道。Fabric
 不能替 Agent 拼接答复，飞书 Adapter 不能从生命周期状态推断业务内容，
 Agent 也不能绕过 Fabric 直接耦合某个通知渠道。
 
+对于 Agent 承接的自然语言工作，意图、上下文依赖、信息充分性、相关性和
+业务含义由 Agent 模型负责。禁止在 Fabric、Channel、Provider、Runtime 或
+Agent 应用策略中使用关键词、正则表达式或固定自然语言词表代替语义判断；
+确定性代码只能处理协议、Schema、Authority、身份、安全边界和资源预算。
+
 ### 目标解析、派发与执行边界
 
 Work Fabric 是连接和交换层，不是任务决策或执行大脑：

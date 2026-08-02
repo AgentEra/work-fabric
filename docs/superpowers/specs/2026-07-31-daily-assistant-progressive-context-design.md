@@ -3,6 +3,12 @@
 **Date:** 2026-07-31
 **Scope:** Daily Assistant information-sufficiency policy and progressive source retrieval
 
+> **Superseded in part:** The deterministic natural-language classification in
+> Sections 3.3, 5, 11 and acceptance criteria 2–3 is superseded by
+> `2026-08-02-model-driven-context-intent-design.md`. Keywords, regular
+> expressions and fixed phrase lists must not decide intent or contextual
+> dependency. The Agent model now owns that semantic decision.
+
 ## 1. Problem
 
 An external collaboration message can refer to information that is not present
