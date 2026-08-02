@@ -1,0 +1,13 @@
+{
+  "name": "@work-fabric/adapter-github-octokit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "types": "./src/index.ts",
+  "dependencies": {
+    "@octokit/auth-app": "8.2.0",
+    "@octokit/rest": "22.0.1",
+    "@work-fabric/provider-github": "0.1.0"
+  }
+}
