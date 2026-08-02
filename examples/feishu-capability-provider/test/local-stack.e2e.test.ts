@@ -121,6 +121,9 @@ describe("local Feishu assistant stack", () => {
           return {
             turn_type: "capability_request",
             request_summary: "读取当前群成员",
+            context_status: "needs_context",
+            context_basis: "当前排期请求缺少受信群成员事实",
+            missing_facts: ["当前群成员"],
             response: "",
             invocation_id: "invocation-members-1",
             capability_id: "feishu.conversation.members.list",
@@ -143,6 +146,9 @@ describe("local Feishu assistant stack", () => {
           return {
             turn_type: "capability_request",
             request_summary: "查询三位群成员的忙闲",
+            context_status: "needs_context",
+            context_basis: "已有群成员事实，但仍缺少排期所需的忙闲事实",
+            missing_facts: ["参与人的忙闲时间"],
             response: "",
             invocation_id: "invocation-freebusy-1",
             capability_id: "feishu.calendar.freebusy.query",
@@ -197,6 +203,9 @@ describe("local Feishu assistant stack", () => {
           return {
             turn_type: "capability_request",
             request_summary: "发起人已确认，创建共同空闲日程",
+            context_status: "sufficient",
+            context_basis: "确认状态、参与人和时间事实均已具备",
+            missing_facts: [],
             response: "",
             invocation_id: "invocation-calendar-create-1",
             capability_id: "feishu.calendar.event.create",
@@ -225,6 +234,9 @@ describe("local Feishu assistant stack", () => {
         return {
           turn_type: "final",
           request_summary: "日程已创建并邀请当前群",
+          context_status: "sufficient",
+          context_basis: "日程 Provider 已返回创建结果",
+          missing_facts: [],
           response:
             "已创建日程：[Work Fabric 日历联调](https://feishu.example/calendar/event-local-1)，时间为 2026-07-30 15:00–16:00。",
           invocation_id: "",
