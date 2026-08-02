@@ -33,6 +33,22 @@ describe("GitHub API error mapping", () => {
       .toMatchObject({ code: "github_response_invalid", retryable: false });
   });
 
+  it("rejects a foreign runtime not-found override without leaking it", () => {
+    const foreignCode = "github_vendor_not_found";
+    const result = mapGitHubApiError({
+      status: 404,
+      message: foreignCode,
+      response: { headers: { "x-github-request-id": "request-123" } },
+    }, foreignCode as never);
+
+    expect(result).toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+      request_id: "request-123",
+    });
+    expect(JSON.stringify(result)).not.toContain(foreignCode);
+  });
+
   it("maps exhausted secondary rate limits and preserves only safe metadata", () => {
     const secret = "-----BEGIN PRIVATE KEY-----\ndo-not-leak\n-----END PRIVATE KEY-----";
     const result = mapGitHubApiError({
