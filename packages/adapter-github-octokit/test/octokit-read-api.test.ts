@@ -412,6 +412,11 @@ describe("OctokitGitHubReadApi", () => {
     "https://api.github.com/repos/AgentEra/work%0Afabric",
     "https://api.github.com/repos/AgentEra/work%2Ffabric",
     "https://api.github.com/repos/AgentEra/%ZZ",
+    "https://api.github.com/repos/AgentEra/.",
+    "https://api.github.com/repos/AgentEra/..",
+    "https://api.github.com/repos/AgentEra/%2E",
+    "https://api.github.com/repos/AgentEra/%2E%2E",
+    "https://api.github.com/repos/AgentEra/work+fabric",
     "https://api.github.com/repos/AgentEra/ignored/../work-fabric",
     `https://api.github.com/repos/AgentEra/${"r".repeat(101)}`,
   ])("rejects malformed search repository metadata before detail reads: %s", async (repositoryUrl) => {
@@ -437,6 +442,37 @@ describe("OctokitGitHubReadApi", () => {
       retryable: false,
     } satisfies Partial<GitHubProviderError>);
     expect(recorded.map((item) => item.route)).toEqual(["GET /search/issues"]);
+  });
+
+  it("retains a valid dot-containing repository from search metadata", async () => {
+    const recorded: RecordedRequest[] = [];
+    const api = new OctokitGitHubReadApi(recordingClient(recorded, (route) => {
+      if (route === "GET /search/issues") return {
+        data: {
+          total_count: 1,
+          incomplete_results: false,
+          items: [{
+            number: 7,
+            repository_url: "https://api.github.com/repos/AgentEra/work.fabric",
+          }],
+        },
+        headers: {},
+      };
+      return response(route);
+    }));
+
+    await expect(api.searchPullRequests({
+      target: { owner: "AgentEra" },
+      state: "open",
+      page_size: 1,
+    }, signal)).resolves.toMatchObject({
+      items: [{ repository: { owner: "AgentEra", name: "work.fabric" } }],
+    });
+    expect(recorded.map((item) => item.route)).toEqual([
+      "GET /search/issues",
+      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+    ]);
+    expect(recorded[1]?.parameters).toMatchObject({ owner: "AgentEra", repo: "work.fabric" });
   });
 
   it("starts status and check-run reads concurrently with the same signal", async () => {

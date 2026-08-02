@@ -502,8 +502,8 @@ function searchRepository(value: unknown, target: GitHubApiPullRequestListInput[
   const segments = rawPath.split("/");
   if (segments.length !== 4 || segments[0] !== "" || segments[1] !== "repos") invalidResponse();
   const result = {
-    owner: upstreamRepositorySegment(segments[2]),
-    name: upstreamRepositorySegment(segments[3]),
+    owner: upstreamOwnerSegment(segments[2]),
+    name: upstreamRepositoryNameSegment(segments[3]),
   };
   if ("owner" in target) {
     if (result.owner.toLowerCase() !== target.owner.toLowerCase()) invalidResponse();
@@ -516,7 +516,7 @@ function searchRepository(value: unknown, target: GitHubApiPullRequestListInput[
   return result;
 }
 
-function upstreamRepositorySegment(value: string | undefined): string {
+function decodedUpstreamSegment(value: string | undefined): string {
   if (value === undefined) invalidResponse();
   let decoded: string;
   try {
@@ -524,10 +524,19 @@ function upstreamRepositorySegment(value: string | undefined): string {
   } catch {
     invalidResponse();
   }
-  if (
-    decoded.length < 1 || decoded.length > 100 || decoded.trim().length === 0 ||
-    decoded.includes("/") || /[\u0000-\u001F\u007F]/u.test(decoded)
-  ) invalidResponse();
+  if (decoded.length < 1 || decoded.length > 100) invalidResponse();
+  return decoded;
+}
+
+function upstreamOwnerSegment(value: string | undefined): string {
+  const decoded = decodedUpstreamSegment(value);
+  if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,98}[A-Za-z0-9])?$/u.test(decoded)) invalidResponse();
+  return decoded;
+}
+
+function upstreamRepositoryNameSegment(value: string | undefined): string {
+  const decoded = decodedUpstreamSegment(value);
+  if (decoded === "." || decoded === ".." || !/^[A-Za-z0-9._-]+$/u.test(decoded)) invalidResponse();
   return decoded;
 }
 
