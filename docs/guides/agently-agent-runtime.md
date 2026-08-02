@@ -205,17 +205,19 @@ cannot independently authorize a command.
 
 The Feishu long connection does not replay messages sent while the Service is
 offline. The Daily Assistant therefore treats each external-message Handoff as
-authoritative but potentially incomplete. A self-contained request proceeds
-without a history query. An explicit reference such as “上面的事”, “刚才说的”
-or “咋样了” first requests at most 20 recent messages through
-`feishu.conversation.history.read`. The Agent inspects the typed evidence and
-continues with the opaque cursor only when `has_more` is true and an older page
-is material. The current Handoff intent authorizes any side effect; historical
-messages only supply facts and parameters. A status question reports known
-state and never starts the historical task, while an explicit same-sender
-imperative such as “把上面的事做一下” may authorize the resolved action. Empty,
-ambiguous, exhausted or denied evidence results in one concise clarification,
-not an invented workflow or status.
+authoritative but potentially incomplete. Daily Assistant 的模型先输出结构化上下文充分性判断，
+并按自然语言语义判断当前请求是否缺少可由已披露查询能力取得的事实；禁止用关键词或正则表达式
+判断意图、上下文依赖、相关性或信息充分性。Runtime 只校验 query 类型、Schema、
+Authority、`has_more` 和资源预算，不解释消息含义。
+
+模型认为证据不足时，通过 Work Fabric 请求
+`feishu.conversation.history.read`，读取一页后重新判断；只有 `has_more` 为 true
+且仍缺少与当前任务实质相关的事实时才继续分页。例如“你把报错的详细信息记录到飞书文档里吧”
+没有显式指代词，仍应由模型识别为对已有报错事实的隐式引用，先读取历史，再在证据充分后请求
+文档能力。The current Handoff intent authorizes any side effect; historical
+messages only supply facts and parameters. Empty, ambiguous, exhausted or
+denied evidence results in one concise clarification, not an invented workflow
+or status.
 
 Post-capability completion is also owned by the Daily Assistant boundary. The
 worker first asks the configured model to turn validated continuation facts

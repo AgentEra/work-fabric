@@ -454,6 +454,144 @@ def test_context_assessment_rejects_inconsistent_turns() -> None:
             validate_turn_assistant_output(invalid, capabilities)
 
 
+@pytest.mark.asyncio
+async def test_implicit_error_reference_is_decided_by_the_model() -> None:
+    value = valid_request_v3()
+    value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "你把报错的详细信息记录到飞书文档里吧",
+    }]
+    request = parse_request(value)
+    agent = FakeAgent()
+
+    async def assess() -> object:
+        return contextual_turn({
+            "turn_type": "capability_request",
+            "request_summary": "先取得当前请求所指的报错详情",
+            "response": "",
+            "invocation_id": "model-history-error-1",
+            "capability_id": "feishu.conversation.history.read",
+            "version_constraint": "1.0.0",
+            "input": {
+                "conversation": {"kind": "current_conversation"},
+                "maximum_messages": 8,
+            },
+            "reason": "当前文档任务缺少被引用的报错详情",
+            "private_state_action": "none",
+            "private_state": {},
+        }, status="needs_context", missing=["报错代码和错误说明"])
+
+    agent.async_start = assess  # type: ignore[method-assign]
+    turn = await execute_turn_with_agent(request, agent)
+
+    assert turn["kind"] == "capability_request"
+    assert turn["request"]["capability_id"] == (
+        "feishu.conversation.history.read"
+    )
+    assert "报错的详细信息" in str(agent.input_value)
+
+
+@pytest.mark.asyncio
+async def test_retrieved_error_evidence_can_feed_a_document_command() -> None:
+    value = valid_request_v3()
+    value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "你把报错的详细信息记录到飞书文档里吧",
+    }]
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "model-history-error-1",
+            "capability_id": "feishu.conversation.history.read",
+            "version_constraint": "1.0.0",
+            "input": {
+                "conversation": {"kind": "current_conversation"},
+                "maximum_messages": 8,
+            },
+            "reason": "取得当前请求所指的报错详情",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "model-history-error-1",
+            "auxiliary_handoff_id": "handoff-history-error-1",
+            "candidate": {
+                "citizen_id": "citizen-feishu-message",
+                "endpoint_id": "endpoint-feishu-provider",
+                "capability_id": "feishu.conversation.history.read",
+                "capability_version": "1.0.0",
+                "contract_digest": f"sha256:{'a' * 64}",
+            },
+            "data": {
+                "messages": [{
+                    "message_id": "om-calendar-error",
+                    "sender": {
+                        "external_id": "app-assistant",
+                        "sender_type": "app",
+                    },
+                    "created_at": "2026-08-02T03:44:53.752Z",
+                    "content": {
+                        "media_type": "text/plain",
+                        "text": (
+                            "创建日程失败：calendar_not_registered；"
+                            "Calendar is not registered"
+                        ),
+                    },
+                    "provenance": {
+                        "provider_family": "feishu",
+                        "source": "im.message",
+                        "updated": False,
+                    },
+                }],
+                "has_more": False,
+                "coverage": {
+                    "oldest_at": "2026-08-02T03:44:53.752Z",
+                    "newest_at": "2026-08-02T03:44:53.752Z",
+                },
+                "provenance": {
+                    "provider_family": "feishu",
+                    "source": "im.message",
+                    "source_reference": "feishu://tenant-1/message/message-1",
+                },
+            },
+            "artifacts": [],
+        },
+    }]}
+    request = parse_request(value)
+    agent = FakeAgent()
+
+    async def create_document() -> object:
+        return contextual_turn({
+            "turn_type": "capability_request",
+            "request_summary": "将已取得的日历报错详情写入飞书文档",
+            "response": "",
+            "invocation_id": "model-document-error-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "1.0.0",
+            "input": {
+                "title": "Work Fabric 日历创建报错记录",
+                "content": {
+                    "media_type": "text/markdown",
+                    "text": (
+                        "## 报错详情\n\n"
+                        "- 错误代码：`calendar_not_registered`\n"
+                        "- 说明：Calendar is not registered"
+                    ),
+                },
+            },
+            "reason": "当前 Handoff 明确要求把检索到的报错详情记录到文档",
+            "private_state_action": "none",
+            "private_state": {},
+        }, status="sufficient")
+
+    agent.async_start = create_document  # type: ignore[method-assign]
+    turn = await execute_turn_with_agent(request, agent)
+
+    assert "calendar_not_registered" in str(agent.input_value)
+    assert turn["kind"] == "capability_request"
+    assert turn["request"]["capability_id"] == "feishu.document.create"
+
+
 def test_scheduling_proposal_has_a_dedicated_required_output_contract() -> None:
     assert set(SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA) == {
         "request_summary",

@@ -132,14 +132,15 @@ describe("Agently Runtime operator guide", () => {
     );
   });
 
-  it("documents bounded progressive retrieval for offline conversation references", async () => {
+  it("documents model-owned progressive retrieval for implicit conversation references", async () => {
     const source = await readFile(guide, "utf8");
     const prose = source.replace(/\s+/gu, " ");
 
     for (const term of [
       "does not replay messages sent while the Service is offline",
-      "20 recent messages",
-      "self-contained request",
+      "结构化上下文充分性判断",
+      "禁止用关键词或正则表达式",
+      "报错的详细信息",
       "current Handoff intent authorizes",
       "has_more",
     ]) expect(prose).toContain(term);
