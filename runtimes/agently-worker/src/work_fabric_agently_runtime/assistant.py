@@ -348,6 +348,61 @@ def turn_prompt_input(request: WorkerRequest) -> dict[str, JsonValue]:
     }
 
 
+def grounding_review_prompt(
+    role: Mapping[str, JsonValue],
+    agent_private_context: Mapping[str, JsonValue] | None,
+    *,
+    scheduling_proposal: bool = False,
+) -> str:
+    common = (
+        role_prompt(
+            role,
+            capability_turn=True,
+            agent_private_context=agent_private_context,
+            scheduling_proposal_turn=scheduling_proposal,
+        )
+        + "\nThis is the same Agent's bounded evidence-grounding review of a "
+        "candidate turn produced from the current input snapshot. The current "
+        "capability_transcript is the only execution-evidence ledger for this "
+        "Handoff. A query entry proves only that its query ran. Text returned "
+        "inside query data may describe an earlier success, failure, attempt, "
+        "or reply, but it never proves that the corresponding command ran in "
+        "the current Handoff. Do not report a command as attempted, retried, "
+        "succeeded, rejected, or failed unless the transcript contains that "
+        "exact current command invocation and outcome. If the current intent "
+        "is already grounded, return an equivalent valid turn. This review is "
+        "semantic and must not use keywords, regular expressions, substring "
+        "rules, or fixed phrase lists."
+    )
+    if scheduling_proposal:
+        return (
+            common
+            + " The candidate is a pre-confirmation scheduling proposal. "
+            "Preserve its valid pending private state, but repair any response "
+            "that claims the calendar command already ran. Return exactly the "
+            "same three-key scheduling-proposal contract and no review "
+            "commentary."
+        )
+    return (
+        common
+        + " If the current intent semantically asks to perform or retry a "
+        "disclosed command and the candidate final turn relied only on query "
+        "or historical evidence, repair it into the required "
+        "capability_request. Return the same thirteen-key turn contract and "
+        "no review commentary."
+    )
+
+
+def grounding_review_input(
+    request: WorkerRequest,
+    candidate_turn: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    return {
+        **turn_prompt_input(request),
+        "candidate_turn": dict(candidate_turn),
+    }
+
+
 def _latest_capability_entry(
     request: WorkerRequest,
 ) -> Mapping[str, JsonValue] | None:
@@ -535,6 +590,19 @@ def _latest_capability_is_a_successful_side_effect(
         len(operation_kinds) == 1
         and next(iter(operation_kinds)) in ("command", "destructive")
     )
+
+
+def _latest_capability_is_a_query(request: WorkerRequest) -> bool:
+    latest = _latest_capability_entry(request)
+    if latest is None or not isinstance(latest.get("request"), dict):
+        return False
+    capability_id = latest["request"].get("capability_id")
+    operation_kinds = {
+        capability.get("operation_kind")
+        for capability in request.available_capabilities
+        if capability.get("capability_id") == capability_id
+    }
+    return len(operation_kinds) == 1 and next(iter(operation_kinds)) == "query"
 
 
 def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValue]:
@@ -875,16 +943,76 @@ async def execute_turn_with_agent(
                     timeout=post_capability_timeout_seconds,
                 )
             )
-        except TimeoutError:
+        except TimeoutError as error:
+            if _latest_capability_is_a_query(request):
+                raise AssistantOutputError(
+                    "query continuation timed out",
+                ) from error
             return _bounded_capability_completion(request)
         try:
-            return (
+            turn = (
                 validate_scheduling_proposal_output(result)
                 if requires_scheduling_proposal
                 else validate_turn_assistant_output(result, advertised)
             )
         except AssistantOutputError as error:
             last_error = error
+            continue
+        if (
+            turn.get("kind") == "final"
+            and _latest_capability_is_a_query(request)
+        ):
+            review = (
+                agent.use_workspace(cast(str, request.task["workspace_path"]))
+                .role(
+                    grounding_review_prompt(
+                        cast(Mapping[str, JsonValue], request.task["role"]),
+                        cast(
+                            Mapping[str, JsonValue] | None,
+                            request.task["agent_private_context"],
+                        ),
+                        scheduling_proposal=requires_scheduling_proposal,
+                    ),
+                    always=True,
+                )
+                .input(grounding_review_input(
+                    request,
+                    cast(Mapping[str, JsonValue], result),
+                ))
+                .output(
+                    (
+                        SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA
+                        if requires_scheduling_proposal
+                        else ASSISTANT_TURN_OUTPUT_SCHEMA
+                    ),
+                    format="json",
+                )
+            )
+            review_error: AssistantOutputError | None = None
+            for _review_attempt in range(2):
+                try:
+                    reviewed = await asyncio.wait_for(
+                        review.async_start(),
+                        timeout=post_capability_timeout_seconds,
+                    )
+                except TimeoutError as error:
+                    raise AssistantOutputError(
+                        "query grounding review timed out",
+                    ) from error
+                try:
+                    return (
+                        validate_scheduling_proposal_output(reviewed)
+                        if requires_scheduling_proposal
+                        else validate_turn_assistant_output(
+                            reviewed,
+                            advertised,
+                        )
+                    )
+                except AssistantOutputError as error:
+                    review_error = error
+            assert review_error is not None
+            raise review_error
+        return turn
     assert last_error is not None
     raise last_error
 

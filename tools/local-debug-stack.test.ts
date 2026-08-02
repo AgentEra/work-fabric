@@ -48,4 +48,29 @@ describe("local Debug Channel environment", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("ignores a Feishu stack config inherited from the shared env file", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "wf-debug-env-"));
+    const envPath = join(directory, "shared.env");
+    await writeFile(envPath, [
+      "WORK_FABRIC_CURSOR_SECRET=" + "x".repeat(32),
+      "WORK_FABRIC_ADMIN_TOKEN=admin",
+      "WORK_FABRIC_DEBUG_TOKEN=debug",
+      "INTAKE_AGENT_ACCESS_TOKEN=agent",
+      "AGENTLY_MODEL_API_KEY=model",
+      "WORK_FABRIC_CONFIG=/tmp/real-feishu-stack.yaml",
+      "",
+    ].join("\n"));
+    try {
+      const environment = await prepareLocalDebugEnvironment({
+        WORK_FABRIC_ENV_FILE: envPath,
+      });
+      expect(environment.WORK_FABRIC_CONFIG).toBe(
+        join(process.cwd(), "examples/config/local-debug-assistant.bundle.yaml"),
+      );
+      expect(environment.WORK_FABRIC_CONFIG).not.toContain("feishu-stack");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

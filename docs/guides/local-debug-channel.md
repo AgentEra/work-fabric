@@ -14,6 +14,10 @@ Handoff、Agent Runtime 和 Signal 路径，并保存最终规范事件和授权
 - 调用方只能提交 `participant_ref`。可信配置决定它采用 `static` 绑定还是
   `admission` 策略，调用方不能注入 Actor、Endpoint 或代理授权。
 - 日志、错误体和状态命令不输出消息正文、模型结果或 Token。
+- 当办公网或其他环境已经运行真实飞书长连接时，本地联调只使用 Debug
+  Channel。一个飞书应用的真实长连接在同一时刻只允许一个部署拥有；本地
+  Debug 配置不加载飞书 Channel 或 Feishu Provider，不会争抢事件、重复回复
+  或创建真实文档/日程。
 
 ## 1. 环境配置
 
@@ -36,6 +40,11 @@ Handoff 与 Capture 仍可查询。删除这些数据库才会清空本地历史
 export WORK_FABRIC_ENV_FILE="$PWD/debug.env"
 export WORK_FABRIC_CONFIG="$PWD/examples/config/local-debug-assistant.bundle.yaml"
 ```
+
+可以复用真实飞书栈的 `.env` 凭据文件。Debug 启动器会忽略该文件中遗留的
+`WORK_FABRIC_CONFIG`，强制使用专用 Debug Bundle；只有启动命令的进程环境中
+显式设置的 `WORK_FABRIC_CONFIG` 才能覆盖它。这是防止误启第二条飞书长连接
+的安全边界。
 
 模型默认沿用本地助理配置中的 OpenAI-compatible Provider。发布门禁使用仓库
 内的确定性假模型，不访问外网。
@@ -109,6 +118,10 @@ npm run local:debug:e2e
 Python Agently Worker、Agent Runtime Host 和 Signal Dispatcher。只把模型
 HTTP 边界替换成本地确定性 fixture，并验证 Markdown+typed data、Agent 语义
 Result、Capture 和幂等重放。
+
+Debug Bundle 使用独立的 `local-debug-*` SQLite 和 workspace 路径；它不读取
+或写入办公网部署状态。需要验证外部副作用时，应接入隔离的模拟 Provider，
+而不是在本地启动真实飞书长连接。
 
 ## 7. 分层排障
 

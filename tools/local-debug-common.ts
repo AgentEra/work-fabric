@@ -69,7 +69,11 @@ export async function prepareLocalDebugEnvironment(
     throw new Error(`Missing environment variables: ${missing.join(", ")}`);
   }
   const configuration = resolve(
-    combined.WORK_FABRIC_CONFIG
+    // The env file is commonly shared with the real Feishu stack. Its
+    // application config must never make Debug Channel start a second Feishu
+    // long connection; only an explicit command environment override may
+    // replace the dedicated debug bundle.
+    input.WORK_FABRIC_CONFIG
       ?? "examples/config/local-debug-assistant.bundle.yaml",
   );
   await readFile(configuration, "utf8");

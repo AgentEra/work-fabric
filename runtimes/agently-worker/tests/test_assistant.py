@@ -592,6 +592,178 @@ async def test_retrieved_error_evidence_can_feed_a_document_command() -> None:
     assert turn["request"]["capability_id"] == "feishu.document.create"
 
 
+@pytest.mark.asyncio
+async def test_query_history_is_reviewed_before_it_can_be_reported_as_current_command_result() -> None:
+    value = valid_request_v3()
+    value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "再试下",
+    }]
+    value["task"]["agent_private_context"] = {
+        "namespace": "daily-assistant.scheduling/v1",
+        "state_version": 1,
+        "current_source": {
+            "handoff_id": "handoff-retry",
+            "actor_id": "actor-initiator",
+            "sender_resource_uri": "feishu://user/open-id/ou-initiator",
+            "conversation_resource_uri": "feishu://chat/oc-team",
+        },
+        "original_initiator": {
+            "actor_id": "actor-initiator",
+            "sender_resource_uri": "feishu://user/open-id/ou-initiator",
+        },
+        "active_session": {
+            "version": 1,
+            "phase": "awaiting_confirmation",
+            "origin_handoff_id": "handoff-origin",
+            "proposal": {
+                "version": 1,
+                "title": "课程设备测试提醒",
+                "participant_resource_uris": [
+                    "feishu://user/open-id/ou-initiator",
+                ],
+                "start_at": "2026-08-06T02:00:00.000Z",
+                "end_at": "2026-08-06T03:00:00.000Z",
+                "timezone": "Asia/Shanghai",
+                "summary_markdown": "课程前设备测试提醒",
+                "digest": f"sha256:{'a' * 64}",
+            },
+            "confirmed_proposal_digest": None,
+            "confirmation_handoff_id": None,
+            "calendar_result_uri": None,
+            "capability_result_handoff_ids": ["handoff-freebusy"],
+        },
+    }
+    value["available_capabilities"].append({
+        "citizen_id": "citizen-feishu-calendar",
+        "capability_id": "feishu.calendar.event.create",
+        "version": "1.1.0",
+        "name": "Create calendar event",
+        "description": "Create one event on the registered calendar.",
+        "operation_kind": "command",
+        "input_schema": {
+            "type": "object",
+            "additionalProperties": True,
+        },
+    })
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-history-retry",
+            "capability_id": "feishu.conversation.history.read",
+            "version_constraint": "1.0.0",
+            "input": {
+                "conversation": {"kind": "current_conversation"},
+                "maximum_messages": 8,
+            },
+            "reason": "理解当前重试指令所引用的事项",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "invocation-history-retry",
+            "auxiliary_handoff_id": "handoff-history-retry",
+            "candidate": {
+                "citizen_id": "citizen-feishu-message",
+                "endpoint_id": "endpoint-feishu-provider",
+                "capability_id": "feishu.conversation.history.read",
+                "capability_version": "1.0.0",
+                "contract_digest": f"sha256:{'b' * 64}",
+            },
+            "data": {
+                "messages": [{
+                    "message_id": "om-old-calendar-error",
+                    "sender": {
+                        "external_id": "app-assistant",
+                        "sender_type": "app",
+                    },
+                    "created_at": "2026-08-02T03:44:53.752Z",
+                    "content": {
+                        "media_type": "text/plain",
+                        "text": (
+                            "上一次创建日程失败：calendar_not_registered；"
+                            "Calendar is not registered"
+                        ),
+                    },
+                    "provenance": {
+                        "provider_family": "feishu",
+                        "source": "im.message",
+                        "updated": False,
+                    },
+                }],
+                "has_more": False,
+                "coverage": {
+                    "oldest_at": "2026-08-02T03:44:53.752Z",
+                    "newest_at": "2026-08-02T03:44:53.752Z",
+                },
+                "provenance": {
+                    "provider_family": "feishu",
+                    "source": "im.message",
+                    "source_reference": "feishu://tenant/message/current",
+                },
+            },
+            "artifacts": [],
+        },
+    }]}
+    request = parse_request(value)
+    agent = FakeAgent()
+    calls = 0
+
+    async def model_turn() -> object:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return contextual_turn({
+                "turn_type": "final",
+                "request_summary": "再次创建日程仍然失败",
+                "response": (
+                    "我已经再次尝试创建日程，但仍然返回 "
+                    "calendar_not_registered。"
+                ),
+                "invocation_id": "",
+                "capability_id": "",
+                "version_constraint": "",
+                "input": {},
+                "reason": "",
+                "private_state_action": "none",
+                "private_state": {},
+            })
+        return contextual_turn({
+            "turn_type": "capability_request",
+            "request_summary": "重新调用日历创建能力",
+            "response": "",
+            "invocation_id": "invocation-calendar-retry",
+            "capability_id": "feishu.calendar.event.create",
+            "version_constraint": "1.1.0",
+            "input": {
+                "calendar": {"kind": "default_calendar"},
+                "title": "课程设备测试提醒",
+                "start_at": "2026-08-06T02:00:00.000Z",
+                "end_at": "2026-08-06T03:00:00.000Z",
+                "time_zone": "Asia/Shanghai",
+                "attendees": ["feishu://user/open-id/ou-initiator"],
+                "authority_evidence": {
+                    "session_origin_handoff_id": "handoff-origin",
+                    "confirmation_handoff_id": "handoff-retry",
+                    "proposal_digest": f"sha256:{'a' * 64}",
+                    "capability_result_handoff_ids": ["handoff-freebusy"],
+                },
+            },
+            "reason": "当前发起人要求重新执行已确认的日程创建",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    agent.async_start = model_turn  # type: ignore[method-assign]
+
+    turn = await execute_turn_with_agent(request, agent)
+
+    assert calls == 2
+    assert turn["kind"] == "capability_request"
+    assert turn["request"]["capability_id"] == (
+        "feishu.calendar.event.create"
+    )
+
+
 def test_scheduling_proposal_has_a_dedicated_required_output_contract() -> None:
     assert set(SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA) == {
         "request_summary",
@@ -644,6 +816,107 @@ def test_scheduling_proposal_has_a_dedicated_required_output_contract() -> None:
         },
     })
     assert turn["kind"] == "final"
+
+
+@pytest.mark.asyncio
+async def test_scheduling_proposal_query_result_receives_evidence_grounding_review() -> None:
+    value = valid_request_v3()
+    value["task"]["agent_private_context"] = {
+        "namespace": "daily-assistant.scheduling/v1",
+        "state_version": 0,
+        "current_source": {
+            "handoff_id": "handoff-schedule",
+            "actor_id": "actor-human",
+            "sender_resource_uri": "feishu://user/open-id/ou-human",
+            "conversation_resource_uri": "feishu://chat/oc-team",
+        },
+        "original_initiator": {
+            "actor_id": "actor-human",
+            "sender_resource_uri": "feishu://user/open-id/ou-human",
+        },
+        "active_session": None,
+    }
+    value["available_capabilities"].append({
+        "citizen_id": "citizen-feishu-calendar",
+        "capability_id": "feishu.calendar.freebusy.query",
+        "version": "1.0.0",
+        "name": "Query free/busy",
+        "description": "Read bounded free/busy facts.",
+        "operation_kind": "query",
+        "input_schema": {"type": "object", "additionalProperties": True},
+    })
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-freebusy",
+            "capability_id": "feishu.calendar.freebusy.query",
+            "version_constraint": "1.0.0",
+            "input": {
+                "start_at": "2026-08-06T02:00:00.000Z",
+                "end_at": "2026-08-06T04:00:00.000Z",
+                "participants": ["feishu://user/open-id/ou-human"],
+            },
+            "reason": "查找共同空闲时间",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "invocation-freebusy",
+            "auxiliary_handoff_id": "handoff-freebusy",
+            "candidate": {
+                "citizen_id": "citizen-feishu-calendar",
+                "endpoint_id": "endpoint-feishu-provider",
+                "capability_id": "feishu.calendar.freebusy.query",
+                "capability_version": "1.0.0",
+                "contract_digest": f"sha256:{'d' * 64}",
+            },
+            "data": {"busy": [], "has_more": False},
+            "artifacts": [],
+        },
+    }]}
+    proposal_state = {
+        "namespace": "daily-assistant.scheduling/v1",
+        "expected_version": 0,
+        "phase": "awaiting_confirmation",
+        "proposal": {
+            "version": 1,
+            "title": "项目评审",
+            "participant_resource_uris": [
+                "feishu://user/open-id/ou-human",
+            ],
+            "start_at": "2026-08-06T02:00:00.000Z",
+            "end_at": "2026-08-06T03:00:00.000Z",
+            "timezone": "Asia/Shanghai",
+            "summary_markdown": "请确认项目评审日程。",
+        },
+        "confirmed_proposal_digest": None,
+        "confirmation_handoff_id": None,
+        "calendar_result_uri": None,
+        "capability_result_handoff_ids": ["handoff-freebusy"],
+    }
+    agent = FakeAgent()
+    calls = 0
+
+    async def model_turn() -> object:
+        nonlocal calls
+        calls += 1
+        return {
+            "request_summary": "已找到共同空闲时间",
+            "response": (
+                "日程已经创建完成。"
+                if calls == 1
+                else "已找到共同空闲时间，请确认后我再创建日程。"
+            ),
+            "private_state": proposal_state,
+        }
+
+    agent.async_start = model_turn  # type: ignore[method-assign]
+
+    turn = await execute_turn_with_agent(parse_request(value), agent)
+
+    assert calls == 2
+    assert turn["kind"] == "final"
+    assert turn["response"]["summary"][0]["text"] == (
+        "已找到共同空闲时间，请确认后我再创建日程。"
+    )
 
 
 def test_prompt_passes_resolved_context_as_untrusted_evidence() -> None:
@@ -783,6 +1056,66 @@ async def test_post_capability_model_timeout_returns_an_agent_owned_semantic_res
             },
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_query_timeout_cannot_turn_read_evidence_into_a_completion_claim() -> None:
+    value = valid_request_v3()
+    value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "再试下",
+    }]
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-history-timeout",
+            "capability_id": "feishu.conversation.history.read",
+            "version_constraint": "1.0.0",
+            "input": {
+                "conversation": {"kind": "current_conversation"},
+                "maximum_messages": 8,
+            },
+            "reason": "读取当前指令引用的历史事实",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "invocation-history-timeout",
+            "auxiliary_handoff_id": "handoff-history-timeout",
+            "candidate": {
+                "citizen_id": "citizen-feishu-message",
+                "endpoint_id": "endpoint-feishu-provider",
+                "capability_id": "feishu.conversation.history.read",
+                "capability_version": "1.0.0",
+                "contract_digest": f"sha256:{'c' * 64}",
+            },
+            "data": {
+                "messages": [],
+                "has_more": False,
+                "coverage": {"oldest_at": None, "newest_at": None},
+                "provenance": {
+                    "provider_family": "feishu",
+                    "source": "im.message",
+                    "source_reference": "feishu://tenant/message/current",
+                },
+            },
+            "artifacts": [],
+        },
+    }]}
+    request = parse_request(value)
+    agent = FakeAgent()
+
+    async def never_finishes() -> object:
+        await asyncio.sleep(60)
+        raise AssertionError("unreachable")
+
+    agent.async_start = never_finishes  # type: ignore[method-assign]
+
+    with pytest.raises(AssistantOutputError, match="query.*timed out"):
+        await execute_turn_with_agent(
+            request,
+            agent,
+            post_capability_timeout_seconds=0.01,
+        )
 
 
 @pytest.mark.asyncio

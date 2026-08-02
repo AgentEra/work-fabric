@@ -12,6 +12,7 @@ import { provisionLocalFeishu } from "./local-feishu-provision.js";
 
 export interface LocalChildProcess {
   readonly pid?: number | undefined;
+  readonly exitCode?: number | null;
   readonly stdout?: Readable | null;
   readonly stderr?: Readable | null;
   kill(signal?: NodeJS.Signals): boolean;
@@ -78,10 +79,26 @@ function productionSpawn(
       cwd: process.cwd(),
       env: environment,
       stdio: ["ignore", "pipe", "pipe"],
+      // Each composed module owns descendants (npm -> tsx -> node). A
+      // supervisor must terminate the whole tree if one module dies, or the
+      // surviving descendants keep PID 1 and its stdio handles alive.
+      detached: process.platform !== "win32",
     },
   );
   prefix(child.stdout, name, console.log);
   prefix(child.stderr, name, console.error);
+  if (process.platform !== "win32" && child.pid !== undefined) {
+    const leaderPid = child.pid;
+    const killLeader = child.kill.bind(child);
+    child.kill = (signal: NodeJS.Signals = "SIGTERM") => {
+      try {
+        process.kill(-leaderPid, signal);
+        return true;
+      } catch {
+        return killLeader(signal);
+      }
+    };
+  }
   return child;
 }
 
@@ -107,6 +124,7 @@ async function waitForService(
 }
 
 function waitForExit(child: LocalChildProcess, timeoutMs = 10_000): Promise<void> {
+  if ("exitCode" in child && child.exitCode !== null) return Promise.resolve();
   return new Promise((resolve) => {
     let finished = false;
     const timer = setTimeout(() => {

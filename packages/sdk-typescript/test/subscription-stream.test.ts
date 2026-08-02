@@ -110,6 +110,62 @@ describe("SubscriptionClient.stream", () => {
     expect(sleeps).toEqual([10, 20]);
   });
 
+  it("does not exhaust reconnects across healthy heartbeat-only idle windows", async () => {
+    const responses = [
+      streamResponse(": heartbeat\n\n"),
+      streamResponse(": heartbeat\n\n"),
+      streamResponse(": heartbeat\n\n"),
+      streamResponse(sse(delivery("cursor_after_idle"))),
+    ];
+    const fetch = vi.fn(async () =>
+      responses.shift() ?? streamResponse(": heartbeat\n\n")
+    ) as unknown as typeof globalThis.fetch;
+    const controller = new AbortController();
+    const iterator = client(fetch, {
+      maxReconnects: 2,
+      sleep: async () => undefined,
+    }).stream(
+      "subscription_01",
+      { partitionId: "partition_01" },
+      { signal: controller.signal },
+    )[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({
+      value: { next_cursor: "cursor_after_idle" },
+      done: false,
+    });
+    controller.abort();
+    await expect(iterator.next()).resolves.toEqual({
+      value: undefined,
+      done: true,
+    });
+    expect(fetch).toHaveBeenCalledTimes(4);
+  });
+
+  it("still exhausts reconnects across non-heartbeat byte-only rotations", async () => {
+    const responses = [
+      streamResponse("ignored-field\n\n"),
+      streamResponse("ignored-field\n\n"),
+      streamResponse("ignored-field\n\n"),
+      streamResponse(sse(delivery("must_not_be_reached"))),
+    ];
+    const fetch = vi.fn(async () =>
+      responses.shift() ?? streamResponse("ignored-field\n\n")
+    ) as unknown as typeof globalThis.fetch;
+    const iterator = client(fetch, {
+      maxReconnects: 2,
+      sleep: async () => undefined,
+    }).stream(
+      "subscription_01",
+      { partitionId: "partition_01" },
+    )[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).rejects.toMatchObject({
+      code: "stream_reconnect_exhausted",
+    });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
   it("ends cleanly when aborted during reconnect backoff", async () => {
     const fetch = vi.fn(async () => { throw new Error("offline"); }) as unknown as typeof globalThis.fetch;
     const controller = new AbortController();

@@ -32,3 +32,15 @@ inside the container; Compose must publish it only to a VM loopback address.
 This is a single-node SQLite pilot, not a high-availability deployment. A
 clustered production deployment should use the existing storage SPI with the
 PostgreSQL adapter and deployment-owned identity/authority composition.
+
+The office container is the exclusive owner of the real Feishu long
+connection for its application credentials. Local development while this
+deployment is active must use `npm run local:debug:start`, whose dedicated
+bundle contains no Feishu Channel or Provider. Do not run a second
+`local:feishu:start` with the same Feishu application.
+
+The image health check verifies the HTTP Service, Daily Assistant and Feishu
+Capability Provider processes as one deployment composition. A live Fabric
+port with a dead Agent or Provider is unhealthy. The SDK treats server
+heartbeat traffic as a healthy SSE connection, so periodic idle-window closes
+do not consume the consecutive reconnect-failure budget.

@@ -219,14 +219,25 @@ messages only supply facts and parameters. Empty, ambiguous, exhausted or
 denied evidence results in one concise clarification, not an invented workflow
 or status.
 
+The current Handoff's capability transcript is the sole execution ledger for
+that turn. A successful query proves only that the query ran. Text contained in
+query results may describe an older attempt, success or failure, but the Agent
+MUST NOT report that historical statement as a current attempt or result. A
+current command may be reported as attempted, retried, succeeded or failed only
+when the transcript contains that exact command invocation and its outcome.
+This grounding decision remains model-owned and semantic; implementations MUST
+NOT infer intent or repair the result with keywords, regular expressions,
+substring matching or fixed phrase lists.
+
 Post-capability completion is also owned by the Daily Assistant boundary. The
 worker first asks the configured model to turn validated continuation facts
 into a semantic Result. That second model call has a shorter bound than the
-outer Driver deadline; if it does not complete in time, the worker returns a
-minimal semantic Result from the validated intent, title, safe HTTP(S) result
-link and typed artifacts. The fallback never copies Provider error text or
-vendor payloads. Fabric, the Provider and Channel Adapter neither compose nor
-repair the user-facing reply.
+outer Driver deadline. A minimal semantic fallback is allowed only for a
+validated current command outcome, using the intent, title, safe HTTP(S) result
+link and typed artifacts. A query-only turn fails closed when its semantic
+continuation cannot complete; it never becomes a fabricated completion.
+Fabric, the Provider and Channel Adapter neither compose nor repair the
+user-facing reply.
 
 For Feishu message/document operations, use the independent Provider described
 in [飞书 Capability / Context Provider](feishu-capability-provider.md). The

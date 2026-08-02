@@ -30,6 +30,6 @@ ENV NODE_ENV=production \
 EXPOSE 8787
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=12 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:8787/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+  CMD ["node", "--import", "tsx", "deploy/office/healthcheck.ts"]
 
 CMD ["npm", "run", "local:feishu:start"]

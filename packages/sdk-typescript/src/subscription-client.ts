@@ -172,6 +172,11 @@ export class SubscriptionClient {
         while (!signal?.aborted) {
           const item = await reader.read();
           const frames = item.done ? parser.finish() : parser.push(item.value);
+          // The server deliberately ends an otherwise healthy SSE response
+          // after its idle window. Only a parsed heartbeat comment or valid
+          // Delivery proves that this connection was healthy; arbitrary bytes
+          // must not defeat the bounded consecutive-failure budget.
+          if (parser.takeHealthyActivity()) reconnects = 0;
           for (const frame of frames) {
             resumeCursor = frame.id;
             reconnects = 0;

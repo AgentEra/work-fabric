@@ -61,6 +61,7 @@ export class SseDeliveryParser {
   private readonly lines: string[] = [];
   private firstLine = true;
   private finished = false;
+  private healthyActivity = false;
 
   constructor(private readonly maxFrameBytes: number) {
     if (!Number.isSafeInteger(maxFrameBytes) || maxFrameBytes < 1) {
@@ -87,6 +88,12 @@ export class SseDeliveryParser {
       return protocolError();
     }
     return this.drain(true);
+  }
+
+  takeHealthyActivity(): boolean {
+    const active = this.healthyActivity;
+    this.healthyActivity = false;
+    return active;
   }
 
   private drain(atEof: boolean): readonly SseDeliveryFrame[] {
@@ -133,6 +140,7 @@ export class SseDeliveryParser {
 
   private dispatch(): SseDeliveryFrame | null {
     const lines = this.lines.splice(0);
+    const heartbeat = lines.some((line) => line.startsWith(":"));
     let id: string | undefined;
     let event: string | undefined;
     const data: string[] = [];
@@ -146,7 +154,10 @@ export class SseDeliveryParser {
       if (field === "event") event = value;
       if (field === "data") data.push(value);
     }
-    if (data.length === 0) return null;
+    if (data.length === 0) {
+      if (heartbeat) this.healthyActivity = true;
+      return null;
+    }
     if (event !== "workfabric.delivery" || id === undefined) protocolError();
     requiredString(id);
     let parsed: unknown;
@@ -157,6 +168,7 @@ export class SseDeliveryParser {
     }
     const delivery = decodeEventDelivery(parsed, true);
     if (delivery.next_cursor !== id) protocolError();
+    this.healthyActivity = true;
     return { id, event: "workfabric.delivery", data: delivery };
   }
 }
