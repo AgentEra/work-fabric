@@ -137,14 +137,30 @@ class StubDriver implements CapabilityAwareAgentRuntimeDriver {
 }
 
 describe("DailyAssistantDriver", () => {
-  it("requests recent history before interpreting an explicit conversation follow-up", async () => {
+  it("delegates an implicit contextual reference to the model Driver", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     stores.push(state);
     const underlying = new StubDriver();
+    underlying.executeTurn.mockResolvedValueOnce({
+      kind: "capability_request",
+      request: {
+        invocation_id: "model-history-1",
+        capability_id: "feishu.conversation.history.read",
+        version_constraint: "1.0.0",
+        input: {
+          conversation: { kind: "current_conversation" },
+          maximum_messages: 8,
+        },
+        reason: "需要取得当前请求所指的报错详情",
+      },
+    });
     const driver = new DailyAssistantDriver(underlying, state);
+    const current = task({
+      text: "你把报错的详细信息记录到飞书文档里吧",
+    });
 
     const turn = await driver.executeTurn(
-      task({ text: "你把上面的事做一下" }),
+      current,
       [historyCapability],
       null,
       async () => undefined,
@@ -158,19 +174,35 @@ describe("DailyAssistantDriver", () => {
         version_constraint: "1.0.0",
         input: {
           conversation: { kind: "current_conversation" },
-          maximum_messages: 20,
+          maximum_messages: 8,
         },
       },
     });
-    expect(underlying.executeTurn).not.toHaveBeenCalled();
+    expect(underlying.executeTurn).toHaveBeenCalledOnce();
+    expect(underlying.executeTurn.mock.calls[0]?.[0].intent).toEqual(
+      current.intent,
+    );
   });
 
-  it("continues from offline history to a document command and semantic result without repeating preflight", async () => {
+  it("continues from model-selected history to a document command and semantic result", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     stores.push(state);
     const underlying = new StubDriver();
     const driver = new DailyAssistantDriver(underlying, state);
     const currentTask = task({ text: "你把上面的事做一下" });
+    underlying.executeTurn.mockResolvedValueOnce({
+      kind: "capability_request",
+      request: {
+        invocation_id: "model-history-2",
+        capability_id: "feishu.conversation.history.read",
+        version_constraint: "1.0.0",
+        input: {
+          conversation: { kind: "current_conversation" },
+          maximum_messages: 8,
+        },
+        reason: "模型判断当前任务缺少历史事实",
+      },
+    });
     const first = await driver.executeTurn(
       currentTask,
       [historyCapability],
@@ -330,7 +362,7 @@ describe("DailyAssistantDriver", () => {
         }],
       },
     });
-    expect(underlying.executeTurn).toHaveBeenCalledTimes(2);
+    expect(underlying.executeTurn).toHaveBeenCalledTimes(3);
   });
 
   it("injects private context, persists a proposal, mentions the initiator and strips private output", async () => {
@@ -630,6 +662,31 @@ describe("DailyAssistantDriver", () => {
       async () => undefined,
       new AbortController().signal,
     );
+    underlying.executeTurn.mockResolvedValueOnce({
+      kind: "final",
+      response: {
+        summary: [{
+          kind: "text",
+          media_type: "text/markdown",
+          text: "已取消这份尚未创建的日程提案。",
+        }],
+        artifacts: [],
+        evidence: [],
+        extensions: {
+          "workfabric.agent/request_summary": "取消待确认日程提案",
+          "workfabric.agent/private_state": {
+            namespace: "daily-assistant.scheduling/v1",
+            expected_version: 1,
+            phase: "cancelled",
+            proposal: null,
+            confirmed_proposal_digest: null,
+            confirmation_handoff_id: null,
+            calendar_result_uri: null,
+            capability_result_handoff_ids: [],
+          },
+        },
+      },
+    });
     await expect(driver.executeTurn(
       task({
         handoff_id: "handoff-cancellation",
@@ -687,63 +744,6 @@ describe("DailyAssistantDriver", () => {
       async () => undefined,
       new AbortController().signal,
     );
-  });
-
-  it("deterministically closes an explicit initiator cancellation without relying on model state output", async () => {
-    const state = new MemoryAgentRuntimeStateStore();
-    stores.push(state);
-    const underlying = new StubDriver();
-    const driver = new DailyAssistantDriver(underlying, state, {
-      now: () => "2026-07-30T01:00:00.000Z",
-    });
-    await driver.executeTurn(
-      task(),
-      [],
-      null,
-      async () => undefined,
-      new AbortController().signal,
-    );
-    underlying.executeTurn.mockClear();
-    underlying.executeTurn.mockRejectedValueOnce(
-      new Error("the model must not own deterministic cancellation"),
-    );
-
-    await expect(driver.executeTurn(
-      task({
-        handoff_id: "handoff-deterministic-cancellation",
-        text: "这个日程取消吧",
-      }),
-      [],
-      null,
-      async () => undefined,
-      new AbortController().signal,
-    )).resolves.toMatchObject({
-      kind: "final",
-      response: {
-        summary: [{
-          kind: "text",
-          media_type: "text/markdown",
-          text: expect.stringContaining("已取消"),
-        }],
-        extensions: {
-          "workfabric.agent/request_summary": "取消待确认日程提案",
-        },
-      },
-    });
-    expect(underlying.executeTurn).not.toHaveBeenCalled();
-    expect(await state.getPrivateState(
-      "tenant-1",
-      "daily-assistant.scheduling/v1",
-      "feishu:conversation:feishu%3A%2F%2Fchat%2Foc-team",
-    )).toMatchObject({
-      version: 2,
-      value: {
-        phase: "cancelled",
-        confirmation_handoff_id: null,
-        calendar_result_uri: null,
-        capability_result_handoff_ids: [],
-      },
-    });
   });
 
   it("does not treat cancellation of another object as cancellation of the active calendar proposal", async () => {

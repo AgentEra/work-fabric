@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
 
@@ -23,6 +23,14 @@ const providerGuide = new URL(
 );
 const localBundle = new URL(
   "../../config/local-feishu-assistant.bundle.yaml",
+  import.meta.url,
+);
+const dailyAssistantDriver = new URL(
+  "../src/daily-assistant-driver.ts",
+  import.meta.url,
+);
+const contextPreflightPolicy = new URL(
+  "../src/context-preflight-policy.ts",
   import.meta.url,
 );
 
@@ -135,6 +143,20 @@ describe("Agently Runtime operator guide", () => {
       "current Handoff intent authorizes",
       "has_more",
     ]) expect(prose).toContain(term);
+  });
+
+  it("forbids deterministic natural-language intent classification", async () => {
+    await expect(access(contextPreflightPolicy)).rejects.toThrow();
+    const [driver, architectureSource] = await Promise.all([
+      readFile(dailyAssistantDriver, "utf8"),
+      readFile(architecture, "utf8"),
+    ]);
+    expect(driver).not.toMatch(
+      /ContextPreflightPolicy|explicitlyDependsOnEarlierContext|explicitProposalCancellation|intentText/,
+    );
+    expect(architectureSource).toContain(
+      "禁止用关键词、正则表达式或固定自然语言词表",
+    );
   });
 
   it("configures the Calendar Citizen and least-privilege scheduling delegation", async () => {
