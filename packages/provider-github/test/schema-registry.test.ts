@@ -1,11 +1,56 @@
 import { describe, expect, it } from "vitest";
+import { Ajv } from "ajv";
 import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
 
 import {
   GitHubCapabilitySchemaRegistry,
+  type GitHubPage,
+  type GitHubReviewRecord,
   githubReadCapabilityDeclarations,
   githubSchemaDocuments,
 } from "../src/index.js";
+
+const review: GitHubReviewRecord = {
+  repository: { owner: "AgentEra", name: "work-fabric" },
+  pull_request_number: 1,
+  id: "review-1",
+  actor: null,
+  state: "COMMENTED",
+  submitted_at: null,
+  body_preview: "",
+  body_truncated: false,
+  url: "https://github.com/AgentEra/work-fabric/pull/1#pullrequestreview-1",
+};
+
+const evidence = <T extends boolean>(complete: T) => ({
+  provider: "github" as const,
+  fetched_at: "2026-08-02T00:00:00.000Z",
+  installation_id_hash: "sha256:installation",
+  api_version: "2022-11-28",
+  query_scope: ["github://repository/AgentEra/work-fabric"],
+  complete,
+});
+
+const coherentReviewPages: readonly GitHubPage<GitHubReviewRecord>[] = [
+  { state: "empty", items: [], evidence: evidence(true) },
+  { state: "complete", items: [review], evidence: evidence(true) },
+  { state: "truncated", items: [review], evidence: evidence(false) },
+];
+
+// @ts-expect-error Empty pages cannot carry items or incomplete evidence.
+const contradictoryEmptyPage: GitHubPage<GitHubReviewRecord> = {
+  state: "empty", items: [review], evidence: evidence(false),
+};
+
+// @ts-expect-error Complete pages require at least one item and complete evidence.
+const contradictoryCompletePage: GitHubPage<GitHubReviewRecord> = {
+  state: "complete", items: [], evidence: evidence(false),
+};
+
+// @ts-expect-error Truncated pages require at least one item and incomplete evidence.
+const contradictoryTruncatedPage: GitHubPage<GitHubReviewRecord> = {
+  state: "truncated", items: [], evidence: evidence(true),
+};
 
 describe("GitHub capability schema registry", () => {
   it("loads every declared schema as an independent digest-checked clone", async () => {
@@ -64,5 +109,33 @@ describe("GitHub capability schema registry", () => {
     await expect(registry.load(reference, aborted.signal)).rejects.toMatchObject({
       name: "AbortError",
     });
+  });
+
+  it("permits empty review previews", () => {
+    const schema = new Map(githubSchemaDocuments()).get(
+      githubReadCapabilityDeclarations().find((item) =>
+        item.declaration_id === "github.pull_request.reviews.list"
+      )!.output_schema!.uri,
+    )!;
+    const validate = new Ajv({ strict: false, validateFormats: false }).compile(schema);
+
+    expect(validate(coherentReviewPages[1])).toBe(true);
+    expect(validate.errors).toBeNull();
+  });
+
+  it("accepts only coherent page state, item, and evidence combinations", () => {
+    const schema = new Map(githubSchemaDocuments()).get(
+      githubReadCapabilityDeclarations().find((item) =>
+        item.declaration_id === "github.pull_request.reviews.list"
+      )!.output_schema!.uri,
+    )!;
+    const validate = new Ajv({ strict: false, validateFormats: false }).compile(schema);
+
+    for (const page of coherentReviewPages) expect(validate(page)).toBe(true);
+    for (const page of [
+      contradictoryEmptyPage,
+      contradictoryCompletePage,
+      contradictoryTruncatedPage,
+    ]) expect(validate(page)).toBe(false);
   });
 });

@@ -13,11 +13,30 @@ export interface GitHubEvidenceMeta {
   readonly next_cursor?: string;
 }
 
-export interface GitHubPage<T> {
-  readonly state: "complete" | "truncated" | "empty";
-  readonly items: readonly T[];
-  readonly evidence: GitHubEvidenceMeta;
-}
+type GitHubCompleteEvidence = GitHubEvidenceMeta & {
+  readonly complete: true;
+};
+
+type GitHubIncompleteEvidence = GitHubEvidenceMeta & {
+  readonly complete: false;
+};
+
+export type GitHubPage<T> =
+  | {
+      readonly state: "empty";
+      readonly items: readonly [];
+      readonly evidence: GitHubCompleteEvidence;
+    }
+  | {
+      readonly state: "complete";
+      readonly items: readonly [T, ...T[]];
+      readonly evidence: GitHubCompleteEvidence;
+    }
+  | {
+      readonly state: "truncated";
+      readonly items: readonly [T, ...T[]];
+      readonly evidence: GitHubIncompleteEvidence;
+    };
 
 export interface GitHubIdentityRecord {
   readonly app_id: string;

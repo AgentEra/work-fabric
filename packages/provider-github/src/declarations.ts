@@ -44,6 +44,12 @@ const boundedText = (maximum = 8_192): CitizenJsonObject => ({
   maxLength: maximum,
 });
 
+const previewText = (): CitizenJsonObject => ({
+  type: "string",
+  minLength: 0,
+  maxLength: 8_192,
+});
+
 const pageSize = { type: "integer", minimum: 1, maximum: 100 } as const;
 const cursor = { type: "string", minLength: 1, maxLength: 4_096 } as const;
 const pullRequestNumber = { type: "integer", minimum: 1 } as const;
@@ -55,7 +61,7 @@ const pageInput = {
   page_size: pageSize,
   cursor,
 } as const;
-const evidence = objectSchema([
+const evidence = (complete: boolean): CitizenJsonObject => objectSchema([
   "provider",
   "fetched_at",
   "installation_id_hash",
@@ -68,7 +74,7 @@ const evidence = objectSchema([
   installation_id_hash: boundedText(128),
   api_version: boundedText(128),
   query_scope: { type: "array", maxItems: 100, items: boundedText(2_048) },
-  complete: { type: "boolean" },
+  complete: { const: complete },
   next_cursor: cursor,
 });
 
@@ -113,7 +119,7 @@ const pullRequestRecord = objectSchema([
   created_at: { type: "string", format: "date-time" },
   updated_at: { type: "string", format: "date-time" },
   reference: boundedText(2_048),
-  body_preview: boundedText(),
+  body_preview: previewText(),
   body_truncated: { type: "boolean" },
 });
 const reviewRecord = objectSchema([
@@ -126,7 +132,7 @@ const reviewRecord = objectSchema([
   actor: nullable(boundedText(100)),
   state: boundedText(100),
   submitted_at: nullable({ type: "string", format: "date-time" }),
-  body_preview: boundedText(),
+  body_preview: previewText(),
   body_truncated: { type: "boolean" },
   url: boundedText(2_048),
 });
@@ -141,7 +147,7 @@ const commentRecord = objectSchema([
   comment_type: { enum: ["issue", "review"] },
   created_at: { type: "string", format: "date-time" },
   updated_at: { type: "string", format: "date-time" },
-  body_preview: boundedText(),
+  body_preview: previewText(),
   body_truncated: { type: "boolean" },
   url: boundedText(2_048),
 });
@@ -210,16 +216,27 @@ const workflowRunRecord = objectSchema([
 
 const singleOutput = (item: CitizenJsonObject): CitizenJsonObject => objectSchema(
   ["state", "item", "evidence"],
-  { state: { const: "complete" }, item, evidence },
+  { state: { const: "complete" }, item, evidence: evidence(true) },
 );
-const pageOutput = (item: CitizenJsonObject): CitizenJsonObject => objectSchema(
-  ["state", "items", "evidence"],
-  {
-    state: { enum: ["complete", "truncated", "empty"] },
-    items: { type: "array", maxItems: 100, items: item },
-    evidence,
-  },
-);
+const pageOutput = (item: CitizenJsonObject): CitizenJsonObject => ({
+  oneOf: [
+    objectSchema(["state", "items", "evidence"], {
+      state: { const: "empty" },
+      items: { type: "array", maxItems: 0, items: item },
+      evidence: evidence(true),
+    }),
+    objectSchema(["state", "items", "evidence"], {
+      state: { const: "complete" },
+      items: { type: "array", minItems: 1, maxItems: 100, items: item },
+      evidence: evidence(true),
+    }),
+    objectSchema(["state", "items", "evidence"], {
+      state: { const: "truncated" },
+      items: { type: "array", minItems: 1, maxItems: 100, items: item },
+      evidence: evidence(false),
+    }),
+  ],
+});
 
 const pullRequestTarget = {
   oneOf: [
