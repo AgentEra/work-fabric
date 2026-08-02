@@ -13,6 +13,10 @@ WORKDIR /app
 COPY . /app
 
 RUN npm ci \
+      --fetch-retries=5 \
+      --fetch-retry-mintimeout=2000 \
+      --fetch-retry-maxtimeout=30000 \
+      --maxsockets=1 \
   && uv sync --project runtimes/agently-worker --frozen --no-dev \
   && mkdir -p /app/var
 

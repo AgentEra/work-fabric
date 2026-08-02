@@ -22,4 +22,13 @@ describe("office deployment image", () => {
     expect(dockerignore).toContain("node_modules/");
     expect(dockerignore).toContain(".git");
   });
+
+  it("bounds package fetch concurrency and retries transient registry resets", async () => {
+    const dockerfile = await readFile("deploy/office/Dockerfile", "utf8");
+
+    expect(dockerfile).toContain("--fetch-retries=5");
+    expect(dockerfile).toContain("--fetch-retry-mintimeout=2000");
+    expect(dockerfile).toContain("--fetch-retry-maxtimeout=30000");
+    expect(dockerfile).toContain("--maxsockets=1");
+  });
 });
