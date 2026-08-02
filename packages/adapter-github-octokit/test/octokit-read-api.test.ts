@@ -28,6 +28,11 @@ function baseRepository() {
     topics: ["agents"],
     pushed_at: "2026-08-01T09:00:00Z",
     updated_at: "2026-08-01T10:00:00Z",
+    authorization: "Bearer installation-secret",
+    private_key: "-----BEGIN PRIVATE KEY-----raw-secret",
+    token: "installation-token",
+    raw_headers: { authorization: "Bearer raw-header-secret" },
+    raw_body: "raw-body-secret",
   };
 }
 
@@ -77,7 +82,7 @@ function response(route: string): { data: unknown; headers: Record<string, strin
     case "GET /installation/repositories":
       return { data: { total_count: 1, repositories: [baseRepository()] }, headers: {} };
     case "GET /repos/{owner}/{repo}":
-      return { data: baseRepository(), headers: {} };
+      return { data: baseRepository(), headers: { authorization: "Bearer response-header-secret" } };
     case "GET /repos/{owner}/{repo}/pulls":
       return { data: [basePullRequest()], headers: {} };
     case "GET /search/issues":
@@ -245,7 +250,7 @@ describe("OctokitGitHubReadApi", () => {
       { items: [{ sha: "abc123", subject: "Bound the adapter" }] },
     ]);
     expect(JSON.stringify(results)).not.toMatch(
-      /authorization|private_key|token|PRIVATE PATCH|PRIVATE LOGS|PRIVATE ARTIFACTS|PRIVATE FULL TITLE|Full commit body/i,
+      /authorization|private_key|token|installation-secret|raw-secret|raw-header-secret|raw-body-secret|response-header-secret|PRIVATE PATCH|PRIVATE LOGS|PRIVATE ARTIFACTS|PRIVATE FULL TITLE|Full commit body/i,
     );
   });
 
@@ -363,22 +368,75 @@ describe("OctokitGitHubReadApi", () => {
     } satisfies Partial<GitHubProviderError>);
   });
 
-  it("rejects secret-bearing upstream links instead of retaining them", async () => {
+  it.each(["client_secret", "api_key", "auth", "signature"])(
+    "rejects every upstream link query, including %s",
+    async (queryKey) => {
+      const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+        route === "GET /repos/{owner}/{repo}"
+          ? {
+              data: {
+                ...baseRepository(),
+                html_url: `https://github.com/AgentEra/work-fabric?${queryKey}=do-not-retain`,
+              },
+              headers: {},
+            }
+          : response(route)
+      ));
+
+      await expect(api.getRepository(repository, signal)).rejects.toMatchObject({
+        code: "github_response_invalid",
+      } satisfies Partial<GitHubProviderError>);
+    },
+  );
+
+  it("preserves a safe HTTPS fragment without treating it as a query", async () => {
     const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
       route === "GET /repos/{owner}/{repo}"
         ? {
             data: {
               ...baseRepository(),
-              html_url: "https://github.com/AgentEra/work-fabric?access_token=do-not-retain",
+              html_url: "https://github.com/AgentEra/work-fabric#readme?display-only",
             },
             headers: {},
           }
         : response(route)
     ));
 
-    await expect(api.getRepository(repository, signal)).rejects.toMatchObject({
+    await expect(api.getRepository(repository, signal)).resolves.toMatchObject({
+      url: "https://github.com/AgentEra/work-fabric#readme?display-only",
+    });
+  });
+
+  it.each([
+    "https://api.github.com/repos/AgentEra/%20",
+    "https://api.github.com/repos/AgentEra/work%0Afabric",
+    "https://api.github.com/repos/AgentEra/work%2Ffabric",
+    "https://api.github.com/repos/AgentEra/%ZZ",
+    "https://api.github.com/repos/AgentEra/ignored/../work-fabric",
+    `https://api.github.com/repos/AgentEra/${"r".repeat(101)}`,
+  ])("rejects malformed search repository metadata before detail reads: %s", async (repositoryUrl) => {
+    const recorded: RecordedRequest[] = [];
+    const api = new OctokitGitHubReadApi(recordingClient(recorded, (route) => {
+      if (route === "GET /search/issues") return {
+        data: {
+          total_count: 1,
+          incomplete_results: false,
+          items: [{ number: 7, repository_url: repositoryUrl }],
+        },
+        headers: {},
+      };
+      return response(route);
+    }));
+
+    await expect(api.searchPullRequests({
+      target: { owner: "AgentEra" },
+      state: "open",
+      page_size: 1,
+    }, signal)).rejects.toMatchObject({
       code: "github_response_invalid",
+      retryable: false,
     } satisfies Partial<GitHubProviderError>);
+    expect(recorded.map((item) => item.route)).toEqual(["GET /search/issues"]);
   });
 
   it("starts status and check-run reads concurrently with the same signal", async () => {

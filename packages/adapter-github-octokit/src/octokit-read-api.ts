@@ -126,9 +126,9 @@ function safeUrl(value: unknown): string {
     invalidResponse();
   }
   if (url.protocol !== "https:" || url.username !== "" || url.password !== "") invalidResponse();
-  for (const key of url.searchParams.keys()) {
-    if (/^(?:authorization|private[_-]?key|access[_-]?token|token|secret|password)$/iu.test(key)) invalidResponse();
-  }
+  const queryIndex = result.indexOf("?");
+  const fragmentIndex = result.indexOf("#");
+  if (queryIndex >= 0 && (fragmentIndex < 0 || queryIndex < fragmentIndex)) invalidResponse();
   return result;
 }
 
@@ -494,9 +494,17 @@ function searchRepository(value: unknown, target: GitHubApiPullRequestListInput[
     invalidResponse();
   }
   if (url.protocol !== "https:" || url.username !== "" || url.password !== "") invalidResponse();
-  const segments = url.pathname.split("/").filter(Boolean);
-  if (segments.length !== 3 || segments[0] !== "repos" || segments[1] === undefined || segments[2] === undefined) invalidResponse();
-  const result = { owner: segments[1], name: segments[2] };
+  const authorityStart = urlValue.indexOf("://") + 3;
+  const pathStart = urlValue.indexOf("/", authorityStart);
+  const fragmentStart = urlValue.indexOf("#", authorityStart);
+  const pathEnd = fragmentStart < 0 ? urlValue.length : fragmentStart;
+  const rawPath = pathStart < 0 || pathStart >= pathEnd ? "" : urlValue.slice(pathStart, pathEnd);
+  const segments = rawPath.split("/");
+  if (segments.length !== 4 || segments[0] !== "" || segments[1] !== "repos") invalidResponse();
+  const result = {
+    owner: upstreamRepositorySegment(segments[2]),
+    name: upstreamRepositorySegment(segments[3]),
+  };
   if ("owner" in target) {
     if (result.owner.toLowerCase() !== target.owner.toLowerCase()) invalidResponse();
   } else {
@@ -506,6 +514,21 @@ function searchRepository(value: unknown, target: GitHubApiPullRequestListInput[
     )) invalidResponse();
   }
   return result;
+}
+
+function upstreamRepositorySegment(value: string | undefined): string {
+  if (value === undefined) invalidResponse();
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    invalidResponse();
+  }
+  if (
+    decoded.length < 1 || decoded.length > 100 || decoded.trim().length === 0 ||
+    decoded.includes("/") || /[\u0000-\u001F\u007F]/u.test(decoded)
+  ) invalidResponse();
+  return decoded;
 }
 
 export class OctokitGitHubReadApi implements GitHubReadApi {
