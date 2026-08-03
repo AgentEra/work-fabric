@@ -337,6 +337,14 @@ Citizen 或声明而获得执行权限。
 独占最终文案；`channel` 只投递 canonical Result。一个进程可以共同托管这些
 Runtime，但不会合并 Citizen 身份、Authority、状态或职责。
 
+GitHub 只读 Provider 是同一边界的独立系统 Citizen：Provider 独占 GitHub
+App 凭据、安装范围、十二个 `github.*` 只读声明、有界分页和供应商错误映射；
+Agent 独占自然语言意图、能力选择、继续分页判断和最终语义答复；Channel 仅做
+可信接入与 Result 投递。Fabric 只维护连接、Identity/Authority、Handoff、
+浅层生命周期事实和审计，不持有 GitHub 领域状态、SDK 或凭据，也不主动调用
+Provider。Provider 即使与 office host 同机部署，仍有独立 Principal、Actor、
+Endpoint、租约和停用生命周期；office host 仍是飞书长连接的唯一所有者。
+
 推荐的 `agent_managed` 模式下，Channel 只提交当前消息和可信
 WorkReference 来源锚点，不主动读取或理解历史。Decision Body 判断信息是否
 足够；不足时通过标准辅助 Handoff 调用 Message Provider 的 query capability，

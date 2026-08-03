@@ -243,3 +243,14 @@ For Feishu message/document operations, use the independent Provider described
 in [飞书 Capability / Context Provider](feishu-capability-provider.md). The
 Agent Runtime must never receive Feishu credentials or import the Feishu
 OpenAPI backend.
+
+For current repository and pull-request facts, use the independent, read-only
+[GitHub Capability Provider](github-capability-provider.md). The Agent discovers
+only its authorized twelve `github.*` contracts and invokes them through a
+standard auxiliary Handoff. GitHub App credentials, Octokit, policy expansion,
+signed pagination and vendor errors remain inside the Provider. The Agent owns
+semantic intent, capability selection, relevance, pagination decisions and the
+final prose; Fabric carries Authority/Handoff/shallow lifecycle/audit facts,
+and the Channel only transports the canonical Result. A current successful
+capability transcript is the sole proof that the GitHub query ran; cached or
+historical PR text cannot ground a claim about the current repository state.

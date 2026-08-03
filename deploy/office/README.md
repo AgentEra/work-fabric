@@ -39,6 +39,17 @@ deployment is active must use `npm run local:debug:start`, whose dedicated
 bundle contains no Feishu Channel or Provider. Do not run a second
 `local:feishu:start` with the same Feishu application.
 
+The optional GitHub read-only Capability Provider is a separate system Citizen
+and process, even if an office image or VM packages it beside the Service. It
+has its own Principal/Actor/Endpoint, lease, health, GitHub App secrets and
+stop/revoke lifecycle. Enabling it does not make it a Feishu facet: the office
+host remains the sole Feishu long-connection owner. Fabric carries only
+connection, Authority, Handoff, shallow lifecycle and audit facts; the Agent
+owns semantic decisions and the Channel remains transport. Mount the GitHub
+App PEM and other Provider secrets through deployment secret management, never
+the image or YAML. If the optional process is disabled, Core, the Agent and the
+Feishu Channel continue without a `github.*` Citizen.
+
 The image health check verifies the HTTP Service, Daily Assistant and Feishu
 Capability Provider processes as one deployment composition. A live Fabric
 port with a dead Agent or Provider is unhealthy. The SDK treats server
