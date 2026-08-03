@@ -4,6 +4,8 @@ export interface AgentRuntimeAuthorityGrant {
   readonly tenant_id: string;
   readonly principal_id: string;
   readonly actor_id: string;
+  /** Omitted grants retain the existing Agent runtime behavior. */
+  readonly actor_type?: "agent" | "system";
   readonly endpoint_id: string;
   readonly subscription_id: string;
 }
@@ -33,12 +35,20 @@ function ownData(value: object, key: string, path: string): unknown {
   return descriptor.value;
 }
 
-function record(value: unknown, path: string, fields: readonly string[]): Record<string, unknown> {
+function record(
+  value: unknown,
+  path: string,
+  fields: readonly string[],
+  optional: readonly string[] = [],
+): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return invalid(path, "must be an object");
   const keys = ownKeys(value, path);
   if (keys.some((key) => typeof key !== "string" || !fields.includes(key))) return invalid(path, "contains unknown keys");
   const result: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  for (const field of fields) result[field] = ownData(value, field, `${path}.${field}`);
+  for (const field of fields) {
+    if (optional.includes(field) && !Object.hasOwn(value, field)) continue;
+    result[field] = ownData(value, field, `${path}.${field}`);
+  }
   return result;
 }
 
@@ -73,12 +83,20 @@ export function validateAgentRuntimeAuthorityConfiguration(
   for (const grantName of Object.keys(grants)) {
     identifier(grantName, `${path}.grants key`, 128);
     const grant = record(grants[grantName], `${path}.grants.${grantName}`, [
-      "tenant_id", "principal_id", "actor_id", "endpoint_id", "subscription_id",
-    ]);
+      "tenant_id", "principal_id", "actor_id", "actor_type", "endpoint_id", "subscription_id",
+    ], ["actor_type"]);
+    if (
+      grant.actor_type !== undefined &&
+      grant.actor_type !== "agent" &&
+      grant.actor_type !== "system"
+    ) invalid(`${path}.grants.${grantName}.actor_type`);
     normalized[grantName] = {
       tenant_id: identifier(grant.tenant_id, `${path}.grants.${grantName}.tenant_id`),
       principal_id: identifier(grant.principal_id, `${path}.grants.${grantName}.principal_id`),
       actor_id: identifier(grant.actor_id, `${path}.grants.${grantName}.actor_id`),
+      ...(grant.actor_type === undefined
+        ? {}
+        : { actor_type: grant.actor_type }),
       endpoint_id: identifier(grant.endpoint_id, `${path}.grants.${grantName}.endpoint_id`),
       subscription_id: identifier(grant.subscription_id, `${path}.grants.${grantName}.subscription_id`),
     };

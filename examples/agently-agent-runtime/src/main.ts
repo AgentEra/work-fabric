@@ -68,7 +68,9 @@ export async function composeAgentRuntime(
     ...(dependencies.fetch === undefined ? {} : { fetch: dependencies.fetch }),
   });
   const gatewayConfig = dailyAssistantGatewayConfig({
-    actorId: loaded.participant.actor_id, endpointId: loaded.participant.endpoint_id,
+    actorId: loaded.participant.actor_id,
+    actorType: loaded.participant.actor_type,
+    endpointId: loaded.participant.endpoint_id,
     subscriptionId: loaded.service.work_fabric.subscription_id,
     queueCapacity: loaded.service.concurrency.queue_capacity,
     maxActivePartitions:
@@ -89,6 +91,7 @@ export async function composeAgentRuntime(
       authority: new LocalInvocationAuthorityProvider({
         tenant_id: loaded.service.work_fabric.tenant_id,
         agent_actor_id: loaded.participant.actor_id,
+        participant_actor_type: loaded.participant.actor_type,
         queries: client.queries,
         allowed_namespaces:
           loaded.service.capability_invocation.allowed_namespaces,
@@ -105,7 +108,7 @@ export async function composeAgentRuntime(
       owner_id: `${loaded.service.runtime_id}:capability-invocations`,
       verifier: {
         actor_id: loaded.participant.actor_id,
-        actor_type: "agent",
+        actor_type: loaded.participant.actor_type,
       },
       resolver: new CatalogCapabilityResolver(client.citizens),
       schemas: capability.schemas,
@@ -146,7 +149,9 @@ export async function composeAgentRuntime(
   const host = composeAgentRuntimeHost({
     config: {
       runtime_id: loaded.service.runtime_id, tenant_id: loaded.service.work_fabric.tenant_id,
-      actor_id: loaded.participant.actor_id, endpoint_id: loaded.participant.endpoint_id,
+      actor_id: loaded.participant.actor_id,
+      actor_type: loaded.participant.actor_type,
+      endpoint_id: loaded.participant.endpoint_id,
       max_active_runs: loaded.service.concurrency.max_active_runs, queue_capacity: loaded.service.concurrency.queue_capacity,
       run_lease_seconds: 60, progress_interval_ms: 1_000, workspace_root: loaded.driver.config.workspace_root,
     },

@@ -13,6 +13,7 @@ import {
 import {
   AgentGateway,
   BoundedAsyncQueue,
+  normalizeAgentGatewayConfig,
   type AgentGatewayClient,
 } from "../src/index.js";
 
@@ -184,6 +185,35 @@ function config() {
 }
 
 describe("AgentGateway", () => {
+  it("normalizes an executable system participant Subscription", () => {
+    const system = {
+      ...config(),
+      subscription: {
+        ...subscription,
+        owner: { actor_id: "citizen-github-provider", actor_type: "system" as const },
+      },
+    };
+
+    expect(normalizeAgentGatewayConfig(system).subscription.owner).toEqual({
+      actor_id: "citizen-github-provider",
+      actor_type: "system",
+    });
+  });
+
+  it("rejects a human participant Subscription", () => {
+    const human = {
+      ...config(),
+      subscription: {
+        ...subscription,
+        owner: { actor_id: "actor-human", actor_type: "human" as const },
+      },
+    };
+
+    expect(() => normalizeAgentGatewayConfig(human)).toThrow(
+      "executable participant",
+    );
+  });
+
   it("exposes only public Handoff query operations", () => {
     const client = fakeClient().client;
     expect(Object.keys(client.queries).sort()).toEqual([

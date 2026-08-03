@@ -51,14 +51,14 @@ export function normalizeAgentGatewayConfig(
     input.endpoint_id.length === 0 ||
     input.endpoint_id.length > 128 ||
     input.subscription.endpoint_id !== input.endpoint_id ||
-    input.subscription.owner.actor_type !== "agent" ||
+    !["agent", "system"].includes(input.subscription.owner.actor_type) ||
     input.subscription.delivery.mode !== "sse" ||
     input.subscription.state !== "active" ||
     !emptyFilter(input.subscription)
   ) {
     throw new AgentGatewayError(
       "invalid_config",
-      "Gateway Subscription must be an active empty-filter Agent SSE Subscription for the Endpoint",
+      "Gateway Subscription must be an active empty-filter executable participant SSE Subscription for the Endpoint",
     );
   }
   positive(input.inbox_refresh_ms, "inbox_refresh_ms", 300_000);

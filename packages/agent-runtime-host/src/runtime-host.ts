@@ -30,6 +30,8 @@ export interface AgentRuntimeHostConfig {
   readonly runtime_id: string;
   readonly tenant_id: string;
   readonly actor_id: string;
+  /** Existing Agent hosts may omit this; executable system hosts set system. */
+  readonly actor_type?: "agent" | "system";
   readonly endpoint_id: string;
   readonly max_active_runs: number;
   readonly queue_capacity: number;
@@ -615,7 +617,10 @@ export class AgentRuntimeHost {
     await this.issueCommand("accept", handoffId, 0, signal, async (_snapshot, options) => this.requireSession().handoffs.accept({ handoff_id: handoffId }, options), (current) => {
       const state = current.state as Record<string, unknown>;
       const recipient = state.recipient as Record<string, unknown> | null;
-      return ["accepted", "result_returned", "verified", "closed"].includes(lifecycle(current) ?? "") && recipient !== null && recipient.actor_id === this.dependencies.config.actor_id;
+      return ["accepted", "result_returned", "verified", "closed"].includes(lifecycle(current) ?? "") &&
+        recipient !== null &&
+        recipient.actor_id === this.dependencies.config.actor_id &&
+        recipient.actor_type === (this.dependencies.config.actor_type ?? "agent");
     });
   }
 
@@ -705,5 +710,10 @@ export class AgentRuntimeHost {
     for (const [field, value] of Object.entries({ max_active_runs: config.max_active_runs, queue_capacity: config.queue_capacity, run_lease_seconds: config.run_lease_seconds, progress_interval_ms: config.progress_interval_ms })) {
       if (!Number.isSafeInteger(value) || value < 1) invalid("invalid_runtime_host", field);
     }
+    if (
+      config.actor_type !== undefined &&
+      config.actor_type !== "agent" &&
+      config.actor_type !== "system"
+    ) invalid("invalid_runtime_host", "actor_type");
   }
 }

@@ -188,6 +188,85 @@ function store(models: readonly HandoffReadModel[] = []): HandoffReadModelStore 
 }
 
 describe("AgentRuntimeAuthorityPolicy", () => {
+  it("authorizes a configured system runtime through target, accept, status, and Result", async () => {
+    const systemGrant = {
+      ...grant,
+      principal_id: "principal-github-citizen",
+      actor_id: "citizen-github-provider",
+      actor_type: "system" as const,
+      endpoint_id: "endpoint-github-provider",
+      subscription_id: "subscription-github-provider",
+    };
+    const systemPrincipal: ResolvedPrincipal = {
+      principal_id: systemGrant.principal_id,
+      tenant_id: systemGrant.tenant_id,
+      actor_claims: [{
+        actor_id: systemGrant.actor_id,
+        actor_type: "system",
+        endpoint_ids: [systemGrant.endpoint_id],
+      }],
+      attributes: {},
+    };
+    const offered = handoff("handoff-system-offered", state("handoff-system-offered", {
+      package: {
+        ...packageFor("handoff-system-offered"),
+        target: { endpoint_id: systemGrant.endpoint_id },
+      },
+    }));
+    const accepted = handoff("handoff-system-accepted", state("handoff-system-accepted", {
+      lifecycle_state: "accepted",
+      package: {
+        ...packageFor("handoff-system-accepted"),
+        target: { endpoint_id: systemGrant.endpoint_id },
+      },
+      recipient: { actor_id: systemGrant.actor_id, actor_type: "system" },
+      current_responsible_actor: {
+        actor_id: systemGrant.actor_id,
+        actor_type: "system",
+      },
+    }));
+    const policy = new AgentRuntimeAuthorityPolicy(
+      [systemGrant],
+      store([offered, accepted]),
+    );
+    const systemRequest = (
+      action: string,
+      resource_id: string,
+    ): AuthorityRequest => ({
+      ...request(),
+      principal: systemPrincipal,
+      actor_id: systemGrant.actor_id,
+      actor_type: "system",
+      endpoint_id: systemGrant.endpoint_id,
+      action,
+      resource_id,
+    });
+
+    await expect(policy.authorize(systemRequest(
+      "workfabric.endpoint.session.open.v1",
+      systemGrant.endpoint_id,
+    ))).resolves.toEqual({ kind: "allow" });
+    await expect(policy.authorize(systemRequest(
+      "workfabric.handoff.accept.v1",
+      offered.handoff_id,
+    ))).resolves.toEqual({ kind: "allow" });
+    for (const action of [
+      "workfabric.handoff.report_status.v1",
+      "workfabric.handoff.return_result.v1",
+    ]) {
+      await expect(policy.authorize(systemRequest(
+        action,
+        accepted.handoff_id,
+      ))).resolves.toEqual({ kind: "allow" });
+    }
+  });
+
+  it("rejects human runtime grants", () => {
+    expect(() => new AgentRuntimeAuthorityPolicy([
+      { ...grant, actor_type: "human" } as unknown as AgentRuntimeAuthorityGrant,
+    ], store())).toThrow("authority grants");
+  });
+
   it("allows only the configured Principal to manage its own Runtime edge", async () => {
     const policy = new AgentRuntimeAuthorityPolicy([grant], store());
 

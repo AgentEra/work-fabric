@@ -117,6 +117,30 @@ describe("Daily Assistant Runtime composition", () => {
     await composition.host.close();
   });
 
+  it("propagates a configured system participant to its Gateway boundary", async () => {
+    const systemFixture = structuredClone(fixture);
+    systemFixture.participant.actor_type = "system";
+    const loaded = await loadAgentRuntimeConfiguration({
+      document: { revision: "test", value: systemFixture },
+      environment: {
+        INTAKE_AGENT_ACCESS_TOKEN: "runtime-token",
+        AGENTLY_MODEL_API_KEY: "model-token",
+      },
+    });
+
+    const composition = await composeAgentRuntime(loaded, {
+      fetch: async () => new Response(null, { status: 204 }),
+      driver: fakeDriver,
+      state: new MemoryAgentRuntimeStateStore(),
+    });
+
+    expect(composition.gatewayConfig.subscription.owner).toEqual({
+      actor_id: "actor-intake-agent",
+      actor_type: "system",
+    });
+    await composition.host.close();
+  });
+
   it("does not expose a Work Fabric database setting to the Runtime", async () => {
     const loaded = await loadedFixture();
     expect(loaded.service.work_fabric).not.toHaveProperty("database");

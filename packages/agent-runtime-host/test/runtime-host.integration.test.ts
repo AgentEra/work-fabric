@@ -40,6 +40,31 @@ const config: AgentRuntimeHostConfig = {
 };
 
 describe("AgentRuntimeHost", () => {
+  it("rejects a human runtime participant", () => {
+    expect(() => new AgentRuntimeHost({
+      config: { ...config, actor_type: "human" } as never,
+      session: {
+        handoffs: {} as never,
+        incoming: async function* () {},
+        close: async () => undefined,
+        session_id: "session-human",
+        closed: Promise.resolve({ reason: "closed" as const }),
+      },
+      state: new MemoryAgentRuntimeStateStore(),
+      driver: {
+        manifest: {
+          driver_type: "test",
+          protocol_version: "1",
+          capability_ids: ["information.synthesis"],
+        },
+        execute: vi.fn(),
+      },
+      packageLoader: { load: vi.fn() } as never,
+      policy: { decide: vi.fn() },
+      queries: { getHandoff: vi.fn() },
+    })).toThrow("invalid_runtime_host");
+  });
+
   it("keeps the original Handoff responsibility while an Agent uses an injected capability port", async () => {
     const state = new MemoryAgentRuntimeStateStore();
     const legacyExecute = vi.fn(async () => result());
@@ -353,7 +378,7 @@ describe("AgentRuntimeHost", () => {
 
   it("converges an accept conflict by re-reading the equivalent accepted Handoff", async () => {
     const state = new MemoryAgentRuntimeStateStore();
-    const accepted = { ...snapshot(), stream_version: 2, state: { lifecycle_state: "accepted", resource_version: 2, recipient: { actor_id: "actor-runtime" } } } as HandoffReadModel;
+    const accepted = { ...snapshot(), stream_version: 2, state: { lifecycle_state: "accepted", resource_version: 2, recipient: { actor_id: "actor-runtime", actor_type: "agent" } } } as HandoffReadModel;
     const accept = vi.fn(async (): Promise<OperationResult> => ({ ...operation(2), operation_status: "conflict", resource: null }));
     const execute = vi.fn(async () => result());
     const host = new AgentRuntimeHost({
@@ -366,6 +391,81 @@ describe("AgentRuntimeHost", () => {
     await host.handle(incoming);
     expect(accept).toHaveBeenCalledWith({ handoff_id: "handoff-1" }, expect.objectContaining({ expectedVersion: 2 }));
     expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not converge a system accept conflict to an Agent recipient with the same ID", async () => {
+    const state = new MemoryAgentRuntimeStateStore();
+    const acceptedByAgent = {
+      ...snapshot(),
+      stream_version: 2,
+      state: {
+        lifecycle_state: "accepted",
+        resource_version: 2,
+        recipient: { actor_id: "actor-runtime", actor_type: "agent" },
+      },
+    } as HandoffReadModel;
+    const accept = vi.fn(async (): Promise<OperationResult> => ({
+      ...operation(2),
+      operation_status: "conflict",
+      resource: null,
+    }));
+    const execute = vi.fn(async () => result());
+    const host = new AgentRuntimeHost({
+      config: { ...config, actor_type: "system" },
+      session: {
+        handoffs: {
+          accept,
+          decline: vi.fn(),
+          reportStatus: vi.fn(async () => operation(3)),
+          returnResult: vi.fn(async () => operation(4)),
+        } as never,
+        incoming: async function* () {},
+        close: async () => undefined,
+        session_id: "session-system",
+        closed: Promise.resolve({ reason: "closed" as const }),
+      },
+      state,
+      driver: {
+        manifest: {
+          driver_type: "test",
+          protocol_version: "1",
+          capability_ids: ["information.synthesis"],
+        },
+        execute,
+      },
+      packageLoader: {
+        load: vi.fn(async () => ({
+          snapshot: snapshot(),
+          events: [event()],
+          task: { tenant_id: "tenant-1", handoff_id: "handoff-1" },
+        })),
+      } as never,
+      policy: { decide: () => ({ kind: "accept" as const }) },
+      queries: { getHandoff: vi.fn(async () => acceptedByAgent) },
+      now,
+    });
+    const incoming: IncomingHandoff = {
+      partition_id: "handoff:handoff-1",
+      delivery: {
+        delivery_id: "delivery-system-conflict",
+        subscription_id: "subscription-1",
+        attempt: 1,
+        events: [event()],
+        next_cursor: "cursor-1",
+        delivered_at: now(),
+        visibility_expires_at: "2026-07-26T00:01:00.000Z",
+      },
+      handoff: snapshot(),
+      acknowledgeSignal: vi.fn(async () => ({
+        kind: "acknowledged",
+        cursor: "cursor-1",
+      } as const)),
+    };
+
+    await host.handle(incoming);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect((await state.getRun("tenant-1", "handoff-1"))?.state).toBe("failed");
   });
 
   it.each(["driver failure", "invalid result"])('marks %s as failed after flushing safe lifecycle state', async (kind) => {

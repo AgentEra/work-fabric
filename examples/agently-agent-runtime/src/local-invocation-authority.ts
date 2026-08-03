@@ -13,6 +13,7 @@ import type {
 export interface LocalInvocationAuthorityProviderOptions {
   readonly tenant_id: string;
   readonly agent_actor_id: string;
+  readonly participant_actor_type?: "agent" | "system";
   readonly queries: {
     getHandoff(
       handoffId: string,
@@ -238,6 +239,9 @@ export class LocalInvocationAuthorityProvider
     if (
       options.tenant_id.length === 0 ||
       options.agent_actor_id.length === 0 ||
+      (options.participant_actor_type !== undefined &&
+        options.participant_actor_type !== "agent" &&
+        options.participant_actor_type !== "system") ||
       options.allowed_namespaces.length === 0
     ) {
       throw new TypeError("Local capability Authority configuration is invalid");
@@ -289,7 +293,8 @@ export class LocalInvocationAuthorityProvider
       initiator?.actor_type !== "human" ||
       typeof initiator.actor_id !== "string" ||
       initiator.actor_id.length === 0 ||
-      responsible?.actor_type !== "agent" ||
+      responsible?.actor_type !==
+        (this.options.participant_actor_type ?? "agent") ||
       responsible.actor_id !== this.options.agent_actor_id ||
       typeof originalDeadline !== "string" ||
       !Number.isFinite(Date.parse(originalDeadline)) ||

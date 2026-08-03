@@ -10,7 +10,10 @@ export async function provisionDailyAssistant(environment: Readonly<Record<strin
   const registration = {
     ...dailyAssistantEndpointRegistration(),
     endpoint_id: loaded.participant.endpoint_id,
-    actor: { actor_id: loaded.participant.actor_id, actor_type: "agent" as const },
+    actor: {
+      actor_id: loaded.participant.actor_id,
+      actor_type: loaded.participant.actor_type,
+    },
     limits: { max_inline_content_bytes: 262_144, max_concurrent_handoffs: loaded.service.concurrency.max_active_runs },
   };
   const client = new WorkFabricClient({

@@ -76,6 +76,30 @@ describe("loadAgentRuntimeConfiguration", () => {
     expect(loaded.service.work_fabric.access_token).toBe("wf-token");
     expect(loaded.service.concurrency.max_active_partitions).toBe(32);
     expect(loaded.driver.config.provider.api_key).toBe("model-token");
+    expect(loaded.participant).toEqual({
+      actor_id: "actor-1",
+      actor_type: "agent",
+      endpoint_id: "endpoint-1",
+    });
+  });
+
+  it("loads a system runtime participant", async () => {
+    const value = structuredClone(base);
+    value.participant.actor_type = "system";
+
+    const loaded = await loadAgentRuntimeConfiguration({
+      document: document(value),
+      environment: {
+        AGENT_RUNTIME_WORK_FABRIC_TOKEN: "wf-token",
+        AGENTLY_MODEL_API_KEY: "model-token",
+      },
+    });
+
+    expect(loaded.participant).toEqual({
+      actor_id: "actor-1",
+      actor_type: "system",
+      endpoint_id: "endpoint-1",
+    });
   });
 
   it("selects the daily-assistant view from a shared configuration bundle", async () => {

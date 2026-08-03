@@ -45,8 +45,7 @@ const CITIZEN_ID = "github-read-provider";
 const PROVIDER = Object.freeze({
   token: "provider-loop-token",
   principal: "principal-github-provider",
-  actor: "actor-github-provider",
-  citizen_actor: "citizen-github-provider",
+  actor: "citizen-github-provider",
   endpoint: "endpoint-github-provider",
   subscription: "subscription-github-provider",
 });
@@ -165,7 +164,7 @@ function gatewayConfig(
     endpoint_id: PROVIDER.endpoint,
     subscription: {
       subscription_id: PROVIDER.subscription,
-      owner: { actor_id: PROVIDER.actor, actor_type: "agent" },
+      owner: { actor_id: PROVIDER.actor, actor_type: "system" },
       endpoint_id: PROVIDER.endpoint,
       filter: {
         event_types: [],
@@ -292,18 +291,11 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           principal: {
             principal_id: PROVIDER.principal,
             tenant_id: TENANT,
-            actor_claims: [
-              {
-                actor_id: PROVIDER.actor,
-                actor_type: "agent",
-                endpoint_ids: [PROVIDER.endpoint],
-              },
-              {
-                actor_id: PROVIDER.citizen_actor,
-                actor_type: "system",
-                endpoint_ids: [PROVIDER.endpoint],
-              },
-            ],
+            actor_claims: [{
+              actor_id: PROVIDER.actor,
+              actor_type: "system",
+              endpoint_ids: [PROVIDER.endpoint],
+            }],
             attributes: {},
           },
         },
@@ -312,7 +304,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         rule(ADMIN, "workfabric.endpoint.provision.v1", PROVIDER.endpoint),
         rule(ADMIN, "workfabric.citizen.provision.v1", CITIZEN_ID),
         rule(
-          { ...PROVIDER, actor: PROVIDER.citizen_actor },
+          PROVIDER,
           "workfabric.citizen.session.open.v1",
           CITIZEN_ID,
           "system",
@@ -346,6 +338,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
             tenant_id: TENANT,
             principal_id: PROVIDER.principal,
             actor_id: PROVIDER.actor,
+            actor_type: "system",
             endpoint_id: PROVIDER.endpoint,
             subscription_id: PROVIDER.subscription,
           },
@@ -362,14 +355,10 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
       const admin = client(origin, ADMIN);
       const assistant = client(origin, ASSISTANT);
       const provider = client(origin, PROVIDER);
-      const citizen = client(origin, {
-        ...PROVIDER,
-        actor: PROVIDER.citizen_actor,
-      });
 
       const registration: EndpointRegistration = {
         endpoint_id: PROVIDER.endpoint,
-        actor: { actor_id: PROVIDER.actor, actor_type: "agent" },
+        actor: { actor_id: PROVIDER.actor, actor_type: "system" },
         endpoint_type: "workfabric.dev/capability_provider",
         display_name: "GitHub Capability Provider",
         protocol_versions: ["1.0"],
@@ -393,7 +382,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         citizen_kind: "capability-provider",
         principal_id: PROVIDER.principal,
         allowed_actor: {
-          actor_id: PROVIDER.citizen_actor,
+          actor_id: PROVIDER.actor,
           actor_type: "system",
         },
         allowed_endpoint_id: PROVIDER.endpoint,
@@ -420,18 +409,19 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         installation_id_hash: "sha256:installation",
         now: () => "2026-08-02T10:00:01.000Z",
       });
+      const citizenExecute = vi.spyOn(executor, "execute");
       citizenRuntime = new GitHubCapabilityCitizenRuntime({
         citizen_id: CITIZEN_ID,
         client_session_id: "github-citizen-http-loop",
         expected_registration_version: 1,
         principal_id: PROVIDER.principal,
-        actor_id: PROVIDER.citizen_actor,
+        actor_id: PROVIDER.actor,
         endpoint_id: PROVIDER.endpoint,
         executor,
       });
       await citizenRuntime.start({
         tenant_id: TENANT,
-        client: citizen.citizens,
+        client: provider.citizens,
         clock: {
           now: () => new Date().toISOString(),
           setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
@@ -508,6 +498,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           runtime_id: "github-provider-http-loop",
           tenant_id: TENANT,
           actor_id: PROVIDER.actor,
+          actor_type: "system",
           endpoint_id: PROVIDER.endpoint,
           max_active_runs: 1,
           queue_capacity: 8,
@@ -641,7 +632,30 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           },
           recipient: {
             actor_id: PROVIDER.actor,
-            actor_type: "agent",
+            actor_type: "system",
+          },
+          package: {
+            target: {
+              capability_requirement: {
+                constraints: {
+                  selected_citizen_id: CITIZEN_ID,
+                  contract_digest: canonicalCitizenDigest(declaration),
+                },
+              },
+            },
+          },
+          target_binding: {
+            target: { endpoint_id: PROVIDER.endpoint },
+            evidence: [{
+              content: {
+                data: {
+                  citizen_id: CITIZEN_ID,
+                  declaration_id: declaration.declaration_id,
+                  declaration_version: declaration.version,
+                  contract_digest: canonicalCitizenDigest(declaration),
+                },
+              },
+            }],
           },
           verifier: {
             actor_id: ASSISTANT.actor,
@@ -662,6 +676,17 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
       ]));
       expect(lifecycleOrder.slice(0, 2)).toEqual(["claim", "accept"]);
       expect(run).toMatchObject({ state: "succeeded" });
+      expect(citizenExecute).toHaveBeenCalledOnce();
+      expect(citizenExecute).toHaveBeenCalledWith(
+        expect.objectContaining({
+          capability_id: declaration.declaration_id,
+          contract_digest: canonicalCitizenDigest(declaration),
+        }),
+        expect.objectContaining({
+          citizen_id: CITIZEN_ID,
+          endpoint_id: PROVIDER.endpoint,
+        }),
+      );
       expect(JSON.stringify({ result, snapshot })).not.toMatch(
         /access_token|private_key|credential_ref|vendor_response/i,
       );

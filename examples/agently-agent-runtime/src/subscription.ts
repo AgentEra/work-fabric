@@ -6,6 +6,7 @@ import { DAILY_ASSISTANT_CAPABILITIES, DAILY_ASSISTANT_CAPABILITY_IDS } from "./
 
 export function dailyAssistantGatewayConfig(input: {
   readonly actorId: string;
+  readonly actorType?: "agent" | "system";
   readonly endpointId: string;
   readonly subscriptionId: string;
   readonly queueCapacity: number;
@@ -14,7 +15,10 @@ export function dailyAssistantGatewayConfig(input: {
   const now = new Date().toISOString();
   const subscription: SubscriptionDocument = {
     subscription_id: input.subscriptionId,
-    owner: { actor_id: input.actorId, actor_type: "agent" }, endpoint_id: input.endpointId,
+    owner: {
+      actor_id: input.actorId,
+      actor_type: input.actorType ?? "agent",
+    }, endpoint_id: input.endpointId,
     filter: { event_types: [], actor_ids: [], endpoint_ids: [], thread_ids: [], handoff_ids: [], work_reference_uris: [], capability_ids: [], lifecycle_states: [] },
     delivery: { mode: "sse" }, state: "active", cursor: null, created_at: now, updated_at: now,
   };

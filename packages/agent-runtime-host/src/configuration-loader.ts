@@ -186,8 +186,14 @@ const participantValidator: NamedConfigurationSectionValidator<AgentRuntimeParti
   section: "participant", type: "workfabric.agent-runtime.participant.v1",
   validate(value, path) {
     const root = object(value, path); exact(root, ["actor_id", "actor_type", "endpoint_id"], path);
-    if (root.actor_type !== "agent") invalid("invalid_participant", `${path}.actor_type`);
-    return { actor_id: string(root.actor_id, `${path}.actor_id`, 128), actor_type: "agent", endpoint_id: string(root.endpoint_id, `${path}.endpoint_id`, 128) };
+    if (root.actor_type !== "agent" && root.actor_type !== "system") {
+      invalid("invalid_participant", `${path}.actor_type`);
+    }
+    return {
+      actor_id: string(root.actor_id, `${path}.actor_id`, 128),
+      actor_type: root.actor_type,
+      endpoint_id: string(root.endpoint_id, `${path}.endpoint_id`, 128),
+    };
   },
 };
 

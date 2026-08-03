@@ -36,7 +36,7 @@ export interface AgentRuntimeServiceConfiguration {
 
 export interface AgentRuntimeParticipant {
   readonly actor_id: string;
-  readonly actor_type: "agent";
+  readonly actor_type: "agent" | "system";
   readonly endpoint_id: string;
 }
 

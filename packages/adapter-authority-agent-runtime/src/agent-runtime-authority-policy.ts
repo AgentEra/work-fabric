@@ -78,8 +78,16 @@ function boundedIdentifier(value: unknown): value is string {
 
 function validGrant(value: unknown): value is AgentRuntimeAuthorityGrant {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  return ["tenant_id", "principal_id", "actor_id", "endpoint_id", "subscription_id"]
-    .every((field) => boundedIdentifier(ownData(value, field)));
+  const actorType = ownData(value, "actor_type");
+  return (actorType === undefined || actorType === "agent" || actorType === "system") &&
+    ["tenant_id", "principal_id", "actor_id", "endpoint_id", "subscription_id"]
+      .every((field) => boundedIdentifier(ownData(value, field)));
+}
+
+function grantActorType(
+  grant: AgentRuntimeAuthorityGrant,
+): "agent" | "system" {
+  return grant.actor_type ?? "agent";
 }
 
 function targetMatches(target: HandoffTarget, grant: AgentRuntimeAuthorityGrant): boolean {
@@ -89,7 +97,9 @@ function targetMatches(target: HandoffTarget, grant: AgentRuntimeAuthorityGrant)
 }
 
 function responsibleActorMatches(actor: HandoffState["recipient"], grant: AgentRuntimeAuthorityGrant): boolean {
-  return actor !== null && actor.actor_id === grant.actor_id;
+  return actor !== null &&
+    actor.actor_id === grant.actor_id &&
+    actor.actor_type === grantActorType(grant);
 }
 
 function targeted(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
@@ -107,7 +117,7 @@ function previouslyAccepted(state: HandoffState, grant: AgentRuntimeAuthorityGra
 }
 
 function initiated(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
-  return state.initiator.actor_type === "agent"
+  return state.initiator.actor_type === grantActorType(grant)
     && state.initiator.actor_id === grant.actor_id;
 }
 
@@ -119,7 +129,7 @@ function hasExternallyResolvedCapabilityTarget(state: HandoffState): boolean {
 
 function activeClaimMatches(state: HandoffState, grant: AgentRuntimeAuthorityGrant): boolean {
   return state.active_claim !== null
-    && state.active_claim.actor.actor_type === "agent"
+    && state.active_claim.actor.actor_type === grantActorType(grant)
     && state.active_claim.actor.actor_id === grant.actor_id
     && state.active_claim.endpoint_id === grant.endpoint_id;
 }
@@ -130,18 +140,24 @@ function exactRuntimeGrant(request: AuthorityRequest, grants: readonly AgentRunt
     const principal = ownData(request, "principal");
     if (typeof principal !== "object" || principal === null || Array.isArray(principal)) return null;
     const actorId = ownData(request, "actor_id");
+    const actorType = ownData(request, "actor_type");
     const endpointId = ownData(request, "endpoint_id");
-    if (!boundedIdentifier(actorId) || !boundedIdentifier(endpointId) || ownData(request, "actor_type") !== "agent") return null;
+    if (
+      !boundedIdentifier(actorId) ||
+      !boundedIdentifier(endpointId) ||
+      (actorType !== "agent" && actorType !== "system")
+    ) return null;
     const claims = ownData(principal, "actor_claims");
     if (!Array.isArray(claims) || !claims.some((claim) => typeof claim === "object" && claim !== null && !Array.isArray(claim)
       && ownData(claim, "actor_id") === actorId
-      && ownData(claim, "actor_type") === "agent"
+      && ownData(claim, "actor_type") === actorType
       && Array.isArray(ownData(claim, "endpoint_ids"))
       && (ownData(claim, "endpoint_ids") as readonly unknown[]).includes(endpointId))) return null;
     return grants.find((grant) =>
       ownData(principal, "tenant_id") === grant.tenant_id
       && ownData(principal, "principal_id") === grant.principal_id
       && actorId === grant.actor_id
+      && actorType === grantActorType(grant)
       && endpointId === grant.endpoint_id,
     ) ?? null;
   } catch {

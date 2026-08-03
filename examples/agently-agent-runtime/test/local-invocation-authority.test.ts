@@ -181,6 +181,30 @@ function membersResult(): HandoffReadModel {
 }
 
 describe("LocalInvocationAuthorityProvider", () => {
+  it("binds local capability Authority to a configured system participant", async () => {
+    const read = snapshot({
+      current_responsible_actor: {
+        actor_id: "actor-intake-agent",
+        actor_type: "system",
+      },
+    });
+    const policy = new LocalInvocationAuthorityProvider({
+      tenant_id: "tenant-local",
+      agent_actor_id: "actor-intake-agent",
+      participant_actor_type: "system",
+      queries: { getHandoff: async () => read },
+      allowed_namespaces: ["feishu."],
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
+
+    await expect(policy.authorize(
+      input(),
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      scopes: ["capability:invoke", "document:write"],
+    });
+  });
+
   it("derives bounded capability Authority from canonical original Handoff facts", async () => {
     const fixture = authority();
 
