@@ -22,6 +22,7 @@ import {
   GitHubPolicyEvaluator,
   GitHubQueryService,
   HmacGitHubCursorCodec,
+  GITHUB_REST_API_VERSION,
   githubInstallationIdentityLabel,
   githubReadCapabilityDeclarations,
 } from "@work-fabric/provider-github";
@@ -162,8 +163,6 @@ function descriptor(declaration: CitizenDeclaration, citizenId: string): Capabil
 export function githubCapabilityDescriptors(citizenId: string): readonly CapabilityDescriptor[] {
   return Object.freeze(githubReadCapabilityDeclarations().map((item) => descriptor(item, citizenId)));
 }
-
-export const GITHUB_REST_API_VERSION = "2022-11-28";
 
 export const installationIdHash = githubInstallationIdentityLabel;
 

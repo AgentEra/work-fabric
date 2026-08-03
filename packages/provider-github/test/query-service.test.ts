@@ -204,6 +204,40 @@ describe("GitHubQueryService", () => {
     expect(calls).toBe(2);
   });
 
+  it("signs the actual upstream continuation after skipping unauthorized repository pages", async () => {
+    const hidden = {
+      ...repositoryRecord,
+      repository: { owner: "AgentEra", name: "installation-only-hidden" },
+    };
+    const calls: Array<string | undefined> = [];
+    const query = service(api({
+      listRepositories: async (input) => {
+        calls.push(input.cursor);
+        if (input.cursor === undefined) return page([hidden], "2");
+        if (input.cursor === "2") return page([repositoryRecord], "3");
+        expect(input.cursor).toBe("3");
+        return page([repositoryRecord]);
+      },
+    }));
+
+    const first = await query.execute("github.repository.list", { page_size: 1 }, context);
+    expect(first).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "truncated", items: [repositoryRecord] },
+    });
+    if (first.outcome !== "succeeded") throw new Error("expected repository page");
+    const cursor = (first.data.evidence as { next_cursor: string }).next_cursor;
+    const second = await query.execute("github.repository.list", {
+      page_size: 1,
+      cursor,
+    }, context);
+    expect(second).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "complete", items: [repositoryRecord] },
+    });
+    expect(calls).toEqual([undefined, "2", "3"]);
+  });
+
   it("queries checks with the immutable pull-request head SHA", async () => {
     let observedRef: string | undefined;
     await service(api({

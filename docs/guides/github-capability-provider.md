@@ -62,7 +62,9 @@ needed, the narrower `allowed_repositories`. Keep `authentication.mode:
 github_app` and the three environment-variable names. Production configuration
 must not add a PAT fallback.
 
-Set these five required environment values in the Provider process environment:
+Set these six required environment values for the local provision-and-start
+flow. The first five belong to the Provider process; the administrative token
+is consumed only by the explicit provisioning step:
 
 ```bash
 export GITHUB_APP_ID='123456'
@@ -70,10 +72,13 @@ export GITHUB_APP_INSTALLATION_ID='7890123'
 export GITHUB_APP_PRIVATE_KEY="$(cat "$HOME/.config/work-fabric/github/provider.private-key.pem")"
 export GITHUB_PROVIDER_ACCESS_TOKEN='rotated-provider-fabric-token'
 export WORK_FABRIC_GITHUB_CURSOR_SECRET="$(openssl rand -hex 32)"
+export WORK_FABRIC_ADMIN_TOKEN='rotated-work-fabric-admin-token'
 ```
 
 `GITHUB_PROVIDER_ACCESS_TOKEN` is the Provider's Work Fabric service token, not
-a GitHub token. Store all five in the platform secret manager or a mode-`0600`
+a GitHub token. `WORK_FABRIC_ADMIN_TOKEN` is the Work Fabric provisioning
+credential and must not be exposed to the Provider child process after
+provisioning. Store all six in the platform secret manager or a mode-`0600`
 environment file outside the repository. Also select the non-secret bundle and
 application view:
 
@@ -169,8 +174,9 @@ surfaces, non-public or cross-owner URLs, URL credentials/query strings, and
 secret-shaped output.
 
 Use a production-style GitHub App configuration with one enabled Provider,
-export the five values above, and explicitly name an owner already present in
-the Provider policy:
+export the five Provider-owned values above (the admin token is not needed for
+this read-only smoke), and explicitly name an owner already present in the
+Provider policy:
 
 ```bash
 export WORK_FABRIC_GITHUB_LIVE_SMOKE=true
@@ -208,7 +214,7 @@ To suspend access, first set the GitHub plugin `enabled: false`, stop the
 standalone Provider, and remove/disable its Work Fabric Authority. Confirm the
 Citizen lease expires and no GitHub capability is discoverable. Then uninstall
 the GitHub App from the organization or remove its selected repositories,
-delete the private key in GitHub, and delete the PEM and five deployment
-secrets from the secret manager. Rotate the Work Fabric Provider token and
+delete the private key in GitHub, and delete the PEM and five Provider-owned
+deployment secrets from the secret manager. Rotate the Work Fabric Provider token and
 cursor key before any later re-enable. Disabling this optional Citizen must not
 interrupt the Agent, Core, Debug Channel, or the office Feishu connection.

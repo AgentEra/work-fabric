@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -41,15 +42,142 @@ import { composeNodeService, parseServiceConfig } from "../src/index.js";
 import { CapabilityProviderDriver } from "@work-fabric/capability-provider-runtime";
 import { githubProviderEvidenceIdentity } from "../../../examples/github-capability-provider/src/composition.js";
 
-const TENANT = "tenant-github-http-loop";
-const EXCHANGE = "exchange-github-http-loop";
-const CITIZEN_ID = "github-read-provider";
+type ActorType = "human" | "agent" | "service" | "system";
+type AuthorityRule = {
+  readonly tenant_id: string;
+  readonly principal_id: string;
+  readonly actor_id: string;
+  readonly actor_type: ActorType;
+  readonly endpoint_id: string;
+  readonly action: string;
+  readonly resource_id: string | null;
+};
+
+function unifiedGitHubProviderFixture() {
+  const bundle = parse(readFileSync(
+    new URL("../../../examples/config/local-feishu-assistant.bundle.yaml", import.meta.url),
+    "utf8",
+  )) as {
+    applications: {
+      "work-fabric": {
+        service: {
+          tenant_id: string;
+          exchange_id: string;
+          identities: Array<{
+            authentication_evidence: { bearer_token: string };
+            principal: {
+              principal_id: string;
+              tenant_id: string;
+              actor_claims: Array<{
+                actor_id: string;
+                actor_type: ActorType;
+                endpoint_ids: string[];
+              }>;
+              attributes: Record<string, unknown>;
+            };
+          }>;
+          authority_rules: AuthorityRule[];
+        };
+        agent_runtime_authority: {
+          grants: {
+            "github-provider": {
+              tenant_id: string;
+              principal_id: string;
+              actor_id: string;
+              actor_type?: ActorType;
+              endpoint_id: string;
+              subscription_id: string;
+            };
+          };
+        };
+      };
+      "github-provider": {
+        service: {
+          work_fabric: {
+            tenant_id: string;
+            exchange_id: string;
+            subscription_id: string;
+          };
+        };
+        plugins: {
+          instances: {
+            "github-primary": {
+              config: {
+                citizen: {
+                  citizen_id: string;
+                  principal_id: string;
+                  actor_id: string;
+                  endpoint_id: string;
+                  registration_version: number;
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+  const workFabric = bundle.applications["work-fabric"];
+  const providerApplication = bundle.applications["github-provider"];
+  const grant = workFabric.agent_runtime_authority.grants["github-provider"];
+  const identity = workFabric.service.identities.find((item) =>
+    item.authentication_evidence.bearer_token === "${GITHUB_PROVIDER_ACCESS_TOKEN}"
+  );
+  const claim = identity?.principal.actor_claims[0];
+  const citizen = providerApplication.plugins.instances["github-primary"].config.citizen;
+  if (
+    identity === undefined || claim === undefined ||
+    grant.actor_type !== "system" ||
+    grant.tenant_id !== workFabric.service.tenant_id ||
+    providerApplication.service.work_fabric.tenant_id !== grant.tenant_id ||
+    providerApplication.service.work_fabric.exchange_id !== workFabric.service.exchange_id ||
+    providerApplication.service.work_fabric.subscription_id !== grant.subscription_id ||
+    identity.principal.principal_id !== grant.principal_id ||
+    identity.principal.tenant_id !== grant.tenant_id ||
+    claim.actor_id !== grant.actor_id ||
+    claim.actor_type !== grant.actor_type ||
+    claim.endpoint_ids.length !== 1 || claim.endpoint_ids[0] !== grant.endpoint_id ||
+    citizen.principal_id !== grant.principal_id ||
+    citizen.actor_id !== grant.actor_id ||
+    citizen.endpoint_id !== grant.endpoint_id
+  ) {
+    throw new TypeError("unified bundle GitHub Provider identity, grant, and Citizen must agree");
+  }
+  const authorityRules = workFabric.service.authority_rules.filter((item) =>
+    item.principal_id === grant.principal_id
+  );
+  if (
+    authorityRules.length === 0 ||
+    authorityRules.some((item) =>
+      item.tenant_id !== grant.tenant_id ||
+      item.actor_id !== grant.actor_id ||
+      item.actor_type !== grant.actor_type ||
+      item.endpoint_id !== grant.endpoint_id ||
+      item.resource_id !== citizen.citizen_id
+    )
+  ) {
+    throw new TypeError("unified bundle GitHub Provider Authority rules must match its grant");
+  }
+  return Object.freeze({
+    tenant_id: grant.tenant_id,
+    exchange_id: workFabric.service.exchange_id,
+    grant: Object.freeze({ ...grant, actor_type: grant.actor_type }),
+    principal: Object.freeze(identity.principal),
+    citizen: Object.freeze(citizen),
+    authority_rules: Object.freeze(authorityRules),
+  });
+}
+
+const UNIFIED_GITHUB = unifiedGitHubProviderFixture();
+const TENANT = UNIFIED_GITHUB.tenant_id;
+const EXCHANGE = UNIFIED_GITHUB.exchange_id;
+const CITIZEN_ID = UNIFIED_GITHUB.citizen.citizen_id;
 const PROVIDER = Object.freeze({
   token: "provider-loop-token",
-  principal: "principal-github-provider",
-  actor: "citizen-github-provider",
-  endpoint: "endpoint-github-provider",
-  subscription: "subscription-github-provider",
+  principal: UNIFIED_GITHUB.principal.principal_id,
+  actor: UNIFIED_GITHUB.grant.actor_id,
+  endpoint: UNIFIED_GITHUB.grant.endpoint_id,
+  subscription: UNIFIED_GITHUB.grant.subscription_id,
 });
 const ASSISTANT = Object.freeze({
   token: "assistant-loop-token",
@@ -162,6 +290,7 @@ function providerCapability(
 function gatewayConfig(
   capabilities: readonly CapabilityDescriptor[],
   actorType: "system",
+  registrationVersion: number,
 ): AgentGatewayConfig {
   const now = new Date().toISOString();
   return {
@@ -192,7 +321,7 @@ function gatewayConfig(
       capabilities,
       availability: "available",
       requested_lease_seconds: 60,
-      expected_registration_version: 1,
+      expected_registration_version: registrationVersion,
     },
     inbox_refresh_ms: 50,
     max_active_partitions: 8,
@@ -245,21 +374,14 @@ async function within<T>(
 
 describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
   it("uses delivery, runtime claim/accept, and Fabric Result while Daily Assistant remains verifier", async () => {
-    const bundle = parse(await readFile(
-      new URL("../../../examples/config/local-feishu-assistant.bundle.yaml", import.meta.url),
-      "utf8",
-    )) as {
-      applications: {
-        "work-fabric": {
-          agent_runtime_authority: {
-            grants: { "github-provider": { actor_type?: "agent" | "system" } };
-          };
-        };
-      };
-    };
-    const providerActorType =
-      bundle.applications["work-fabric"].agent_runtime_authority.grants["github-provider"].actor_type;
+    const providerActorType = UNIFIED_GITHUB.grant.actor_type;
     expect(providerActorType).toBe("system");
+    expect(PROVIDER).toMatchObject({
+      principal: "principal-github-provider",
+      actor: "actor-github-provider",
+      endpoint: "endpoint-github-provider",
+      subscription: "subscription-github-provider",
+    });
     if (providerActorType !== "system") throw new Error("unified bundle GitHub Provider must be system-typed");
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-github-http-"));
     directories.push(directory);
@@ -308,27 +430,13 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         },
         {
           authentication_evidence: { bearer_token: PROVIDER.token },
-          principal: {
-            principal_id: PROVIDER.principal,
-            tenant_id: TENANT,
-            actor_claims: [{
-              actor_id: PROVIDER.actor,
-              actor_type: providerActorType,
-              endpoint_ids: [PROVIDER.endpoint],
-            }],
-            attributes: {},
-          },
+          principal: UNIFIED_GITHUB.principal,
         },
       ],
       authority_rules: [
         rule(ADMIN, "workfabric.endpoint.provision.v1", PROVIDER.endpoint),
         rule(ADMIN, "workfabric.citizen.provision.v1", CITIZEN_ID),
-        rule(
-          PROVIDER,
-          "workfabric.citizen.session.open.v1",
-          CITIZEN_ID,
-          providerActorType,
-        ),
+        ...UNIFIED_GITHUB.authority_rules,
         rule(ASSISTANT, "workfabric.handoff.offer.v1", null),
         rule(ASSISTANT, "workfabric.citizen.discover.v1", null),
         rule(
@@ -355,12 +463,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
             subscription_id: ASSISTANT.subscription,
           },
           provider: {
-            tenant_id: TENANT,
-            principal_id: PROVIDER.principal,
-            actor_id: PROVIDER.actor,
-            actor_type: providerActorType,
-            endpoint_id: PROVIDER.endpoint,
-            subscription_id: PROVIDER.subscription,
+            ...UNIFIED_GITHUB.grant,
           },
         },
       },
@@ -394,7 +497,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           max_concurrent_handoffs: 1,
         },
         administrative_state: "enabled",
-        registration_version: 1,
+        registration_version: UNIFIED_GITHUB.citizen.registration_version,
       };
       await admin.endpoints.provision(PROVIDER.endpoint, registration);
       await admin.citizens.provision(CITIZEN_ID, {
@@ -409,7 +512,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         allowed_declaration_namespaces: ["github"],
         maximum_risk: "destructive",
         administrative_state: "enabled",
-        registration_version: 1,
+        registration_version: UNIFIED_GITHUB.citizen.registration_version,
       });
 
       const evidenceIdentity = githubProviderEvidenceIdentity("12345", Buffer.alloc(32, 4));
@@ -434,7 +537,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
       citizenRuntime = new GitHubCapabilityCitizenRuntime({
         citizen_id: CITIZEN_ID,
         client_session_id: "github-citizen-http-loop",
-        expected_registration_version: 1,
+        expected_registration_version: UNIFIED_GITHUB.citizen.registration_version,
         principal_id: PROVIDER.principal,
         actor_id: PROVIDER.actor,
         endpoint_id: PROVIDER.endpoint,
@@ -463,7 +566,11 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           queries: provider.queries,
           handoffs: provider.handoffs,
         },
-        gatewayConfig([capability], providerActorType),
+        gatewayConfig(
+          [capability],
+          providerActorType,
+          UNIFIED_GITHUB.citizen.registration_version,
+        ),
       );
       const providerState = new SqliteAgentRuntimeStateStore({
         location: join(directory, "provider-runtime.db"),

@@ -147,15 +147,50 @@ describe("optional local GitHub Provider", () => {
     }
   });
 
+  it("requires the administrative token before the local provision-and-start flow", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "work-fabric-github-admin-token-"));
+    try {
+      const envFile = join(directory, "github.env");
+      const enabledConfig = join(directory, "github-enabled.yaml");
+      await writeFile(enabledConfig, (await readFile(
+        resolve("examples/config/local-feishu-assistant.bundle.yaml"),
+        "utf8",
+      )).replace("enabled: false", "enabled: true"));
+      await writeFile(envFile, [
+        "GITHUB_APP_ID=123",
+        "GITHUB_APP_INSTALLATION_ID=456",
+        "GITHUB_APP_PRIVATE_KEY=private-key",
+        "GITHUB_PROVIDER_ACCESS_TOKEN=provider-token",
+        `WORK_FABRIC_GITHUB_CURSOR_SECRET=${"g".repeat(32)}`,
+      ].join("\n"));
+
+      await expect(prepareLocalGitHubProviderEnvironment({
+        WORK_FABRIC_ENV_FILE: envFile,
+        WORK_FABRIC_CONFIG: enabledConfig,
+        WORK_FABRIC_RESOLVED_CONFIG: join(directory, "resolved.yaml"),
+      })).rejects.toThrow(/WORK_FABRIC_ADMIN_TOKEN/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("provisions and starts only the GitHub Provider", async () => {
     const calls: string[] = [];
+    let startedEnvironment: Readonly<Record<string, string>> | undefined;
     await runLocalGitHubProvider({}, {
-      prepare: async () => ({ WORK_FABRIC_CONFIG: "github.yaml" }),
+      prepare: async () => ({
+        WORK_FABRIC_CONFIG: "github.yaml",
+        WORK_FABRIC_ADMIN_TOKEN: "admin-secret",
+      }),
       provision: async () => { calls.push("provision:github"); },
-      start: async () => { calls.push("start:github"); },
+      start: async (environment) => {
+        calls.push("start:github");
+        startedEnvironment = environment;
+      },
     });
 
     expect(calls).toEqual(["provision:github", "start:github"]);
     expect(calls.join(" ")).not.toContain("feishu");
+    expect(startedEnvironment).toEqual({ WORK_FABRIC_CONFIG: "github.yaml" });
   });
 });

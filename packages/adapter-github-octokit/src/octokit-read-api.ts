@@ -1,5 +1,6 @@
 import {
   GitHubProviderError,
+  GITHUB_REST_API_VERSION,
   type GitHubApiCommitListInput,
   type GitHubApiPage,
   type GitHubApiPageInput,
@@ -476,8 +477,14 @@ function routeRepository(repository: GitHubRepositoryRef): Record<string, string
   return { owner: result.owner, repo: result.name };
 }
 
-function requestOptions(signal: AbortSignal): { readonly request: { readonly signal: AbortSignal } } {
-  return { request: { signal } };
+function requestOptions(signal: AbortSignal): {
+  readonly request: { readonly signal: AbortSignal };
+  readonly headers: { readonly "X-GitHub-Api-Version": typeof GITHUB_REST_API_VERSION };
+} {
+  return {
+    request: { signal },
+    headers: { "X-GitHub-Api-Version": GITHUB_REST_API_VERSION },
+  };
 }
 
 function safeQualifier(value: string): string {

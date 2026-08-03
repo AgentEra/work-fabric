@@ -1,3 +1,5 @@
+export const GITHUB_REST_API_VERSION = "2022-11-28";
+
 export interface GitHubRepositoryRef {
   readonly owner: string;
   readonly name: string;

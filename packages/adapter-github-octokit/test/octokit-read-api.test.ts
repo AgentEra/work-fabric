@@ -234,6 +234,10 @@ describe("OctokitGitHubReadApi", () => {
     expect(recorded.every((item) =>
       (item.parameters.request as { signal?: AbortSignal }).signal === signal
     )).toBe(true);
+    expect(recorded.every((item) =>
+      (item.parameters.headers as Record<string, string> | undefined)?.["X-GitHub-Api-Version"]
+        === "2022-11-28"
+    )).toBe(true);
     expect(results).toMatchObject([
       {
         app_id: "42",

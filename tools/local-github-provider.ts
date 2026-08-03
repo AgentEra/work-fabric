@@ -11,6 +11,7 @@ export const LOCAL_GITHUB_REQUIRED_ENVIRONMENT = Object.freeze([
   "GITHUB_APP_PRIVATE_KEY",
   "GITHUB_PROVIDER_ACCESS_TOKEN",
   "WORK_FABRIC_GITHUB_CURSOR_SECRET",
+  "WORK_FABRIC_ADMIN_TOKEN",
 ] as const);
 
 export async function prepareLocalGitHubProviderEnvironment(
@@ -62,7 +63,11 @@ export async function runLocalGitHubProvider(
 ): Promise<void> {
   const environment = await ports.prepare(input);
   await ports.provision(environment);
-  await ports.start(environment);
+  const {
+    WORK_FABRIC_ADMIN_TOKEN: _administrativeToken,
+    ...providerEnvironment
+  } = environment;
+  await ports.start(providerEnvironment);
 }
 
 export async function startLocalGitHubProvider(

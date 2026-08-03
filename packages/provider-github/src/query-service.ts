@@ -187,6 +187,7 @@ function pageResult<T>(
   options: GitHubQueryServiceOptions,
   parsed: GitHubParsedCapabilityInput,
   context: QueryContext,
+  currentPage = parsed.page,
 ): CapabilityExecutionResult {
   if (!Array.isArray(page.items) || page.items.length > parsed.page_size) {
     invalidResponse();
@@ -206,7 +207,7 @@ function pageResult<T>(
       evidence: evidence(options, parsed, context, true),
     });
   }
-  const next = nextPage(page.next_cursor, parsed.page);
+  const next = nextPage(page.next_cursor, currentPage);
   const opaque = options.cursor.encode({
     version: 1,
     scope_hash: parsed.scope_hash,
@@ -223,7 +224,10 @@ async function authorizedRepositoryPage(
   options: GitHubQueryServiceOptions,
   parsed: GitHubParsedCapabilityInput,
   signal: AbortSignal,
-): Promise<GitHubApiPage<import("./contracts.js").GitHubRepositoryRecord>> {
+): Promise<{
+  readonly page: GitHubApiPage<import("./contracts.js").GitHubRepositoryRecord>;
+  readonly current_page: number;
+}> {
   let input = apiInput(parsed);
   for (let scanned = 0; scanned < 10_000; scanned += 1) {
     const page = await options.api.listRepositories(input, signal);
@@ -235,7 +239,10 @@ async function authorizedRepositoryPage(
       options.policy.isRepositoryAuthorized(item.repository)
     );
     if (items.length > 0 || page.next_cursor === undefined) {
-      return { items, ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }) };
+      return {
+        page: { items, ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }) },
+        current_page: Number(input.cursor ?? "1"),
+      };
     }
     const next = nextPage(page.next_cursor, Number(input.cursor ?? "1"));
     input = { page_size: parsed.page_size, cursor: String(next) };
@@ -570,12 +577,20 @@ export class GitHubQueryService {
         );
         break;
       case "github.repository.list":
-        result = pageResult(
-          await authorizedRepositoryPage(this.options, parsed, context.signal),
-          this.options,
-          parsed,
-          context,
-        );
+        {
+          const repositoryPage = await authorizedRepositoryPage(
+            this.options,
+            parsed,
+            context.signal,
+          );
+          result = pageResult(
+            repositoryPage.page,
+            this.options,
+            parsed,
+            context,
+            repositoryPage.current_page,
+          );
+        }
         break;
       case "github.repository.get":
         result = singleResult(

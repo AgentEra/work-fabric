@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  GITHUB_REST_API_VERSION,
   ManagedGitHubProviderComposition,
   installationIdHash,
 } from "../src/composition.js";
+import { GITHUB_REST_API_VERSION } from "@work-fabric/provider-github";
 
 describe("ManagedGitHubProviderComposition", () => {
   it("uses a deployment-secret, domain-separated installation identifier for capability evidence", () => {
