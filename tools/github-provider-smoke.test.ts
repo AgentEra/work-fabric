@@ -114,6 +114,7 @@ async function smokeModule(): Promise<SmokeModule> {
 function fakeQuery(overrides: {
   readonly identity_url?: string;
   readonly repository_url?: string;
+  readonly repository_items?: readonly GitHubRepositoryRecord[];
   readonly pull_request_url?: string;
 } = {}) {
   const calls: Array<{ readonly capability_id: string; readonly input: unknown }> = [];
@@ -145,7 +146,7 @@ function fakeQuery(overrides: {
             outcome: "succeeded" as const,
             data: {
               state: "complete",
-              items: [{
+              items: overrides.repository_items ?? [{
                 ...repository,
                 url: overrides.repository_url ?? repository.url,
               }],
@@ -179,37 +180,71 @@ const enabledEnvironment = {
   WORK_FABRIC_GITHUB_SMOKE_ALLOWED_OWNER: "AgentEra",
 } as const;
 
+function fakePreflight(overrides: {
+  readonly allowed_owners?: readonly string[];
+  readonly allowed_repositories?: readonly {
+    readonly owner: string;
+    readonly name: string;
+  }[];
+} = {}) {
+  return {
+    tenant_id: "tenant-test",
+    authentication: {
+      mode: "github_app" as const,
+      credential_ref: "github-primary",
+      app_id_environment: "GITHUB_APP_ID",
+      installation_id_environment: "GITHUB_APP_INSTALLATION_ID",
+      private_key_environment: "GITHUB_APP_PRIVATE_KEY",
+    },
+    cursor_environment: "WORK_FABRIC_GITHUB_CURSOR_SECRET",
+    required_environment_names: [],
+    policy: {
+      allowed_owners: overrides.allowed_owners ?? ["AgentEra"],
+      allowed_repositories: overrides.allowed_repositories ?? [],
+      maximum_page_size: 100,
+      maximum_aggregate_repositories: 100,
+    },
+  };
+}
+
 describe("GitHub Provider live smoke", () => {
   it("refuses before loading credentials or creating a network client without opt-in", async () => {
     const { runGitHubProviderSmoke } = await smokeModule();
-    let loads = 0;
+    let preflightLoads = 0;
+    let runtimeLoads = 0;
 
     await expect(runGitHubProviderSmoke({}, {
       declarations: githubReadCapabilityDeclarations,
-      load: async () => {
-        loads += 1;
+      preflight: async () => {
+        preflightLoads += 1;
+        return fakePreflight();
+      },
+      loadRuntime: async () => {
+        runtimeLoads += 1;
         throw new Error("must not load");
       },
       write: () => undefined,
     })).rejects.toThrow("WORK_FABRIC_GITHUB_LIVE_SMOKE=true");
-    expect(loads).toBe(0);
+    expect(preflightLoads).toBe(1);
+    expect(runtimeLoads).toBe(0);
   });
 
   it("requires an explicit allowed owner before loading credentials", async () => {
     const { runGitHubProviderSmoke } = await smokeModule();
-    let loads = 0;
+    let runtimeLoads = 0;
 
     await expect(runGitHubProviderSmoke({
       WORK_FABRIC_GITHUB_LIVE_SMOKE: "true",
     }, {
       declarations: githubReadCapabilityDeclarations,
-      load: async () => {
-        loads += 1;
+      preflight: async () => fakePreflight(),
+      loadRuntime: async () => {
+        runtimeLoads += 1;
         throw new Error("must not load");
       },
       write: () => undefined,
     })).rejects.toThrow("WORK_FABRIC_GITHUB_SMOKE_ALLOWED_OWNER is required");
-    expect(loads).toBe(0);
+    expect(runtimeLoads).toBe(0);
   });
 
   it("queries only identity, repositories, and owner-scoped open pull requests", async () => {
@@ -219,12 +254,11 @@ describe("GitHub Provider live smoke", () => {
 
     await runGitHubProviderSmoke(enabledEnvironment, {
       declarations: githubReadCapabilityDeclarations,
-      load: async () => ({
+      preflight: async () => fakePreflight(),
+      loadRuntime: async () => ({
         query: fake.query,
         tenant_id: "tenant-test",
         installation_id_hash: evidence.installation_id_hash,
-        allowed_owners: ["AgentEra"],
-        allowed_repositories: [],
       }),
       write: (value) => output.push(value),
     });
@@ -254,7 +288,7 @@ describe("GitHub Provider live smoke", () => {
 
   it("rejects a write declaration before loading credentials", async () => {
     const { runGitHubProviderSmoke } = await smokeModule();
-    let loads = 0;
+    let runtimeLoads = 0;
     const first = githubReadCapabilityDeclarations()[0]!;
 
     await expect(runGitHubProviderSmoke(enabledEnvironment, {
@@ -262,31 +296,80 @@ describe("GitHub Provider live smoke", () => {
         ...githubReadCapabilityDeclarations(),
         { ...first, declaration_id: "github.issue.create" },
       ],
-      load: async () => {
-        loads += 1;
+      preflight: async () => fakePreflight(),
+      loadRuntime: async () => {
+        runtimeLoads += 1;
         throw new Error("must not load");
       },
       write: () => undefined,
     })).rejects.toThrow("write-capable");
-    expect(loads).toBe(0);
+    expect(runtimeLoads).toBe(0);
   });
 
   it("rejects an explicit owner outside the configured Provider policy", async () => {
     const { runGitHubProviderSmoke } = await smokeModule();
     const fake = fakeQuery();
+    let runtimeLoads = 0;
 
     await expect(runGitHubProviderSmoke(enabledEnvironment, {
       declarations: githubReadCapabilityDeclarations,
-      load: async () => ({
+      preflight: async () => fakePreflight({
+        allowed_owners: ["DifferentOwner"],
+      }),
+      loadRuntime: async () => {
+        runtimeLoads += 1;
+        return {
+          query: fake.query,
+          tenant_id: "tenant-test",
+          installation_id_hash: evidence.installation_id_hash,
+        };
+      },
+      write: () => undefined,
+    })).rejects.toThrow("outside the Provider policy");
+    expect(runtimeLoads).toBe(0);
+    expect(fake.calls).toEqual([]);
+  });
+
+  it("rejects every cross-owner repository-list attestation", async () => {
+    const { runGitHubProviderSmoke } = await smokeModule();
+    const fake = fakeQuery({
+      repository_items: [{
+        ...repository,
+        repository: { owner: "DifferentOwner", name: "work-fabric" },
+        url: "https://github.com/DifferentOwner/work-fabric",
+      }],
+    });
+    const output: string[] = [];
+
+    await expect(runGitHubProviderSmoke(enabledEnvironment, {
+      declarations: githubReadCapabilityDeclarations,
+      preflight: async () => fakePreflight(),
+      loadRuntime: async () => ({
         query: fake.query,
         tenant_id: "tenant-test",
         installation_id_hash: evidence.installation_id_hash,
-        allowed_owners: ["DifferentOwner"],
-        allowed_repositories: [],
       }),
-      write: () => undefined,
-    })).rejects.toThrow("outside the Provider policy");
-    expect(fake.calls).toEqual([]);
+      write: (value) => output.push(value),
+    })).rejects.toThrow("outside the selected owner");
+    expect(output).toEqual([]);
+  });
+
+  it("rejects duplicate repository-list attestations", async () => {
+    const { runGitHubProviderSmoke } = await smokeModule();
+    const fake = fakeQuery({ repository_items: [repository, repository] });
+    const output: string[] = [];
+
+    await expect(runGitHubProviderSmoke(enabledEnvironment, {
+      declarations: githubReadCapabilityDeclarations,
+      preflight: async () => fakePreflight(),
+      loadRuntime: async () => ({
+        query: fake.query,
+        tenant_id: "tenant-test",
+        installation_id_hash: evidence.installation_id_hash,
+      }),
+      write: (value) => output.push(value),
+    })).rejects.toThrow("duplicate repository");
+    expect(output).toEqual([]);
   });
 
   it("rejects result URLs outside a configured repository ceiling", async () => {
@@ -296,12 +379,13 @@ describe("GitHub Provider live smoke", () => {
 
     await expect(runGitHubProviderSmoke(enabledEnvironment, {
       declarations: githubReadCapabilityDeclarations,
-      load: async () => ({
+      preflight: async () => fakePreflight({
+        allowed_repositories: [{ owner: "AgentEra", name: "approved-only" }],
+      }),
+      loadRuntime: async () => ({
         query: fake.query,
         tenant_id: "tenant-test",
         installation_id_hash: evidence.installation_id_hash,
-        allowed_owners: ["AgentEra"],
-        allowed_repositories: [{ owner: "AgentEra", name: "approved-only" }],
       }),
       write: (value) => output.push(value),
     })).rejects.toThrow("outside the Provider repository policy");
@@ -317,12 +401,11 @@ describe("GitHub Provider live smoke", () => {
 
     await expect(runGitHubProviderSmoke(enabledEnvironment, {
       declarations: githubReadCapabilityDeclarations,
-      load: async () => ({
+      preflight: async () => fakePreflight(),
+      loadRuntime: async () => ({
         query: fake.query,
         tenant_id: "tenant-test",
         installation_id_hash: evidence.installation_id_hash,
-        allowed_owners: ["AgentEra"],
-        allowed_repositories: [],
       }),
       write: (value) => output.push(value),
     })).rejects.toThrow("secret-shaped");

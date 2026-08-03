@@ -10,13 +10,17 @@ import {
   GitHubQueryService,
   HmacGitHubCursorCodec,
   githubReadCapabilityDeclarations,
+  type GitHubProviderPolicy,
 } from "@work-fabric/provider-github";
 import type {
   CitizenDeclaration,
   CitizenJsonObject,
 } from "@work-fabric/network-citizen-spi";
 
-import { loadGitHubProviderConfiguration } from "../examples/github-capability-provider/src/configuration.js";
+import {
+  loadGitHubProviderConfiguration,
+  type GitHubProviderAuthentication,
+} from "../examples/github-capability-provider/src/configuration.js";
 import { EnvironmentGitHubCredentialProvider } from "../examples/github-capability-provider/src/credentials.js";
 
 type GitHubSmokeCapabilityId =
@@ -40,17 +44,24 @@ export interface GitHubSmokeRuntime {
   readonly query: GitHubSmokeQueryPort;
   readonly tenant_id: string;
   readonly installation_id_hash: string;
-  readonly allowed_owners: readonly string[];
-  readonly allowed_repositories: readonly {
-    readonly owner: string;
-    readonly name: string;
-  }[];
+}
+
+export interface GitHubSmokePreflight {
+  readonly tenant_id: string;
+  readonly authentication: GitHubProviderAuthentication;
+  readonly cursor_environment: string;
+  readonly required_environment_names: readonly string[];
+  readonly policy: GitHubProviderPolicy;
 }
 
 export interface GitHubProviderSmokeDependencies {
   readonly declarations: () => readonly CitizenDeclaration[];
-  readonly load: (
+  readonly preflight: (
     environment: Readonly<Record<string, string | undefined>>,
+  ) => Promise<GitHubSmokePreflight>;
+  readonly loadRuntime: (
+    environment: Readonly<Record<string, string | undefined>>,
+    preflight: GitHubSmokePreflight,
   ) => Promise<GitHubSmokeRuntime>;
   readonly write: (value: string) => void;
 }
@@ -156,7 +167,7 @@ function equal(left: string, right: string): boolean {
 function allowedRepository(
   owner: string,
   name: string,
-  ceiling: GitHubSmokeRuntime["allowed_repositories"],
+  ceiling: GitHubProviderPolicy["allowed_repositories"],
 ): boolean {
   return ceiling.length === 0 || ceiling.some((repository) =>
     equal(repository.owner, owner) && equal(repository.name, name)
@@ -166,12 +177,12 @@ function allowedRepository(
 function repositoryRecord(
   value: unknown,
   owner: string,
-  ceiling: GitHubSmokeRuntime["allowed_repositories"],
+  ceiling: GitHubProviderPolicy["allowed_repositories"],
 ): {
   readonly owner: string;
   readonly name: string;
   readonly url: string;
-} | null {
+} {
   const item = record(value, "GitHub smoke received an invalid repository result");
   const repository = record(
     item.repository,
@@ -179,7 +190,9 @@ function repositoryRecord(
   );
   const resultOwner = text(repository.owner, "GitHub smoke received an invalid repository owner");
   const name = text(repository.name, "GitHub smoke received an invalid repository name");
-  if (!equal(resultOwner, owner)) return null;
+  if (!equal(resultOwner, owner)) {
+    throw new Error("GitHub smoke repository result is outside the selected owner");
+  }
   if (!allowedRepository(resultOwner, name, ceiling)) {
     throw new Error("GitHub smoke result is outside the Provider repository policy");
   }
@@ -195,7 +208,7 @@ function repositoryRecord(
 function pullRequestUrl(
   value: unknown,
   owner: string,
-  ceiling: GitHubSmokeRuntime["allowed_repositories"],
+  ceiling: GitHubProviderPolicy["allowed_repositories"],
 ): string {
   const item = record(value, "GitHub smoke received an invalid pull request result");
   const repository = record(
@@ -266,7 +279,33 @@ function requireEnvironment(
 
 async function loadLiveRuntime(
   environment: Readonly<Record<string, string | undefined>>,
+  preflight: GitHubSmokePreflight,
 ): Promise<GitHubSmokeRuntime> {
+  requireEnvironment(environment, preflight.required_environment_names);
+  const credentials = await new EnvironmentGitHubCredentialProvider({
+    ...preflight.authentication,
+    environment,
+  }).load();
+  const api = new OctokitGitHubReadApi(createGitHubAppOctokit(credentials));
+  const query = new GitHubQueryService({
+    api,
+    policy: new GitHubPolicyEvaluator(preflight.policy),
+    cursor: new HmacGitHubCursorCodec({
+      key: Buffer.from(environment[preflight.cursor_environment]!, "utf8"),
+    }),
+    api_version: "github-v3",
+  });
+  return {
+    query,
+    tenant_id: preflight.tenant_id,
+    installation_id_hash: `sha256:${createHash("sha256")
+      .update(credentials.installation_id, "utf8").digest("hex")}`,
+  };
+}
+
+async function loadPreflight(
+  environment: Readonly<Record<string, string | undefined>>,
+): Promise<GitHubSmokePreflight> {
   const loaded = await loadGitHubProviderConfiguration({ environment });
   const authentication = loaded.provider.authentication;
   const accessTokenEnvironment = environmentName(
@@ -277,39 +316,25 @@ async function loadLiveRuntime(
     loaded.provider.cursor_signing_key,
     "provider.cursor_signing_key",
   );
-  requireEnvironment(environment, [
-    authentication.app_id_environment,
-    authentication.installation_id_environment,
-    authentication.private_key_environment,
-    accessTokenEnvironment,
-    cursorEnvironment,
-  ]);
-  const credentials = await new EnvironmentGitHubCredentialProvider({
-    ...authentication,
-    environment,
-  }).load();
-  const api = new OctokitGitHubReadApi(createGitHubAppOctokit(credentials));
-  const query = new GitHubQueryService({
-    api,
-    policy: new GitHubPolicyEvaluator(loaded.provider.policy),
-    cursor: new HmacGitHubCursorCodec({
-      key: Buffer.from(environment[cursorEnvironment]!, "utf8"),
-    }),
-    api_version: "github-v3",
-  });
   return {
-    query,
     tenant_id: loaded.service.work_fabric.tenant_id,
-    installation_id_hash: `sha256:${createHash("sha256")
-      .update(credentials.installation_id, "utf8").digest("hex")}`,
-    allowed_owners: loaded.provider.policy.allowed_owners,
-    allowed_repositories: loaded.provider.policy.allowed_repositories,
+    authentication,
+    cursor_environment: cursorEnvironment,
+    required_environment_names: [
+      authentication.app_id_environment,
+      authentication.installation_id_environment,
+      authentication.private_key_environment,
+      accessTokenEnvironment,
+      cursorEnvironment,
+    ],
+    policy: loaded.provider.policy,
   };
 }
 
 const liveDependencies: GitHubProviderSmokeDependencies = {
   declarations: githubReadCapabilityDeclarations,
-  load: loadLiveRuntime,
+  preflight: loadPreflight,
+  loadRuntime: loadLiveRuntime,
   write: (value) => process.stdout.write(value),
 };
 
@@ -318,15 +343,16 @@ export async function runGitHubProviderSmoke(
   environment: Readonly<Record<string, string | undefined>> = process.env,
   dependencies: GitHubProviderSmokeDependencies = liveDependencies,
 ): Promise<void> {
+  const preflight = await dependencies.preflight(environment);
   if (environment.WORK_FABRIC_GITHUB_LIVE_SMOKE !== "true") {
     throw new Error("GitHub smoke requires WORK_FABRIC_GITHUB_LIVE_SMOKE=true");
   }
   const owner = explicitOwner(environment);
   assertReadOnlyDeclarations(dependencies.declarations());
-  const runtime = await dependencies.load(environment);
-  if (!runtime.allowed_owners.some((allowed) => equal(allowed, owner))) {
+  if (!preflight.policy.allowed_owners.some((allowed) => equal(allowed, owner))) {
     throw new Error("GitHub smoke owner is outside the Provider policy");
   }
+  const runtime = await dependencies.loadRuntime(environment, preflight);
   const context = {
     tenant_id: runtime.tenant_id,
     installation_id_hash: runtime.installation_id_hash,
@@ -347,8 +373,17 @@ export async function runGitHubProviderSmoke(
     "github.repository.list",
   );
   const repositories = pageItems(repositoryData, "github.repository.list")
-    .map((item) => repositoryRecord(item, owner, runtime.allowed_repositories))
-    .filter((item): item is NonNullable<typeof item> => item !== null);
+    .map((item) => repositoryRecord(
+      item,
+      owner,
+      preflight.policy.allowed_repositories,
+    ));
+  const repositoryIdentities = new Set(
+    repositories.map((item) => `${item.owner.toLowerCase()}/${item.name.toLowerCase()}`),
+  );
+  if (repositoryIdentities.size !== repositories.length) {
+    throw new Error("GitHub smoke received a duplicate repository result");
+  }
   const pullRequestData = succeededData(
     await runtime.query.execute("github.pull_request.list", {
       target: { owner },
@@ -358,7 +393,9 @@ export async function runGitHubProviderSmoke(
     "github.pull_request.list",
   );
   const pullRequestUrls = pageItems(pullRequestData, "github.pull_request.list")
-    .map((item) => pullRequestUrl(item, owner, runtime.allowed_repositories));
+    .map((item) =>
+      pullRequestUrl(item, owner, preflight.policy.allowed_repositories)
+    );
   const output = JSON.stringify({
     counts: {
       identity: 1,
