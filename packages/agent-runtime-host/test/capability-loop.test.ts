@@ -158,6 +158,17 @@ describe("runCapabilityContinuationLoop", () => {
           outcome: "succeeded",
           data: { document_id: "doc-1" },
         },
+        host_receipt: {
+          operation_id: "invocation-1",
+          original_handoff_id: task.handoff_id,
+          auxiliary_handoff_id: "handoff-auxiliary-1",
+          selected_candidate: {
+            citizen_id: "citizen-feishu",
+            endpoint_id: "endpoint-feishu",
+          },
+          started_at: "2026-07-27T10:00:00.000Z",
+          received_at: "2026-07-27T10:00:00.000Z",
+        },
       }],
     });
   });

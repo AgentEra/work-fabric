@@ -106,6 +106,17 @@ export type RuntimeDriverTurn =
 export interface RuntimeCapabilityContinuation {
   readonly request: RuntimeCapabilityRequest;
   readonly result: CapabilityInvocationResult;
+  /** Host-owned invocation binding and timing; never supplied by the model. */
+  readonly host_receipt?: RuntimeCapabilityHostReceipt;
+}
+
+export interface RuntimeCapabilityHostReceipt {
+  readonly operation_id: string;
+  readonly original_handoff_id: string;
+  readonly auxiliary_handoff_id: string | null;
+  readonly selected_candidate: CapabilityCandidate | null;
+  readonly started_at: string;
+  readonly received_at: string;
 }
 
 export interface RuntimeCapabilityTranscript {
@@ -589,9 +600,11 @@ export function validateRuntimeDriverTurn(
 export function validateRuntimeCapabilityContinuation(
   value: unknown,
 ): Readonly<RuntimeCapabilityContinuation> {
+  const hasReceipt = value !== null && typeof value === "object" &&
+    !Array.isArray(value) && Object.hasOwn(value, "host_receipt");
   const source = exactObject(
     value,
-    ["request", "result"],
+    hasReceipt ? ["request", "result", "host_receipt"] : ["request", "result"],
     "Runtime capability continuation",
   );
   const request = runtimeRequest(source.request);
@@ -599,7 +612,78 @@ export function validateRuntimeCapabilityContinuation(
   if (request.invocation_id !== result.invocation_id) {
     throw new TypeError("continuation invocation_id does not match");
   }
-  return deepFreeze({ request, result });
+  if (!hasReceipt) return deepFreeze({ request, result });
+  const receiptSource = exactObject(
+    source.host_receipt,
+    [
+      "operation_id",
+      "original_handoff_id",
+      "auxiliary_handoff_id",
+      "selected_candidate",
+      "started_at",
+      "received_at",
+    ],
+    "Runtime capability host receipt",
+  );
+  const operationId = opaqueId(receiptSource.operation_id, "operation_id");
+  if (operationId !== request.invocation_id) {
+    throw new TypeError("host receipt operation_id does not match invocation_id");
+  }
+  const auxiliaryHandoffId = receiptSource.auxiliary_handoff_id === null
+    ? null
+    : opaqueId(receiptSource.auxiliary_handoff_id, "auxiliary_handoff_id");
+  if (auxiliaryHandoffId !== result.auxiliary_handoff_id) {
+    throw new TypeError("host receipt auxiliary_handoff_id does not match result");
+  }
+  const selectedCandidate = receiptSource.selected_candidate === null
+    ? null
+    : validateCapabilityCandidate(receiptSource.selected_candidate);
+  if (result.outcome === "succeeded") {
+    if (
+      selectedCandidate === null ||
+      selectedCandidate.citizen_id !== result.candidate.citizen_id ||
+      selectedCandidate.endpoint_id !== result.candidate.endpoint_id ||
+      selectedCandidate.capability_id !== result.candidate.capability_id ||
+      selectedCandidate.capability_version !== result.candidate.capability_version ||
+      selectedCandidate.contract_digest !== result.candidate.contract_digest
+    ) {
+      throw new TypeError("host receipt selected_candidate does not match result");
+    }
+  }
+  if (
+    selectedCandidate !== null &&
+    selectedCandidate.capability_id !== request.capability_id
+  ) {
+    throw new TypeError("host receipt selected_candidate does not match request");
+  }
+  const startedAt = string(receiptSource.started_at, "started_at", 64);
+  const receivedAt = string(receiptSource.received_at, "received_at", 64);
+  const startedAtMs = Date.parse(startedAt);
+  const receivedAtMs = Date.parse(receivedAt);
+  if (
+    !RFC3339.test(startedAt) ||
+    !RFC3339.test(receivedAt) ||
+    !Number.isFinite(startedAtMs) ||
+    !Number.isFinite(receivedAtMs) ||
+    receivedAtMs < startedAtMs
+  ) {
+    throw new TypeError("host receipt received_at must not precede started_at");
+  }
+  return deepFreeze({
+    request,
+    result,
+    host_receipt: {
+      operation_id: operationId,
+      original_handoff_id: opaqueId(
+        receiptSource.original_handoff_id,
+        "original_handoff_id",
+      ),
+      auxiliary_handoff_id: auxiliaryHandoffId,
+      selected_candidate: selectedCandidate,
+      started_at: startedAt,
+      received_at: receivedAt,
+    },
+  });
 }
 
 const SECRET_FIELD =

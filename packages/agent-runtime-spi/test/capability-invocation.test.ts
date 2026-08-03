@@ -100,6 +100,60 @@ describe("Agent capability invocation contracts", () => {
     expect(Object.isFrozen(continuation)).toBe(true);
   });
 
+  it("validates Host-owned invocation lineage and rejects correlation changes", () => {
+    const result = validateCapabilityInvocationResult({
+      outcome: "succeeded",
+      invocation_id: request.invocation_id,
+      auxiliary_handoff_id: "handoff-capability-01",
+      candidate,
+      data: { document_token: "docx-token" },
+      artifacts: [],
+    });
+    const entry = {
+      request: {
+        invocation_id: request.invocation_id,
+        capability_id: request.capability_id,
+        version_constraint: request.version_constraint,
+        input: request.input,
+        reason: request.reason,
+      },
+      result,
+      host_receipt: {
+        operation_id: request.invocation_id,
+        original_handoff_id: request.original_handoff_id,
+        auxiliary_handoff_id: "handoff-capability-01",
+        selected_candidate: candidate,
+        started_at: "2026-07-27T00:00:00.000Z",
+        received_at: "2026-07-27T00:00:01.000Z",
+      },
+    };
+
+    expect(validateRuntimeCapabilityContinuation(entry)).toMatchObject({
+      host_receipt: { selected_candidate: candidate },
+    });
+    expect(() => validateRuntimeCapabilityContinuation({
+      ...entry,
+      host_receipt: {
+        ...entry.host_receipt,
+        auxiliary_handoff_id: "handoff-other",
+      },
+    })).toThrow(/auxiliary_handoff_id.*match/i);
+    expect(() => validateRuntimeCapabilityContinuation({
+      ...entry,
+      host_receipt: {
+        ...entry.host_receipt,
+        selected_candidate: { ...candidate, endpoint_id: "endpoint-other" },
+      },
+    })).toThrow(/selected_candidate.*match/i);
+    expect(() => validateRuntimeCapabilityContinuation({
+      ...entry,
+      host_receipt: {
+        ...entry.host_receipt,
+        started_at: "2026-07-27T00:00:02.000Z",
+      },
+    })).toThrow(/received_at.*started_at/i);
+  });
+
   it("validates a bounded, ordered capability transcript", () => {
     const entries = [1, 2].map((index) => ({
       request: {

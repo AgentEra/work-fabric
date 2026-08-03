@@ -4,6 +4,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Literal, Mapping, TextIO, TypeAlias
 
 PROTOCOL = "workfabric.agent-runtime/1"
@@ -20,6 +21,7 @@ SECRET_FIELD = re.compile(
 )
 CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -260,10 +262,65 @@ def _validate_capability_result(value: object) -> dict[str, JsonValue]:
     return _json_object(result, "continuation.result")
 
 
-def _validate_continuation(value: object) -> dict[str, JsonValue]:
+def _validate_host_receipt(
+    value: object,
+    request: dict[str, JsonValue],
+    result: dict[str, JsonValue],
+    handoff_id: str,
+) -> dict[str, JsonValue]:
+    receipt = _exact_object(
+        value,
+        (
+            "operation_id", "original_handoff_id", "auxiliary_handoff_id",
+            "selected_candidate", "started_at", "received_at",
+        ),
+        "continuation.host_receipt",
+    )
+    for field in ("operation_id", "original_handoff_id", "started_at", "received_at"):
+        _string(receipt[field], f"continuation.host_receipt.{field}", 256)
+    if receipt["operation_id"] != request["invocation_id"]:
+        _fail("host receipt operation_id does not match invocation_id")
+    if receipt["original_handoff_id"] != handoff_id:
+        _fail("host receipt original_handoff_id does not match task")
+    if receipt["auxiliary_handoff_id"] != result["auxiliary_handoff_id"]:
+        _fail("host receipt auxiliary_handoff_id does not match result")
+    selected = receipt["selected_candidate"]
+    if selected is not None:
+        selected = _exact_object(
+            selected,
+            (
+                "citizen_id", "endpoint_id", "capability_id",
+                "capability_version", "contract_digest",
+            ),
+            "continuation.host_receipt.selected_candidate",
+        )
+        for field in selected:
+            _string(selected[field], f"continuation.host_receipt.selected_candidate.{field}", 256)
+        if not DIGEST.fullmatch(str(selected["contract_digest"])):
+            _fail("host receipt selected_candidate contract_digest is invalid")
+        if selected["capability_id"] != request["capability_id"]:
+            _fail("host receipt selected_candidate does not match request")
+    if result["outcome"] == "succeeded" and selected != result["candidate"]:
+        _fail("host receipt selected_candidate does not match result")
+    try:
+        started = datetime.fromisoformat(str(receipt["started_at"]).replace("Z", "+00:00"))
+        received = datetime.fromisoformat(str(receipt["received_at"]).replace("Z", "+00:00"))
+    except ValueError:
+        _fail("host receipt timestamps are invalid")
+    if started.tzinfo is None or received.tzinfo is None or received < started:
+        _fail("host receipt received_at must not precede started_at")
+    return _json_object({**receipt, "selected_candidate": selected}, "continuation.host_receipt")
+
+
+def _validate_continuation(value: object, handoff_id: str) -> dict[str, JsonValue]:
+    fields = (
+        ("request", "result", "host_receipt")
+        if isinstance(value, dict) and "host_receipt" in value
+        else ("request", "result")
+    )
     continuation = _exact_object(
         value,
-        ("request", "result"),
+        fields,
         "continuation",
     )
     request = _validate_capability_request(continuation["request"])
@@ -276,12 +333,26 @@ def _validate_continuation(value: object) -> dict[str, JsonValue]:
         != request["capability_id"]
     ):
         _fail("continuation candidate capability_id does not match")
-    safe = {"request": request, "result": result}
+    receipt = (
+        None
+        if "host_receipt" not in continuation
+        else _validate_host_receipt(
+            continuation["host_receipt"], request, result, handoff_id
+        )
+    )
+    safe = {
+        "request": request,
+        "result": result,
+        **({} if receipt is None else {"host_receipt": receipt}),
+    }
     _reject_secret_fields(safe)
     return safe
 
 
-def _validate_capability_transcript(value: object) -> dict[str, JsonValue]:
+def _validate_capability_transcript(
+    value: object,
+    handoff_id: str,
+) -> dict[str, JsonValue]:
     transcript = _exact_object(value, ("entries",), "capability_transcript")
     entries = transcript["entries"]
     if not isinstance(entries, list) or not 1 <= len(entries) <= 8:
@@ -289,7 +360,7 @@ def _validate_capability_transcript(value: object) -> dict[str, JsonValue]:
     safe_entries: list[JsonValue] = []
     invocation_ids: set[str] = set()
     for entry in entries:
-        safe = _validate_continuation(entry)
+        safe = _validate_continuation(entry, handoff_id)
         invocation_id = safe["request"]["invocation_id"]  # type: ignore[index]
         if not isinstance(invocation_id, str) or invocation_id in invocation_ids:
             _fail("capability_transcript contains a duplicate invocation")
@@ -413,7 +484,8 @@ def parse_request(value: object) -> WorkerRequest:
             None
             if protocol == PROTOCOL or request["capability_transcript"] is None
             else _validate_capability_transcript(
-                request["capability_transcript"]
+                request["capability_transcript"],
+                str(task["handoff_id"]),
             )
         ),
         provider_type="OpenAICompatible",

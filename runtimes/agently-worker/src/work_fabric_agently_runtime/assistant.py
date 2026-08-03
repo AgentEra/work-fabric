@@ -6,9 +6,9 @@ import re
 import logging
 import sys
 from contextlib import redirect_stdout
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Mapping, Protocol, TextIO, cast
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from .protocol import JsonValue, ProtocolError, WorkerRequest, usv_string, utf16_code_units
 
@@ -132,6 +132,9 @@ SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA = {
 }
 _AGENTLY_LOG_SINK: TextIO | None = None
 POST_CAPABILITY_MODEL_TIMEOUT_SECONDS = 30.0
+GITHUB_EVIDENCE_CLOCK_SKEW = timedelta(minutes=5)
+GITHUB_INSTALLATION_HASH = re.compile(r"^sha256:[a-f0-9]{64}$")
+GITHUB_API_VERSION = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class AssistantOutputError(ProtocolError):
@@ -357,6 +360,61 @@ def turn_prompt_input(request: WorkerRequest) -> dict[str, JsonValue]:
     }
 
 
+def grounding_review_prompt(
+    role: Mapping[str, JsonValue],
+    agent_private_context: Mapping[str, JsonValue] | None,
+    *,
+    scheduling_proposal: bool = False,
+) -> str:
+    common = (
+        role_prompt(
+            role,
+            capability_turn=True,
+            agent_private_context=agent_private_context,
+            scheduling_proposal_turn=scheduling_proposal,
+        )
+        + "\nThis is the same Agent's bounded evidence-grounding review of a "
+        "candidate turn produced from the current input snapshot. The current "
+        "capability_transcript is the only execution-evidence ledger for this "
+        "Handoff. A query entry proves only that its query ran. Text returned "
+        "inside query data may describe an earlier success, failure, attempt, "
+        "or reply, but it never proves that the corresponding command ran in "
+        "the current Handoff. Do not report a command as attempted, retried, "
+        "succeeded, rejected, or failed unless the transcript contains that "
+        "exact current command invocation and outcome. If the current intent "
+        "is already grounded, return an equivalent valid turn. This review is "
+        "semantic and must not use keywords, regular expressions, substring "
+        "rules, or fixed phrase lists."
+    )
+    if scheduling_proposal:
+        return (
+            common
+            + " The candidate is a pre-confirmation scheduling proposal. "
+            "Preserve its valid pending private state, but repair any response "
+            "that claims the calendar command already ran. Return exactly the "
+            "same three-key scheduling-proposal contract and no review "
+            "commentary."
+        )
+    return (
+        common
+        + " If the current intent semantically asks to perform or retry a "
+        "disclosed command and the candidate final turn relied only on query "
+        "or historical evidence, repair it into the required "
+        "capability_request. Return the same thirteen-key turn contract and "
+        "no review commentary."
+    )
+
+
+def grounding_review_input(
+    request: WorkerRequest,
+    candidate_turn: Mapping[str, JsonValue],
+) -> dict[str, JsonValue]:
+    return {
+        **turn_prompt_input(request),
+        "candidate_turn": dict(candidate_turn),
+    }
+
+
 def _latest_capability_entry(
     request: WorkerRequest,
 ) -> Mapping[str, JsonValue] | None:
@@ -569,26 +627,126 @@ def _timestamp(value: object) -> datetime | None:
     return parsed if parsed.tzinfo is not None else None
 
 
-def _current_github_evidence_error(request: WorkerRequest) -> str | None:
-    transcript = request.capability_transcript
-    if transcript is None:
+def _github_repository_uri(value: object) -> str | None:
+    if not isinstance(value, dict):
         return None
-    entries = transcript.get("entries")
-    if not isinstance(entries, list):
-        return "current GitHub evidence transcript is missing"
-    github_entries = [
-        entry for entry in entries
-        if isinstance(entry, dict)
-        and isinstance(entry.get("request"), dict)
-        and isinstance(entry["request"].get("capability_id"), str)
-        and cast(str, entry["request"]["capability_id"]).startswith("github.")
-    ]
-    if not github_entries:
+    owner = value.get("owner")
+    name = value.get("name")
+    if not isinstance(owner, str) or not owner or not isinstance(name, str) or not name:
         return None
-    latest = github_entries[-1]
+    return f"github://repository/{quote(owner, safe='')}/{quote(name, safe='')}"
+
+
+def _expected_github_query_scope(
+    capability_id: str,
+    query_input: object,
+    installation_id_hash: str,
+) -> list[str] | None:
+    if not isinstance(query_input, dict):
+        return None
+    installation = quote(installation_id_hash, safe="")
+    if capability_id == "github.identity.get":
+        return [f"github://installation/{installation}"]
+    if capability_id == "github.repository.list":
+        return [f"github://installation/{installation}/repositories"]
+    if capability_id == "github.pull_request.list":
+        target = query_input.get("target")
+        if not isinstance(target, dict) or len(target) != 1:
+            return None
+        if "owner" in target:
+            owner = target.get("owner")
+            return (
+                [f"github://owner/{quote(owner, safe='')}"]
+                if isinstance(owner, str) and owner
+                else None
+            )
+        if "repository" in target:
+            scope = _github_repository_uri(target.get("repository"))
+            return None if scope is None else [scope]
+        repositories = target.get("repositories")
+        if not isinstance(repositories, list) or not repositories:
+            return None
+        scopes = [_github_repository_uri(item) for item in repositories]
+        return None if any(scope is None for scope in scopes) else cast(list[str], scopes)
+    repository = _github_repository_uri(query_input.get("repository"))
+    if repository is None:
+        return None
+    if capability_id in {
+        "github.repository.get",
+        "github.actions.workflow_runs.list",
+        "github.commit.list",
+    }:
+        return [repository]
+    number_field = (
+        "number"
+        if capability_id in {
+            "github.pull_request.get",
+            "github.pull_request.checks.get",
+        }
+        else "pull_request_number"
+    )
+    number = query_input.get(number_field)
+    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
+        return None
+    if capability_id not in {
+        "github.pull_request.get",
+        "github.pull_request.checks.get",
+        "github.pull_request.reviews.list",
+        "github.pull_request.comments.list",
+        "github.pull_request.files.list",
+        "github.pull_request.commits.list",
+    }:
+        return None
+    return [f"{repository}/pull-request/{number}"]
+
+
+def _github_query_scope_matches(
+    capability_id: str,
+    query_input: object,
+    actual: object,
+    installation_id_hash: str,
+) -> bool:
+    if (
+        not isinstance(actual, list)
+        or not 1 <= len(actual) <= 100
+        or any(not isinstance(item, str) or not item for item in actual)
+    ):
+        return False
+    expected = _expected_github_query_scope(
+        capability_id,
+        query_input,
+        installation_id_hash,
+    )
+    if actual == expected:
+        return True
+    if capability_id != "github.pull_request.list" or not isinstance(query_input, dict):
+        return False
+    target = query_input.get("target")
+    owner = target.get("owner") if isinstance(target, dict) else None
+    if not isinstance(owner, str) or not owner:
+        return False
+    prefix = f"github://repository/{quote(owner, safe='')}/"
+    # Local policy may expand an authorized owner query into its bounded
+    # repository allow-list. Every resulting scope must remain under that owner.
+    return len(set(cast(list[str], actual))) == len(actual) and all(
+        cast(str, scope).startswith(prefix)
+        and len(cast(str, scope)) > len(prefix)
+        for scope in actual
+    )
+
+
+def _github_evidence_entry_error(
+    request: WorkerRequest,
+    latest: Mapping[str, JsonValue],
+) -> str | None:
     capability_request = latest.get("request")
     result = latest.get("result")
-    if not isinstance(capability_request, dict) or not isinstance(result, dict):
+    receipt = latest.get("host_receipt")
+    if (
+        not isinstance(capability_request, dict)
+        or not isinstance(result, dict)
+        or not isinstance(receipt, dict)
+    ):
         return "current GitHub evidence entry is missing"
     if (
         result.get("outcome") != "succeeded"
@@ -597,42 +755,60 @@ def _current_github_evidence_error(request: WorkerRequest) -> str | None:
         return "current GitHub evidence did not succeed"
     candidate = result.get("candidate")
     data = result.get("data")
+    selected_candidate = receipt.get("selected_candidate")
     if (
         not isinstance(candidate, dict)
+        or not isinstance(selected_candidate, dict)
+        or selected_candidate != candidate
         or candidate.get("capability_id") != capability_request.get("capability_id")
+        or receipt.get("operation_id") != capability_request.get("invocation_id")
+        or receipt.get("original_handoff_id") != request.task.get("handoff_id")
+        or receipt.get("auxiliary_handoff_id") != result.get("auxiliary_handoff_id")
         or not isinstance(data, dict)
     ):
         return "current GitHub evidence correlation is invalid"
+    advertised = [
+        capability
+        for capability in request.available_capabilities
+        if capability.get("citizen_id") == candidate.get("citizen_id")
+        and capability.get("capability_id") == candidate.get("capability_id")
+        and capability.get("version") == candidate.get("capability_version")
+        and capability.get("operation_kind") == "query"
+    ]
+    if len(advertised) != 1:
+        return "current GitHub evidence selected candidate is invalid"
     state = data.get("state")
     evidence = data.get("evidence")
     if not isinstance(evidence, dict) or evidence.get("provider") != "github":
         return "current GitHub evidence provenance is invalid"
     fetched_at = _timestamp(evidence.get("fetched_at"))
-    source = request.task.get("source_reference")
-    source_extensions = (
-        source.get("extensions")
-        if isinstance(source, dict)
-        else None
-    )
-    occurred_at = _timestamp(
-        source_extensions.get("workfabric.dev/occurred_at")
-        if isinstance(source_extensions, dict)
-        else None
-    )
-    result_due_at = _timestamp(request.task.get("result_due_at"))
+    started_at = _timestamp(receipt.get("started_at"))
+    received_at = _timestamp(receipt.get("received_at"))
+    installation_id_hash = evidence.get("installation_id_hash")
+    api_version = evidence.get("api_version")
     query_scope = evidence.get("query_scope")
+    scope_matches = (
+        _github_query_scope_matches(
+            cast(str, capability_request.get("capability_id")),
+            capability_request.get("input"),
+            query_scope,
+            installation_id_hash,
+        )
+        if isinstance(installation_id_hash, str)
+        else False
+    )
     if (
         fetched_at is None
-        or occurred_at is None
-        or result_due_at is None
-        or fetched_at < occurred_at
-        or fetched_at > result_due_at
-        or not isinstance(query_scope, list)
-        or not 1 <= len(query_scope) <= 100
-        or any(
-            not isinstance(item, str) or not item or len(item) > 2_048
-            for item in query_scope
-        )
+        or started_at is None
+        or received_at is None
+        or received_at < started_at
+        or fetched_at < started_at - GITHUB_EVIDENCE_CLOCK_SKEW
+        or fetched_at > received_at + GITHUB_EVIDENCE_CLOCK_SKEW
+        or not isinstance(installation_id_hash, str)
+        or GITHUB_INSTALLATION_HASH.fullmatch(installation_id_hash) is None
+        or not isinstance(api_version, str)
+        or GITHUB_API_VERSION.fullmatch(api_version) is None
+        or not scope_matches
     ):
         return "current GitHub evidence freshness or scope is invalid"
     items = data.get("items")
@@ -640,11 +816,8 @@ def _current_github_evidence_error(request: WorkerRequest) -> str | None:
         valid_state = items == [] and evidence.get("complete") is True
     elif state == "complete":
         valid_state = (
-            (
-                isinstance(items, list)
-                and len(items) > 0
-            )
-            or "item" in data
+            (isinstance(items, list) and len(items) > 0)
+            or isinstance(data.get("item"), dict)
         ) and evidence.get("complete") is True
     elif state == "truncated":
         valid_state = (
@@ -661,6 +834,53 @@ def _current_github_evidence_error(request: WorkerRequest) -> str | None:
     if not valid_state:
         return "current GitHub evidence state is invalid"
     return None
+
+
+def _current_github_evidence_error(request: WorkerRequest) -> str | None:
+    transcript = request.capability_transcript
+    if transcript is None:
+        return None
+    entries = transcript.get("entries")
+    if not isinstance(entries, list):
+        return "current GitHub evidence transcript is missing"
+    github_entries = [
+        entry for entry in entries
+        if isinstance(entry, dict)
+        and isinstance(entry.get("request"), dict)
+        and isinstance(entry["request"].get("capability_id"), str)
+        and cast(str, entry["request"]["capability_id"]).startswith("github.")
+    ]
+    if not github_entries:
+        return None
+    for index, entry in enumerate(github_entries):
+        error = _github_evidence_entry_error(request, entry)
+        if (
+            error == "current GitHub evidence is truncated"
+            and index < len(github_entries) - 1
+        ):
+            continue
+        if error is not None:
+            return error
+    return None
+
+
+def _is_valid_current_github_only_query(request: WorkerRequest) -> bool:
+    transcript = request.capability_transcript
+    if transcript is None or _current_github_evidence_error(request) is not None:
+        return False
+    entries = transcript.get("entries")
+    return (
+        isinstance(entries, list)
+        and bool(entries)
+        and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("request"), dict)
+            and isinstance(entry["request"].get("capability_id"), str)
+            and cast(str, entry["request"]["capability_id"]).startswith("github.")
+            for entry in entries
+        )
+        and _latest_capability_is_a_query(request)
+    )
 
 
 def _bounded_capability_completion(request: WorkerRequest) -> dict[str, JsonValue]:
@@ -963,6 +1183,14 @@ async def execute_turn_with_agent(
         return _bounded_capability_completion(request)
     requires_scheduling_proposal = _requires_scheduling_proposal(request)
     github_evidence_error = _current_github_evidence_error(request)
+    if (
+        github_evidence_error is not None
+        and github_evidence_error != "current GitHub evidence is truncated"
+    ):
+        # The transcript and receipt are Host-owned. Invalid current GitHub
+        # evidence is a terminal driver diagnostic, never a model-owned status.
+        raise AssistantOutputError(github_evidence_error)
+    valid_github_only_query = _is_valid_current_github_only_query(request)
     prepared = (
         agent.use_workspace(cast(str, request.task["workspace_path"]))
         .role(
@@ -1019,14 +1247,64 @@ async def execute_turn_with_agent(
             continue
         if (
             turn.get("kind") == "final"
-            and github_evidence_error is not None
-            and (
-                not isinstance(result, dict)
-                or result.get("context_status") != "exhausted"
-            )
+            and github_evidence_error == "current GitHub evidence is truncated"
         ):
-            last_error = AssistantOutputError(github_evidence_error)
-            continue
+            raise AssistantOutputError(github_evidence_error)
+        if (
+            turn.get("kind") == "final"
+            and _latest_capability_is_a_query(request)
+            and not valid_github_only_query
+        ):
+            review = (
+                agent.use_workspace(cast(str, request.task["workspace_path"]))
+                .role(
+                    grounding_review_prompt(
+                        cast(Mapping[str, JsonValue], request.task["role"]),
+                        cast(
+                            Mapping[str, JsonValue] | None,
+                            request.task["agent_private_context"],
+                        ),
+                        scheduling_proposal=requires_scheduling_proposal,
+                    ),
+                    always=True,
+                )
+                .input(grounding_review_input(
+                    request,
+                    cast(Mapping[str, JsonValue], result),
+                ))
+                .output(
+                    (
+                        SCHEDULING_PROPOSAL_TURN_OUTPUT_SCHEMA
+                        if requires_scheduling_proposal
+                        else ASSISTANT_TURN_OUTPUT_SCHEMA
+                    ),
+                    format="json",
+                )
+            )
+            review_error: AssistantOutputError | None = None
+            for _review_attempt in range(2):
+                try:
+                    reviewed = await asyncio.wait_for(
+                        review.async_start(),
+                        timeout=post_capability_timeout_seconds,
+                    )
+                except TimeoutError as error:
+                    raise AssistantOutputError(
+                        "query grounding review timed out",
+                    ) from error
+                try:
+                    return (
+                        validate_scheduling_proposal_output(reviewed)
+                        if requires_scheduling_proposal
+                        else validate_turn_assistant_output(
+                            reviewed,
+                            advertised,
+                        )
+                    )
+                except AssistantOutputError as error:
+                    review_error = error
+            assert review_error is not None
+            raise review_error
         return turn
     assert last_error is not None
     raise last_error

@@ -224,7 +224,9 @@ export async function runCapabilityContinuationLoop(
       thread_id: input.task.thread_id,
       deadline: input.task.result_due_at,
     });
+    const startedAt = now();
     const result = await input.invocations.invoke(request, input.signal);
+    const receivedAt = now();
     if (operationKind === "query" && result.outcome === "succeeded") {
       queryResultBytes += new TextEncoder().encode(JSON.stringify({
         data: result.data,
@@ -240,6 +242,15 @@ export async function runCapabilityContinuationLoop(
     const entry = {
       request: turn.request,
       result,
+      host_receipt: {
+        operation_id: turn.request.invocation_id,
+        original_handoff_id: input.task.handoff_id,
+        auxiliary_handoff_id: result.auxiliary_handoff_id,
+        selected_candidate:
+          result.outcome === "succeeded" ? result.candidate : null,
+        started_at: startedAt,
+        received_at: receivedAt,
+      },
     };
     transcriptEntries.push(entry);
     validateRuntimeCapabilityTranscript({ entries: transcriptEntries });

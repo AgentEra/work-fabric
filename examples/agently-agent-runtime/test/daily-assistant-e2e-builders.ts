@@ -261,7 +261,7 @@ export async function startGitHubReadProviderFixture(input: {
   });
   const executor = new GitHubCapabilityExecutor({
     query_service: query,
-    installation_id_hash: "sha256:e2e-installation",
+    installation_id_hash: `sha256:${"8".repeat(64)}`,
     now: () => new Date().toISOString(),
   });
   const shutdown = new AbortController();
