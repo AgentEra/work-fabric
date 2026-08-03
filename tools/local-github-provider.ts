@@ -16,7 +16,10 @@ export const LOCAL_GITHUB_REQUIRED_ENVIRONMENT = Object.freeze([
 export async function prepareLocalGitHubProviderEnvironment(
   input: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<Readonly<Record<string, string>>> {
-  const environment = await prepareLocalBundleEnvironment(input, []);
+  const environment = await prepareLocalBundleEnvironment(input, {
+    required_environment: [],
+    resolve_feishu_deployment_metadata: false,
+  });
   const missing = LOCAL_GITHUB_REQUIRED_ENVIRONMENT.filter(
     (name) => environment[name] === undefined || environment[name]!.length === 0,
   );
@@ -27,11 +30,21 @@ export async function prepareLocalGitHubProviderEnvironment(
   return environment;
 }
 
-export async function startLocalGitHubProvider(
-  input: Readonly<Record<string, string | undefined>> = process.env,
+export interface LocalGitHubProviderPorts {
+  readonly prepare: (
+    input: Readonly<Record<string, string | undefined>>,
+  ) => Promise<Readonly<Record<string, string>>>;
+  readonly provision: (
+    environment: Readonly<Record<string, string>>,
+  ) => Promise<unknown>;
+  readonly start: (
+    environment: Readonly<Record<string, string>>,
+  ) => Promise<void>;
+}
+
+async function startGitHubProviderProcess(
+  environment: Readonly<Record<string, string>>,
 ): Promise<void> {
-  const environment = await prepareLocalGitHubProviderEnvironment(input);
-  await provisionGitHubProvider(environment);
   const child = spawn("npm", ["run", "github-provider:start"], {
     cwd: process.cwd(),
     env: environment,
@@ -41,6 +54,25 @@ export async function startLocalGitHubProvider(
     child.once("exit", resolve);
   });
   if (code !== 0) throw new Error("GitHub Provider process exited");
+}
+
+export async function runLocalGitHubProvider(
+  input: Readonly<Record<string, string | undefined>>,
+  ports: LocalGitHubProviderPorts,
+): Promise<void> {
+  const environment = await ports.prepare(input);
+  await ports.provision(environment);
+  await ports.start(environment);
+}
+
+export async function startLocalGitHubProvider(
+  input: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<void> {
+  await runLocalGitHubProvider(input, {
+    prepare: prepareLocalGitHubProviderEnvironment,
+    provision: provisionGitHubProvider,
+    start: startGitHubProviderProcess,
+  });
 }
 
 if (

@@ -11,6 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
+    "typecheck:github-provider": "tsc --noEmit -p examples/github-capability-provider/tsconfig.json",
     "conformance": "tsx tools/conformance/src/cli.ts",
     "postgres:migrate": "tsx tools/postgres-migrate.ts",
     "postgres:smoke": "tsx tools/postgres-smoke.ts",

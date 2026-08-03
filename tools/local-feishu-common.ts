@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
@@ -21,6 +22,11 @@ export const LOCAL_FEISHU_REQUIRED_ENVIRONMENT = Object.freeze([
 export const LOCAL_FEISHU_PID_FILE = resolve(
   "var/local-feishu-stack.json",
 );
+
+export interface LocalBundlePreparationOptions {
+  readonly required_environment?: readonly string[];
+  readonly resolve_feishu_deployment_metadata?: boolean;
+}
 
 function parseLine(line: string): readonly [string, string] | null {
   const trimmed = line.trim();
@@ -74,7 +80,7 @@ function replaceDeploymentValue(
 
 export async function prepareLocalBundleEnvironment(
   input: Readonly<Record<string, string | undefined>> = process.env,
-  requiredEnvironment: readonly string[] = LOCAL_FEISHU_REQUIRED_ENVIRONMENT,
+  options: LocalBundlePreparationOptions = {},
 ): Promise<Readonly<Record<string, string>>> {
   const envFile = input.WORK_FABRIC_ENV_FILE;
   if (envFile === undefined || envFile.trim() === "") {
@@ -90,11 +96,13 @@ export async function prepareLocalBundleEnvironment(
       ?? fileValues.WORK_FABRIC_LISTEN_HOST
       ?? "127.0.0.1",
   };
-  const missing = [
-    ...requiredEnvironment,
-    "FEISHU_EXTERNAL_TENANT_ID",
-    "FEISHU_BOT_OPEN_ID",
-  ].filter(
+  const requiredEnvironment = options.required_environment
+    ?? LOCAL_FEISHU_REQUIRED_ENVIRONMENT;
+  const requiredDeploymentMetadata =
+    options.resolve_feishu_deployment_metadata === false
+      ? []
+      : ["FEISHU_EXTERNAL_TENANT_ID", "FEISHU_BOT_OPEN_ID"];
+  const missing = [...requiredEnvironment, ...requiredDeploymentMetadata].filter(
     (name) => combined[name] === undefined || combined[name]!.length === 0,
   );
   if (missing.length > 0) {
@@ -109,7 +117,10 @@ export async function prepareLocalBundleEnvironment(
       "var/local-feishu-assistant.bundle.resolved.yaml",
   );
   let configuration = await readFile(sourcePath, "utf8");
-  if (configuration.includes("${FEISHU_EXTERNAL_TENANT_ID}")) {
+  if (
+    options.resolve_feishu_deployment_metadata !== false
+    && configuration.includes("${FEISHU_EXTERNAL_TENANT_ID}")
+  ) {
     configuration = replaceDeploymentValue(
       configuration,
       "FEISHU_EXTERNAL_TENANT_ID",
@@ -120,7 +131,10 @@ export async function prepareLocalBundleEnvironment(
       "FEISHU_BOT_OPEN_ID",
       combined.FEISHU_BOT_OPEN_ID!,
     );
-  } else if (sourcePath !== resolvedPath) {
+  } else if (
+    options.resolve_feishu_deployment_metadata !== false
+    && sourcePath !== resolvedPath
+  ) {
     throw new Error("Configuration deployment markers are missing");
   }
   if (configuration.includes("${WORK_FABRIC_LISTEN_HOST}")) {
@@ -132,13 +146,15 @@ export async function prepareLocalBundleEnvironment(
   } else if (sourcePath !== resolvedPath) {
     throw new Error("Configuration listen marker is missing");
   }
-  if (
+  const disabledGitHubIdentityToken =
     combined.GITHUB_PROVIDER_ACCESS_TOKEN === undefined
     || combined.GITHUB_PROVIDER_ACCESS_TOKEN.length === 0
-  ) {
+      ? randomBytes(32).toString("base64url")
+      : undefined;
+  if (disabledGitHubIdentityToken !== undefined) {
     configuration = configuration.replaceAll(
-      "${GITHUB_PROVIDER_ACCESS_TOKEN}",
-      "${WORK_FABRIC_ADMIN_TOKEN}",
+      "bearer_token: ${GITHUB_PROVIDER_ACCESS_TOKEN}",
+      "bearer_token: ${WORK_FABRIC_DISABLED_GITHUB_PROVIDER_TOKEN}",
     );
   }
   await mkdir(dirname(resolvedPath), { recursive: true, mode: 0o700 });
@@ -146,6 +162,12 @@ export async function prepareLocalBundleEnvironment(
   return Object.freeze(Object.fromEntries(
     Object.entries({
       ...combined,
+      ...(disabledGitHubIdentityToken === undefined
+        ? {}
+        : {
+            WORK_FABRIC_DISABLED_GITHUB_PROVIDER_TOKEN:
+              disabledGitHubIdentityToken,
+          }),
       WORK_FABRIC_CONFIG: resolvedPath,
       WORK_FABRIC_CONFIG_APPLICATION: "work-fabric",
       WORK_FABRIC_AGENT_RUNTIME_CONFIG: resolvedPath,
@@ -163,7 +185,10 @@ export async function prepareLocalBundleEnvironment(
 export async function prepareLocalFeishuEnvironment(
   input: Readonly<Record<string, string | undefined>> = process.env,
 ): Promise<Readonly<Record<string, string>>> {
-  return prepareLocalBundleEnvironment(input);
+  return prepareLocalBundleEnvironment(input, {
+    required_environment: LOCAL_FEISHU_REQUIRED_ENVIRONMENT,
+    resolve_feishu_deployment_metadata: true,
+  });
 }
 
 export interface LocalFeishuPidState {

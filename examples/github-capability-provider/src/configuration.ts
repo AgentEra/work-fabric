@@ -112,6 +112,14 @@ function declaredSecret(value: unknown, path: string): string {
   return reference;
 }
 
+function environmentVariableName(value: unknown, path: string): string {
+  const name = text(value, path, 128);
+  if (!environmentName.test(name)) {
+    throw new TypeError(`${path} is invalid`);
+  }
+  return name;
+}
+
 function service(value: unknown, path: string): GitHubProviderServiceConfiguration {
   const root = record(value, path);
   exact(root, ["runtime_id", "development_mode", "work_fabric", "concurrency", "citizen_lease"], path);
@@ -183,11 +191,18 @@ function provider(value: unknown, path: string): GitHubProviderConfiguration {
   if (authentication.mode !== "github_app") {
     throw new TypeError(`${path}.authentication.mode is invalid; github_app is required`);
   }
-  for (const field of ["app_id_environment", "installation_id_environment", "private_key_environment"] as const) {
-    if (typeof authentication[field] !== "string" || !environmentName.test(authentication[field])) {
-      throw new TypeError(`${path}.authentication.${field} is invalid`);
-    }
-  }
+  const appIdEnvironment = environmentVariableName(
+    authentication.app_id_environment,
+    `${path}.authentication.app_id_environment`,
+  );
+  const installationIdEnvironment = environmentVariableName(
+    authentication.installation_id_environment,
+    `${path}.authentication.installation_id_environment`,
+  );
+  const privateKeyEnvironment = environmentVariableName(
+    authentication.private_key_environment,
+    `${path}.authentication.private_key_environment`,
+  );
   const policy = record(root.policy, `${path}.policy`);
   exact(policy, ["allowed_owners", "allowed_repositories", "maximum_page_size", "maximum_aggregate_repositories"], `${path}.policy`);
   const allowedOwners = owners(policy.allowed_owners, `${path}.policy.allowed_owners`);
@@ -218,9 +233,9 @@ function provider(value: unknown, path: string): GitHubProviderConfiguration {
     authentication: Object.freeze({
       mode: "github_app" as const,
       credential_ref: identifier(authentication.credential_ref, `${path}.authentication.credential_ref`),
-      app_id_environment: authentication.app_id_environment,
-      installation_id_environment: authentication.installation_id_environment,
-      private_key_environment: authentication.private_key_environment,
+      app_id_environment: appIdEnvironment,
+      installation_id_environment: installationIdEnvironment,
+      private_key_environment: privateKeyEnvironment,
     }),
     cursor_signing_key: declaredSecret(root.cursor_signing_key, `${path}.cursor_signing_key`),
     policy: parsedPolicy,

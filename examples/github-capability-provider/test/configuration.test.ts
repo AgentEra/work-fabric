@@ -116,6 +116,10 @@ describe("GitHub Provider configuration", () => {
     const disabled = structuredClone(document);
     disabled.value.applications["github-provider"].plugins.instances["github-primary"].enabled = false;
     await expect(loadGitHubProviderConfiguration({ document: disabled })).rejects.toThrow(/plugins.instances/);
+
+    const nonStringEnvironmentName = structuredClone(document);
+    nonStringEnvironmentName.value.applications["github-provider"].plugins.instances["github-primary"].config.authentication.app_id_environment = 42 as never;
+    await expect(loadGitHubProviderConfiguration({ document: nonStringEnvironmentName })).rejects.toThrow(/app_id_environment/);
   });
 
   it("requires the fixed GitHub system Citizen and Endpoint identity", async () => {
