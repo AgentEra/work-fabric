@@ -221,8 +221,8 @@ has write permissions.
 | `github_authentication_failed` | App ID, installation ID, PEM format, key rotation, and App installation do not agree. Correct credentials; do not retry blindly. |
 | `github_forbidden` | Provider policy, invocation Authority, selected-repository installation scope, or one of the exact read permissions denied the query. Fix the responsible layer deliberately; do not widen the ceiling to hide a configuration error. |
 | `github_repository_not_found` / `github_pull_request_not_found` | The approved resource no longer exists or is not visible to this installation. |
-| `github_rate_limited` | Stop retrying until the safe `retry_at` time. The Provider maps the vendor limit without exposing headers or credentials. |
-| `github_upstream_unavailable` | A transient GitHub/network failure occurred. Retry only according to the bounded Provider policy. |
+| `github_rate_limited` | The Provider reports a safe optional `retry_after` time without exposing headers or credentials. The Agent or caller may retry only after that time and only if its Handoff deadline still permits it. |
+| `github_upstream_unavailable` | A transient GitHub/network failure occurred. The Agent or caller decides whether a later attempt still fits its Handoff deadline. |
 | `github_response_invalid` | GitHub returned malformed, incomplete, or over-limit data outside the Provider's normalized contract. Preserve safe diagnostics and investigate the adapter. |
 | `github_result_truncated` | The normalized result could not fit the Provider's 122,880-byte serialized-data budget. Narrow the repository scope or filters; this is not an upstream availability failure. |
 | `empty` | The query succeeded and found no matching item. Report “none found”; do not treat it as auth failure. |
@@ -232,6 +232,11 @@ Safe investigation uses capability ID, installation hash, authorized query
 scope, terminal code, `fetched_at`, completeness, and low-cardinality timing.
 Never log the PEM, tokens, raw Authorization headers, cursor signing key, raw
 vendor response body, private repository text, or full invocation input/output.
+
+The MVP does not sleep or automatically retry inside the GitHub Provider,
+Fabric, or Agent runtime. A retryable failure and optional RFC3339
+`retry_after` are execution facts carried through the capability transcript;
+they do not themselves authorize or trigger another invocation.
 
 ## 7. Disable, rotate, and revoke
 

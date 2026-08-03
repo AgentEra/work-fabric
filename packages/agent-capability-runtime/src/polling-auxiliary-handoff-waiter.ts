@@ -29,6 +29,20 @@ function object(value: unknown): Record<string, unknown> | null {
   return value as Record<string, unknown>;
 }
 
+const RFC3339 =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+
+function retryAfter(value: unknown): string | undefined {
+  if (value === undefined) return undefined;
+  if (
+    typeof value !== "string" ||
+    value.length > 64 ||
+    !RFC3339.test(value) ||
+    !Number.isFinite(Date.parse(value))
+  ) throw new TypeError("Capability Provider failure retry_after is invalid");
+  return value;
+}
+
 function providerOutcome(snapshot: HandoffReadModel): AuxiliaryHandoffTerminal {
   const state = object(snapshot.state);
   const result = object(state?.result);
@@ -60,11 +74,13 @@ function providerOutcome(snapshot: HandoffReadModel): AuxiliaryHandoffTerminal {
       typeof outcome.message !== "string" ||
       typeof outcome.retryable !== "boolean"
     ) throw new TypeError("Capability Provider failure is invalid");
+    const retry_after = retryAfter(outcome.retry_after);
     return {
       outcome: outcome.outcome,
       code: outcome.code,
       message: outcome.message,
       retryable: outcome.retryable,
+      ...(retry_after === undefined ? {} : { retry_after }),
     };
   }
   throw new TypeError("Capability Provider outcome is invalid");

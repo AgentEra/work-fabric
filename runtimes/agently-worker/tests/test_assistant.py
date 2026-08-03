@@ -1361,6 +1361,24 @@ async def test_failed_or_stale_github_result_cannot_reach_final_prose(
         )
 
 
+def test_retry_after_failure_fact_is_visible_in_the_model_turn_input() -> None:
+    result = {
+        "outcome": "failed",
+        "invocation_id": "github-pr-list-1",
+        "auxiliary_handoff_id": "handoff-github-pr-list-1",
+        "code": "github_rate_limited",
+        "message": "github_rate_limited",
+        "retryable": True,
+        "retry_after": "2026-08-03T08:05:00.000Z",
+    }
+
+    prompt_input = turn_prompt_input(
+        parse_request(github_query_request(result))
+    )
+
+    assert prompt_input["capability_transcript"]["entries"][0]["result"] == result
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(("fetched_at", "query_scope"), [
     ("2026-08-03T07:00:00.000Z", ["github://owner/AgentEra"]),

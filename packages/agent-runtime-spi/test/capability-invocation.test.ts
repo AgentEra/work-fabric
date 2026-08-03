@@ -89,6 +89,7 @@ describe("Agent capability invocation contracts", () => {
       code: "provider_unavailable",
       message: "The capability provider is temporarily unavailable.",
       retryable: true,
+      retry_after: "2026-07-27T00:01:00.000Z",
     });
     const continuation = validateRuntimeCapabilityContinuation({
       request: turn.kind === "capability_request" ? turn.request : {},
@@ -97,7 +98,30 @@ describe("Agent capability invocation contracts", () => {
 
     expect(turn.kind).toBe("capability_request");
     expect(continuation.result).toEqual(result);
+    expect(continuation.result).toMatchObject({
+      retry_after: "2026-07-27T00:01:00.000Z",
+    });
     expect(Object.isFrozen(continuation)).toBe(true);
+  });
+
+  it("rejects invalid or unknown capability failure timing fields", () => {
+    const failure = {
+      outcome: "failed",
+      invocation_id: request.invocation_id,
+      auxiliary_handoff_id: null,
+      code: "provider_unavailable",
+      message: "Provider unavailable.",
+      retryable: true,
+    } as const;
+
+    expect(() => validateCapabilityInvocationResult({
+      ...failure,
+      retry_after: "tomorrow",
+    })).toThrow(/retry_after/i);
+    expect(() => validateCapabilityInvocationResult({
+      ...failure,
+      retry_at: "2026-07-27T00:01:00.000Z",
+    })).toThrow(/fields/i);
   });
 
   it("validates Host-owned invocation lineage and rejects correlation changes", () => {

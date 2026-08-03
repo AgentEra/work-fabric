@@ -17,6 +17,7 @@ import type {
 
 import {
   HandoffCapabilityInvocationPort,
+  PollingAuxiliaryHandoffWaiter,
   type AuxiliaryHandoffTerminal,
   type BoundCapabilityContract,
 } from "../src/index.js";
@@ -256,6 +257,69 @@ describe("HandoffCapabilityInvocationPort", () => {
       code: "capability_output_invalid",
       retryable: false,
     });
+  });
+
+  it("preserves Provider retry timing in the persisted invocation failure", async () => {
+    const deps = dependencies();
+    const realWaiter = new PollingAuxiliaryHandoffWaiter({
+      queries: {
+        getHandoff: async () => ({
+          tenant_id: "tenant-1",
+          handoff_id: "handoff-auxiliary-1",
+          stream_version: 3,
+          state: {
+            lifecycle_state: "result_returned",
+            result: {
+              summary: [{
+                kind: "data",
+                schema_ref: "urn:work-fabric:schema:capability-result:1",
+                data: {
+                  outcome: "failed",
+                  code: "github_rate_limited",
+                  message: "github_rate_limited",
+                  retryable: true,
+                  retry_after: "2026-07-27T10:01:00.000Z",
+                },
+              }],
+              artifacts: [],
+              evidence: [],
+              extensions: {},
+            },
+          },
+        }) as never,
+      },
+      now: () => "2026-07-27T10:00:00.000Z",
+      delay: async () => undefined,
+    });
+    deps.waiter.wait.mockImplementation(async () => realWaiter.wait({
+      tenant_id: "tenant-1",
+      original_handoff_id: request.original_handoff_id,
+      auxiliary_handoff_id: "handoff-auxiliary-1",
+      invocation_id: request.invocation_id,
+      candidate,
+      contract,
+      deadline: request.deadline,
+    }, new AbortController().signal));
+
+    const result = await deps.port.invoke(
+      request,
+      new AbortController().signal,
+    );
+
+    expect(result).toEqual({
+      outcome: "failed",
+      invocation_id: request.invocation_id,
+      auxiliary_handoff_id: "handoff-auxiliary-1",
+      code: "github_rate_limited",
+      message: "github_rate_limited",
+      retryable: true,
+      retry_after: "2026-07-27T10:01:00.000Z",
+    });
+    await expect(deps.store.getInvocation(
+      "tenant-1",
+      request.original_handoff_id,
+      request.invocation_id,
+    )).resolves.toMatchObject({ result });
   });
 
   it("rejects an expired deadline without discovery or an auxiliary Handoff", async () => {

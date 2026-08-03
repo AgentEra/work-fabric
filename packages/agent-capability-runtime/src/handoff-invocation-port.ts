@@ -118,6 +118,7 @@ function failure(
   message: string,
   retryable: boolean,
   outcome: "rejected" | "failed" = "failed",
+  retryAfter?: string,
 ): CapabilityInvocationResult {
   return validateCapabilityInvocationResult({
     outcome,
@@ -126,6 +127,7 @@ function failure(
     code,
     message,
     retryable,
+    ...(retryAfter === undefined ? {} : { retry_after: retryAfter }),
   });
 }
 
@@ -141,6 +143,7 @@ function terminalFailure(
     terminal.message,
     terminal.retryable,
     terminal.outcome,
+    terminal.retry_after,
   );
 }
 

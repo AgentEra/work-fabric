@@ -121,6 +121,7 @@ export type AuxiliaryHandoffTerminal =
       readonly code: string;
       readonly message: string;
       readonly retryable: boolean;
+      readonly retry_after?: string;
     };
 
 export interface BoundAuxiliaryHandoff {

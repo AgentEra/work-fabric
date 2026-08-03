@@ -12,6 +12,8 @@ interface GitHubApiFailure {
   readonly headers: Record<string, string>;
 }
 
+const MAX_SAFE_RETRY_DELAY_MS = 24 * 60 * 60 * 1_000;
+
 function record(value: unknown): Record<string, unknown> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -37,25 +39,30 @@ function apiFailure(value: unknown): GitHubApiFailure | undefined {
   return { status: source.status, headers: headers(response?.headers) };
 }
 
-function isoAt(time: number): string | undefined {
-  if (!Number.isFinite(time)) return undefined;
+function isoAt(time: number, now: number): string | undefined {
+  if (
+    !Number.isFinite(time) ||
+    time < now ||
+    time - now > MAX_SAFE_RETRY_DELAY_MS
+  ) return undefined;
   const date = new Date(time);
   return Number.isNaN(date.getTime()) ? undefined : date.toISOString();
 }
 
 function retryAt(headers: Record<string, string>): string | undefined {
+  const now = Date.now();
   const retryAfter = headers["retry-after"];
   if (retryAfter !== undefined) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) {
-      return isoAt(Date.now() + seconds * 1_000);
+    const seconds = /^\d+$/.test(retryAfter) ? Number(retryAfter) : Number.NaN;
+    if (Number.isFinite(seconds)) {
+      return isoAt(now + seconds * 1_000, now);
     }
     const date = Date.parse(retryAfter);
-    if (!Number.isNaN(date)) return isoAt(date);
+    if (!Number.isNaN(date)) return isoAt(date, now);
   }
   const reset = headers["x-ratelimit-reset"];
   if (reset !== undefined && /^\d+$/.test(reset)) {
-    return isoAt(Number(reset) * 1_000);
+    return isoAt(Number(reset) * 1_000, now);
   }
   return undefined;
 }
@@ -98,8 +105,10 @@ export function mapGitHubApiError(
   const { status, headers } = failure;
   if (status === 401) return mapped("github_authentication_failed", headers);
   if (status === 403) {
-    return headers["x-ratelimit-remaining"] === "0"
-      ? mapped("github_rate_limited", headers)
+    return headers["x-ratelimit-remaining"] === "0" ||
+        (headers["retry-after"] !== undefined &&
+          retryAt({ "retry-after": headers["retry-after"] }) !== undefined)
+      ? mapped("github_rate_limited", headers, true)
       : mapped("github_forbidden", headers);
   }
   if (status === 404) {
@@ -108,7 +117,7 @@ export function mapGitHubApiError(
       : mapped("github_response_invalid", headers);
   }
   if (status === 422) return mapped("github_invalid_request", headers);
-  if (status === 429) return mapped("github_rate_limited", headers);
+  if (status === 429) return mapped("github_rate_limited", headers, true);
   if (status >= 500 && status <= 599) {
     return mapped("github_upstream_unavailable", headers, true);
   }

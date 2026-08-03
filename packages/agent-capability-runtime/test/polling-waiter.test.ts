@@ -103,4 +103,54 @@ describe("PollingAuxiliaryHandoffWaiter", () => {
       retryable: false,
     });
   });
+
+  it("preserves a Provider failure retry_after timestamp", async () => {
+    const waiter = new PollingAuxiliaryHandoffWaiter({
+      queries: {
+        getHandoff: async () => snapshot("result_returned", {
+          outcome: "failed",
+          code: "github_rate_limited",
+          message: "github_rate_limited",
+          retryable: true,
+          retry_after: "2026-07-27T10:00:30.000Z",
+        }),
+      },
+      poll_interval_ms: 1,
+      now: () => "2026-07-27T10:00:00.000Z",
+      delay: async () => undefined,
+    });
+
+    await expect(waiter.wait(
+      bound,
+      new AbortController().signal,
+    )).resolves.toEqual({
+      outcome: "failed",
+      code: "github_rate_limited",
+      message: "github_rate_limited",
+      retryable: true,
+      retry_after: "2026-07-27T10:00:30.000Z",
+    });
+  });
+
+  it("rejects an invalid Provider failure retry_after timestamp", async () => {
+    const waiter = new PollingAuxiliaryHandoffWaiter({
+      queries: {
+        getHandoff: async () => snapshot("result_returned", {
+          outcome: "failed",
+          code: "github_rate_limited",
+          message: "github_rate_limited",
+          retryable: true,
+          retry_after: "in one minute",
+        }),
+      },
+      poll_interval_ms: 1,
+      now: () => "2026-07-27T10:00:00.000Z",
+      delay: async () => undefined,
+    });
+
+    await expect(waiter.wait(
+      bound,
+      new AbortController().signal,
+    )).rejects.toThrow(/retry_after/i);
+  });
 });

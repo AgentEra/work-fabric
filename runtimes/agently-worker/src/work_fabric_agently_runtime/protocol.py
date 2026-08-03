@@ -22,6 +22,9 @@ SECRET_FIELD = re.compile(
 CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
+RFC3339 = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
 
@@ -239,11 +242,13 @@ def _validate_capability_result(value: object) -> dict[str, JsonValue]:
         ):
             _fail("continuation.result.artifacts is invalid")
     elif outcome in ("rejected", "failed"):
+        has_retry_after = "retry_after" in value
         result = _exact_object(
             value,
             (
                 "outcome", "invocation_id", "auxiliary_handoff_id",
                 "code", "message", "retryable",
+                *(("retry_after",) if has_retry_after else ()),
             ),
             "continuation.result",
         )
@@ -257,6 +262,23 @@ def _validate_capability_result(value: object) -> dict[str, JsonValue]:
             )
         if not isinstance(result["retryable"], bool):
             _fail("continuation.result.retryable is invalid")
+        if has_retry_after:
+            retry_after = _string(
+                result["retry_after"],
+                "continuation.result.retry_after",
+                64,
+            )
+            try:
+                parsed_retry_after = datetime.fromisoformat(
+                    retry_after.replace("Z", "+00:00")
+                )
+            except ValueError:
+                _fail("continuation.result.retry_after is invalid")
+            if (
+                RFC3339.fullmatch(retry_after) is None
+                or parsed_retry_after.tzinfo is None
+            ):
+                _fail("continuation.result.retry_after is invalid")
     else:
         _fail("continuation.result.outcome is invalid")
     return _json_object(result, "continuation.result")

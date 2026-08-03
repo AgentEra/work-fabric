@@ -47,14 +47,44 @@ def test_v3_request_accepts_only_summaries_and_a_normalized_transcript() -> None
             "code": "provider_unavailable",
             "message": "Provider unavailable",
             "retryable": True,
+            "retry_after": "2026-07-27T00:01:00.000Z",
         },
     }]}
     parsed = parse_request(value)
     assert parsed.capability_transcript is not None
     assert parsed.capability_transcript["entries"][0]["result"]["code"] == "provider_unavailable"
+    assert parsed.capability_transcript["entries"][0]["result"]["retry_after"] == (
+        "2026-07-27T00:01:00.000Z"
+    )
 
     value["capability_transcript"]["entries"][0]["result"]["api_key"] = "forbidden"
     with pytest.raises(ProtocolError, match="unknown|secret"):
+        parse_request(value)
+
+
+@pytest.mark.parametrize("retry_after", ["tomorrow", "2026-07-27 00:01:00Z"])
+def test_v3_request_rejects_invalid_failure_retry_after(retry_after: str) -> None:
+    value = valid_request_v3()
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "1.0.0",
+            "input": {"title": "项目需求"},
+            "reason": "创建团队文档",
+        },
+        "result": {
+            "outcome": "failed",
+            "invocation_id": "invocation-1",
+            "auxiliary_handoff_id": None,
+            "code": "provider_unavailable",
+            "message": "Provider unavailable",
+            "retryable": True,
+            "retry_after": retry_after,
+        },
+    }]}
+
+    with pytest.raises(ProtocolError, match="retry_after"):
         parse_request(value)
 
 

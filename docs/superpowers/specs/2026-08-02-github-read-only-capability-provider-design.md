@@ -335,11 +335,12 @@ github_response_invalid
 github_result_truncated
 ```
 
-`github_rate_limited` includes a safe `retry_at` timestamp when GitHub supplies
-one. The Provider performs bounded retries only for idempotent reads and only
-for transient transport/5xx failures within the Handoff deadline. It does not
-retry authentication, authorization, validation, not-found or exhausted-rate
-limit responses.
+`github_rate_limited` includes a safe optional RFC3339 `retry_after` timestamp
+when GitHub supplies usable timing metadata. The first usable release does not
+sleep or automatically retry inside the Provider or Fabric. The Agent or other
+caller may decide to create a later invocation only when the retry time and the
+Handoff deadline permit it. The timing field is evidence, not an automation or
+authorization decision.
 
 The first release uses no persistent business-data cache. Request-local
 deduplication may collapse identical reads within one accepted capability

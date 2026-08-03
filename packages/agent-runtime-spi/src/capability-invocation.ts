@@ -49,6 +49,7 @@ export type CapabilityInvocationResult =
       readonly code: string;
       readonly message: string;
       readonly retryable: boolean;
+      readonly retry_after?: string;
     };
 
 export interface CapabilityInvocationPort {
@@ -526,6 +527,7 @@ export function validateCapabilityInvocationResult(
   if (outcome.value !== "rejected" && outcome.value !== "failed") {
     throw new TypeError("Capability invocation result outcome is invalid");
   }
+  const hasRetryAfter = Object.hasOwn(value, "retry_after");
   const source = exactObject(
     value,
     [
@@ -535,6 +537,7 @@ export function validateCapabilityInvocationResult(
       "code",
       "message",
       "retryable",
+      ...(hasRetryAfter ? ["retry_after"] : []),
     ],
     "Capability invocation failure",
   );
@@ -549,6 +552,13 @@ export function validateCapabilityInvocationResult(
   if (typeof source.retryable !== "boolean") {
     throw new TypeError("retryable is invalid");
   }
+  let retryAfter: string | undefined;
+  if (hasRetryAfter) {
+    retryAfter = string(source.retry_after, "retry_after", 64);
+    if (!RFC3339.test(retryAfter) || !Number.isFinite(Date.parse(retryAfter))) {
+      throw new TypeError("retry_after is invalid");
+    }
+  }
   return deepFreeze({
     outcome: outcome.value,
     invocation_id: opaqueId(source.invocation_id, "invocation_id"),
@@ -559,6 +569,7 @@ export function validateCapabilityInvocationResult(
     code,
     message: string(source.message, "message", 8_192),
     retryable: source.retryable,
+    ...(retryAfter === undefined ? {} : { retry_after: retryAfter }),
   });
 }
 
