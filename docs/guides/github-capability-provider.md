@@ -97,6 +97,14 @@ npm run github-provider:provision
 npm run github-provider:start
 ```
 
+The local launcher reads the mode-`0600` environment file only while preparing
+and provisioning. Before spawning the standalone Provider it constructs a
+minimal allowlist containing basic process/network variables, the
+GitHub-specific configuration view, and the exact secret variable names
+declared by that Provider configuration. It never forwards
+`WORK_FABRIC_ENV_FILE`, `WORK_FABRIC_ADMIN_TOKEN`, Feishu credentials, model
+credentials, or unrelated environment-file secrets.
+
 The Provider is a standalone process and system Citizen even when packaged in
 the same VM or image as the Service, Agent, or Channel. It owns no Feishu
 connection and can be disabled without changing Core, the Agent Runtime, or any

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -174,23 +174,71 @@ describe("optional local GitHub Provider", () => {
     }
   });
 
-  it("provisions and starts only the GitHub Provider", async () => {
-    const calls: string[] = [];
-    let startedEnvironment: Readonly<Record<string, string>> | undefined;
-    await runLocalGitHubProvider({}, {
-      prepare: async () => ({
-        WORK_FABRIC_CONFIG: "github.yaml",
-        WORK_FABRIC_ADMIN_TOKEN: "admin-secret",
-      }),
-      provision: async () => { calls.push("provision:github"); },
-      start: async (environment) => {
-        calls.push("start:github");
-        startedEnvironment = environment;
-      },
-    });
+  it("provisions with the complete prepared environment but starts with a minimal dynamic Provider environment", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "work-fabric-github-child-env-"));
+    try {
+      const envFile = join(directory, "github.env");
+      const enabledConfig = join(directory, "github-enabled.yaml");
+      const resolvedConfig = join(directory, "resolved.yaml");
+      const bundle = (await readFile(
+        resolve("examples/config/local-feishu-assistant.bundle.yaml"),
+        "utf8",
+      ))
+        .replace("enabled: false", "enabled: true")
+        .replaceAll("GITHUB_APP_ID", "CUSTOM_GITHUB_APP_ID")
+        .replaceAll("GITHUB_APP_INSTALLATION_ID", "CUSTOM_GITHUB_INSTALLATION_ID")
+        .replaceAll("GITHUB_APP_PRIVATE_KEY", "CUSTOM_GITHUB_PRIVATE_KEY")
+        .replaceAll("GITHUB_PROVIDER_ACCESS_TOKEN", "CUSTOM_GITHUB_FABRIC_TOKEN")
+        .replaceAll("WORK_FABRIC_GITHUB_CURSOR_SECRET", "CUSTOM_GITHUB_CURSOR_SECRET");
+      await writeFile(enabledConfig, bundle);
+      await writeFile(envFile, [
+        "CUSTOM_GITHUB_APP_ID=123",
+        "CUSTOM_GITHUB_INSTALLATION_ID=456",
+        "CUSTOM_GITHUB_PRIVATE_KEY=private-key",
+        "CUSTOM_GITHUB_FABRIC_TOKEN=provider-token",
+        `CUSTOM_GITHUB_CURSOR_SECRET=${"g".repeat(32)}`,
+        `WORK_FABRIC_ADMIN_TOKEN=${"a".repeat(32)}`,
+        "FEISHU_APP_SECRET=must-not-reach-provider",
+        "AGENTLY_MODEL_API_KEY=must-not-reach-provider",
+        "UNRELATED_SECRET=must-not-reach-provider",
+      ].join("\n"));
+      await chmod(envFile, 0o600);
 
-    expect(calls).toEqual(["provision:github", "start:github"]);
-    expect(calls.join(" ")).not.toContain("feishu");
-    expect(startedEnvironment).toEqual({ WORK_FABRIC_CONFIG: "github.yaml" });
+      let provisionedEnvironment: Readonly<Record<string, string>> | undefined;
+      let startedEnvironment: Readonly<Record<string, string>> | undefined;
+      await runLocalGitHubProvider({
+        WORK_FABRIC_ENV_FILE: envFile,
+        WORK_FABRIC_CONFIG: enabledConfig,
+        WORK_FABRIC_RESOLVED_CONFIG: resolvedConfig,
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+      }, {
+        prepare: prepareLocalGitHubProviderEnvironment,
+        provision: async (environment) => { provisionedEnvironment = environment; },
+        start: async (environment) => { startedEnvironment = environment; },
+      });
+
+      expect(provisionedEnvironment).toMatchObject({
+        WORK_FABRIC_ADMIN_TOKEN: "a".repeat(32),
+        WORK_FABRIC_ENV_FILE: envFile,
+        FEISHU_APP_SECRET: "must-not-reach-provider",
+      });
+      expect(startedEnvironment).toMatchObject({
+        CUSTOM_GITHUB_APP_ID: "123",
+        CUSTOM_GITHUB_INSTALLATION_ID: "456",
+        CUSTOM_GITHUB_PRIVATE_KEY: "private-key",
+        CUSTOM_GITHUB_FABRIC_TOKEN: "provider-token",
+        CUSTOM_GITHUB_CURSOR_SECRET: "g".repeat(32),
+        WORK_FABRIC_GITHUB_PROVIDER_CONFIG: resolvedConfig,
+        WORK_FABRIC_GITHUB_PROVIDER_CONFIG_APPLICATION: "github-provider",
+      });
+      expect(startedEnvironment).not.toHaveProperty("WORK_FABRIC_ADMIN_TOKEN");
+      expect(startedEnvironment).not.toHaveProperty("WORK_FABRIC_ENV_FILE");
+      expect(startedEnvironment).not.toHaveProperty("FEISHU_APP_SECRET");
+      expect(startedEnvironment).not.toHaveProperty("AGENTLY_MODEL_API_KEY");
+      expect(startedEnvironment).not.toHaveProperty("UNRELATED_SECRET");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

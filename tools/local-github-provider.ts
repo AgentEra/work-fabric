@@ -5,14 +5,94 @@ import { provisionGitHubProvider } from "../examples/github-capability-provider/
 
 import { prepareLocalBundleEnvironment } from "./local-feishu-common.js";
 
-export const LOCAL_GITHUB_REQUIRED_ENVIRONMENT = Object.freeze([
-  "GITHUB_APP_ID",
-  "GITHUB_APP_INSTALLATION_ID",
-  "GITHUB_APP_PRIVATE_KEY",
-  "GITHUB_PROVIDER_ACCESS_TOKEN",
-  "WORK_FABRIC_GITHUB_CURSOR_SECRET",
-  "WORK_FABRIC_ADMIN_TOKEN",
+const DECLARED_ENVIRONMENT = /^\$\{([A-Z_][A-Z0-9_]*)\}$/u;
+const FORBIDDEN_PROVIDER_SECRET = /^(?:WORK_FABRIC_ADMIN_TOKEN|WORK_FABRIC_ENV_FILE|FEISHU_|AGENTLY_|MODEL_)/u;
+const PROCESS_ENVIRONMENT_ALLOWLIST = Object.freeze([
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "SystemRoot",
+  "COMSPEC",
+  "PATHEXT",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "TZ",
+  "NODE_OPTIONS",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "HTTP_PROXY",
+  "HTTPS_PROXY",
+  "NO_PROXY",
+  "http_proxy",
+  "https_proxy",
+  "no_proxy",
 ] as const);
+const PROVIDER_CONFIGURATION_ENVIRONMENT = Object.freeze([
+  "WORK_FABRIC_GITHUB_PROVIDER_CONFIG",
+  "WORK_FABRIC_GITHUB_PROVIDER_CONFIG_APPLICATION",
+] as const);
+
+function referencedEnvironment(value: string, path: string): string {
+  const name = DECLARED_ENVIRONMENT.exec(value)?.[1];
+  if (name === undefined) {
+    throw new Error(`${path} must reference a GitHub Provider-owned environment variable`);
+  }
+  return providerOwnedEnvironment(name, path);
+}
+
+function providerOwnedEnvironment(name: string, path: string): string {
+  if (FORBIDDEN_PROVIDER_SECRET.test(name)) {
+    throw new Error(`${path} must reference a GitHub Provider-owned environment variable`);
+  }
+  return name;
+}
+
+async function requiredGitHubProviderEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): Promise<readonly string[]> {
+  const loaded = await loadGitHubProviderConfiguration({ environment });
+  return Object.freeze([
+    providerOwnedEnvironment(
+      loaded.provider.authentication.app_id_environment,
+      "provider.authentication.app_id_environment",
+    ),
+    providerOwnedEnvironment(
+      loaded.provider.authentication.installation_id_environment,
+      "provider.authentication.installation_id_environment",
+    ),
+    providerOwnedEnvironment(
+      loaded.provider.authentication.private_key_environment,
+      "provider.authentication.private_key_environment",
+    ),
+    referencedEnvironment(
+      loaded.provider.cursor_signing_key,
+      "provider.cursor_signing_key",
+    ),
+    referencedEnvironment(
+      loaded.service.work_fabric.access_token,
+      "service.work_fabric.access_token",
+    ),
+  ]);
+}
+
+function requireEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+  names: readonly string[],
+): void {
+  const missing = [...new Set(names)].filter((name) =>
+    environment[name] === undefined || environment[name]!.length === 0
+  );
+  if (missing.length > 0) {
+    throw new Error(`Missing environment variables: ${missing.join(", ")}`);
+  }
+}
 
 export async function prepareLocalGitHubProviderEnvironment(
   input: Readonly<Record<string, string | undefined>> = process.env,
@@ -21,14 +101,35 @@ export async function prepareLocalGitHubProviderEnvironment(
     required_environment: [],
     resolve_feishu_deployment_metadata: false,
   });
-  const missing = LOCAL_GITHUB_REQUIRED_ENVIRONMENT.filter(
-    (name) => environment[name] === undefined || environment[name]!.length === 0,
-  );
-  if (missing.length > 0) {
-    throw new Error(`Missing environment variables: ${missing.join(", ")}`);
-  }
-  await loadGitHubProviderConfiguration({ environment });
+  const providerEnvironment = await requiredGitHubProviderEnvironment(environment);
+  requireEnvironment(environment, [
+    ...providerEnvironment,
+    "WORK_FABRIC_ADMIN_TOKEN",
+  ]);
   return environment;
+}
+
+/**
+ * Builds the complete environment boundary for the standalone Provider.
+ * Environment-file indirection and every non-Provider secret are intentionally
+ * excluded after the administrative provisioning step.
+ */
+export async function createGitHubProviderChildEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): Promise<Readonly<Record<string, string>>> {
+  const dynamicNames = await requiredGitHubProviderEnvironment(environment);
+  requireEnvironment(environment, dynamicNames);
+  const allowed = new Set<string>([
+    ...PROCESS_ENVIRONMENT_ALLOWLIST,
+    ...PROVIDER_CONFIGURATION_ENVIRONMENT,
+    ...dynamicNames,
+  ]);
+  const child: Record<string, string> = {};
+  for (const name of allowed) {
+    const value = environment[name];
+    if (value !== undefined) child[name] = value;
+  }
+  return Object.freeze(child);
 }
 
 export interface LocalGitHubProviderPorts {
@@ -63,10 +164,7 @@ export async function runLocalGitHubProvider(
 ): Promise<void> {
   const environment = await ports.prepare(input);
   await ports.provision(environment);
-  const {
-    WORK_FABRIC_ADMIN_TOKEN: _administrativeToken,
-    ...providerEnvironment
-  } = environment;
+  const providerEnvironment = await createGitHubProviderChildEnvironment(environment);
   await ports.start(providerEnvironment);
 }
 
