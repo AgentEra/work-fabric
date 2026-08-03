@@ -13,11 +13,23 @@ describe("GitHub provider errors", () => {
     expect(error).toMatchObject({
       code: "github_rate_limited",
       retryable: false,
-      retry_at: "2026-08-02T00:00:00.000Z",
       request_id: "request-123",
     });
+    expect(error).not.toHaveProperty("retry_at");
     expect(JSON.stringify(error)).toBe(
-      '{"code":"github_rate_limited","retryable":false,"retry_at":"2026-08-02T00:00:00.000Z","request_id":"request-123"}',
+      '{"code":"github_rate_limited","retryable":false,"request_id":"request-123"}',
     );
+  });
+
+  it("keeps retry timing only for retryable failures", () => {
+    const error = new GitHubProviderError("github_rate_limited", {
+      retryable: true,
+      retry_at: "2026-08-02T00:00:00.000Z",
+    });
+
+    expect(error).toMatchObject({
+      retryable: true,
+      retry_at: "2026-08-02T00:00:00.000Z",
+    });
   });
 });

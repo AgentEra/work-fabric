@@ -109,7 +109,6 @@ describe("GitHubCapabilityExecutor", () => {
       code: "github_rate_limited",
       message: "github_rate_limited",
       retryable: false,
-      retry_after: "2026-08-02T10:02:00.000Z",
     });
     expect(JSON.stringify(result)).not.toMatch(/secret|private|request-1/);
   });

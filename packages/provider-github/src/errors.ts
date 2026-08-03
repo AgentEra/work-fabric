@@ -18,8 +18,8 @@ export interface GitHubProviderErrorMetadata {
 /** A stable, safe diagnostic for callers of the GitHub capability provider. */
 export class GitHubProviderError extends Error {
   readonly retryable: boolean;
-  readonly retry_at?: string;
-  readonly request_id?: string;
+  declare readonly retry_at?: string;
+  declare readonly request_id?: string;
 
   constructor(
     readonly code: GitHubProviderErrorCode,
@@ -28,7 +28,7 @@ export class GitHubProviderError extends Error {
     super(code);
     Object.defineProperty(this, "name", { value: "GitHubProviderError" });
     this.retryable = metadata.retryable ?? false;
-    if (metadata.retry_at !== undefined) this.retry_at = metadata.retry_at;
+    if (this.retryable && metadata.retry_at !== undefined) this.retry_at = metadata.retry_at;
     if (metadata.request_id !== undefined) this.request_id = metadata.request_id;
   }
 }

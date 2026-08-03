@@ -54,7 +54,7 @@ function failed(
     code,
     message: code,
     retryable,
-    ...(retryAfter === undefined ? {} : { retry_after: retryAfter }),
+    ...(!retryable || retryAfter === undefined ? {} : { retry_after: retryAfter }),
   };
 }
 
