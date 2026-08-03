@@ -8,12 +8,14 @@ export interface GitHubCursorState {
   readonly page: number;
 }
 
-export interface GitHubCommentMergeCursorSourceState {
+export interface GitHubPagedSourceCursorState {
   readonly page: number;
   readonly offset: number;
   readonly next_page: number | null;
   readonly complete: boolean;
 }
+
+export type GitHubCommentMergeCursorSourceState = GitHubPagedSourceCursorState;
 
 export interface GitHubCommentMergeCursorState {
   readonly version: 1;
@@ -21,6 +23,14 @@ export interface GitHubCommentMergeCursorState {
   readonly scope_hash: `sha256:${string}`;
   readonly issue: GitHubCommentMergeCursorSourceState;
   readonly review: GitHubCommentMergeCursorSourceState;
+}
+
+export interface GitHubPullRequestAggregateCursorState {
+  readonly version: 1;
+  readonly kind: "pull_request_aggregate";
+  readonly scope_hash: `sha256:${string}`;
+  readonly repository_index: number;
+  readonly source: GitHubPagedSourceCursorState;
 }
 
 export interface GitHubCursorCodec {
@@ -31,6 +41,11 @@ export interface GitHubCursorCodec {
     cursor: string,
     scopeHash: `sha256:${string}`,
   ): GitHubCommentMergeCursorState;
+  encodePullRequestAggregate(state: GitHubPullRequestAggregateCursorState): string;
+  decodePullRequestAggregate(
+    cursor: string,
+    scopeHash: `sha256:${string}`,
+  ): GitHubPullRequestAggregateCursorState;
 }
 
 export interface HmacGitHubCursorCodecOptions {
@@ -125,6 +140,30 @@ function normalizeMerge(value: unknown): GitHubCommentMergeCursorState {
   });
 }
 
+function normalizePullRequestAggregate(value: unknown): GitHubPullRequestAggregateCursorState {
+  if (
+    value === null || typeof value !== "object" || Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  ) invalid();
+  const source = value as Record<string, unknown>;
+  const fields = ["version", "kind", "scope_hash", "repository_index", "source"];
+  if (
+    Object.keys(source).length !== fields.length ||
+    Object.keys(source).some((field) => !fields.includes(field)) ||
+    source.version !== 1 || source.kind !== "pull_request_aggregate" ||
+    typeof source.repository_index !== "number" ||
+    !Number.isSafeInteger(source.repository_index) ||
+    source.repository_index < 0 || source.repository_index > 100
+  ) invalid();
+  return Object.freeze({
+    version: 1,
+    kind: "pull_request_aggregate",
+    scope_hash: scopeHash(source.scope_hash),
+    repository_index: source.repository_index,
+    source: mergeSource(source.source),
+  });
+}
+
 function canonical(state: GitHubCursorState): string {
   return JSON.stringify({
     version: state.version,
@@ -149,6 +188,21 @@ function canonicalMerge(state: GitHubCommentMergeCursorState): string {
       offset: state.review.offset,
       next_page: state.review.next_page,
       complete: state.review.complete,
+    },
+  });
+}
+
+function canonicalPullRequestAggregate(state: GitHubPullRequestAggregateCursorState): string {
+  return JSON.stringify({
+    version: state.version,
+    kind: state.kind,
+    scope_hash: state.scope_hash,
+    repository_index: state.repository_index,
+    source: {
+      page: state.source.page,
+      offset: state.source.offset,
+      next_page: state.source.next_page,
+      complete: state.source.complete,
     },
   });
 }
@@ -185,6 +239,20 @@ export class HmacGitHubCursorCodec implements GitHubCursorCodec {
     expectedScopeHash: `sha256:${string}`,
   ): GitHubCommentMergeCursorState {
     const state = normalizeMerge(this.verify(cursor));
+    if (state.scope_hash !== scopeHash(expectedScopeHash)) invalid();
+    return state;
+  }
+
+  encodePullRequestAggregate(value: GitHubPullRequestAggregateCursorState): string {
+    const state = normalizePullRequestAggregate(value);
+    return this.sign(canonicalPullRequestAggregate(state));
+  }
+
+  decodePullRequestAggregate(
+    cursor: string,
+    expectedScopeHash: `sha256:${string}`,
+  ): GitHubPullRequestAggregateCursorState {
+    const state = normalizePullRequestAggregate(this.verify(cursor));
     if (state.scope_hash !== scopeHash(expectedScopeHash)) invalid();
     return state;
   }

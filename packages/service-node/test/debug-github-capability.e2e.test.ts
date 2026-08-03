@@ -109,13 +109,12 @@ function fakeGitHubApi() {
     getIdentity: unused,
     listRepositories: unused,
     getRepository: unused,
-    listPullRequests: unused,
-    searchPullRequests: async (input: GitHubApiPullRequestListInput) => {
+    listPullRequests: async (input: GitHubApiPullRequestListInput) => {
       const owner = "owner" in input.target
         ? input.target.owner
         : "repositories" in input.target
           ? input.target.repositories[0]?.owner
-          : undefined;
+          : input.target.repository.owner;
       if (owner === undefined) throw new Error("expected owner target");
       calls.push({
         capability_id: "github.pull_request.list",
@@ -124,6 +123,7 @@ function fakeGitHubApi() {
       });
       return { items };
     },
+    searchPullRequests: unused,
     getPullRequest: unused,
     listReviews: unused,
     listIssueComments: unused,

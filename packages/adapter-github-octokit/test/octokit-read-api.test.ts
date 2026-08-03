@@ -132,6 +132,7 @@ function response(route: string): { data: unknown; headers: Record<string, strin
     case "GET /repos/{owner}/{repo}/commits/{ref}/status":
       return { data: {
         state: "success",
+        total_count: 1,
         statuses: [{
           context: "legacy/status",
           state: "success",
@@ -315,7 +316,7 @@ describe("OctokitGitHubReadApi", () => {
     });
   });
 
-  it("follows only the bounded search page with PR detail reads", async () => {
+  it("groups a bounded search page by repository without per-PR detail reads", async () => {
     const recorded: RecordedRequest[] = [];
     const api = new OctokitGitHubReadApi(recordingClient(recorded, (route) => {
       if (route === "GET /search/issues") return {
@@ -329,9 +330,8 @@ describe("OctokitGitHubReadApi", () => {
         },
         headers: { link: '<https://api.github.com/search/issues?q=x&page=2>; rel="next"' },
       };
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
-        const pullNumber = (recorded.at(-1)?.parameters.pull_number as number | undefined) ?? 7;
-        return { data: basePullRequest(pullNumber), headers: {} };
+      if (route === "GET /repos/{owner}/{repo}/pulls") {
+        return { data: [basePullRequest(7), basePullRequest(8)], headers: {} };
       }
       return response(route);
     }));
@@ -352,13 +352,98 @@ describe("OctokitGitHubReadApi", () => {
     });
     expect(recorded.map((item) => item.route)).toEqual([
       "GET /search/issues",
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+      "GET /repos/{owner}/{repo}/pulls",
     ]);
     expect(recorded[0]?.parameters).toMatchObject({
       per_page: 2,
       page: 1,
       q: 'is:pr org:AgentEra is:open label:"ready to merge" draft:false base:"release/1" updated:>=2026-08-01T00:00:00Z',
+    });
+  });
+
+  it("rejects incomplete GitHub search results instead of claiming a complete page", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /search/issues"
+        ? { data: { total_count: 1, incomplete_results: true, items: [] }, headers: {} }
+        : response(route)
+    ));
+
+    await expect(api.searchPullRequests({
+      target: { owner: "AgentEra" },
+      page_size: 10,
+    }, signal)).rejects.toMatchObject({ code: "github_response_invalid" });
+  });
+
+  it("compares updated_since as parsed RFC3339 instants", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /repos/{owner}/{repo}/pulls"
+        ? {
+            data: [
+              { ...basePullRequest(7), updated_at: "2026-08-01T10:00:00Z" },
+              { ...basePullRequest(8), updated_at: "2026-08-01T09:59:59Z" },
+            ],
+            headers: {},
+          }
+        : response(route)
+    ));
+
+    await expect(api.listPullRequests({
+      target: { repository },
+      updated_since: "2026-08-01T12:00:00+02:00",
+      page_size: 10,
+    }, signal)).resolves.toMatchObject({ items: [{ number: 7 }] });
+  });
+
+  it("preserves upstream continuation when a repository PR page filters to zero matches", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /repos/{owner}/{repo}/pulls"
+        ? {
+            data: [{ ...basePullRequest(), user: { login: "someone-else" } }],
+            headers: { link: '<https://api.github.com/repos/AgentEra/work-fabric/pulls?page=2>; rel="next"' },
+          }
+        : response(route)
+    ));
+
+    await expect(api.listPullRequests({
+      target: { repository },
+      author: "octo",
+      page_size: 10,
+    }, signal)).resolves.toEqual({ items: [], next_cursor: "2" });
+  });
+
+  it.each([
+    ["check runs", { total_count: 2, check_runs: [] }],
+    ["statuses", { state: "success", total_count: 2, statuses: [] }],
+  ])("rejects partial %s aggregates", async (kind, partial) => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) => {
+      if (kind === "check runs" && route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
+        return { data: partial, headers: {} };
+      }
+      if (kind === "statuses" && route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
+        return { data: partial, headers: {} };
+      }
+      return response(route);
+    }));
+
+    await expect(api.getChecks(repository, "abc123", signal)).rejects.toMatchObject({
+      code: "github_response_invalid",
+    });
+  });
+
+  it("rejects check aggregates with an upstream continuation even when returned counts match", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) => {
+      const result = response(route);
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
+        return {
+          ...result,
+          headers: { link: '<https://api.github.com/repos/AgentEra/work-fabric/commits/abc/status?page=2>; rel="next"' },
+        };
+      }
+      return result;
+    }));
+
+    await expect(api.getChecks(repository, "abc123", signal)).rejects.toMatchObject({
+      code: "github_response_invalid",
     });
   });
 
@@ -519,12 +604,12 @@ describe("OctokitGitHubReadApi", () => {
         },
         headers: {},
       };
-      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+      if (route === "GET /repos/{owner}/{repo}/pulls") {
         return {
-          data: {
+          data: [{
             ...basePullRequest(),
             html_url: "https://github.com/AgentEra/work.fabric/pull/7",
-          },
+          }],
           headers: {},
         };
       }
@@ -540,7 +625,7 @@ describe("OctokitGitHubReadApi", () => {
     });
     expect(recorded.map((item) => item.route)).toEqual([
       "GET /search/issues",
-      "GET /repos/{owner}/{repo}/pulls/{pull_number}",
+      "GET /repos/{owner}/{repo}/pulls",
     ]);
     expect(recorded[1]?.parameters).toMatchObject({ owner: "AgentEra", repo: "work.fabric" });
   });

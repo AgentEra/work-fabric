@@ -562,6 +562,27 @@ function searchRepository(value: unknown, target: GitHubApiPullRequestListInput[
   return result;
 }
 
+function sameRepositoryKey(value: GitHubRepositoryRef): string {
+  return `${value.owner.toLowerCase()}\u0000${value.name.toLowerCase()}`;
+}
+
+function filteredPullRequests(
+  values: readonly GitHubPullRequestRecord[],
+  input: GitHubApiPullRequestListInput,
+): readonly GitHubPullRequestRecord[] {
+  let result = values;
+  if (input.author !== undefined) result = result.filter((item) => item.author === input.author);
+  if (input.reviewer !== undefined) result = result.filter((item) => item.requested_reviewers.includes(input.reviewer!));
+  if (input.assignee !== undefined) result = result.filter((item) => item.assignees.includes(input.assignee!));
+  if (input.labels !== undefined) result = result.filter((item) => input.labels!.every((label) => item.labels.includes(label)));
+  if (input.draft !== undefined) result = result.filter((item) => item.draft === input.draft);
+  if (input.updated_since !== undefined) {
+    const threshold = Date.parse(timestamp(input.updated_since));
+    result = result.filter((item) => Date.parse(item.updated_at) >= threshold);
+  }
+  return result;
+}
+
 function decodedUpstreamSegment(value: string | undefined): string {
   if (value === undefined) invalidResponse();
   let decoded: string;
@@ -661,13 +682,10 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       page: pageNumber(input),
       ...requestOptions(signal),
     }, "github_repository_not_found");
-    let values = items(result.data).map((item) => pullRequest(item, repositoryValue, false));
-    if (input.author !== undefined) values = values.filter((item) => item.author === input.author);
-    if (input.reviewer !== undefined) values = values.filter((item) => item.requested_reviewers.includes(input.reviewer!));
-    if (input.assignee !== undefined) values = values.filter((item) => item.assignees.includes(input.assignee!));
-    if (input.labels !== undefined) values = values.filter((item) => input.labels!.every((label) => item.labels.includes(label)));
-    if (input.draft !== undefined) values = values.filter((item) => item.draft === input.draft);
-    if (input.updated_since !== undefined) values = values.filter((item) => item.updated_at >= input.updated_since!);
+    const values = filteredPullRequests(
+      items(result.data).map((item) => pullRequest(item, repositoryValue, false)),
+      input,
+    );
     return apiPage(values, result.headers);
   }
 
@@ -681,18 +699,46 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       ...requestOptions(signal),
     });
     const record = source(result.data);
+    if (boolean(required(record, "incomplete_results"))) invalidResponse();
     const searchItems = items(required(record, "items"));
     if (searchItems.length > input.page_size) invalidResponse();
-    const detailInputs = searchItems.map((item) => {
+    const searchInputs = searchItems.map((item) => {
       const searchItem = source(item);
       return {
         repository: searchRepository(required(searchItem, "repository_url"), input.target),
         number: integer(required(searchItem, "number"), 1),
       };
     });
-    const values = await Promise.all(detailInputs.map(({ repository, number }) =>
-      this.getPullRequest(repository, number, signal)
-    ));
+    const repositories = new Map<string, GitHubRepositoryRef>();
+    for (const item of searchInputs) repositories.set(sameRepositoryKey(item.repository), item.repository);
+    const found = new Map<string, GitHubPullRequestRecord>();
+    for (const repository of [...repositories.values()].sort((left, right) =>
+      sameRepositoryKey(left).localeCompare(sameRepositoryKey(right))
+    )) {
+      const wanted = new Set(searchInputs
+        .filter((item) => sameRepository(item.repository, repository))
+        .map((item) => item.number));
+      let cursor: string | undefined;
+      for (let scanned = 0; scanned < 10_000 && wanted.size > 0; scanned += 1) {
+        const page = await this.listPullRequests({
+          target: { repository },
+          state: "all",
+          page_size: MAX_ITEMS,
+          ...(cursor === undefined ? {} : { cursor }),
+        }, signal);
+        for (const item of page.items) {
+          if (wanted.delete(item.number)) found.set(`${sameRepositoryKey(repository)}\u0000${item.number}`, item);
+        }
+        if (page.next_cursor === undefined) break;
+        cursor = page.next_cursor;
+      }
+      if (wanted.size > 0) invalidResponse();
+    }
+    const values = searchInputs.map(({ repository, number }) => {
+      const item = found.get(`${sameRepositoryKey(repository)}\u0000${number}`);
+      if (item === undefined) invalidResponse();
+      return item;
+    });
     return apiPage(values, result.headers);
   }
 
@@ -751,9 +797,17 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
     const statusesRecord = source(statusesResult.data);
     const checksRecord = source(checksResult.data);
     const statusState = text(required(statusesRecord, "state"), 100);
+    const statuses = items(required(statusesRecord, "statuses"));
+    const checkRuns = items(required(checksRecord, "check_runs"));
+    if (
+      integer(required(statusesRecord, "total_count"), 0) !== statuses.length ||
+      integer(required(checksRecord, "total_count"), 0) !== checkRuns.length ||
+      nextCursor(statusesResult.headers) !== undefined ||
+      nextCursor(checksResult.headers) !== undefined
+    ) invalidResponse();
     const checks = [
-      ...items(required(statusesRecord, "statuses")).map(legacyStatus),
-      ...items(required(checksRecord, "check_runs")).map((item) => checkRun(item, repository)),
+      ...statuses.map(legacyStatus),
+      ...checkRuns.map((item) => checkRun(item, repository)),
     ];
     if (checks.length > MAX_ITEMS) invalidResponse();
     return {

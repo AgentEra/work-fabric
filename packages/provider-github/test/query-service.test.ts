@@ -170,10 +170,13 @@ const context = {
   signal: new AbortController().signal,
 } as const;
 
-function service(readApi: GitHubReadApi): GitHubQueryService {
+function service(
+  readApi: GitHubReadApi,
+  policyEvaluator: GitHubPolicyEvaluator = policy,
+): GitHubQueryService {
   return new GitHubQueryService({
     api: readApi,
-    policy,
+    policy: policyEvaluator,
     cursor,
     api_version: "2022-11-28",
     now: () => "2026-08-02T10:00:00.000Z",
@@ -249,12 +252,164 @@ describe("GitHubQueryService", () => {
 
     expect(observedRef).toBe("abc123immutable");
   });
+
+  it("scans filtered empty upstream PR pages and resumes later matches without duplication", async () => {
+    const later = { ...pullRequest, number: 43, title: "Later match" };
+    const calls: Array<{ readonly name: string; readonly cursor: string | undefined }> = [];
+    const query = service(api({
+      listPullRequests: async (input) => {
+        if (!("repository" in input.target)) throw new Error("expected repository target");
+        calls.push({ name: input.target.repository.name, cursor: input.cursor });
+        if (input.cursor === undefined) return page([], "2");
+        if (input.cursor === "2") return page([pullRequest], "3");
+        if (input.cursor === "3") return page([later]);
+        throw new Error("unexpected page");
+      },
+      searchPullRequests: async () => {
+        throw new Error("search must not be used");
+      },
+    }));
+
+    const first = await query.execute("github.pull_request.list", {
+      target: { repository },
+      author: "octocat",
+      page_size: 1,
+    }, context);
+    expect(first).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "truncated", items: [{ number: 42 }] },
+    });
+    if (first.outcome !== "succeeded") throw new Error("expected first PR page");
+    const next = (first.data.evidence as { readonly next_cursor: string }).next_cursor;
+    expect(next).not.toBe("3");
+
+    const second = await query.execute("github.pull_request.list", {
+      target: { repository },
+      author: "octocat",
+      page_size: 1,
+      cursor: next,
+    }, context);
+    expect(second).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "complete", items: [{ number: 43 }] },
+    });
+    expect(calls).toEqual([
+      { name: "work-fabric", cursor: undefined },
+      { name: "work-fabric", cursor: "2" },
+      { name: "work-fabric", cursor: "2" },
+      { name: "work-fabric", cursor: "3" },
+    ]);
+  });
+
+  it("aggregates explicit repositories in deterministic order without search or per-PR detail calls", async () => {
+    const alpha = { owner: "AgentEra", name: "alpha" } as const;
+    const beta = { owner: "AgentEra", name: "beta" } as const;
+    const alphaPull = { ...pullRequest, repository: alpha, number: 1, title: "alpha" };
+    const betaPull = { ...pullRequest, repository: beta, number: 2, title: "beta" };
+    const calls: string[] = [];
+    const aggregatePolicy = new GitHubPolicyEvaluator({
+      allowed_owners: ["AgentEra"],
+      allowed_repositories: [alpha, beta],
+      maximum_page_size: 50,
+      maximum_aggregate_repositories: 2,
+    });
+    const query = service(api({
+      listPullRequests: async (input) => {
+        if (!("repository" in input.target)) throw new Error("expected repository target");
+        calls.push(input.target.repository.name);
+        return page<GitHubPullRequestRecord>(
+          input.target.repository.name === "alpha" ? [alphaPull] : [betaPull],
+        );
+      },
+      searchPullRequests: async () => {
+        throw new Error("search must not be used");
+      },
+      getPullRequest: async () => {
+        throw new Error("detail must not be used");
+      },
+    }), aggregatePolicy);
+
+    const result = await query.execute("github.pull_request.list", {
+      target: { repositories: [beta, alpha] },
+      page_size: 10,
+    }, context);
+    expect(result).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "complete", items: [{ title: "alpha" }, { title: "beta" }] },
+    });
+    expect(calls).toEqual(["alpha", "beta"]);
+  });
+
+  it("continues at the next deterministic repository without refetching prior PRs", async () => {
+    const alpha = { owner: "AgentEra", name: "alpha" } as const;
+    const beta = { owner: "AgentEra", name: "beta" } as const;
+    const aggregatePolicy = new GitHubPolicyEvaluator({
+      allowed_owners: ["AgentEra"],
+      allowed_repositories: [alpha, beta],
+      maximum_page_size: 50,
+      maximum_aggregate_repositories: 2,
+    });
+    const calls: string[] = [];
+    const query = service(api({
+      listPullRequests: async (input) => {
+        if (!("repository" in input.target)) throw new Error("expected repository target");
+        calls.push(input.target.repository.name);
+        return input.target.repository.name === "beta"
+          ? page([{ ...pullRequest, repository: input.target.repository }], "2")
+          : page([{ ...pullRequest, repository: input.target.repository }]);
+      },
+    }), aggregatePolicy);
+
+    const first = await query.execute("github.pull_request.list", {
+      target: { repositories: [beta, alpha] },
+      page_size: 1,
+    }, context);
+    if (first.outcome !== "succeeded") throw new Error("expected first aggregate page");
+    const next = (first.data.evidence as { readonly next_cursor: string }).next_cursor;
+    expect(first.data).toMatchObject({ state: "truncated", items: [{ repository: alpha }] });
+
+    const second = await query.execute("github.pull_request.list", {
+      target: { repositories: [beta, alpha] },
+      page_size: 1,
+      cursor: next,
+    }, context);
+    expect(second).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "truncated", items: [{ repository: beta }] },
+    });
+    expect(calls).toEqual(["alpha", "beta"]);
+  });
+
+  it("rejects unrestricted owner aggregation above the configured repository ceiling before PR reads", async () => {
+    const alphaRecord = { ...repositoryRecord, repository: { owner: "AgentEra", name: "alpha" } };
+    const betaRecord = { ...repositoryRecord, repository: { owner: "AgentEra", name: "beta" } };
+    let pullCalls = 0;
+    const ownerPolicy = new GitHubPolicyEvaluator({
+      allowed_owners: ["AgentEra"],
+      allowed_repositories: [],
+      maximum_page_size: 50,
+      maximum_aggregate_repositories: 1,
+    });
+    const query = service(api({
+      listRepositories: async () => page([betaRecord, alphaRecord]),
+      listPullRequests: async () => {
+        pullCalls += 1;
+        return page([]);
+      },
+    }), ownerPolicy);
+
+    await expect(query.execute("github.pull_request.list", {
+      target: { owner: "AgentEra" },
+      page_size: 10,
+    }, context)).rejects.toThrowError("github_forbidden");
+    expect(pullCalls).toBe(0);
+  });
   it.each([
     [[], "empty", true],
     [[pullRequest], "complete", true],
   ] as const)("distinguishes successful list results", async (items, state, complete) => {
     const result = await service(api({
-      searchPullRequests: async () => page(items),
+      listPullRequests: async () => page(items),
     })).execute("github.pull_request.list", {
       target: { owner: "AgentEra" },
       state: "open",

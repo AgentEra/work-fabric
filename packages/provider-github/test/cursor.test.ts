@@ -53,4 +53,24 @@ describe("HmacGitHubCursorCodec", () => {
     expect(() => codec.decode(cursor, "sha256:comments"))
       .toThrowError("github_invalid_request");
   });
+
+  it("round-trips a scope-bound pull-request aggregate continuation", () => {
+    const codec = new HmacGitHubCursorCodec({ key: Buffer.alloc(32, 7) });
+    const state = {
+      version: 1 as const,
+      kind: "pull_request_aggregate" as const,
+      scope_hash: "sha256:pulls" as const,
+      repository_index: 2,
+      source: { page: 3, offset: 1, next_page: 4, complete: false },
+    };
+    const cursor = codec.encodePullRequestAggregate(state);
+
+    expect(codec.decodePullRequestAggregate(cursor, "sha256:pulls")).toEqual(state);
+    expect(() => codec.decodePullRequestAggregate(`${cursor}x`, "sha256:pulls"))
+      .toThrowError("github_invalid_request");
+    expect(() => codec.decodePullRequestAggregate(cursor, "sha256:other"))
+      .toThrowError("github_invalid_request");
+    expect(() => codec.decode(cursor, "sha256:pulls"))
+      .toThrowError("github_invalid_request");
+  });
 });

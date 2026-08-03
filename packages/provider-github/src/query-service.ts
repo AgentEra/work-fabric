@@ -11,6 +11,7 @@ import type {
   GitHubApiPullRequestPageInput,
   GitHubCommentRecord,
   GitHubEvidenceMeta,
+  GitHubPullRequestRecord,
   GitHubReadApi,
   GitHubRepositoryRef,
 } from "./contracts.js";
@@ -18,6 +19,7 @@ import type {
   GitHubCommentMergeCursorSourceState,
   GitHubCommentMergeCursorState,
   GitHubCursorCodec,
+  GitHubPullRequestAggregateCursorState,
 } from "./cursor.js";
 import { GITHUB_READ_CAPABILITY_IDS } from "./declarations.js";
 import { GitHubProviderError } from "./errors.js";
@@ -138,6 +140,168 @@ function nextPage(value: string, currentPage: number): number {
   const page = Number(value);
   if (page !== currentPage + 1) invalidResponse();
   return page;
+}
+
+function compareRepositories(left: GitHubRepositoryRef, right: GitHubRepositoryRef): number {
+  return left.owner.toLowerCase().localeCompare(right.owner.toLowerCase()) ||
+    left.name.toLowerCase().localeCompare(right.name.toLowerCase()) ||
+    left.owner.localeCompare(right.owner) || left.name.localeCompare(right.name);
+}
+
+function sameRepository(left: GitHubRepositoryRef, right: GitHubRepositoryRef): boolean {
+  return left.owner.toLowerCase() === right.owner.toLowerCase() &&
+    left.name.toLowerCase() === right.name.toLowerCase();
+}
+
+async function pullRequestRepositories(
+  options: GitHubQueryServiceOptions,
+  parsed: GitHubParsedCapabilityInput,
+  signal: AbortSignal,
+): Promise<readonly GitHubRepositoryRef[]> {
+  const target = parsed.input.target as GitHubApiPullRequestListInput["target"];
+  if ("repository" in target) return [target.repository];
+  if ("repositories" in target) {
+    const unique = new Map<string, GitHubRepositoryRef>();
+    for (const repository of target.repositories) {
+      unique.set(`${repository.owner.toLowerCase()}\u0000${repository.name.toLowerCase()}`, repository);
+    }
+    return [...unique.values()].sort(compareRepositories);
+  }
+  const discovered = new Map<string, GitHubRepositoryRef>();
+  let input: GitHubApiPageInput = { page_size: 100 };
+  for (let scanned = 0; scanned < 10_000; scanned += 1) {
+    const page = await options.api.listRepositories(input, signal);
+    if (!Array.isArray(page.items) || page.items.length > 100) invalidResponse();
+    if (page.items.length === 0 && page.next_cursor !== undefined) invalidResponse();
+    for (const item of page.items) {
+      if (
+        item.repository.owner.toLowerCase() === target.owner.toLowerCase() &&
+        options.policy.isRepositoryAuthorized(item.repository)
+      ) {
+        discovered.set(
+          `${item.repository.owner.toLowerCase()}\u0000${item.repository.name.toLowerCase()}`,
+          item.repository,
+        );
+        if (discovered.size > Math.min(options.policy.maximum_aggregate_repositories, 100)) {
+          throw new GitHubProviderError("github_forbidden");
+        }
+      }
+    }
+    if (page.next_cursor === undefined) return [...discovered.values()].sort(compareRepositories);
+    input = {
+      page_size: 100,
+      cursor: String(nextPage(page.next_cursor, Number(input.cursor ?? "1"))),
+    };
+  }
+  return invalidResponse();
+}
+
+function normalizedPullRequestPage(
+  page: GitHubApiPage<GitHubPullRequestRecord>,
+  pageSize: number,
+  currentPage: number,
+  repository: GitHubRepositoryRef,
+): { readonly items: readonly GitHubPullRequestRecord[]; readonly next_page: number | null } {
+  if (!Array.isArray(page.items) || page.items.length > pageSize) invalidResponse();
+  if (page.items.some((item) => !sameRepository(item.repository, repository))) invalidResponse();
+  return {
+    items: page.items,
+    next_page: page.next_cursor === undefined ? null : nextPage(page.next_cursor, currentPage),
+  };
+}
+
+async function pullRequestAggregateResult(
+  options: GitHubQueryServiceOptions,
+  parsed: GitHubParsedCapabilityInput,
+  context: QueryContext,
+): Promise<CapabilityExecutionResult> {
+  const repositories = await pullRequestRepositories(options, parsed, context.signal);
+  const opaque = parsed.input.cursor;
+  let state: GitHubPullRequestAggregateCursorState = opaque === undefined
+    ? {
+        version: 1,
+        kind: "pull_request_aggregate",
+        scope_hash: parsed.scope_hash,
+        repository_index: 0,
+        source: initialCommentSource(),
+      }
+    : options.cursor.decodePullRequestAggregate(opaque as string, parsed.scope_hash);
+  if (state.repository_index > repositories.length) invalidResponse();
+  const { target: _target, cursor: _cursor, page_size: _pageSize, ...filters } =
+    parsed.input as Record<string, unknown>;
+  const selected: GitHubPullRequestRecord[] = [];
+  let calls = 0;
+  let verifyContinuation = opaque !== undefined && !(
+    state.source.page === 1 && state.source.offset === 0 &&
+    state.source.next_page === null && !state.source.complete
+  );
+  while (state.repository_index < repositories.length && selected.length < parsed.page_size) {
+    if (calls >= 10_000) invalidResponse();
+    const repository = repositories[state.repository_index];
+    if (repository === undefined) invalidResponse();
+    const page = normalizedPullRequestPage(
+      await options.api.listPullRequests({
+        ...filters,
+        target: { repository },
+        page_size: parsed.page_size,
+        ...(state.source.page === 1 ? {} : { cursor: String(state.source.page) }),
+      } as unknown as GitHubApiPullRequestListInput, context.signal),
+      parsed.page_size,
+      state.source.page,
+      repository,
+    );
+    calls += 1;
+    if (verifyContinuation && page.next_page !== state.source.next_page) invalidResponse();
+    verifyContinuation = false;
+    if (state.source.offset > page.items.length) invalidResponse();
+    const available = page.items.slice(state.source.offset);
+    const take = Math.min(parsed.page_size - selected.length, available.length);
+    selected.push(...available.slice(0, take));
+    const offset = state.source.offset + take;
+    if (selected.length === parsed.page_size) {
+      if (offset < page.items.length || page.next_page !== null) {
+        state = { ...state, source: {
+          page: state.source.page,
+          offset,
+          next_page: page.next_page,
+          complete: false,
+        } };
+      } else if (state.repository_index + 1 < repositories.length) {
+        state = { ...state, repository_index: state.repository_index + 1, source: initialCommentSource() };
+      } else {
+        state = { ...state, repository_index: repositories.length, source: {
+          page: state.source.page, offset: 0, next_page: null, complete: true,
+        } };
+      }
+      break;
+    }
+    if (offset !== page.items.length) invalidResponse();
+    if (page.next_page !== null) {
+      state = { ...state, source: {
+        page: page.next_page, offset: 0, next_page: null, complete: false,
+      } };
+    } else {
+      state = state.repository_index + 1 < repositories.length
+        ? { ...state, repository_index: state.repository_index + 1, source: initialCommentSource() }
+        : { ...state, repository_index: repositories.length, source: {
+            page: state.source.page, offset: 0, next_page: null, complete: true,
+          } };
+    }
+  }
+  const complete = state.repository_index >= repositories.length;
+  if (selected.length === 0) {
+    if (!complete) invalidResponse();
+    return succeeded({ state: "empty", items: [], evidence: evidence(options, parsed, context, true) });
+  }
+  if (complete) {
+    return succeeded({ state: "complete", items: selected, evidence: evidence(options, parsed, context, true) });
+  }
+  const nextCursor = options.cursor.encodePullRequestAggregate(state);
+  return succeeded({
+    state: "truncated",
+    items: selected,
+    evidence: evidence(options, parsed, context, false, nextCursor),
+  });
 }
 
 function evidence(
@@ -563,7 +727,8 @@ export class GitHubQueryService {
     );
     const mergeComments = capabilityId === "github.pull_request.comments.list" &&
       normalized.input.kind === "all";
-    const parsed = mergeComments
+    const aggregatePullRequests = capabilityId === "github.pull_request.list";
+    const parsed = mergeComments || aggregatePullRequests
       ? normalized
       : withDecodedCursor(normalized, this.options.cursor);
     let result: CapabilityExecutionResult;
@@ -604,15 +769,7 @@ export class GitHubQueryService {
         );
         break;
       case "github.pull_request.list": {
-        const request = {
-          ...parsed.input,
-          ...apiInput(parsed),
-        } as unknown as GitHubApiPullRequestListInput;
-        const target = request.target;
-        const page = "repository" in target
-          ? await this.options.api.listPullRequests(request, context.signal)
-          : await this.options.api.searchPullRequests(request, context.signal);
-        result = pageResult(page, this.options, parsed, context);
+        result = await pullRequestAggregateResult(this.options, parsed, context);
         break;
       }
       case "github.pull_request.get":
