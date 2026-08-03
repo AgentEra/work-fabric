@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import logging
@@ -8,7 +9,7 @@ import sys
 from contextlib import redirect_stdout
 from datetime import datetime, timedelta
 from typing import Any, Mapping, Protocol, TextIO, cast
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from .protocol import JsonValue, ProtocolError, WorkerRequest, usv_string, utf16_code_units
 
@@ -717,7 +718,18 @@ def _github_query_scope_matches(
         query_input,
         installation_id_hash,
     )
-    if actual == expected:
+    actual_identities = [_github_scope_identity(cast(str, item)) for item in actual]
+    expected_identities = (
+        None
+        if expected is None
+        else [_github_scope_identity(item) for item in expected]
+    )
+    if (
+        all(identity is not None for identity in actual_identities)
+        and expected_identities is not None
+        and all(identity is not None for identity in expected_identities)
+        and actual_identities == expected_identities
+    ):
         return True
     if capability_id != "github.pull_request.list" or not isinstance(query_input, dict):
         return False
@@ -725,14 +737,229 @@ def _github_query_scope_matches(
     owner = target.get("owner") if isinstance(target, dict) else None
     if not isinstance(owner, str) or not owner:
         return False
-    prefix = f"github://repository/{quote(owner, safe='')}/"
+    normalized_owner = owner.casefold()
+    identities = cast(list[tuple[str, ...] | None], actual_identities)
     # Local policy may expand an authorized owner query into its bounded
-    # repository allow-list. Every resulting scope must remain under that owner.
-    return len(set(cast(list[str], actual))) == len(actual) and all(
-        cast(str, scope).startswith(prefix)
-        and len(cast(str, scope)) > len(prefix)
-        for scope in actual
+    # repository allow-list. Parsed URI identities must all remain under that
+    # same case-insensitive GitHub owner; raw string prefixes are not trusted.
+    return (
+        all(
+            identity is not None
+            and len(identity) == 3
+            and identity[0] == "repository"
+            and identity[1] == normalized_owner
+            for identity in identities
+        )
+        and len(set(cast(list[tuple[str, ...]], identities))) == len(identities)
     )
+
+
+def _github_scope_segment(value: str) -> str | None:
+    if not value or re.search(r"%(?![0-9A-Fa-f]{2})", value):
+        return None
+    try:
+        decoded = unquote(value, encoding="utf-8", errors="strict")
+    except (UnicodeDecodeError, ValueError):
+        return None
+    if (
+        not decoded
+        or len(decoded) > 128
+        or "/" in decoded
+        or "\\" in decoded
+        or any(character.isspace() or ord(character) < 32 for character in decoded)
+    ):
+        return None
+    return decoded
+
+
+def _github_scope_identity(value: str) -> tuple[str, ...] | None:
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        parsed.scheme != "github"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+        or parsed.query
+        or parsed.fragment
+        or not parsed.path.startswith("/")
+    ):
+        return None
+    segments = parsed.path[1:].split("/")
+    decoded = [_github_scope_segment(segment) for segment in segments]
+    if any(segment is None for segment in decoded):
+        return None
+    safe = cast(list[str], decoded)
+    if parsed.netloc == "owner" and len(safe) == 1:
+        return ("owner", safe[0].casefold())
+    if parsed.netloc == "repository" and len(safe) in (2, 4):
+        identity = ("repository", safe[0].casefold(), safe[1].casefold())
+        if len(safe) == 2:
+            return identity
+        if safe[2] != "pull-request" or not safe[3].isdigit() or int(safe[3]) < 1:
+            return None
+        return (*identity, "pull-request", str(int(safe[3])))
+    if parsed.netloc == "installation" and len(safe) in (1, 2):
+        if GITHUB_INSTALLATION_HASH.fullmatch(safe[0]) is None:
+            return None
+        if len(safe) == 2 and safe[1] != "repositories":
+            return None
+        return ("installation", *safe)
+    return None
+
+
+def _canonical_github_query_arguments(
+    capability_id: object,
+    value: object,
+) -> dict[str, JsonValue] | None:
+    if not isinstance(capability_id, str) or not isinstance(value, dict):
+        return None
+    try:
+        normalized = json.loads(json.dumps(value))
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(normalized, dict):
+        return None
+    normalized.pop("cursor", None)
+
+    def normalize_repository(reference: object) -> bool:
+        if not isinstance(reference, dict):
+            return False
+        owner = reference.get("owner")
+        name = reference.get("name")
+        if not isinstance(owner, str) or not isinstance(name, str):
+            return False
+        reference["owner"] = owner.casefold()
+        reference["name"] = name.casefold()
+        return True
+
+    if capability_id == "github.pull_request.list":
+        target = normalized.get("target")
+        if not isinstance(target, dict):
+            return None
+        owner = target.get("owner")
+        if isinstance(owner, str):
+            target["owner"] = owner.casefold()
+        elif "repository" in target:
+            if not normalize_repository(target.get("repository")):
+                return None
+        elif isinstance(target.get("repositories"), list):
+            if not all(
+                normalize_repository(item)
+                for item in cast(list[object], target["repositories"])
+            ):
+                return None
+        else:
+            return None
+    elif "repository" in normalized:
+        if not normalize_repository(normalized.get("repository")):
+            return None
+    return cast(dict[str, JsonValue], normalized)
+
+
+def _github_entry_scope_identities(
+    entry: Mapping[str, JsonValue],
+) -> list[tuple[str, ...]] | None:
+    result = entry.get("result")
+    data = result.get("data") if isinstance(result, dict) else None
+    evidence = data.get("evidence") if isinstance(data, dict) else None
+    scope = evidence.get("query_scope") if isinstance(evidence, dict) else None
+    if not isinstance(scope, list) or not scope:
+        return None
+    identities = [
+        _github_scope_identity(item) if isinstance(item, str) else None
+        for item in scope
+    ]
+    return (
+        cast(list[tuple[str, ...]], identities)
+        if all(identity is not None for identity in identities)
+        else None
+    )
+
+
+def _github_page_item_identity(
+    capability_id: str,
+    item: object,
+) -> tuple[str, str, int] | None:
+    if capability_id != "github.pull_request.list" or not isinstance(item, dict):
+        return None
+    repository = item.get("repository")
+    number = item.get("number")
+    if (
+        not isinstance(repository, dict)
+        or not isinstance(repository.get("owner"), str)
+        or not isinstance(repository.get("name"), str)
+        or not isinstance(number, int)
+        or isinstance(number, bool)
+    ):
+        return None
+    return (
+        cast(str, repository["owner"]).casefold(),
+        cast(str, repository["name"]).casefold(),
+        number,
+    )
+
+
+def _github_truncated_chain_error(
+    entries: list[Mapping[str, JsonValue]],
+) -> str | None:
+    seen_page_items: set[tuple[str, str, int]] = set()
+    previous_was_truncated = False
+    for index, entry in enumerate(entries):
+        request = entry.get("request")
+        result = entry.get("result")
+        receipt = entry.get("host_receipt")
+        data = result.get("data") if isinstance(result, dict) else None
+        evidence = data.get("evidence") if isinstance(data, dict) else None
+        state = data.get("state") if isinstance(data, dict) else None
+        capability_id = request.get("capability_id") if isinstance(request, dict) else None
+        if not previous_was_truncated:
+            seen_page_items.clear()
+        items = data.get("items") if isinstance(data, dict) else None
+        if isinstance(capability_id, str) and isinstance(items, list):
+            for item in items:
+                identity = _github_page_item_identity(capability_id, item)
+                if identity is not None:
+                    if identity in seen_page_items:
+                        return "current GitHub evidence continuation chain has duplicate items"
+                    seen_page_items.add(identity)
+        if state != "truncated":
+            previous_was_truncated = False
+            continue
+        if index + 1 >= len(entries):
+            return "current GitHub evidence is truncated"
+        following = entries[index + 1]
+        following_request = following.get("request")
+        following_receipt = following.get("host_receipt")
+        if (
+            not isinstance(request, dict)
+            or not isinstance(receipt, dict)
+            or not isinstance(evidence, dict)
+            or not isinstance(following_request, dict)
+            or not isinstance(following_receipt, dict)
+            or following_request.get("capability_id") != capability_id
+            or following_receipt.get("selected_candidate")
+            != receipt.get("selected_candidate")
+        ):
+            return "current GitHub evidence continuation chain is invalid"
+        next_cursor = evidence.get("next_cursor")
+        following_input = following_request.get("input")
+        if (
+            not isinstance(next_cursor, str)
+            or not next_cursor
+            or not isinstance(following_input, dict)
+            or following_input.get("cursor") != next_cursor
+            or _canonical_github_query_arguments(capability_id, request.get("input"))
+            != _canonical_github_query_arguments(capability_id, following_input)
+            or _github_entry_scope_identities(entry)
+            != _github_entry_scope_identities(following)
+        ):
+            return "current GitHub evidence continuation chain is invalid"
+        previous_was_truncated = True
+    return None
 
 
 def _github_evidence_entry_error(
@@ -852,6 +1079,11 @@ def _current_github_evidence_error(request: WorkerRequest) -> str | None:
     ]
     if not github_entries:
         return None
+    chain_error = _github_truncated_chain_error(
+        cast(list[Mapping[str, JsonValue]], github_entries)
+    )
+    if chain_error is not None:
+        return chain_error
     for index, entry in enumerate(github_entries):
         error = _github_evidence_entry_error(request, entry)
         if (

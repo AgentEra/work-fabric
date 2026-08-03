@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
 
 import pytest
 
@@ -124,6 +125,87 @@ def github_success_result(data: dict[str, object]) -> dict[str, object]:
         "data": data,
         "artifacts": [],
     }
+
+
+def github_chain_entry(
+    page: int,
+    *,
+    query_input: dict[str, object],
+    state: str,
+    items: list[dict[str, object]],
+    query_scope: list[str],
+    next_cursor: str | None = None,
+    capability_id: str = "github.pull_request.list",
+    contract_digest: str | None = None,
+) -> dict[str, object]:
+    invocation_id = f"github-chain-{page}"
+    candidate = {
+        "citizen_id": "citizen-github-read",
+        "endpoint_id": "endpoint-github-provider",
+        "capability_id": capability_id,
+        "capability_version": "1.0.0",
+        "contract_digest": contract_digest or f"sha256:{'a' * 64}",
+    }
+    evidence = {
+        "provider": "github",
+        "fetched_at": f"2026-08-03T08:00:0{page}.000Z",
+        "installation_id_hash": f"sha256:{'b' * 64}",
+        "api_version": "2022-11-28",
+        "query_scope": query_scope,
+        "complete": state != "truncated",
+        **({} if next_cursor is None else {"next_cursor": next_cursor}),
+    }
+    return {
+        "request": {
+            "invocation_id": invocation_id,
+            "capability_id": capability_id,
+            "version_constraint": "1.0.0",
+            "input": query_input,
+            "reason": "读取有界 GitHub 页",
+        },
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": invocation_id,
+            "auxiliary_handoff_id": f"handoff-github-chain-{page}",
+            "candidate": candidate,
+            "data": {"state": state, "items": items, "evidence": evidence},
+            "artifacts": [],
+        },
+        "host_receipt": {
+            "operation_id": invocation_id,
+            "original_handoff_id": "handoff-1",
+            "auxiliary_handoff_id": f"handoff-github-chain-{page}",
+            "selected_candidate": candidate,
+            "started_at": f"2026-08-03T08:00:0{page}.000Z",
+            "received_at": f"2026-08-03T08:00:0{page}.500Z",
+        },
+    }
+
+
+def github_chain_request(entries: list[dict[str, object]]) -> dict[str, object]:
+    value = github_query_request(github_success_result({
+        "state": "empty",
+        "items": [],
+        "evidence": {
+            "provider": "github",
+            "fetched_at": "2026-08-03T08:00:00.000Z",
+            "installation_id_hash": f"sha256:{'b' * 64}",
+            "api_version": "2022-11-28",
+            "query_scope": ["github://owner/AgentEra"],
+            "complete": True,
+        },
+    }))
+    value["capability_transcript"] = {"entries": entries}
+    value["available_capabilities"].append({
+        "citizen_id": "citizen-github-read",
+        "capability_id": "github.identity.get",
+        "version": "1.0.0",
+        "name": "GitHub identity",
+        "description": "Returns current installation identity.",
+        "operation_kind": "query",
+        "input_schema": {"type": "object"},
+    })
+    return value
 
 
 @pytest.mark.asyncio
@@ -1365,6 +1447,191 @@ async def test_empty_github_result_is_valid_but_truncated_requires_continuation(
         await execute_turn_with_agent(
             parse_request(github_query_request(truncated)),
             truncated_final_agent,
+        )
+
+
+@pytest.mark.asyncio
+async def test_valid_three_page_github_chain_accepts_casefolded_owner_scope() -> None:
+    base = {
+        "target": {"owner": "agentera"},
+        "state": "open",
+        "labels": ["runtime"],
+        "page_size": 30,
+    }
+    scope = ["github://repository/AgentEra/work-fabric"]
+    entries = [
+        github_chain_entry(
+            1,
+            query_input=base,
+            state="truncated",
+            items=[{"repository": {"owner": "AgentEra", "name": "work-fabric"}, "number": 41}],
+            query_scope=scope,
+            next_cursor="cursor-2",
+        ),
+        github_chain_entry(
+            2,
+            query_input={**base, "cursor": "cursor-2"},
+            state="truncated",
+            items=[{"repository": {"owner": "agentera", "name": "WORK-FABRIC"}, "number": 42}],
+            query_scope=["github://repository/agentera/WORK-FABRIC"],
+            next_cursor="cursor-3",
+        ),
+        github_chain_entry(
+            3,
+            query_input={**base, "cursor": "cursor-3"},
+            state="complete",
+            items=[{"repository": {"owner": "AgentEra", "name": "work-fabric"}, "number": 43}],
+            query_scope=scope,
+        ),
+    ]
+    agent = FakeAgent()
+    calls = 0
+
+    async def final() -> object:
+        nonlocal calls
+        calls += 1
+        return contextual_turn({
+            "turn_type": "final",
+            "request_summary": "汇总三页 PR",
+            "response": "当前有 #41、#42、#43。",
+            "invocation_id": "",
+            "capability_id": "",
+            "version_constraint": "",
+            "input": {},
+            "reason": "",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    agent.async_start = final  # type: ignore[method-assign]
+    turn = await execute_turn_with_agent(
+        parse_request(github_chain_request(entries)),
+        agent,
+    )
+    assert calls == 1
+    assert turn["kind"] == "final"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broken", [
+    "unrelated_capability",
+    "changed_owner",
+    "changed_filter",
+    "wrong_cursor",
+    "missing_cursor",
+    "changed_scope",
+    "changed_contract",
+    "duplicate_item",
+])
+async def test_broken_github_truncated_chain_fails_before_final_prose(
+    broken: str,
+) -> None:
+    base = {
+        "target": {"owner": "AgentEra"},
+        "state": "open",
+        "labels": ["runtime"],
+        "page_size": 30,
+    }
+    scope = ["github://repository/AgentEra/work-fabric"]
+    entries = [
+        github_chain_entry(
+            1,
+            query_input=base,
+            state="truncated",
+            items=[{"repository": {"owner": "AgentEra", "name": "work-fabric"}, "number": 41}],
+            query_scope=scope,
+            next_cursor="cursor-2",
+        ),
+        github_chain_entry(
+            2,
+            query_input={**base, "cursor": "cursor-2"},
+            state="complete",
+            items=[{"repository": {"owner": "AgentEra", "name": "work-fabric"}, "number": 42}],
+            query_scope=scope,
+        ),
+    ]
+    changed = deepcopy(entries)
+    next_entry = changed[1]
+    next_request = next_entry["request"]
+    next_result = next_entry["result"]
+    next_receipt = next_entry["host_receipt"]
+    if broken == "unrelated_capability":
+        next_request["capability_id"] = "github.identity.get"
+        next_request["input"] = {}
+        next_result["candidate"]["capability_id"] = "github.identity.get"
+        next_receipt["selected_candidate"]["capability_id"] = "github.identity.get"
+        next_result["data"]["evidence"]["query_scope"] = [
+            f"github://installation/sha256%3A{'b' * 64}"
+        ]
+    elif broken == "changed_owner":
+        next_request["input"]["target"] = {"owner": "OtherOrg"}
+        next_result["data"]["evidence"]["query_scope"] = [
+            "github://owner/OtherOrg"
+        ]
+    elif broken == "changed_filter":
+        next_request["input"]["state"] = "closed"
+    elif broken == "wrong_cursor":
+        next_request["input"]["cursor"] = "wrong-cursor"
+    elif broken == "missing_cursor":
+        next_request["input"].pop("cursor")
+    elif broken == "changed_scope":
+        next_result["data"]["evidence"]["query_scope"] = [
+            "github://repository/OtherOrg/work-fabric"
+        ]
+    elif broken == "changed_contract":
+        next_result["candidate"]["contract_digest"] = f"sha256:{'c' * 64}"
+        next_receipt["selected_candidate"]["contract_digest"] = f"sha256:{'c' * 64}"
+    elif broken == "duplicate_item":
+        next_result["data"]["items"][0]["number"] = 41
+    agent = FakeAgent()
+    calls = 0
+
+    async def invented_final() -> object:
+        nonlocal calls
+        calls += 1
+        return contextual_turn({
+            "turn_type": "final",
+            "request_summary": "错误汇总",
+            "response": "当前有两个 PR。",
+            "invocation_id": "",
+            "capability_id": "",
+            "version_constraint": "",
+            "input": {},
+            "reason": "",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    agent.async_start = invented_final  # type: ignore[method-assign]
+    with pytest.raises(AssistantOutputError, match="GitHub evidence"):
+        await execute_turn_with_agent(
+            parse_request(github_chain_request(changed)),
+            agent,
+        )
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope", [
+    "github://repository/OtherOrg/work-fabric",
+    "github://repository/AgentEraSibling/work-fabric",
+    "github://repository/AgentEra/work-fabric/sibling",
+    "github://repository/AgentEra/%ZZ",
+])
+async def test_owner_scope_reconciliation_rejects_siblings_and_malformed_uris(
+    scope: str,
+) -> None:
+    entry = github_chain_entry(
+        1,
+        query_input={"target": {"owner": "agentera"}, "state": "open", "page_size": 30},
+        state="complete",
+        items=[{"number": 42}],
+        query_scope=[scope],
+    )
+    with pytest.raises(AssistantOutputError, match="GitHub evidence"):
+        await execute_turn_with_agent(
+            parse_request(github_chain_request([entry])),
+            FakeAgent(),
         )
 
 
