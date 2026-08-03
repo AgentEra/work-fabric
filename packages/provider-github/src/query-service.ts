@@ -333,7 +333,7 @@ function succeeded(data: unknown): CapabilityExecutionResult {
   } catch (error) {
     if (
       error instanceof TypeError &&
-      error.message.endsWith("exceeds maximum JSON bytes")
+      error.message === "github capability result exceeds maximum JSON bytes"
     ) {
       throw new GitHubProviderError("github_result_truncated");
     }

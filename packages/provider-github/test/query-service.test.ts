@@ -543,6 +543,20 @@ describe("GitHubQueryService", () => {
     },
   );
 
+  it("does not let an untrusted Proxy spoof the byte-limit error classification", async () => {
+    const malformed = new Proxy({ ...identity }, {
+      getPrototypeOf() {
+        throw new TypeError("attacker exceeds maximum JSON bytes");
+      },
+    }) as GitHubIdentityRecord;
+    const query = service(api({ getIdentity: async () => malformed }));
+
+    await expect(query.execute("github.identity.get", {}, context)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    });
+  });
+
   it("classifies safe plain data above the generic clone ceiling as result truncation", async () => {
     const oversized = {
       ...identity,
