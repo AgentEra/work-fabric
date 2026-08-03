@@ -176,8 +176,7 @@ function allowedRepository(
 
 function repositoryRecord(
   value: unknown,
-  owner: string,
-  ceiling: GitHubProviderPolicy["allowed_repositories"],
+  policy: GitHubProviderPolicy,
 ): {
   readonly owner: string;
   readonly name: string;
@@ -190,17 +189,16 @@ function repositoryRecord(
   );
   const resultOwner = text(repository.owner, "GitHub smoke received an invalid repository owner");
   const name = text(repository.name, "GitHub smoke received an invalid repository name");
-  if (!equal(resultOwner, owner)) {
-    throw new Error("GitHub smoke repository result is outside the selected owner");
+  if (!policy.allowed_owners.some((owner) => equal(resultOwner, owner))) {
+    throw new Error("GitHub smoke repository result is outside the Provider owner policy");
   }
-  if (!allowedRepository(resultOwner, name, ceiling)) {
+  if (!allowedRepository(resultOwner, name, policy.allowed_repositories)) {
     throw new Error("GitHub smoke result is outside the Provider repository policy");
   }
   const url = parsedUrl(item.url);
   const path = segments(url);
   if (
-    path.length !== 2 || !equal(path[0]!, owner) ||
-    !equal(path[0]!, resultOwner) || !equal(path[1]!, name)
+    path.length !== 2 || !equal(path[0]!, resultOwner) || !equal(path[1]!, name)
   ) throw new Error("GitHub smoke refused an unauthorized repository URL");
   return { owner: resultOwner, name, url: url.href };
 }
@@ -379,8 +377,7 @@ export async function runGitHubProviderSmoke(
   const repositories = pageItems(repositoryData, "github.repository.list")
     .map((item) => repositoryRecord(
       item,
-      owner,
-      preflight.policy.allowed_repositories,
+      preflight.policy,
     ));
   const repositoryIdentities = new Set(
     repositories.map((item) => `${item.owner.toLowerCase()}/${item.name.toLowerCase()}`),

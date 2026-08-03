@@ -75,6 +75,26 @@ function baseCommit() {
   };
 }
 
+function baseWorkflowRun(id = 14) {
+  return {
+    id,
+    name: "CI",
+    display_title: "PRIVATE FULL TITLE",
+    run_number: id - 11,
+    event: "pull_request",
+    head_branch: "feature/github",
+    head_sha: "abc123",
+    actor: null,
+    status: "completed",
+    conclusion: "success",
+    created_at: "2026-08-01T09:00:00Z",
+    updated_at: "2026-08-01T09:01:00Z",
+    html_url: `https://github.com/AgentEra/work-fabric/actions/runs/${id}`,
+    logs_url: "PRIVATE LOGS",
+    artifacts_url: "PRIVATE ARTIFACTS",
+  };
+}
+
 function response(route: string): { data: unknown; headers: Record<string, string> } {
   switch (route) {
     case "GET /app":
@@ -157,23 +177,7 @@ function response(route: string): { data: unknown; headers: Record<string, strin
         html_url: "https://github.com/AgentEra/work-fabric/runs/1",
       }] }, headers: {} };
     case "GET /repos/{owner}/{repo}/actions/runs":
-      return { data: { total_count: 1, workflow_runs: [{
-        id: 14,
-        name: "CI",
-        display_title: "PRIVATE FULL TITLE",
-        run_number: 3,
-        event: "pull_request",
-        head_branch: "feature/github",
-        head_sha: "abc123",
-        actor: null,
-        status: "completed",
-        conclusion: "success",
-        created_at: "2026-08-01T09:00:00Z",
-        updated_at: "2026-08-01T09:01:00Z",
-        html_url: "https://github.com/AgentEra/work-fabric/actions/runs/14",
-        logs_url: "PRIVATE LOGS",
-        artifacts_url: "PRIVATE ARTIFACTS",
-      }] }, headers: {} };
+      return { data: { total_count: 1, workflow_runs: [baseWorkflowRun()] }, headers: {} };
     default:
       throw new Error(`unexpected route ${route}`);
   }
@@ -181,14 +185,14 @@ function response(route: string): { data: unknown; headers: Record<string, strin
 
 function recordingClient(
   recorded: RecordedRequest[],
-  responder: (route: string) =>
+  responder: (route: string, parameters: Record<string, unknown>) =>
     | { data: unknown; headers: Record<string, string> }
     | Promise<{ data: unknown; headers: Record<string, string> }> = response,
 ): OctokitRequestClient {
   return {
     request: (async (route: string, parameters: Record<string, unknown>) => {
       recorded.push({ route, parameters });
-      return responder(route);
+      return responder(route, parameters);
     }) as OctokitRequestClient["request"],
   };
 }
@@ -403,12 +407,28 @@ describe("OctokitGitHubReadApi", () => {
     });
   });
 
+  it("rejects an incomplete installation-repository count used for identity evidence", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /installation/repositories"
+        ? {
+            data: { total_count: 2, repositories: [baseRepository()] },
+            headers: {},
+          }
+        : response(route)
+    ));
+
+    await expect(api.getIdentity(signal)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    } satisfies Partial<GitHubProviderError>);
+  });
+
   it("groups a bounded search page by repository without per-PR detail reads", async () => {
     const recorded: RecordedRequest[] = [];
     const api = new OctokitGitHubReadApi(recordingClient(recorded, (route) => {
       if (route === "GET /search/issues") return {
         data: {
-          total_count: 2,
+          total_count: 3,
           incomplete_results: false,
           items: [
             { number: 7, repository_url: "https://api.github.com/repos/AgentEra/work-fabric" },
@@ -459,6 +479,201 @@ describe("OctokitGitHubReadApi", () => {
       target: { owner: "AgentEra" },
       page_size: 5,
     }, signal)).rejects.toMatchObject({ code: "github_response_invalid" });
+  });
+
+  it.each([
+    ["installation repositories", "GET /installation/repositories", {
+      total_count: 2,
+      repositories: [baseRepository()],
+    }, (api: OctokitGitHubReadApi) => api.listRepositories({ page_size: 2 }, signal)],
+    ["workflow runs", "GET /repos/{owner}/{repo}/actions/runs", {
+      total_count: 1,
+      workflow_runs: [],
+    }, (api: OctokitGitHubReadApi) => api.listWorkflowRuns({
+      repository,
+      page_size: 2,
+    }, signal)],
+    ["search issues", "GET /search/issues", {
+      total_count: 1,
+      incomplete_results: false,
+      items: [],
+    }, (api: OctokitGitHubReadApi) => api.searchPullRequests({
+      target: { owner: "AgentEra" },
+      page_size: 2,
+    }, signal)],
+  ] as const)("rejects a short non-terminal %s page", async (_name, route, data, execute) => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (actualRoute) =>
+      actualRoute === route
+        ? {
+            data,
+            headers: { link: `<https://api.github.com/resource?page=2>; rel="next"` },
+          }
+        : response(actualRoute)
+    ));
+
+    await expect(execute(api)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    } satisfies Partial<GitHubProviderError>);
+  });
+
+  it.each([
+    ["installation repositories", "GET /installation/repositories", {
+      total_count: 2,
+      repositories: [baseRepository(), {
+        ...baseRepository(),
+        name: "second",
+        html_url: "https://github.com/AgentEra/second",
+      }],
+    }, (api: OctokitGitHubReadApi) => api.listRepositories({ page_size: 2 }, signal)],
+    ["workflow runs", "GET /repos/{owner}/{repo}/actions/runs", {
+      total_count: 2,
+      workflow_runs: [
+        baseWorkflowRun(),
+        baseWorkflowRun(15),
+      ],
+    }, (api: OctokitGitHubReadApi) => api.listWorkflowRuns({
+      repository,
+      page_size: 2,
+    }, signal)],
+  ] as const)("rejects a terminal %s page that advertises a next link", async (_name, route, data, execute) => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (actualRoute) =>
+      actualRoute === route
+        ? {
+            data,
+            headers: { link: `<https://api.github.com/resource?page=2>; rel="next"` },
+          }
+        : response(actualRoute)
+    ));
+
+    await expect(execute(api)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    } satisfies Partial<GitHubProviderError>);
+  });
+
+  it("accepts coherent counted middle and terminal repository pages", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route, parameters) => {
+      if (route !== "GET /installation/repositories") return response(route);
+      if (parameters.page === 1) return {
+        data: {
+          total_count: 3,
+          repositories: [baseRepository(), {
+            ...baseRepository(),
+            name: "second",
+            html_url: "https://github.com/AgentEra/second",
+          }],
+        },
+        headers: {
+          link: '<https://api.github.com/installation/repositories?page=2>; rel="next"',
+        },
+      };
+      return {
+        data: {
+          total_count: 3,
+          repositories: [{
+            ...baseRepository(),
+            name: "third",
+            html_url: "https://github.com/AgentEra/third",
+          }],
+        },
+        headers: {},
+      };
+    }));
+
+    await expect(api.listRepositories({ page_size: 2 }, signal)).resolves.toMatchObject({
+      items: { length: 2 },
+      next_cursor: "2",
+    });
+    await expect(api.listRepositories({ page_size: 2, cursor: "2" }, signal)).resolves.toMatchObject({
+      items: { length: 1 },
+    });
+  });
+
+  it.each([
+    ["remaining total without a next link", { page_size: 2 }, {
+      total_count: 3,
+      repositories: [baseRepository(), {
+        ...baseRepository(),
+        name: "second",
+        html_url: "https://github.com/AgentEra/second",
+      }],
+    }],
+    ["items beyond the remaining total", { page_size: 2, cursor: "2" }, {
+      total_count: 3,
+      repositories: [baseRepository(), {
+        ...baseRepository(),
+        name: "extra",
+        html_url: "https://github.com/AgentEra/extra",
+      }],
+    }],
+  ] as const)("rejects counted repository pages with %s", async (_name, input, data) => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /installation/repositories"
+        ? { data, headers: {} }
+        : response(route)
+    ));
+
+    await expect(api.listRepositories(input, signal)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    } satisfies Partial<GitHubProviderError>);
+  });
+
+  it("accepts coherent counted middle and terminal workflow-run pages", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route, parameters) => {
+      if (route !== "GET /repos/{owner}/{repo}/actions/runs") return response(route);
+      return parameters.page === 1
+        ? {
+            data: { total_count: 3, workflow_runs: [baseWorkflowRun(), baseWorkflowRun(15)] },
+            headers: { link: '<https://api.github.com/actions/runs?page=2>; rel="next"' },
+          }
+        : {
+            data: { total_count: 3, workflow_runs: [baseWorkflowRun(16)] },
+            headers: {},
+          };
+    }));
+
+    await expect(api.listWorkflowRuns({ repository, page_size: 2 }, signal)).resolves.toMatchObject({
+      items: { length: 2 },
+      next_cursor: "2",
+    });
+    await expect(api.listWorkflowRuns({ repository, page_size: 2, cursor: "2" }, signal))
+      .resolves.toMatchObject({ items: { length: 1 } });
+  });
+
+  it("accepts coherent counted middle and terminal search pages", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route, parameters) => {
+      if (route === "GET /search/issues") {
+        const page = parameters.page as number;
+        const numbers = page === 1 ? [7, 8] : [9];
+        return {
+          data: {
+            total_count: 3,
+            incomplete_results: false,
+            items: numbers.map((number) => ({
+              number,
+              repository_url: "https://api.github.com/repos/AgentEra/work-fabric",
+            })),
+          },
+          headers: page === 1
+            ? { link: '<https://api.github.com/search/issues?page=2>; rel="next"' }
+            : {},
+        };
+      }
+      if (route === "GET /repos/{owner}/{repo}/pulls") {
+        return { data: [basePullRequest(7), basePullRequest(8), basePullRequest(9)], headers: {} };
+      }
+      return response(route);
+    }));
+
+    const input = { target: { owner: "AgentEra" }, page_size: 2 } as const;
+    await expect(api.searchPullRequests(input, signal)).resolves.toMatchObject({
+      items: { length: 2 },
+      next_cursor: "2",
+    });
+    await expect(api.searchPullRequests({ ...input, cursor: "2" }, signal))
+      .resolves.toMatchObject({ items: { length: 1 } });
   });
 
   it("compares updated_since as parsed RFC3339 instants", async () => {
@@ -555,7 +770,7 @@ describe("OctokitGitHubReadApi", () => {
     const recorded: RecordedRequest[] = [];
     const api = new OctokitGitHubReadApi(recordingClient(recorded, (route) => {
       if (route === "GET /installation/repositories") return {
-        data: { total_count: 1, repositories: [baseRepository()] },
+        data: { total_count: 3, repositories: [baseRepository()] },
         headers: { link: '<https://api.github.com/installation/repositories?page=3>; rel="next"' },
       };
       return response(route);

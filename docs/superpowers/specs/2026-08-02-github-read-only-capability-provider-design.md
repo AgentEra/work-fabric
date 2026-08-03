@@ -179,6 +179,12 @@ replaceable global Configuration Provider remains the only consumer-facing
 configuration boundary. A future database-backed source does not change the
 GitHub Provider contract.
 
+The environment credential boundary accepts either a raw multiline PEM (for a
+process environment or secret manager) or a canonical `base64:` UTF-8 PEM
+representation (for one-line `.env` values). Decoding is Provider-local,
+strictly bounded, rejects malformed/NUL-containing input with a fixed redacted
+diagnostic, and never changes the GitHub App authentication contract.
+
 A fine-grained read-only PAT mode may exist only in local development
 configuration. Office and production profiles reject PAT mode.
 
@@ -318,6 +324,15 @@ The Agent receives only the current invocation Result as execution proof. It
 must not infer that a query ran from an older conversation message. Links in
 the final Agent response are normal GitHub HTTPS links from authorized result
 items and are rendered by the destination Channel.
+
+For GitHub endpoints that return `total_count` (installation repositories,
+workflow runs, and issue search), the adapter cross-checks the current page,
+requested page size, returned item count, accessible total (including GitHub
+Search's 1,000-result ceiling), and `Link rel="next"`. Contradictory or partial
+pages fail as `github_response_invalid`; coherent middle and terminal pages
+retain normal continuation semantics. The live repository smoke attests every
+item against the complete Provider policy and may therefore report multiple
+authorized owners, while its PR query remains explicitly owner-scoped.
 
 ## 9. Errors, rate limits and retries
 

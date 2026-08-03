@@ -484,6 +484,30 @@ function apiPage<T>(values: readonly T[], headers: unknown): GitHubApiPage<T> {
   return { items: values, ...(next === undefined ? {} : { next_cursor: next }) };
 }
 
+function countedApiPage<T>(
+  values: readonly T[],
+  headers: unknown,
+  input: GitHubApiPageInput,
+  totalCount: number,
+  accessibleResultLimit?: number,
+): GitHubApiPage<T> {
+  const currentPage = pageNumber(input);
+  const accessibleTotal = accessibleResultLimit === undefined
+    ? totalCount
+    : Math.min(totalCount, accessibleResultLimit);
+  const offset = (currentPage - 1) * input.page_size;
+  const remaining = Math.max(0, accessibleTotal - offset);
+  const expectedItems = Math.min(input.page_size, remaining);
+  const next = nextCursor(headers);
+  const expectsNext = remaining > expectedItems;
+  if (
+    values.length !== expectedItems ||
+    (next !== undefined) !== expectsNext ||
+    (next !== undefined && Number(next) !== currentPage + 1)
+  ) invalidResponse();
+  return { items: values, ...(next === undefined ? {} : { next_cursor: next }) };
+}
+
 function routeRepository(repository: GitHubRepositoryRef): Record<string, string> {
   const result = requestedRepository(repository);
   return { owner: result.owner, repo: result.name };
@@ -668,6 +692,13 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
     ]);
     const record = source(app.data);
     const accessRecord = source(access.data);
+    const installationRepositoryCount = integer(required(accessRecord, "total_count"), 0);
+    countedApiPage(
+      items(required(accessRecord, "repositories"), 1),
+      access.headers,
+      { page_size: 1 },
+      installationRepositoryCount,
+    );
     const slug = text(required(record, "slug"), 100);
     const appUrl = githubUrl(required(record, "html_url"));
     if (new URL(appUrl).pathname !== `/apps/${encodeURIComponent(slug)}`) invalidResponse();
@@ -677,7 +708,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       name: text(required(record, "name"), 255),
       url: appUrl,
       owner: login(required(record, "owner")),
-      installation_repository_count: integer(required(accessRecord, "total_count"), 0),
+      installation_repository_count: installationRepositoryCount,
     };
   }
 
@@ -687,11 +718,17 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       page: pageNumber(input),
       ...requestOptions(signal),
     });
+    const record = source(result.data);
     const values = items(
-      required(source(result.data), "repositories"),
+      required(record, "repositories"),
       input.page_size,
     ).map((item) => repository(item));
-    return apiPage(values, result.headers);
+    return countedApiPage(
+      values,
+      result.headers,
+      input,
+      integer(required(record, "total_count"), 0),
+    );
   }
 
   async getRepository(repositoryValue: GitHubRepositoryRef, signal: AbortSignal): Promise<GitHubRepositoryRecord> {
@@ -770,7 +807,13 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       if (item === undefined) invalidResponse();
       return item;
     });
-    return apiPage(values, result.headers);
+    return countedApiPage(
+      values,
+      result.headers,
+      input,
+      integer(required(record, "total_count"), 0),
+      1_000,
+    );
   }
 
   async getPullRequest(repositoryValue: GitHubRepositoryRef, number: number, signal: AbortSignal): Promise<GitHubPullRequestRecord> {
@@ -865,11 +908,17 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       page: pageNumber(input),
       ...requestOptions(signal),
     }, "github_repository_not_found");
+    const record = source(result.data);
     const values = items(
-      required(source(result.data), "workflow_runs"),
+      required(record, "workflow_runs"),
       input.page_size,
     ).map((item) => workflowRun(item, repository));
-    return apiPage(values, result.headers);
+    return countedApiPage(
+      values,
+      result.headers,
+      input,
+      integer(required(record, "total_count"), 0),
+    );
   }
 
   async listCommits(input: GitHubApiCommitListInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubCommitRecord>> {

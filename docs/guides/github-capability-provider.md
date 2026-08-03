@@ -75,6 +75,30 @@ export WORK_FABRIC_GITHUB_CURSOR_SECRET="$(openssl rand -hex 32)"
 export WORK_FABRIC_ADMIN_TOKEN='rotated-work-fabric-admin-token'
 ```
 
+The raw multiline PEM export above remains supported for a shell session. For
+a mode-`0600` `.env` file, encode the PEM once so the value stays on one line.
+The `.env` file does not execute shell substitutions; this command writes the
+resolved `GITHUB_APP_PRIVATE_KEY=base64:...` line for you:
+
+```bash
+ENV_FILE=/absolute/path/to/work-fabric.env
+KEY_FILE="$HOME/.config/work-fabric/github/provider.private-key.pem"
+printf 'GITHUB_APP_PRIVATE_KEY=base64:%s\n' \
+  "$(base64 < "$KEY_FILE" | tr -d '\n')" >> "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+```
+
+The generated line has this shape (replace the command expression with its
+output; do not paste it literally into `.env`):
+
+```dotenv
+GITHUB_APP_PRIVATE_KEY=base64:$(base64 < key.pem | tr -d '\n')
+```
+
+The Provider accepts canonical base64 only, decodes it as UTF-8, caps the
+decoded private key at 64 KiB, and rejects NUL-containing or malformed values
+without echoing credential material.
+
 `GITHUB_PROVIDER_ACCESS_TOKEN` is the Provider's Work Fabric service token, not
 a GitHub token. `WORK_FABRIC_ADMIN_TOKEN` is the Work Fabric provisioning
 credential and must not be exposed to the Provider child process after
@@ -95,6 +119,17 @@ step; starting the process does not provision implicitly:
 ```bash
 npm run github-provider:provision
 npm run github-provider:start
+```
+
+For the long-term local `.env` workflow, set `WORK_FABRIC_ENV_FILE` and use the
+one-command launcher. It loads and resolves the bundle, provisions with the
+administrative token, removes that token and unrelated secrets from the child
+environment, and then starts the standalone Provider:
+
+```bash
+WORK_FABRIC_ENV_FILE=/absolute/path/to/work-fabric.env \
+WORK_FABRIC_CONFIG=/absolute/path/to/deployment.bundle.yaml \
+npm run local:github:start
 ```
 
 The local launcher reads the mode-`0600` environment file only while preparing
@@ -193,10 +228,13 @@ or repair that response.
 
 The live smoke performs only `github.identity.get`,
 `github.repository.list`, and one owner-scoped open
-`github.pull_request.list`. It prints a JSON object containing counts and
-authorized public GitHub URLs only. It rejects undeclared/write-capable
-surfaces, non-public or cross-owner URLs, URL credentials/query strings, and
-secret-shaped output.
+`github.pull_request.list`. Repository-list results are attested against the
+complete Provider owner/repository policy, so a first page may legitimately
+contain repositories from multiple authorized owners. The PR smoke remains
+scoped to `WORK_FABRIC_GITHUB_SMOKE_ALLOWED_OWNER`. It prints a JSON object
+containing counts and authorized public GitHub URLs only. It rejects
+undeclared/write-capable surfaces, URLs outside the Provider policy, URL
+credentials/query strings, and secret-shaped output.
 
 Use a production-style GitHub App configuration with one enabled Provider,
 export the five Provider-owned values above (the admin token is not needed for

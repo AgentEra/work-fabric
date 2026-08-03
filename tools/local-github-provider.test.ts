@@ -1,8 +1,17 @@
+import { generateKeyPairSync } from "node:crypto";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
+
+import {
+  createGitHubAppOctokit,
+  type GitHubAppOctokitOptions,
+  type OctokitRequestClient,
+} from "@work-fabric/adapter-github-octokit";
+
+import { EnvironmentGitHubCredentialProvider } from "../examples/github-capability-provider/src/credentials.js";
 
 import { loadNodeConfiguration } from "../packages/service-node/src/configuration-loader.js";
 import { prepareLocalFeishuEnvironment } from "./local-feishu-common.js";
@@ -44,6 +53,53 @@ async function feishuOnlyInput(): Promise<{
 }
 
 describe("optional local GitHub Provider", () => {
+  it("loads a one-line base64 PEM from the configured local env file into the Octokit factory", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "work-fabric-github-base64-pem-"));
+    try {
+      const envFile = join(directory, "github.env");
+      const enabledConfig = join(directory, "github-enabled.yaml");
+      const privateKey = generateKeyPairSync("rsa", { modulusLength: 2_048 }).privateKey.export({
+        type: "pkcs8",
+        format: "pem",
+      }).toString();
+      await writeFile(enabledConfig, (await readFile(
+        resolve("examples/config/local-feishu-assistant.bundle.yaml"),
+        "utf8",
+      )).replace("enabled: false", "enabled: true"));
+      await writeFile(envFile, [
+        "GITHUB_APP_ID=123",
+        "GITHUB_APP_INSTALLATION_ID=456",
+        `GITHUB_APP_PRIVATE_KEY=base64:${Buffer.from(privateKey, "utf8").toString("base64")}`,
+        "GITHUB_PROVIDER_ACCESS_TOKEN=provider-token",
+        `WORK_FABRIC_GITHUB_CURSOR_SECRET=${"g".repeat(32)}`,
+        `WORK_FABRIC_ADMIN_TOKEN=${"a".repeat(32)}`,
+      ].join("\n"));
+      await chmod(envFile, 0o600);
+
+      const environment = await prepareLocalGitHubProviderEnvironment({
+        WORK_FABRIC_ENV_FILE: envFile,
+        WORK_FABRIC_CONFIG: enabledConfig,
+        WORK_FABRIC_RESOLVED_CONFIG: join(directory, "resolved.yaml"),
+      });
+      const credentials = await new EnvironmentGitHubCredentialProvider({
+        credential_ref: "github-primary",
+        app_id_environment: "GITHUB_APP_ID",
+        installation_id_environment: "GITHUB_APP_INSTALLATION_ID",
+        private_key_environment: "GITHUB_APP_PRIVATE_KEY",
+        environment,
+      }).load();
+      const observed: GitHubAppOctokitOptions[] = [];
+
+      expect(() => createGitHubAppOctokit(credentials, (options) => {
+        observed.push(options);
+        return { request: async () => ({ data: {}, headers: {} }) } as unknown as OctokitRequestClient;
+      })).not.toThrow();
+      expect(observed[0]?.auth.privateKey).toBe(privateKey);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     "PATH",
     "NODE_OPTIONS",

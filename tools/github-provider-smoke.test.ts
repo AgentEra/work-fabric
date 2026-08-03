@@ -353,7 +353,7 @@ describe("GitHub Provider live smoke", () => {
     expect(fake.calls).toEqual([]);
   });
 
-  it("rejects every cross-owner repository-list attestation", async () => {
+  it("rejects a repository-list owner outside the Provider policy", async () => {
     const { runGitHubProviderSmoke } = await smokeModule();
     const fake = fakeQuery({
       repository_items: [{
@@ -373,8 +373,50 @@ describe("GitHub Provider live smoke", () => {
         installation_id_hash: evidence.installation_id_hash,
       }),
       write: (value) => output.push(value),
-    })).rejects.toThrow("outside the selected owner");
+    })).rejects.toThrow("outside the Provider owner policy");
     expect(output).toEqual([]);
+  });
+
+  it("attests a mixed-owner repository page against the full Provider policy", async () => {
+    const { runGitHubProviderSmoke } = await smokeModule();
+    const otherRepository = {
+      ...repository,
+      repository: { owner: "AnotherAllowedOwner", name: "shared-library" },
+      url: "https://github.com/AnotherAllowedOwner/shared-library",
+    };
+    const fake = fakeQuery({ repository_items: [repository, otherRepository] });
+    const output: string[] = [];
+
+    await runGitHubProviderSmoke(enabledEnvironment, {
+      declarations: githubReadCapabilityDeclarations,
+      preflight: async () => fakePreflight({
+        allowed_owners: ["AgentEra", "AnotherAllowedOwner"],
+      }),
+      loadRuntime: async () => ({
+        query: fake.query,
+        tenant_id: "tenant-test",
+        installation_id_hash: evidence.installation_id_hash,
+      }),
+      write: (value) => output.push(value),
+    });
+
+    expect(JSON.parse(output[0]!)).toMatchObject({
+      counts: { repositories: 2, open_pull_requests: 1 },
+      urls: [
+        "https://github.com/apps/work-fabric-provider",
+        "https://github.com/AgentEra/work-fabric",
+        "https://github.com/AnotherAllowedOwner/shared-library",
+        "https://github.com/AgentEra/work-fabric/pull/42",
+      ],
+    });
+    expect(fake.calls[2]).toEqual({
+      capability_id: "github.pull_request.list",
+      input: {
+        target: { owner: "AgentEra" },
+        state: "open",
+        page_size: 5,
+      },
+    });
   });
 
   it("rejects duplicate repository-list attestations", async () => {

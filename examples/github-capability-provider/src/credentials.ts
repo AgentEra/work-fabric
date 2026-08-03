@@ -1,5 +1,41 @@
 import type { GitHubAppCredentials, GitHubCredentialProvider } from "@work-fabric/adapter-github-octokit";
 
+const BASE64_PREFIX = "base64:";
+const MAX_PRIVATE_KEY_BYTES = 65_536;
+const strictBase64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/u;
+
+function invalidCredentials(): never {
+  throw new Error("GitHub App credentials are invalid");
+}
+
+function checkedPrivateKey(value: string): string {
+  let result = value;
+  if (value.startsWith(BASE64_PREFIX)) {
+    const encoded = value.slice(BASE64_PREFIX.length);
+    if (
+      encoded.length === 0 ||
+      encoded.length > Math.ceil(MAX_PRIVATE_KEY_BYTES / 3) * 4 ||
+      encoded.length % 4 !== 0 ||
+      !strictBase64.test(encoded)
+    ) invalidCredentials();
+    const decoded = Buffer.from(encoded, "base64");
+    if (
+      decoded.byteLength > MAX_PRIVATE_KEY_BYTES ||
+      decoded.toString("base64") !== encoded
+    ) invalidCredentials();
+    try {
+      result = new TextDecoder("utf-8", { fatal: true }).decode(decoded);
+    } catch {
+      invalidCredentials();
+    }
+  }
+  if (
+    Buffer.byteLength(result, "utf8") > MAX_PRIVATE_KEY_BYTES ||
+    result.includes("\0")
+  ) invalidCredentials();
+  return result;
+}
+
 export interface EnvironmentGitHubCredentialProviderOptions {
   readonly credential_ref: string;
   readonly app_id_environment: string;
@@ -35,7 +71,7 @@ export class EnvironmentGitHubCredentialProvider implements GitHubCredentialProv
     return Object.freeze({
       app_id: appId,
       installation_id: installationId,
-      private_key: privateKey,
+      private_key: checkedPrivateKey(privateKey),
     });
   }
 }
