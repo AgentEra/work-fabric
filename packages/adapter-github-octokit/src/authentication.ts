@@ -1,3 +1,5 @@
+import { createPrivateKey } from "node:crypto";
+
 import { createAppAuth } from "@octokit/auth-app";
 import { Octokit } from "@octokit/rest";
 
@@ -52,6 +54,11 @@ function validateCredentials(credentials: GitHubAppCredentials): void {
     !isDecimalIdentifier(credentials.installation_id) ||
     !isPrivateKeyPem(credentials.private_key)
   ) invalidCredentials();
+  try {
+    createPrivateKey(credentials.private_key);
+  } catch {
+    invalidCredentials();
+  }
 }
 
 export function createGitHubAppOctokit(

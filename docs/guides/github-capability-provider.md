@@ -120,6 +120,14 @@ opaque signed cursors. The Provider returns typed current facts, safe GitHub
 links, evidence metadata, and stable errors—not prose, priorities, review
 judgments, or tool-selection decisions.
 
+`github.identity.get` reports the App identity plus the bounded installation
+repository count. `github.repository.list` is always filtered by the Provider
+policy ceiling even when the App installation can see more repositories.
+Pull-request records include both the display `head_branch` and immutable
+`head_sha`; check reads use the SHA. Evidence uses GitHub REST API version
+`2022-11-28`, and its installation label is an HMAC-SHA-256 value derived from
+deployment-local secret material with domain separation.
+
 ## 4. Debug and end-to-end testing
 
 Use the deterministic Debug Channel E2E for routine testing. It composes the

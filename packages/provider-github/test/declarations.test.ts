@@ -3,9 +3,20 @@ import { describe, expect, it } from "vitest";
 import {
   GITHUB_READ_CAPABILITY_IDS,
   githubReadCapabilityDeclarations,
+  githubSchemaDocuments,
 } from "../src/index.js";
 
 describe("GitHub read capability declarations", () => {
+  it("declares installation access summary and immutable PR head SHA", () => {
+    const declarations = githubReadCapabilityDeclarations();
+    const schemas = new Map(githubSchemaDocuments());
+    const identity = declarations.find((item) => item.declaration_id === "github.identity.get")!;
+    const pullRequests = declarations.find((item) => item.declaration_id === "github.pull_request.list")!;
+    expect(JSON.stringify(schemas.get(identity.output_schema!.uri)))
+      .toContain("installation_repository_count");
+    expect(JSON.stringify(schemas.get(pullRequests.output_schema!.uri))).toContain("head_sha");
+  });
+
   it("declares exactly the approved read-only surface", () => {
     expect(GITHUB_READ_CAPABILITY_IDS).toEqual([
       "github.identity.get",

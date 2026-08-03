@@ -44,6 +44,7 @@ export interface GitHubIdentityRecord {
   readonly name: string;
   readonly url: string;
   readonly owner: string | null;
+  readonly installation_repository_count: number;
 }
 
 export interface GitHubRepositoryRecord {
@@ -67,6 +68,7 @@ export interface GitHubPullRequestRecord {
   readonly draft: boolean;
   readonly base_branch: string;
   readonly head_branch: string;
+  readonly head_sha: string;
   readonly assignees: readonly string[];
   readonly requested_reviewers: readonly string[];
   readonly labels: readonly string[];

@@ -241,7 +241,7 @@ interface GitHubPullRequestListInput {
 ```
 
 Each returned item contains repository reference, PR number, title, GitHub URL,
-author, draft flag, base/head branches, assignees, requested reviewers, labels,
+author, draft flag, base/head branches, immutable head SHA, assignees, requested reviewers, labels,
 review state when available, CI state when requested by the dedicated checks
 capability, mergeability when GitHub has computed it, and creation/update time.
 
@@ -283,8 +283,9 @@ interface GitHubEvidenceMeta {
 ```
 
 The installation ID is represented only by a non-reversible deployment-local
-hash. Tokens, private keys, response headers and internal request URLs never
-enter evidence.
+HMAC-SHA-256 label derived with domain-separated deployment secret material.
+Tokens, private keys, response headers and internal request URLs never enter
+evidence.
 
 Result states remain distinct:
 

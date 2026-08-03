@@ -68,7 +68,7 @@ const evidence = {
   provider: "github",
   fetched_at: "2026-08-03T00:00:00.000Z",
   installation_id_hash: `sha256:${"a".repeat(64)}`,
-  api_version: "github-v3",
+  api_version: "2022-11-28",
   query_scope: ["github://test"],
   complete: true,
 } as const;
@@ -94,6 +94,7 @@ const pullRequest: GitHubPullRequestRecord = {
   draft: false,
   base_branch: "main",
   head_branch: "github-provider",
+  head_sha: "abc1234",
   assignees: [],
   requested_reviewers: [],
   labels: [],
@@ -135,6 +136,7 @@ function fakeQuery(overrides: {
                 url: overrides.identity_url
                   ?? "https://github.com/apps/work-fabric-provider",
                 owner: "AgentEra",
+                installation_repository_count: 1,
               },
               evidence,
             },

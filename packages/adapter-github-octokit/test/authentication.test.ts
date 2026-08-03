@@ -1,3 +1,5 @@
+import { generateKeyPairSync } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -7,10 +9,15 @@ import {
   type OctokitRequestClient,
 } from "../src/index.js";
 
+const validPrivateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
+  type: "pkcs8",
+  format: "pem",
+}).toString();
+
 const credentials: GitHubAppCredentials = {
   app_id: "12345",
   installation_id: "67890",
-  private_key: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+  private_key: validPrivateKey,
 };
 
 describe("GitHub App authentication", () => {
@@ -42,12 +49,16 @@ describe("GitHub App authentication", () => {
     expect(constructions).toBe(0);
   });
 
-  it("accepts an RSA private-key envelope", () => {
+  it("accepts a cryptographically parseable RSA private-key envelope", () => {
     const observed: GitHubAppOctokitOptions[] = [];
+    const rsaPrivateKey = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({
+      type: "pkcs1",
+      format: "pem",
+    }).toString();
 
     createGitHubAppOctokit({
       ...credentials,
-      private_key: "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----",
+      private_key: rsaPrivateKey,
     }, (options) => {
       observed.push(options);
       return { request: async () => ({ data: {}, headers: {} }) } as unknown as OctokitRequestClient;
@@ -61,6 +72,10 @@ describe("GitHub App authentication", () => {
     { ...credentials, app_id: "12a" },
     { ...credentials, installation_id: " 67890" },
     { ...credentials, private_key: "not a private key" },
+    {
+      ...credentials,
+      private_key: "-----BEGIN PRIVATE KEY-----\ndGVzdA==\n-----END PRIVATE KEY-----",
+    },
   ])("rejects invalid credentials before constructing a client", (invalid) => {
     let constructions = 0;
 

@@ -1,8 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { parse } from "yaml";
 
 import { SqliteAgentRuntimeStateStore } from "@work-fabric/adapter-agent-runtime-sqlite";
 import {
@@ -38,6 +39,7 @@ import {
 import { composeNodeService, parseServiceConfig } from "../src/index.js";
 
 import { CapabilityProviderDriver } from "@work-fabric/capability-provider-runtime";
+import { githubProviderEvidenceIdentity } from "../../../examples/github-capability-provider/src/composition.js";
 
 const TENANT = "tenant-github-http-loop";
 const EXCHANGE = "exchange-github-http-loop";
@@ -72,6 +74,7 @@ const pullRequests: readonly GitHubPullRequestRecord[] = [1, 2].map((number) => 
   draft: false,
   base_branch: "main",
   head_branch: `feature-${number}`,
+  head_sha: `abc123${number}`,
   assignees: [],
   requested_reviewers: [],
   labels: [],
@@ -158,13 +161,14 @@ function providerCapability(
 
 function gatewayConfig(
   capabilities: readonly CapabilityDescriptor[],
+  actorType: "system",
 ): AgentGatewayConfig {
   const now = new Date().toISOString();
   return {
     endpoint_id: PROVIDER.endpoint,
     subscription: {
       subscription_id: PROVIDER.subscription,
-      owner: { actor_id: PROVIDER.actor, actor_type: "system" },
+      owner: { actor_id: PROVIDER.actor, actor_type: actorType },
       endpoint_id: PROVIDER.endpoint,
       filter: {
         event_types: [],
@@ -241,6 +245,22 @@ async function within<T>(
 
 describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
   it("uses delivery, runtime claim/accept, and Fabric Result while Daily Assistant remains verifier", async () => {
+    const bundle = parse(await readFile(
+      new URL("../../../examples/config/local-feishu-assistant.bundle.yaml", import.meta.url),
+      "utf8",
+    )) as {
+      applications: {
+        "work-fabric": {
+          agent_runtime_authority: {
+            grants: { "github-provider": { actor_type?: "agent" | "system" } };
+          };
+        };
+      };
+    };
+    const providerActorType =
+      bundle.applications["work-fabric"].agent_runtime_authority.grants["github-provider"].actor_type;
+    expect(providerActorType).toBe("system");
+    if (providerActorType !== "system") throw new Error("unified bundle GitHub Provider must be system-typed");
     const directory = await mkdtemp(join(tmpdir(), "work-fabric-github-http-"));
     directories.push(directory);
     const declaration = githubReadCapabilityDeclarations().find(
@@ -293,7 +313,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
             tenant_id: TENANT,
             actor_claims: [{
               actor_id: PROVIDER.actor,
-              actor_type: "system",
+              actor_type: providerActorType,
               endpoint_ids: [PROVIDER.endpoint],
             }],
             attributes: {},
@@ -307,7 +327,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           PROVIDER,
           "workfabric.citizen.session.open.v1",
           CITIZEN_ID,
-          "system",
+          providerActorType,
         ),
         rule(ASSISTANT, "workfabric.handoff.offer.v1", null),
         rule(ASSISTANT, "workfabric.citizen.discover.v1", null),
@@ -338,7 +358,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
             tenant_id: TENANT,
             principal_id: PROVIDER.principal,
             actor_id: PROVIDER.actor,
-            actor_type: "system",
+            actor_type: providerActorType,
             endpoint_id: PROVIDER.endpoint,
             subscription_id: PROVIDER.subscription,
           },
@@ -358,7 +378,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
 
       const registration: EndpointRegistration = {
         endpoint_id: PROVIDER.endpoint,
-        actor: { actor_id: PROVIDER.actor, actor_type: "system" },
+        actor: { actor_id: PROVIDER.actor, actor_type: providerActorType },
         endpoint_type: "workfabric.dev/capability_provider",
         display_name: "GitHub Capability Provider",
         protocol_versions: ["1.0"],
@@ -383,7 +403,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         principal_id: PROVIDER.principal,
         allowed_actor: {
           actor_id: PROVIDER.actor,
-          actor_type: "system",
+          actor_type: providerActorType,
         },
         allowed_endpoint_id: PROVIDER.endpoint,
         allowed_declaration_namespaces: ["github"],
@@ -392,6 +412,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         registration_version: 1,
       });
 
+      const evidenceIdentity = githubProviderEvidenceIdentity("12345", Buffer.alloc(32, 4));
       const query = new GitHubQueryService({
         api: readApi(),
         policy: new GitHubPolicyEvaluator({
@@ -401,12 +422,12 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           maximum_aggregate_repositories: 10,
         }),
         cursor: new HmacGitHubCursorCodec({ key: Buffer.alloc(32, 4) }),
-        api_version: "2022-11-28",
+        api_version: evidenceIdentity.api_version,
         now: () => "2026-08-02T10:00:01.000Z",
       });
       const executor = new GitHubCapabilityExecutor({
         query_service: query,
-        installation_id_hash: "sha256:installation",
+        installation_id_hash: evidenceIdentity.installation_id_hash,
         now: () => "2026-08-02T10:00:01.000Z",
       });
       const citizenExecute = vi.spyOn(executor, "execute");
@@ -442,7 +463,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           queries: provider.queries,
           handoffs: provider.handoffs,
         },
-        gatewayConfig([capability]),
+        gatewayConfig([capability], providerActorType),
       );
       const providerState = new SqliteAgentRuntimeStateStore({
         location: join(directory, "provider-runtime.db"),
@@ -498,7 +519,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           runtime_id: "github-provider-http-loop",
           tenant_id: TENANT,
           actor_id: PROVIDER.actor,
-          actor_type: "system",
+          actor_type: providerActorType,
           endpoint_id: PROVIDER.endpoint,
           max_active_runs: 1,
           queue_capacity: 8,
@@ -632,7 +653,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
           },
           recipient: {
             actor_id: PROVIDER.actor,
-            actor_type: "system",
+          actor_type: providerActorType,
           },
           package: {
             target: {

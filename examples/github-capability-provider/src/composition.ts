@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 
 import {
   createGitHubAppOctokit,
@@ -22,6 +22,7 @@ import {
   GitHubPolicyEvaluator,
   GitHubQueryService,
   HmacGitHubCursorCodec,
+  githubInstallationIdentityLabel,
   githubReadCapabilityDeclarations,
 } from "@work-fabric/provider-github";
 import { canonicalCitizenDigest, type CitizenDeclaration, type CitizenHealth } from "@work-fabric/network-citizen-spi";
@@ -162,8 +163,21 @@ export function githubCapabilityDescriptors(citizenId: string): readonly Capabil
   return Object.freeze(githubReadCapabilityDeclarations().map((item) => descriptor(item, citizenId)));
 }
 
-export function installationIdHash(installationId: string): `sha256:${string}` {
-  return `sha256:${createHash("sha256").update(installationId, "utf8").digest("hex")}`;
+export const GITHUB_REST_API_VERSION = "2022-11-28";
+
+export const installationIdHash = githubInstallationIdentityLabel;
+
+export function githubProviderEvidenceIdentity(
+  installationId: string,
+  deploymentKey: Uint8Array,
+): {
+  readonly api_version: typeof GITHUB_REST_API_VERSION;
+  readonly installation_id_hash: `sha256:${string}`;
+} {
+  return Object.freeze({
+    api_version: GITHUB_REST_API_VERSION,
+    installation_id_hash: installationIdHash(installationId, deploymentKey),
+  });
 }
 
 function gatewayConfiguration(
@@ -229,15 +243,20 @@ export async function composeGitHubProvider(
   const credentials = await credentialProvider.load();
   const octokit = createGitHubAppOctokit(credentials);
   const api = new OctokitGitHubReadApi(octokit);
+  const cursorKey = Buffer.from(resolved.provider.cursor_signing_key, "utf8");
+  const evidenceIdentity = githubProviderEvidenceIdentity(
+    credentials.installation_id,
+    cursorKey,
+  );
   const queryService = new GitHubQueryService({
     api,
     policy: new GitHubPolicyEvaluator(loaded.provider.policy),
-    cursor: new HmacGitHubCursorCodec({ key: Buffer.from(resolved.provider.cursor_signing_key, "utf8") }),
-    api_version: "github-v3",
+    cursor: new HmacGitHubCursorCodec({ key: cursorKey }),
+    api_version: evidenceIdentity.api_version,
   });
   const executor = new GitHubCapabilityExecutor({
     query_service: queryService,
-    installation_id_hash: installationIdHash(credentials.installation_id),
+    installation_id_hash: evidenceIdentity.installation_id_hash,
   });
   const client = new WorkFabricClient({
     baseUrl: loaded.service.work_fabric.base_url,

@@ -38,6 +38,7 @@ import {
 } from "@work-fabric/service-node";
 
 import { dailyAssistantEndpointRegistration, dailyAssistantGatewayConfig } from "../src/subscription.js";
+import { githubProviderEvidenceIdentity } from "../../github-capability-provider/src/composition.js";
 import { DailyAssistantDriver } from "../src/daily-assistant-driver.js";
 import { LocalInvocationAuthorityProvider } from "../src/local-invocation-authority.js";
 
@@ -247,6 +248,7 @@ export async function startGitHubReadProviderFixture(input: {
     DAILY_E2E.githubActorId,
     DAILY_E2E.githubEndpointId,
   );
+  const evidenceIdentity = githubProviderEvidenceIdentity("88888", Buffer.alloc(32, 8));
   const query = new GitHubQueryService({
     api: input.api,
     policy: new GitHubPolicyEvaluator({
@@ -256,12 +258,12 @@ export async function startGitHubReadProviderFixture(input: {
       maximum_aggregate_repositories: 10,
     }),
     cursor: new HmacGitHubCursorCodec({ key: Buffer.alloc(32, 8) }),
-    api_version: "2022-11-28",
+    api_version: evidenceIdentity.api_version,
     now: () => new Date().toISOString(),
   });
   const executor = new GitHubCapabilityExecutor({
     query_service: query,
-    installation_id_hash: `sha256:${"8".repeat(64)}`,
+    installation_id_hash: evidenceIdentity.installation_id_hash,
     now: () => new Date().toISOString(),
   });
   const shutdown = new AbortController();

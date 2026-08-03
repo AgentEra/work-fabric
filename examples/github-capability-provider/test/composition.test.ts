@@ -1,14 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  GITHUB_REST_API_VERSION,
   ManagedGitHubProviderComposition,
   installationIdHash,
 } from "../src/composition.js";
 
 describe("ManagedGitHubProviderComposition", () => {
-  it("uses a one-way installation identifier for capability evidence", () => {
-    expect(installationIdHash("456")).toMatch(/^sha256:[a-f0-9]{64}$/);
-    expect(installationIdHash("456")).not.toContain("456");
+  it("uses a deployment-secret, domain-separated installation identifier for capability evidence", () => {
+    const first = installationIdHash("456", Buffer.alloc(32, 1));
+    const second = installationIdHash("456", Buffer.alloc(32, 2));
+    expect(first).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(first).not.toBe(second);
+    expect(first).not.toContain("456");
+    expect(GITHUB_REST_API_VERSION).toBe("2022-11-28");
   });
 
   it("starts the leased Citizen before the Gateway Host and closes in reverse order", async () => {

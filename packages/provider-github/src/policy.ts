@@ -112,6 +112,18 @@ export class GitHubPolicyEvaluator {
     return normalized;
   }
 
+  isRepositoryAuthorized(value: GitHubRepositoryRef): boolean {
+    try {
+      this.authorizeRepository(value);
+      return true;
+    } catch (error) {
+      if (error instanceof GitHubProviderError && error.code === "github_forbidden") {
+        return false;
+      }
+      throw error;
+    }
+  }
+
   authorizeRepositories(values: readonly GitHubRepositoryRef[]): readonly GitHubRepositoryRef[] {
     if (!Array.isArray(values) || values.length === 0 || values.length > this.maximum_aggregate_repositories) {
       forbidden();

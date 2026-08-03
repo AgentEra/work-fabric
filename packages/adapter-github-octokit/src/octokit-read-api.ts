@@ -26,6 +26,7 @@ import { mapGitHubApiError } from "./error-mapping.js";
 
 const MAX_ITEMS = 100;
 const MAX_TEXT_BYTES = 8_192;
+const INSTALLATION_REPOSITORIES_ROUTE = "GET /installation/repositories";
 const encoder = new TextEncoder();
 
 type Source = Record<string, unknown>;
@@ -132,8 +133,34 @@ function safeUrl(value: unknown): string {
   return result;
 }
 
+function githubUrl(value: unknown): string {
+  const result = safeUrl(value);
+  const url = new URL(result);
+  if (
+    url.hostname.toLowerCase() !== "github.com" ||
+    url.port !== "" ||
+    !url.pathname.startsWith("/")
+  ) invalidResponse();
+  return result;
+}
+
 function nullableSafeUrl(value: unknown): string | null {
   return value === null ? null : safeUrl(value);
+}
+
+function sameRepository(left: GitHubRepositoryRef, right: GitHubRepositoryRef): boolean {
+  return left.owner.toLowerCase() === right.owner.toLowerCase() &&
+    left.name.toLowerCase() === right.name.toLowerCase();
+}
+
+function assertRepositoryPath(value: string, repository: GitHubRepositoryRef): string {
+  const url = new URL(value);
+  const prefix = `/${encodeURIComponent(repository.owner)}/${encodeURIComponent(repository.name)}`;
+  if (
+    url.pathname.toLowerCase() !== prefix.toLowerCase() &&
+    !url.pathname.toLowerCase().startsWith(`${prefix.toLowerCase()}/`)
+  ) invalidResponse();
+  return value;
 }
 
 function items(value: unknown): readonly unknown[] {
@@ -185,7 +212,7 @@ function requestedRepository(value: GitHubRepositoryRef): GitHubRepositoryRef {
   return { owner: value.owner, name: value.name };
 }
 
-function repository(value: unknown): GitHubRepositoryRecord {
+function repository(value: unknown, expected?: GitHubRepositoryRef): GitHubRepositoryRecord {
   const record = source(value);
   const visibilityValue = record.visibility;
   let visibility: GitHubRepositoryRecord["visibility"];
@@ -197,9 +224,11 @@ function repository(value: unknown): GitHubRepositoryRecord {
     invalidResponse();
   }
   const topics = items(required(record, "topics")).map((topic) => text(topic, 100));
+  const actualRepository = repositoryRef(record);
+  if (expected !== undefined && !sameRepository(actualRepository, expected)) invalidResponse();
   return {
-    repository: repositoryRef(record),
-    url: safeUrl(required(record, "html_url")),
+    repository: actualRepository,
+    url: assertRepositoryPath(githubUrl(required(record, "html_url")), actualRepository),
     description: nullableText(required(record, "description")),
     visibility,
     archived: boolean(required(record, "archived")),
@@ -232,15 +261,17 @@ function pullRequest(
 ): GitHubPullRequestRecord {
   const record = source(value);
   const body = detail ? preview(required(record, "body")) : undefined;
+  const head = source(required(record, "head"));
   return {
     repository,
     number: integer(required(record, "number"), 1),
     title: text(required(record, "title")),
-    url: safeUrl(required(record, "html_url")),
+    url: assertRepositoryPath(githubUrl(required(record, "html_url")), repository),
     author: login(required(record, "user")),
     draft: boolean(required(record, "draft")),
     base_branch: text(required(source(required(record, "base")), "ref"), 255),
-    head_branch: text(required(source(required(record, "head")), "ref"), 255),
+    head_branch: text(required(head, "ref"), 255),
+    head_sha: text(required(head, "sha"), 64),
     assignees: namedLogins(required(record, "assignees")),
     requested_reviewers: namedLogins(required(record, "requested_reviewers")),
     labels: labels(required(record, "labels")),
@@ -267,7 +298,7 @@ function review(value: unknown, repository: GitHubRepositoryRef, number: number)
     submitted_at: nullableTimestamp(required(record, "submitted_at")),
     body_preview: body.value,
     body_truncated: body.truncated,
-    url: safeUrl(required(record, "html_url")),
+    url: assertRepositoryPath(githubUrl(required(record, "html_url")), repository),
   };
 }
 
@@ -289,7 +320,7 @@ function comment(
     updated_at: timestamp(required(record, "updated_at")),
     body_preview: body.value,
     body_truncated: body.truncated,
-    url: safeUrl(required(record, "html_url")),
+    url: assertRepositoryPath(githubUrl(required(record, "html_url")), repository),
   };
 }
 
@@ -303,7 +334,7 @@ function changedFile(value: unknown, repository: GitHubRepositoryRef, number: nu
     additions: integer(required(record, "additions")),
     deletions: integer(required(record, "deletions")),
     changes: integer(required(record, "changes")),
-    url: safeUrl(required(record, "blob_url")),
+    url: assertRepositoryPath(githubUrl(required(record, "blob_url")), repository),
   };
 }
 
@@ -331,7 +362,7 @@ function commit(value: unknown, repository: GitHubRepositoryRef): GitHubCommitRe
     timestamp: authorRecord !== null
       ? nullableTimestamp(required(authorRecord, "date"))
       : committerRecord === null ? null : nullableTimestamp(required(committerRecord, "date")),
-    url: safeUrl(required(record, "html_url")),
+    url: assertRepositoryPath(githubUrl(required(record, "html_url")), repository),
   };
 }
 
@@ -350,7 +381,7 @@ function workflowRun(value: unknown, repository: GitHubRepositoryRef): GitHubWor
     conclusion: nullableText(required(record, "conclusion"), 100),
     created_at: timestamp(required(record, "created_at")),
     updated_at: timestamp(required(record, "updated_at")),
-    url: safeUrl(required(record, "html_url")),
+    url: assertRepositoryPath(githubUrl(required(record, "html_url")), repository),
   };
 }
 
@@ -368,7 +399,7 @@ function legacyStatus(value: unknown): GitHubCheckRecord {
   };
 }
 
-function checkRun(value: unknown): GitHubCheckRecord {
+function checkRun(value: unknown, repository: GitHubRepositoryRef): GitHubCheckRecord {
   const record = source(value);
   return {
     name: text(required(record, "name"), 255),
@@ -376,7 +407,9 @@ function checkRun(value: unknown): GitHubCheckRecord {
     conclusion: nullableText(required(record, "conclusion"), 100),
     started_at: nullableTimestamp(required(record, "started_at")),
     completed_at: nullableTimestamp(required(record, "completed_at")),
-    url: nullableSafeUrl(required(record, "html_url")),
+    url: required(record, "html_url") === null
+      ? null
+      : assertRepositoryPath(githubUrl(required(record, "html_url")), repository),
   };
 }
 
@@ -424,7 +457,10 @@ function nextCursor(headersValue: unknown): string | undefined {
   } catch {
     invalidResponse();
   }
-  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") invalidResponse();
+  if (
+    url.protocol !== "https:" || url.username !== "" || url.password !== "" ||
+    url.hostname.toLowerCase() !== "api.github.com" || url.port !== ""
+  ) invalidResponse();
   const page = url.searchParams.get("page");
   if (page === null || !/^[1-9]\d{0,3}$|^10000$/u.test(page)) invalidResponse();
   return page;
@@ -493,7 +529,10 @@ function searchRepository(value: unknown, target: GitHubApiPullRequestListInput[
   } catch {
     invalidResponse();
   }
-  if (url.protocol !== "https:" || url.username !== "" || url.password !== "") invalidResponse();
+  if (
+    url.protocol !== "https:" || url.username !== "" || url.password !== "" ||
+    url.hostname.toLowerCase() !== "api.github.com" || url.port !== ""
+  ) invalidResponse();
   const authorityStart = urlValue.indexOf("://") + 3;
   const pathStart = urlValue.indexOf("/", authorityStart);
   const fragmentStart = urlValue.indexOf("#", authorityStart);
@@ -563,24 +602,36 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
   }
 
   async getIdentity(signal: AbortSignal): Promise<GitHubIdentityRecord> {
-    const { data } = await this.request("GET /app", requestOptions(signal));
-    const record = source(data);
+    const [app, access] = await Promise.all([
+      this.request("GET /app", requestOptions(signal)),
+      this.request(INSTALLATION_REPOSITORIES_ROUTE, {
+        per_page: 1,
+        page: 1,
+        ...requestOptions(signal),
+      }),
+    ]);
+    const record = source(app.data);
+    const accessRecord = source(access.data);
+    const slug = text(required(record, "slug"), 100);
+    const appUrl = githubUrl(required(record, "html_url"));
+    if (new URL(appUrl).pathname !== `/apps/${encodeURIComponent(slug)}`) invalidResponse();
     return {
       app_id: identifier(required(record, "id")),
-      slug: text(required(record, "slug"), 100),
+      slug,
       name: text(required(record, "name"), 255),
-      url: safeUrl(required(record, "html_url")),
+      url: appUrl,
       owner: login(required(record, "owner")),
+      installation_repository_count: integer(required(accessRecord, "total_count"), 0),
     };
   }
 
   async listRepositories(input: GitHubApiPageInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubRepositoryRecord>> {
-    const result = await this.request("GET /installation/repositories", {
+    const result = await this.request(INSTALLATION_REPOSITORIES_ROUTE, {
       per_page: input.page_size,
       page: pageNumber(input),
       ...requestOptions(signal),
     });
-    const values = items(required(source(result.data), "repositories")).map(repository);
+    const values = items(required(source(result.data), "repositories")).map((item) => repository(item));
     return apiPage(values, result.headers);
   }
 
@@ -589,7 +640,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       ...routeRepository(repositoryValue),
       ...requestOptions(signal),
     }, "github_repository_not_found");
-    return repository(result.data);
+    return repository(result.data, requestedRepository(repositoryValue));
   }
 
   async listPullRequests(input: GitHubApiPullRequestListInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubPullRequestRecord>> {
@@ -695,7 +746,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
     const statusState = text(required(statusesRecord, "state"), 100);
     const checks = [
       ...items(required(statusesRecord, "statuses")).map(legacyStatus),
-      ...items(required(checksRecord, "check_runs")).map(checkRun),
+      ...items(required(checksRecord, "check_runs")).map((item) => checkRun(item, repository)),
     ];
     if (checks.length > MAX_ITEMS) invalidResponse();
     return {

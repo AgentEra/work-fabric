@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import {
   createGitHubAppOctokit,
   OctokitGitHubReadApi,
@@ -22,6 +20,7 @@ import {
   type GitHubProviderAuthentication,
 } from "../examples/github-capability-provider/src/configuration.js";
 import { EnvironmentGitHubCredentialProvider } from "../examples/github-capability-provider/src/credentials.js";
+import { githubProviderEvidenceIdentity } from "../examples/github-capability-provider/src/composition.js";
 
 type GitHubSmokeCapabilityId =
   | "github.identity.get"
@@ -287,19 +286,23 @@ async function loadLiveRuntime(
     environment,
   }).load();
   const api = new OctokitGitHubReadApi(createGitHubAppOctokit(credentials));
+  const cursorKey = Buffer.from(environment[preflight.cursor_environment]!, "utf8");
+  const evidenceIdentity = githubProviderEvidenceIdentity(
+    credentials.installation_id,
+    cursorKey,
+  );
   const query = new GitHubQueryService({
     api,
     policy: new GitHubPolicyEvaluator(preflight.policy),
     cursor: new HmacGitHubCursorCodec({
-      key: Buffer.from(environment[preflight.cursor_environment]!, "utf8"),
+      key: cursorKey,
     }),
-    api_version: "github-v3",
+    api_version: evidenceIdentity.api_version,
   });
   return {
     query,
     tenant_id: preflight.tenant_id,
-    installation_id_hash: `sha256:${createHash("sha256")
-      .update(credentials.installation_id, "utf8").digest("hex")}`,
+    installation_id_hash: evidenceIdentity.installation_id_hash,
   };
 }
 

@@ -4,6 +4,7 @@ export * from "./cursor.js";
 export * from "./declarations.js";
 export * from "./errors.js";
 export * from "./executor.js";
+export * from "./installation-identity.js";
 export * from "./policy.js";
 export * from "./query-service.js";
 export * from "./schema-registry.js";

@@ -44,7 +44,7 @@ function basePullRequest(number = 7) {
     user: { login: "octo" },
     draft: false,
     base: { ref: "main" },
-    head: { ref: "feature/github" },
+    head: { ref: "feature/github", sha: "deadbeef1234" },
     assignees: [{ login: "owner" }],
     requested_reviewers: [{ login: "reviewer" }],
     labels: [{ name: "github" }],
@@ -216,6 +216,7 @@ describe("OctokitGitHubReadApi", () => {
     expect(recorded.map((item) => item.route)).toEqual([
       "GET /app",
       "GET /installation/repositories",
+      "GET /installation/repositories",
       "GET /repos/{owner}/{repo}",
       "GET /repos/{owner}/{repo}/pulls",
       "GET /search/issues",
@@ -234,10 +235,15 @@ describe("OctokitGitHubReadApi", () => {
       (item.parameters.request as { signal?: AbortSignal }).signal === signal
     )).toBe(true);
     expect(results).toMatchObject([
-      { app_id: "42", slug: "work-fabric", owner: "AgentEra" },
+      {
+        app_id: "42",
+        slug: "work-fabric",
+        owner: "AgentEra",
+        installation_repository_count: 1,
+      },
       { items: [{ repository, visibility: "private" }] },
       { repository, default_branch: "main" },
-      { items: [{ repository, number: 7, author: "octo" }] },
+      { items: [{ repository, number: 7, author: "octo", head_sha: "deadbeef1234" }] },
       { items: [] },
       { repository, number: 7, body_preview: "A bounded body", body_truncated: false },
       { items: [{ actor: null, body_preview: "" }] },
@@ -252,6 +258,57 @@ describe("OctokitGitHubReadApi", () => {
     expect(JSON.stringify(results)).not.toMatch(
       /authorization|private_key|token|installation-secret|raw-secret|raw-header-secret|raw-body-secret|response-header-secret|PRIVATE PATCH|PRIVATE LOGS|PRIVATE ARTIFACTS|PRIVATE FULL TITLE|Full commit body/i,
     );
+  });
+
+  it("rejects GitHub-owned URLs and REST repository identities from other hosts", async () => {
+    const foreignHtml = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /repos/{owner}/{repo}"
+        ? { data: { ...baseRepository(), html_url: "https://example.test/AgentEra/work-fabric" }, headers: {} }
+        : response(route)
+    ));
+    await expect(foreignHtml.getRepository(repository, signal)).rejects.toMatchObject({
+      code: "github_response_invalid",
+    });
+
+    const foreignRest = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /search/issues"
+        ? {
+            data: {
+              total_count: 1,
+              incomplete_results: false,
+              items: [{
+                number: 7,
+                repository_url: "https://evil.example/repos/AgentEra/work-fabric",
+              }],
+            },
+            headers: {},
+          }
+        : response(route)
+    ));
+    await expect(foreignRest.searchPullRequests({
+      target: { owner: "AgentEra" },
+      page_size: 1,
+    }, signal)).rejects.toMatchObject({ code: "github_response_invalid" });
+  });
+
+  it("rebinds direct repository responses to the requested repository identity", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /repos/{owner}/{repo}"
+        ? {
+            data: {
+              ...baseRepository(),
+              name: "transferred",
+              owner: { login: "OtherOwner" },
+              html_url: "https://github.com/OtherOwner/transferred",
+            },
+            headers: {},
+          }
+        : response(route)
+    ));
+
+    await expect(api.getRepository(repository, signal)).rejects.toMatchObject({
+      code: "github_response_invalid",
+    });
   });
 
   it("follows only the bounded search page with PR detail reads", async () => {
@@ -458,6 +515,15 @@ describe("OctokitGitHubReadApi", () => {
         },
         headers: {},
       };
+      if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
+        return {
+          data: {
+            ...basePullRequest(),
+            html_url: "https://github.com/AgentEra/work.fabric/pull/7",
+          },
+          headers: {},
+        };
+      }
       return response(route);
     }));
 

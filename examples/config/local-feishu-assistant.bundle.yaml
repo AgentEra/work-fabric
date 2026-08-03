@@ -590,6 +590,7 @@ applications:
           tenant_id: tenant-local
           principal_id: principal-github-provider
           actor_id: actor-github-provider
+          actor_type: system
           endpoint_id: endpoint-github-provider
           subscription_id: subscription-github-provider
     admission:

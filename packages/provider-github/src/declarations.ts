@@ -78,12 +78,15 @@ const evidence = (complete: boolean): CitizenJsonObject => objectSchema([
   next_cursor: cursor,
 });
 
-const identityRecord = objectSchema(["app_id", "slug", "name", "url", "owner"], {
+const identityRecord = objectSchema([
+  "app_id", "slug", "name", "url", "owner", "installation_repository_count",
+], {
   app_id: boundedText(100),
   slug: boundedText(100),
   name: boundedText(8_192),
   url: boundedText(2_048),
   owner: nullable(boundedText(100)),
+  installation_repository_count: { type: "integer", minimum: 0 },
 });
 const repositoryRecord = objectSchema([
   "repository", "url", "description", "visibility", "archived", "default_branch",
@@ -101,7 +104,7 @@ const repositoryRecord = objectSchema([
 });
 const pullRequestRecord = objectSchema([
   "repository", "number", "title", "url", "author", "draft", "base_branch",
-  "head_branch", "assignees", "requested_reviewers", "labels", "mergeable",
+  "head_branch", "head_sha", "assignees", "requested_reviewers", "labels", "mergeable",
   "created_at", "updated_at",
 ], {
   repository,
@@ -112,6 +115,7 @@ const pullRequestRecord = objectSchema([
   draft: { type: "boolean" },
   base_branch: boundedText(255),
   head_branch: boundedText(255),
+  head_sha: boundedText(64),
   assignees: { type: "array", maxItems: 100, items: boundedText(100) },
   requested_reviewers: { type: "array", maxItems: 100, items: boundedText(100) },
   labels: { type: "array", maxItems: 100, items: boundedText(100) },

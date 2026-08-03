@@ -44,6 +44,18 @@ async function feishuOnlyInput(): Promise<{
 }
 
 describe("optional local GitHub Provider", () => {
+  it("keeps the unified bundle GitHub Provider authority grant system-typed", async () => {
+    const fixture = await feishuOnlyInput();
+    try {
+      const environment = await prepareLocalFeishuEnvironment(fixture.input);
+      const loaded = await loadNodeConfiguration(environment);
+      expect(loaded.agent_runtime_authority?.grants?.["github-provider"])
+        .toMatchObject({ actor_type: "system" });
+    } finally {
+      await rm(fixture.directory, { recursive: true, force: true });
+    }
+  });
+
   it("does not require GitHub credentials for the existing Feishu stack", async () => {
     const fixture = await feishuOnlyInput();
     try {

@@ -29,6 +29,7 @@ const pullRequest: GitHubPullRequestRecord = {
   draft: false,
   base_branch: "main",
   head_branch: "provider-query",
+  head_sha: "abc123immutable",
   assignees: [],
   requested_reviewers: [],
   labels: ["provider"],
@@ -55,6 +56,7 @@ const identity: GitHubIdentityRecord = {
   name: "Work Fabric",
   url: "https://github.com/apps/work-fabric",
   owner: "AgentEra",
+  installation_repository_count: 1,
 };
 
 const review: GitHubReviewRecord = {
@@ -110,7 +112,7 @@ const commit: GitHubCommitRecord = {
 
 const checks: GitHubCheckSummary = {
   repository,
-  ref: "provider-query",
+  ref: "abc123immutable",
   aggregate_state: "success",
   checks: [],
 };
@@ -179,6 +181,40 @@ function service(readApi: GitHubReadApi): GitHubQueryService {
 }
 
 describe("GitHubQueryService", () => {
+  it("filters installation repository pages through the Provider policy ceiling without losing continuation", async () => {
+    const hidden = {
+      ...repositoryRecord,
+      repository: { owner: "AgentEra", name: "installation-only-hidden" },
+    };
+    let calls = 0;
+    const query = service(api({
+      listRepositories: async (input) => {
+        calls += 1;
+        if (input.cursor === undefined) return page([hidden], "2");
+        expect(input.cursor).toBe("2");
+        return page([repositoryRecord]);
+      },
+    }));
+
+    const result = await query.execute("github.repository.list", { page_size: 1 }, context);
+    expect(result).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "complete", items: [repositoryRecord] },
+    });
+    expect(calls).toBe(2);
+  });
+
+  it("queries checks with the immutable pull-request head SHA", async () => {
+    let observedRef: string | undefined;
+    await service(api({
+      getChecks: async (_repository, ref) => {
+        observedRef = ref;
+        return checks;
+      },
+    })).execute("github.pull_request.checks.get", { repository, number: 42 }, context);
+
+    expect(observedRef).toBe("abc123immutable");
+  });
   it.each([
     [[], "empty", true],
     [[pullRequest], "complete", true],

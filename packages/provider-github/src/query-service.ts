@@ -219,6 +219,30 @@ function pageResult<T>(
   });
 }
 
+async function authorizedRepositoryPage(
+  options: GitHubQueryServiceOptions,
+  parsed: GitHubParsedCapabilityInput,
+  signal: AbortSignal,
+): Promise<GitHubApiPage<import("./contracts.js").GitHubRepositoryRecord>> {
+  let input = apiInput(parsed);
+  for (let scanned = 0; scanned < 10_000; scanned += 1) {
+    const page = await options.api.listRepositories(input, signal);
+    if (!Array.isArray(page.items) || page.items.length > parsed.page_size) {
+      invalidResponse();
+    }
+    if (page.items.length === 0 && page.next_cursor !== undefined) invalidResponse();
+    const items = page.items.filter((item) =>
+      options.policy.isRepositoryAuthorized(item.repository)
+    );
+    if (items.length > 0 || page.next_cursor === undefined) {
+      return { items, ...(page.next_cursor === undefined ? {} : { next_cursor: page.next_cursor }) };
+    }
+    const next = nextPage(page.next_cursor, Number(input.cursor ?? "1"));
+    input = { page_size: parsed.page_size, cursor: String(next) };
+  }
+  return invalidResponse();
+}
+
 function pullRequestPageInput(
   parsed: GitHubParsedCapabilityInput,
   page = parsed.page,
@@ -547,7 +571,7 @@ export class GitHubQueryService {
         break;
       case "github.repository.list":
         result = pageResult(
-          await this.options.api.listRepositories(apiInput(parsed), context.signal),
+          await authorizedRepositoryPage(this.options, parsed, context.signal),
           this.options,
           parsed,
           context,
@@ -643,7 +667,7 @@ export class GitHubQueryService {
         );
         aborted(context.signal);
         result = singleResult(
-          await this.options.api.getChecks(repository, pullRequest.head_branch, context.signal),
+          await this.options.api.getChecks(repository, pullRequest.head_sha, context.signal),
           this.options,
           parsed,
           context,
