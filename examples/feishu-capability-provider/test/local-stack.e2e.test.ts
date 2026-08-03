@@ -195,28 +195,6 @@ describe("local Feishu assistant stack", () => {
           };
         }
         if (index === 3) {
-          const reviewInput = JSON.stringify(request);
-          if (
-            !reviewInput.includes("candidate_turn")
-            || !reviewInput.includes("capability_transcript")
-          ) throw new Error("proposal grounding evidence was not disclosed");
-          return {
-            request_summary: "形成共同空闲的一小时日程提案",
-            response:
-              "排期提案：明天 15:00–16:00 举行 Work Fabric 日历联调，并邀请当前群。请发起人确认。",
-            private_state: {
-              namespace: "daily-assistant.scheduling/v1",
-              expected_version: 0,
-              phase: "awaiting_confirmation",
-              proposal: schedulingProposal,
-              confirmed_proposal_digest: null,
-              confirmation_handoff_id: null,
-              calendar_result_uri: null,
-              capability_result_handoff_ids: proposalEvidence,
-            },
-          };
-        }
-        if (index === 4) {
           if (
             handoffIds.length < 2 ||
             proposalEvidence.length < 2
@@ -710,7 +688,7 @@ describe("local Feishu assistant stack", () => {
         ),
       });
       await eventually(async () => {
-        expect(model.requests).toHaveLength(4);
+        expect(model.requests).toHaveLength(3);
         expect(externalEventCreates).toBe(0);
         const proposalRun =
           handoffIds[0] === undefined || agentState === undefined
@@ -811,7 +789,7 @@ describe("local Feishu assistant stack", () => {
           workerObservations,
           run,
           invocation,
-        })).toHaveLength(5);
+        })).toHaveLength(4);
         expect(sent).toHaveLength(2);
         expect(JSON.stringify(sent[1])).toContain(
           "https://feishu.example/calendar/event-local-1",

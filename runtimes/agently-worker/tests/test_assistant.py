@@ -71,6 +71,35 @@ def contextual_turn(
     }
 
 
+def github_query_request(result: dict[str, object]) -> dict[str, object]:
+    value = valid_request_v3()
+    value["task"]["source_reference"]["extensions"][
+        "workfabric.dev/occurred_at"
+    ] = "2026-08-03T08:00:00.000Z"
+    value["task"]["result_due_at"] = "2026-08-03T09:00:00.000Z"
+    value["available_capabilities"] = [{
+        "citizen_id": "citizen-github-read",
+        "capability_id": "github.pull_request.list",
+        "version": "1.0.0",
+        "name": "GitHub pull requests",
+        "description": "Lists current pull request facts.",
+        "operation_kind": "query",
+        "input_schema": {"type": "object"},
+    }]
+    request = {
+        "invocation_id": "github-pr-list-1",
+        "capability_id": "github.pull_request.list",
+        "version_constraint": "1.0.0",
+        "input": {"target": {"owner": "AgentEra"}},
+        "reason": "需要当前 GitHub PR 事实",
+    }
+    value["capability_transcript"] = {"entries": [{
+        "request": request,
+        "result": result,
+    }]}
+    return value
+
+
 @pytest.mark.asyncio
 async def test_executes_a_single_structured_request_in_the_supplied_workspace() -> None:
     request = parse_request(valid_request())
@@ -593,7 +622,7 @@ async def test_retrieved_error_evidence_can_feed_a_document_command() -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_history_is_reviewed_before_it_can_be_reported_as_current_command_result() -> None:
+async def test_query_history_requires_a_current_command_request_in_r2() -> None:
     value = valid_request_v3()
     value["task"]["intent"] = [{
         "kind": "text",
@@ -711,22 +740,6 @@ async def test_query_history_is_reviewed_before_it_can_be_reported_as_current_co
     async def model_turn() -> object:
         nonlocal calls
         calls += 1
-        if calls == 1:
-            return contextual_turn({
-                "turn_type": "final",
-                "request_summary": "再次创建日程仍然失败",
-                "response": (
-                    "我已经再次尝试创建日程，但仍然返回 "
-                    "calendar_not_registered。"
-                ),
-                "invocation_id": "",
-                "capability_id": "",
-                "version_constraint": "",
-                "input": {},
-                "reason": "",
-                "private_state_action": "none",
-                "private_state": {},
-            })
         return contextual_turn({
             "turn_type": "capability_request",
             "request_summary": "重新调用日历创建能力",
@@ -757,7 +770,7 @@ async def test_query_history_is_reviewed_before_it_can_be_reported_as_current_co
 
     turn = await execute_turn_with_agent(request, agent)
 
-    assert calls == 2
+    assert calls == 1
     assert turn["kind"] == "capability_request"
     assert turn["request"]["capability_id"] == (
         "feishu.calendar.event.create"
@@ -819,7 +832,7 @@ def test_scheduling_proposal_has_a_dedicated_required_output_contract() -> None:
 
 
 @pytest.mark.asyncio
-async def test_scheduling_proposal_query_result_receives_evidence_grounding_review() -> None:
+async def test_scheduling_proposal_uses_current_evidence_in_r2() -> None:
     value = valid_request_v3()
     value["task"]["agent_private_context"] = {
         "namespace": "daily-assistant.scheduling/v1",
@@ -900,11 +913,7 @@ async def test_scheduling_proposal_query_result_receives_evidence_grounding_revi
         calls += 1
         return {
             "request_summary": "已找到共同空闲时间",
-            "response": (
-                "日程已经创建完成。"
-                if calls == 1
-                else "已找到共同空闲时间，请确认后我再创建日程。"
-            ),
+            "response": "已找到共同空闲时间，请确认后我再创建日程。",
             "private_state": proposal_state,
         }
 
@@ -912,7 +921,7 @@ async def test_scheduling_proposal_query_result_receives_evidence_grounding_revi
 
     turn = await execute_turn_with_agent(parse_request(value), agent)
 
-    assert calls == 2
+    assert calls == 1
     assert turn["kind"] == "final"
     assert turn["response"]["summary"][0]["text"] == (
         "已找到共同空闲时间，请确认后我再创建日程。"
@@ -942,6 +951,213 @@ def test_prompt_passes_resolved_context_as_untrusted_evidence() -> None:
             "private_state_action": "none",
             "private_state": {},
         })
+
+
+@pytest.mark.asyncio
+async def test_historical_github_prs_cannot_replace_the_current_query_result() -> None:
+    historical = {
+        "context_id": "historical-github-prs",
+        "facts": [{
+            "capability_id": "github.pull_request.list",
+            "state": "complete",
+            "items": [{"number": 7, "title": "旧 PR"}],
+            "fetched_at": "2026-08-01T08:00:00.000Z",
+        }],
+    }
+    capability = {
+        "citizen_id": "citizen-github-read",
+        "capability_id": "github.pull_request.list",
+        "version": "1.0.0",
+        "name": "GitHub pull requests",
+        "description": "Lists current pull request facts.",
+        "operation_kind": "query",
+        "input_schema": {"type": "object", "additionalProperties": True},
+    }
+    first_value = valid_request_v3()
+    first_value["task"]["intent"] = [{
+        "kind": "text",
+        "media_type": "text/plain",
+        "text": "查询 AgentEra 当前未关闭的 PR",
+    }]
+    first_value["task"]["resolved_context"] = historical
+    first_value["task"]["source_reference"]["extensions"][
+        "workfabric.dev/occurred_at"
+    ] = "2026-08-03T08:00:00.000Z"
+    first_value["task"]["result_due_at"] = "2026-08-03T09:00:00.000Z"
+    first_value["available_capabilities"] = [capability]
+    first_value["capability_transcript"] = None
+    calls = 0
+    first_agent = FakeAgent()
+
+    async def request_current_prs() -> object:
+        nonlocal calls
+        calls += 1
+        return contextual_turn({
+            "turn_type": "capability_request",
+            "request_summary": "查询当前未关闭的 PR",
+            "response": "",
+            "invocation_id": "github-pr-list-1",
+            "capability_id": "github.pull_request.list",
+            "version_constraint": "1.0.0",
+            "input": {
+                "target": {"owner": "AgentEra"},
+                "state": "open",
+                "page_size": 30,
+            },
+            "reason": "需要当前 GitHub PR 事实",
+            "private_state_action": "none",
+            "private_state": {},
+        }, status="needs_context", missing=["当前未关闭的 PR"])
+
+    first_agent.async_start = request_current_prs  # type: ignore[method-assign]
+    first_turn = await execute_turn_with_agent(
+        parse_request(first_value),
+        first_agent,
+    )
+
+    assert first_turn["kind"] == "capability_request"
+    assert first_turn["request"]["capability_id"] == (
+        "github.pull_request.list"
+    )
+
+    second_value = valid_request_v3()
+    second_value["task"] = first_value["task"]
+    second_value["available_capabilities"] = [capability]
+    second_value["capability_transcript"] = {"entries": [{
+        "request": first_turn["request"],
+        "result": {
+            "outcome": "succeeded",
+            "invocation_id": "github-pr-list-1",
+            "auxiliary_handoff_id": "handoff-github-pr-list-1",
+            "candidate": {
+                "citizen_id": "citizen-github-read",
+                "endpoint_id": "endpoint-github-provider",
+                "capability_id": "github.pull_request.list",
+                "capability_version": "1.0.0",
+                "contract_digest": f"sha256:{'a' * 64}",
+            },
+            "data": {
+                "state": "complete",
+                "items": [
+                    {
+                        "number": 42,
+                        "title": "修复 SSE 重连",
+                        "url": "https://github.com/AgentEra/work-fabric/pull/42",
+                    },
+                    {
+                        "number": 43,
+                        "title": "增加 GitHub Provider",
+                        "url": "https://github.com/AgentEra/work-fabric/pull/43",
+                    },
+                ],
+                "evidence": {
+                    "provider": "github",
+                    "fetched_at": "2026-08-03T08:00:01.000Z",
+                    "installation_id_hash": "sha256:installation",
+                    "api_version": "2022-11-28",
+                    "query_scope": ["github://owner/AgentEra"],
+                    "complete": True,
+                },
+            },
+            "artifacts": [],
+        },
+    }]}
+    second_agent = FakeAgent()
+
+    async def summarize_current_prs() -> object:
+        nonlocal calls
+        calls += 1
+        return contextual_turn({
+            "turn_type": "final",
+            "request_summary": "汇总当前未关闭的 PR",
+            "response": "当前有 2 个未关闭 PR：#42、#43。",
+            "invocation_id": "",
+            "capability_id": "",
+            "version_constraint": "",
+            "input": {},
+            "reason": "",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    second_agent.async_start = summarize_current_prs  # type: ignore[method-assign]
+    second_turn = await execute_turn_with_agent(
+        parse_request(second_value),
+        second_agent,
+    )
+
+    assert calls == 2
+    assert second_turn["kind"] == "final"
+    assert second_turn["response"]["summary"][0]["text"] == (
+        "当前有 2 个未关闭 PR：#42、#43。"
+    )
+    assert second_agent.input_value["capability_transcript"] == (
+        second_value["capability_transcript"]
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("result", [
+    {
+        "outcome": "failed",
+        "invocation_id": "github-pr-list-1",
+        "auxiliary_handoff_id": "handoff-github-pr-list-1",
+        "code": "github_upstream_unavailable",
+        "message": "github_upstream_unavailable",
+        "retryable": True,
+    },
+    {
+        "outcome": "succeeded",
+        "invocation_id": "github-pr-list-1",
+        "auxiliary_handoff_id": "handoff-github-pr-list-1",
+        "candidate": {
+            "citizen_id": "citizen-github-read",
+            "endpoint_id": "endpoint-github-provider",
+            "capability_id": "github.pull_request.list",
+            "capability_version": "1.0.0",
+            "contract_digest": f"sha256:{'a' * 64}",
+        },
+        "data": {
+            "state": "complete",
+            "items": [{"number": 7}],
+            "evidence": {
+                "provider": "github",
+                "fetched_at": "2026-08-01T08:00:00.000Z",
+                "installation_id_hash": "sha256:installation",
+                "api_version": "2022-11-28",
+                "query_scope": ["github://owner/AgentEra"],
+                "complete": True,
+            },
+        },
+        "artifacts": [],
+    },
+])
+async def test_failed_or_stale_github_result_cannot_reach_final_prose(
+    result: dict[str, object],
+) -> None:
+    agent = FakeAgent()
+
+    async def ungrounded_final() -> object:
+        return contextual_turn({
+            "turn_type": "final",
+            "request_summary": "汇总当前未关闭的 PR",
+            "response": "当前有 1 个未关闭 PR：#7。",
+            "invocation_id": "",
+            "capability_id": "",
+            "version_constraint": "",
+            "input": {},
+            "reason": "",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    agent.async_start = ungrounded_final  # type: ignore[method-assign]
+
+    with pytest.raises(AssistantOutputError, match="current GitHub evidence"):
+        await execute_turn_with_agent(
+            parse_request(github_query_request(result)),
+            agent,
+        )
 
 
 @pytest.mark.asyncio

@@ -18,6 +18,9 @@ export class GitHubCapabilitySchemaRegistry {
       document === undefined ||
       canonicalCitizenDigest(document) !== reference.digest
     ) throw new TypeError("Unknown or changed GitHub capability schema");
-    return structuredClone(document);
+    // Invocation contracts cross a JSON boundary. Materialize repeated schema
+    // fragments as independent JSON tree nodes so consumers never receive a
+    // shared object graph that can be mistaken for a cyclic value.
+    return JSON.parse(JSON.stringify(document)) as unknown;
   }
 }

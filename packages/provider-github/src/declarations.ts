@@ -347,7 +347,7 @@ const declaration = (
   interaction_modes: Object.freeze(["asynchronous"] as const),
   risk: "low",
   confirmation: "none",
-  constraints: deepFreezeCitizenJson({}),
+  constraints: deepFreezeCitizenJson({ operation_kind: "query" }),
   extensions: deepFreezeCitizenJson({}),
 });
 

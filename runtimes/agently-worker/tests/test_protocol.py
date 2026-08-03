@@ -84,6 +84,14 @@ def test_v3_transcript_allows_typed_resource_tokens_but_rejects_credentials() ->
         },
     }]}
     assert parse_request(value).capability_transcript is not None
+    value["capability_transcript"]["entries"][0]["result"]["candidate"][
+        "capability_id"
+    ] = "feishu.document.read"
+    with pytest.raises(ProtocolError, match="capability_id.*match"):
+        parse_request(value)
+    value["capability_transcript"]["entries"][0]["result"]["candidate"][
+        "capability_id"
+    ] = "feishu.document.create"
     value["capability_transcript"]["entries"][0]["result"]["data"]["access_token"] = "forbidden"
     with pytest.raises(ProtocolError, match="secret"):
         parse_request(value)

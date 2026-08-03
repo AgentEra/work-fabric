@@ -104,10 +104,14 @@ function capabilityInput(
   requestInput: Record<string, unknown>,
 ): NormalizedInvocationAuthorityRequest {
   const candidate = {
-    citizen_id: capabilityId.startsWith("feishu.calendar.")
-      ? "citizen-feishu-calendar"
-      : "citizen-feishu-message",
-    endpoint_id: "endpoint-feishu-actions",
+    citizen_id: capabilityId.startsWith("github.")
+      ? "citizen-github-read"
+      : capabilityId.startsWith("feishu.calendar.")
+        ? "citizen-feishu-calendar"
+        : "citizen-feishu-message",
+    endpoint_id: capabilityId.startsWith("github.")
+      ? "endpoint-github-provider"
+      : "endpoint-feishu-actions",
     capability_id: capabilityId,
     capability_version: "1.0.0",
     contract_digest: digest,
@@ -181,6 +185,45 @@ function membersResult(): HandoffReadModel {
 }
 
 describe("LocalInvocationAuthorityProvider", () => {
+  it("delegates github:read only after the Agent selected a github declaration", async () => {
+    const read = snapshot({
+      package: {
+        ...(snapshot().state.package as Record<string, unknown>),
+        authority_scope: {
+          delegation_id: "delegation-human-agent",
+          scopes: ["github:read"],
+          resource_refs: ["feishu://tenant-key-1/message/om-trigger"],
+          expires_at: "2026-07-27T12:00:00.000Z",
+          may_redelegate: true,
+        },
+      },
+    });
+    const policy = new LocalInvocationAuthorityProvider({
+      tenant_id: "tenant-local",
+      agent_actor_id: "actor-intake-agent",
+      queries: { getHandoff: async () => read },
+      allowed_namespaces: ["github."],
+      now: () => "2026-07-27T10:00:00.000Z",
+    });
+    const request = capabilityInput("github.pull_request.list", {
+      target: { owner: "AgentEra" },
+      state: "open",
+      page_size: 30,
+    });
+
+    await expect(policy.authorize(
+      request,
+      new AbortController().signal,
+    )).resolves.toMatchObject({
+      scopes: ["capability:invoke", "github:read"],
+      extensions: {
+        "workfabric.dev/capability_authority": {
+          delegation_scopes: ["github:read"],
+        },
+      },
+    });
+  });
+
   it("binds local capability Authority to a configured system participant", async () => {
     const read = snapshot({
       current_responsible_actor: {

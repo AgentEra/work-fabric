@@ -202,8 +202,9 @@ function canonical(value: RuntimeJsonValue): string {
   if (Array.isArray(value)) {
     return `[${value.map(canonical).join(",")}]`;
   }
-  return `{${Object.keys(value).sort().map((key) =>
-    `${JSON.stringify(key)}:${canonical(value[key]!)}`
+  const object = value as RuntimeJsonObject;
+  return `{${Object.keys(object).sort().map((key) =>
+    `${JSON.stringify(key)}:${canonical(object[key]!)}`
   ).join(",")}}`;
 }
 

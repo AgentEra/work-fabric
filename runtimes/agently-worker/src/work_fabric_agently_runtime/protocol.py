@@ -270,6 +270,12 @@ def _validate_continuation(value: object) -> dict[str, JsonValue]:
     result = _validate_capability_result(continuation["result"])
     if request["invocation_id"] != result["invocation_id"]:
         _fail("continuation invocation_id does not match")
+    if (
+        result["outcome"] == "succeeded"
+        and result["candidate"]["capability_id"]
+        != request["capability_id"]
+    ):
+        _fail("continuation candidate capability_id does not match")
     safe = {"request": request, "result": result}
     _reject_secret_fields(safe)
     return safe

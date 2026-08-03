@@ -24,12 +24,15 @@ function supportsSchedulingContext(task: RuntimeTaskPackage): boolean {
     Array.isArray(source)
   ) return false;
   const extensions = source.extensions;
+  if (
+    extensions === null ||
+    typeof extensions !== "object" ||
+    Array.isArray(extensions)
+  ) return false;
+  const extensionRecord = extensions as Readonly<Record<string, unknown>>;
   return (
-    extensions !== null &&
-    typeof extensions === "object" &&
-    !Array.isArray(extensions) &&
-    extensions["workfabric.dev/provider_family"] === "feishu" &&
-    extensions["workfabric.dev/resource_kind"] === "conversation_message"
+    extensionRecord["workfabric.dev/provider_family"] === "feishu" &&
+    extensionRecord["workfabric.dev/resource_kind"] === "conversation_message"
   );
 }
 
@@ -135,9 +138,12 @@ function withInitiatorMention(
       ...structuredClone(item),
       extensions: {
         ...(
-          item.extensions === undefined
+          item.extensions === undefined ||
+            item.extensions === null ||
+            typeof item.extensions !== "object" ||
+            Array.isArray(item.extensions)
             ? {}
-            : structuredClone(item.extensions)
+            : structuredClone(item.extensions) as Record<string, unknown>
         ),
         "workfabric.dev/recipient_references": [{
           kind: "mention",

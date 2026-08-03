@@ -65,6 +65,7 @@ const OPERATION_SCOPE = Object.freeze({
 } as const);
 
 function requiredScope(capabilityId: string): string {
+  if (capabilityId.startsWith("github.")) return "github:read";
   if (capabilityId in OPERATION_SCOPE) {
     return OPERATION_SCOPE[
       capabilityId as keyof typeof OPERATION_SCOPE
