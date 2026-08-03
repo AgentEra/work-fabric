@@ -4,6 +4,7 @@ import type { GitHubRepositoryRef } from "./contracts.js";
 import { GITHUB_READ_CAPABILITY_IDS } from "./declarations.js";
 import { GitHubProviderError } from "./errors.js";
 import { GitHubPolicyEvaluator } from "./policy.js";
+import { GITHUB_MAX_PAGE_SIZE, GITHUB_MAX_RECORD_ARRAY_ITEMS } from "./limits.js";
 
 type GitHubCapabilityId = (typeof GITHUB_READ_CAPABILITY_IDS)[number];
 
@@ -94,7 +95,7 @@ function optionalBoolean(source: Record<string, unknown>, field: string): boolea
 
 function optionalLabels(source: Record<string, unknown>): readonly string[] | undefined {
   if (!Object.hasOwn(source, "labels")) return undefined;
-  if (!Array.isArray(source.labels) || source.labels.length > 100) invalid();
+  if (!Array.isArray(source.labels) || source.labels.length > GITHUB_MAX_RECORD_ARRAY_ITEMS) invalid();
   return Object.freeze(source.labels.map((label) => text(label, 100)));
 }
 
@@ -111,8 +112,8 @@ function pageInput(
   policy: GitHubPolicyEvaluator,
 ): { readonly page_size: number; readonly cursor?: string } {
   const pageSize = !Object.hasOwn(source, "page_size")
-    ? 30
-    : integer(source.page_size, 1, 100);
+    ? GITHUB_MAX_PAGE_SIZE
+    : integer(source.page_size, 1, GITHUB_MAX_PAGE_SIZE);
   const cursor = !Object.hasOwn(source, "cursor") ? undefined : text(source.cursor, 4_096);
   return Object.freeze({
     page_size: policy.authorizePageSize(pageSize),
@@ -143,7 +144,7 @@ function singleResult(
     capability_id,
     input: Object.freeze(input),
     page: 1,
-    page_size: 30,
+    page_size: GITHUB_MAX_PAGE_SIZE,
     scope_hash: scopeHash({ capability_id, input }),
   });
 }

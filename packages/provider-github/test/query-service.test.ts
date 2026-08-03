@@ -160,7 +160,7 @@ function api(overrides: Partial<GitHubReadApi> = {}): GitHubReadApi {
 const policy = new GitHubPolicyEvaluator({
   allowed_owners: ["AgentEra"],
   allowed_repositories: [repository],
-  maximum_page_size: 50,
+  maximum_page_size: 5,
   maximum_aggregate_repositories: 10,
 });
 const cursor = new HmacGitHubCursorCodec({ key: Buffer.alloc(32, 7) });
@@ -310,7 +310,7 @@ describe("GitHubQueryService", () => {
     const aggregatePolicy = new GitHubPolicyEvaluator({
       allowed_owners: ["AgentEra"],
       allowed_repositories: [alpha, beta],
-      maximum_page_size: 50,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 2,
     });
     const query = service(api({
@@ -331,7 +331,7 @@ describe("GitHubQueryService", () => {
 
     const result = await query.execute("github.pull_request.list", {
       target: { repositories: [beta, alpha] },
-      page_size: 10,
+      page_size: 5,
     }, context);
     expect(result).toMatchObject({
       outcome: "succeeded",
@@ -346,7 +346,7 @@ describe("GitHubQueryService", () => {
     const aggregatePolicy = new GitHubPolicyEvaluator({
       allowed_owners: ["AgentEra"],
       allowed_repositories: [alpha, beta],
-      maximum_page_size: 50,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 2,
     });
     const calls: string[] = [];
@@ -387,7 +387,7 @@ describe("GitHubQueryService", () => {
     const ownerPolicy = new GitHubPolicyEvaluator({
       allowed_owners: ["AgentEra"],
       allowed_repositories: [],
-      maximum_page_size: 50,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 1,
     });
     const query = service(api({
@@ -400,7 +400,7 @@ describe("GitHubQueryService", () => {
 
     await expect(query.execute("github.pull_request.list", {
       target: { owner: "AgentEra" },
-      page_size: 10,
+      page_size: 5,
     }, context)).rejects.toThrowError("github_forbidden");
     expect(pullCalls).toBe(0);
   });
@@ -413,7 +413,7 @@ describe("GitHubQueryService", () => {
     })).execute("github.pull_request.list", {
       target: { owner: "AgentEra" },
       state: "open",
-      page_size: 30,
+      page_size: 5,
     }, context);
 
     expect(result).toMatchObject({
@@ -434,6 +434,57 @@ describe("GitHubQueryService", () => {
     });
   });
 
+  it("keeps a worst-case successful capability result below the Agent byte ceiling", async () => {
+    const repositories = Array.from({ length: 100 }, (_, index) => ({
+      owner: "AgentEra",
+      name: `r-${String(index).padStart(3, "0")}-${"x".repeat(94)}`,
+    }));
+    const boundedNames = Array.from({ length: 10 }, (_, index) =>
+      `user-${String(index).padStart(2, "0")}-${"x".repeat(92)}`
+    );
+    const resultPolicy = new GitHubPolicyEvaluator({
+      allowed_owners: ["AgentEra"],
+      allowed_repositories: repositories,
+      maximum_page_size: 5,
+      maximum_aggregate_repositories: 100,
+    });
+    const query = service(api({
+      listPullRequests: async (input) => {
+        if (!("repository" in input.target)) throw new Error("expected repository target");
+        const current = input.target.repository;
+        return page([{
+          repository: current,
+          number: 99_999,
+          title: "t".repeat(512),
+          url: `https://github.com/${current.owner}/${current.name}/pull/99999#${"x".repeat(1_850)}`,
+          author: "a".repeat(100),
+          draft: false,
+          base_branch: "b".repeat(255),
+          head_branch: "h".repeat(255),
+          head_sha: "f".repeat(64),
+          assignees: boundedNames,
+          requested_reviewers: boundedNames,
+          labels: boundedNames,
+          mergeable: null,
+          created_at: "2026-08-01T09:00:00.000Z",
+          updated_at: "2026-08-02T09:00:00.000Z",
+        }]);
+      },
+    }), resultPolicy);
+
+    const result = await query.execute("github.pull_request.list", {
+      target: { repositories },
+      state: "open",
+      page_size: 5,
+    }, context);
+
+    expect(result).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "truncated", items: { length: 5 } },
+    });
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(131_072);
+  });
+
   it("signs the upstream continuation and marks incomplete evidence as truncated", async () => {
     const query = service(api({
       listCommits: async (input) => {
@@ -444,7 +495,7 @@ describe("GitHubQueryService", () => {
 
     const first = await query.execute("github.commit.list", {
       repository,
-      page_size: 10,
+      page_size: 5,
     }, context);
     expect(first).toMatchObject({
       outcome: "succeeded",
@@ -462,14 +513,14 @@ describe("GitHubQueryService", () => {
     });
     await expect(service(secondApi).execute("github.commit.list", {
       repository,
-      page_size: 10,
+      page_size: 5,
       cursor: next,
     }, context)).resolves.toMatchObject({ outcome: "succeeded", data: { state: "complete" } });
 
     await expect(service(secondApi).execute("github.commit.list", {
       repository,
       ref: "other",
-      page_size: 10,
+      page_size: 5,
       cursor: next,
     }, context)).rejects.toThrowError("github_invalid_request");
   });
@@ -513,7 +564,7 @@ describe("GitHubQueryService", () => {
       repository,
       pull_request_number: 42,
       kind: "all",
-      page_size: 30,
+      page_size: 5,
     }, context);
 
     expect(result).toMatchObject({

@@ -1,5 +1,6 @@
 import type { GitHubRepositoryRef } from "./contracts.js";
 import { GitHubProviderError } from "./errors.js";
+import { GITHUB_MAX_PAGE_SIZE } from "./limits.js";
 
 export interface GitHubProviderPolicy {
   readonly allowed_owners: readonly string[];
@@ -71,7 +72,7 @@ export class GitHubPolicyEvaluator {
     }
     this.allowedOwners = Object.freeze(policy.allowed_owners.map((owner) => text(owner, 100)));
     this.allowedRepositories = Object.freeze(policy.allowed_repositories.map(repository));
-    this.maximum_page_size = positiveInteger(policy.maximum_page_size, 100);
+    this.maximum_page_size = positiveInteger(policy.maximum_page_size, GITHUB_MAX_PAGE_SIZE);
     this.maximum_aggregate_repositories = positiveInteger(
       policy.maximum_aggregate_repositories,
       Number.MAX_SAFE_INTEGER,
@@ -132,7 +133,7 @@ export class GitHubPolicyEvaluator {
   }
 
   authorizePageSize(value: number): number {
-    positiveInteger(value, 100);
+    positiveInteger(value, GITHUB_MAX_PAGE_SIZE);
     if (value > this.maximum_page_size) forbidden();
     return value;
   }

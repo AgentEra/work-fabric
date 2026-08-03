@@ -8,7 +8,7 @@ import {
 const policy: GitHubProviderPolicy = {
   allowed_owners: ["AgentEra"],
   allowed_repositories: [{ owner: "AgentEra", name: "work-fabric" }],
-  maximum_page_size: 50,
+  maximum_page_size: 5,
   maximum_aggregate_repositories: 2,
 };
 
@@ -17,7 +17,7 @@ describe("GitHubPolicyEvaluator", () => {
     const evaluator = new GitHubPolicyEvaluator({
       allowed_owners: ["AgentEra"],
       allowed_repositories: [],
-      maximum_page_size: 100,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 100,
     });
 
@@ -50,11 +50,18 @@ describe("GitHubPolicyEvaluator", () => {
   it("enforces page and aggregate repository ceilings", () => {
     const evaluator = new GitHubPolicyEvaluator(policy);
 
-    expect(() => evaluator.authorizePageSize(51)).toThrowError("github_forbidden");
+    expect(() => evaluator.authorizePageSize(6)).toThrowError("github_invalid_request");
     expect(() => evaluator.authorizeRepositories([
       { owner: "AgentEra", name: "work-fabric" },
       { owner: "AgentEra", name: "work-fabric" },
       { owner: "AgentEra", name: "work-fabric" },
     ])).toThrowError("github_forbidden");
+  });
+
+  it("rejects a configured page ceiling above the MVP result bound", () => {
+    expect(() => new GitHubPolicyEvaluator({
+      ...policy,
+      maximum_page_size: 6,
+    })).toThrowError("github_invalid_request");
   });
 });

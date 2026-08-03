@@ -46,7 +46,7 @@ const document = {
                 policy: {
                   allowed_owners: ["AgentEra"],
                   allowed_repositories: [],
-                  maximum_page_size: 100,
+                  maximum_page_size: 5,
                   maximum_aggregate_repositories: 100,
                 },
                 citizen: {
@@ -80,7 +80,7 @@ describe("GitHub Provider configuration", () => {
         authentication: { mode: "github_app", credential_ref: "github-primary" },
         policy: {
           allowed_owners: ["AgentEra"],
-          maximum_page_size: 100,
+          maximum_page_size: 5,
           maximum_aggregate_repositories: 100,
         },
         citizen: { citizen_id: "citizen-github-read" },
@@ -126,5 +126,12 @@ describe("GitHub Provider configuration", () => {
     const changed = structuredClone(document);
     changed.value.applications["github-provider"].plugins.instances["github-primary"].config.citizen.endpoint_id = "endpoint-other";
     await expect(loadGitHubProviderConfiguration({ document: changed })).rejects.toThrow(/GitHub system participant/);
+  });
+
+  it("rejects a Provider page policy above the conservative MVP bound", async () => {
+    const oversized = structuredClone(document);
+    oversized.value.applications["github-provider"].plugins.instances["github-primary"].config.policy.maximum_page_size = 6;
+    await expect(loadGitHubProviderConfiguration({ document: oversized }))
+      .rejects.toThrow(/maximum_page_size/);
   });
 });

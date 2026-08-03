@@ -169,7 +169,7 @@ plugins:
     cursor_signing_key: ${WORK_FABRIC_GITHUB_CURSOR_SECRET}
     policy:
       allowed_owners: [AgentEra]
-      maximum_page_size: 100
+      maximum_page_size: 5
       maximum_aggregate_repositories: 100
 ```
 
@@ -201,6 +201,17 @@ App. It can never widen GitHub installation access.
 All declarations use version `1.0.0`, `application/json`, asynchronous
 interaction, low risk and no confirmation. Inputs reject unknown fields and
 raw API URLs. Every list uses a bounded `page_size` and opaque Provider cursor.
+
+For the MVP, every list defaults to and is capped at `page_size: 5`; Provider
+configuration cannot raise that ceiling. The Agent may request another page
+using the opaque `next_cursor`. Normalized free text is capped at 512 UTF-8
+bytes, body/comment/review previews at 1024 bytes, repeated record arrays such
+as topics, labels, assignees and requested reviewers at 10 values, and the
+combined status/check-run collection at 20 values. GitHub responses above a
+static item or array bound fail closed as `github_response_invalid`; the
+Provider never silently drops facts to fit. Worst-case normalized Result tests
+must remain below the unified Agent `max_query_result_bytes: 131072` limit and
+therefore also below the generic 256 KiB Citizen JSON clone ceiling.
 
 ### 7.1 Repository reference
 
@@ -405,6 +416,9 @@ Result and event facts. It does not acquire GitHub-specific persistence.
     installation and never runs in the default test suite.
 11. Existing Feishu, Agent, Citizen, capability and full verification suites
     continue to pass without Core protocol changes.
+12. Every successful Result is statically bounded below 128 KiB; all list
+    declarations and production policies cap pages at five items, and
+    over-limit upstream arrays fail with `github_response_invalid`.
 
 ## 13. Deferred extensions
 
@@ -414,3 +428,8 @@ alerts and GitHub event ingestion. Every write capability requires a separate
 design with explicit Authority, confirmation, idempotency and external-outcome
 handling; write permissions are not enabled by extending this Provider's first
 release configuration.
+
+Larger pages, byte-offset continuation, and snapshot/watermark semantics for
+data that changes between GitHub page reads are deferred capacity features.
+The MVP uses small bounded pages and the existing opaque continuation contract;
+it does not promise a cross-request snapshot while GitHub is mutating.

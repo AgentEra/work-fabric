@@ -23,6 +23,7 @@ import type {
 } from "./cursor.js";
 import { GITHUB_READ_CAPABILITY_IDS } from "./declarations.js";
 import { GitHubProviderError } from "./errors.js";
+import { GITHUB_MAX_PAGE_SIZE } from "./limits.js";
 import { GitHubPolicyEvaluator } from "./policy.js";
 import {
   parseGitHubCapabilityInput,
@@ -168,10 +169,10 @@ async function pullRequestRepositories(
     return [...unique.values()].sort(compareRepositories);
   }
   const discovered = new Map<string, GitHubRepositoryRef>();
-  let input: GitHubApiPageInput = { page_size: 100 };
+  let input: GitHubApiPageInput = { page_size: GITHUB_MAX_PAGE_SIZE };
   for (let scanned = 0; scanned < 10_000; scanned += 1) {
     const page = await options.api.listRepositories(input, signal);
-    if (!Array.isArray(page.items) || page.items.length > 100) invalidResponse();
+    if (!Array.isArray(page.items) || page.items.length > GITHUB_MAX_PAGE_SIZE) invalidResponse();
     if (page.items.length === 0 && page.next_cursor !== undefined) invalidResponse();
     for (const item of page.items) {
       if (
@@ -189,7 +190,7 @@ async function pullRequestRepositories(
     }
     if (page.next_cursor === undefined) return [...discovered.values()].sort(compareRepositories);
     input = {
-      page_size: 100,
+      page_size: GITHUB_MAX_PAGE_SIZE,
       cursor: String(nextPage(page.next_cursor, Number(input.cursor ?? "1"))),
     };
   }

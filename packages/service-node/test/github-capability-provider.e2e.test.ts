@@ -521,7 +521,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         policy: new GitHubPolicyEvaluator({
           allowed_owners: ["AgentEra"],
           allowed_repositories: [repository],
-          maximum_page_size: 30,
+          maximum_page_size: 5,
           maximum_aggregate_repositories: 10,
         }),
         cursor: new HmacGitHubCursorCodec({ key: Buffer.alloc(32, 4) }),
@@ -722,7 +722,7 @@ describe("public Agent -> auxiliary Handoff -> GitHub Citizen loop", () => {
         input: {
           target: { owner: "AgentEra" },
           state: "open",
-          page_size: 30,
+          page_size: 5,
         },
         reason: "current pull request facts",
         deadline: new Date(Date.now() + 60_000).toISOString(),

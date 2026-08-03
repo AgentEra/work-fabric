@@ -372,7 +372,7 @@ export async function runGitHubProviderSmoke(
     record(identityData.item, "GitHub smoke identity result is invalid").url,
   );
   const repositoryData = succeededData(
-    await runtime.query.execute("github.repository.list", { page_size: 100 }, context),
+    await runtime.query.execute("github.repository.list", { page_size: 5 }, context),
     "github.repository.list",
   );
   const repositories = pageItems(repositoryData, "github.repository.list")
@@ -391,7 +391,7 @@ export async function runGitHubProviderSmoke(
     await runtime.query.execute("github.pull_request.list", {
       target: { owner },
       state: "open",
-      page_size: 100,
+      page_size: 5,
     }, context),
     "github.pull_request.list",
   );

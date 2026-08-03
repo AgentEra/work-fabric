@@ -852,7 +852,7 @@ applications:
               allowed_owners:
                 - AgentEra
               allowed_repositories: []
-              maximum_page_size: 100
+              maximum_page_size: 5
               maximum_aggregate_repositories: 100
             citizen:
               citizen_id: citizen-github-read

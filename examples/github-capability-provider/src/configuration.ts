@@ -8,7 +8,11 @@ import type {
   ConfigurationDocument,
   ConfigurationProvider,
 } from "@work-fabric/configuration-spi";
-import type { GitHubProviderPolicy, GitHubRepositoryRef } from "@work-fabric/provider-github";
+import {
+  GITHUB_MAX_PAGE_SIZE,
+  type GitHubProviderPolicy,
+  type GitHubRepositoryRef,
+} from "@work-fabric/provider-github";
 
 export interface GitHubProviderServiceConfiguration {
   readonly runtime_id: string;
@@ -209,7 +213,11 @@ function provider(value: unknown, path: string): GitHubProviderConfiguration {
   const parsedPolicy: GitHubProviderPolicy = Object.freeze({
     allowed_owners: allowedOwners,
     allowed_repositories: repositories(policy.allowed_repositories, `${path}.policy.allowed_repositories`, allowedOwners),
-    maximum_page_size: positive(policy.maximum_page_size, `${path}.policy.maximum_page_size`, 100),
+    maximum_page_size: positive(
+      policy.maximum_page_size,
+      `${path}.policy.maximum_page_size`,
+      GITHUB_MAX_PAGE_SIZE,
+    ),
     maximum_aggregate_repositories: positive(policy.maximum_aggregate_repositories, `${path}.policy.maximum_aggregate_repositories`, 10_000),
   });
   const citizen = record(root.citizen, `${path}.citizen`);

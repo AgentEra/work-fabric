@@ -133,6 +133,17 @@ opaque signed cursors. The Provider returns typed current facts, safe GitHub
 links, evidence metadata, and stable errors—not prose, priorities, review
 judgments, or tool-selection decisions.
 
+The first usable release deliberately defaults every list to five items and
+rejects `page_size` values or Provider policy ceilings above `5`. When more
+facts are relevant, the Agent follows `evidence.next_cursor` one bounded page
+at a time. Normal text is limited to 512 UTF-8 bytes, body/comment/review
+previews to 1024 bytes, repeated record fields such as topics, labels,
+assignees and requested reviewers to 10 values, and a check summary to 20
+combined statuses/check runs. These conservative static bounds keep every
+successful capability Result below the unified Agent's 128 KiB input ceiling;
+an upstream response outside them fails as `github_response_invalid` instead
+of being silently shortened or failing later during transport cloning.
+
 `github.identity.get` reports the App identity plus the bounded installation
 repository count. `github.repository.list` is always filtered by the Provider
 policy ceiling even when the App installation can see more repositories.
@@ -206,10 +217,10 @@ has write permissions.
 | `github_repository_not_found` / `github_pull_request_not_found` | The approved resource no longer exists or is not visible to this installation. |
 | `github_rate_limited` | Stop retrying until the safe `retry_at` time. The Provider maps the vendor limit without exposing headers or credentials. |
 | `github_upstream_unavailable` | A transient GitHub/network failure occurred. Retry only according to the bounded Provider policy. |
-| `github_response_invalid` | GitHub returned data outside the Provider's normalized contract. Preserve safe diagnostics and investigate the adapter. |
+| `github_response_invalid` | GitHub returned malformed, incomplete, or over-limit data outside the Provider's normalized contract. Preserve safe diagnostics and investigate the adapter. |
 | `github_result_truncated` | Owner-wide aggregation exceeded the Provider's configured repository ceiling before it could form a valid page. Narrow the target or adjust the reviewed ceiling. |
 | `empty` | The query succeeded and found no matching item. Report “none found”; do not treat it as auth failure. |
-| `truncated` | The response reached a declared item/page/repository ceiling. `evidence.complete` is false and `next_cursor` is opaque; only the Agent decides whether another bounded page is relevant. |
+| `truncated` | More data exists after the current five-item page. `evidence.complete` is false and `next_cursor` is opaque; only the Agent decides whether another bounded page is relevant. |
 
 Safe investigation uses capability ID, installation hash, authorized query
 scope, terminal code, `fetched_at`, completeness, and low-cardinality timing.

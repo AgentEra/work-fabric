@@ -203,7 +203,7 @@ function fakePreflight(overrides: {
     policy: {
       allowed_owners: overrides.allowed_owners ?? ["AgentEra"],
       allowed_repositories: overrides.allowed_repositories ?? [],
-      maximum_page_size: 100,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 100,
     },
   };
@@ -267,13 +267,13 @@ describe("GitHub Provider live smoke", () => {
 
     expect(fake.calls).toEqual([
       { capability_id: "github.identity.get", input: {} },
-      { capability_id: "github.repository.list", input: { page_size: 100 } },
+      { capability_id: "github.repository.list", input: { page_size: 5 } },
       {
         capability_id: "github.pull_request.list",
         input: {
           target: { owner: "AgentEra" },
           state: "open",
-          page_size: 100,
+          page_size: 5,
         },
       },
     ]);

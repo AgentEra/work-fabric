@@ -191,7 +191,7 @@ describe("OctokitGitHubReadApi", () => {
   it("uses only the approved GET routes and returns provider-owned records", async () => {
     const recorded: RecordedRequest[] = [];
     const api = new OctokitGitHubReadApi(recordingClient(recorded));
-    const page = { page_size: 30 };
+    const page = { page_size: 5 };
     const pullPage = { ...page, repository, pull_request_number: 7 };
 
     const results = [];
@@ -239,6 +239,10 @@ describe("OctokitGitHubReadApi", () => {
       (item.parameters.headers as Record<string, string> | undefined)?.["X-GitHub-Api-Version"]
         === "2022-11-28"
     )).toBe(true);
+    expect(recorded.filter((item) =>
+      item.route === "GET /repos/{owner}/{repo}/commits/{ref}/status" ||
+      item.route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs"
+    ).every((item) => item.parameters.per_page === 20)).toBe(true);
     expect(results).toMatchObject([
       {
         app_id: "42",
@@ -370,7 +374,7 @@ describe("OctokitGitHubReadApi", () => {
 
     await expect(api.searchPullRequests({
       target: { owner: "AgentEra" },
-      page_size: 10,
+      page_size: 5,
     }, signal)).rejects.toMatchObject({ code: "github_response_invalid" });
   });
 
@@ -390,7 +394,7 @@ describe("OctokitGitHubReadApi", () => {
     await expect(api.listPullRequests({
       target: { repository },
       updated_since: "2026-08-01T12:00:00+02:00",
-      page_size: 10,
+      page_size: 5,
     }, signal)).resolves.toMatchObject({ items: [{ number: 7 }] });
   });
 
@@ -407,7 +411,7 @@ describe("OctokitGitHubReadApi", () => {
       reviewer: "Reviewer",
       assignee: "OWNER",
       labels: ["GitHub"],
-      page_size: 10,
+      page_size: 5,
     }, signal)).resolves.toMatchObject({ items: [{ number: 7 }] });
   });
 
@@ -424,7 +428,7 @@ describe("OctokitGitHubReadApi", () => {
     await expect(api.listPullRequests({
       target: { repository },
       author: "octo",
-      page_size: 10,
+      page_size: 5,
     }, signal)).resolves.toEqual({ items: [], next_cursor: "2" });
   });
 
@@ -480,7 +484,7 @@ describe("OctokitGitHubReadApi", () => {
   });
 
   it("bounds UTF-8 previews without splitting a surrogate pair", async () => {
-    const body = `${"a".repeat(8_190)}🙂secret-tail`;
+    const body = `${"a".repeat(1_022)}🙂secret-tail`;
     const api = new OctokitGitHubReadApi(recordingClient([], (route) => {
       if (route === "GET /repos/{owner}/{repo}/pulls/{pull_number}") {
         return { data: { ...basePullRequest(), body }, headers: {} };
@@ -490,10 +494,30 @@ describe("OctokitGitHubReadApi", () => {
 
     const result = await api.getPullRequest(repository, 7, signal);
 
-    expect(Buffer.byteLength(result.body_preview ?? "", "utf8")).toBe(8_190);
+    expect(Buffer.byteLength(result.body_preview ?? "", "utf8")).toBe(1_022);
     expect(result.body_preview?.endsWith("\uFFFD")).toBe(false);
     expect(result.body_truncated).toBe(true);
     expect(JSON.stringify(result)).not.toContain("secret-tail");
+  });
+
+  it("bounds commit subjects at the default 512-byte text limit", async () => {
+    const commit = baseCommit();
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /repos/{owner}/{repo}/commits"
+        ? {
+            data: [{
+              ...commit,
+              commit: { ...commit.commit, message: `${"s".repeat(513)}\nprivate body` },
+            }],
+            headers: {},
+          }
+        : response(route)
+    ));
+
+    const result = await api.listCommits({ repository, page_size: 5 }, signal);
+
+    expect(result.items[0]?.subject).toBe("s".repeat(512));
+    expect(JSON.stringify(result)).not.toContain("private body");
   });
 
   it("fails closed for malformed or over-limit upstream payloads", async () => {
@@ -504,10 +528,10 @@ describe("OctokitGitHubReadApi", () => {
     ));
     const overLimit = new OctokitGitHubReadApi(recordingClient([], (route) =>
       route === "GET /repos/{owner}/{repo}/pulls/{pull_number}/files"
-        ? { data: Array.from({ length: 101 }, () => ({})), headers: {} }
+        ? { data: Array.from({ length: 6 }, () => ({})), headers: {} }
         : response(route)
     ));
-    const input = { repository, pull_request_number: 7, page_size: 30 };
+    const input = { repository, pull_request_number: 7, page_size: 5 };
 
     await expect(malformed.listReviews(input, signal)).rejects.toMatchObject({
       code: "github_response_invalid",
@@ -517,6 +541,113 @@ describe("OctokitGitHubReadApi", () => {
       code: "github_response_invalid",
       retryable: false,
     } satisfies Partial<GitHubProviderError>);
+  });
+
+  it.each([
+    ["repository topics", "GET /repos/{owner}/{repo}", () => ({
+      ...baseRepository(),
+      topics: Array.from({ length: 11 }, (_, index) => `topic-${index}`),
+    }), (api: OctokitGitHubReadApi) => api.getRepository(repository, signal)],
+    ["pull request labels", "GET /repos/{owner}/{repo}/pulls", () => ([{
+      ...basePullRequest(),
+      labels: Array.from({ length: 11 }, (_, index) => ({ name: `label-${index}` })),
+    }]), (api: OctokitGitHubReadApi) => api.listPullRequests({
+      target: { repository }, page_size: 5,
+    }, signal)],
+    ["pull request assignees", "GET /repos/{owner}/{repo}/pulls", () => ([{
+      ...basePullRequest(),
+      assignees: Array.from({ length: 11 }, (_, index) => ({ login: `user-${index}` })),
+    }]), (api: OctokitGitHubReadApi) => api.listPullRequests({
+      target: { repository }, page_size: 5,
+    }, signal)],
+    ["requested reviewers", "GET /repos/{owner}/{repo}/pulls", () => ([{
+      ...basePullRequest(),
+      requested_reviewers: Array.from({ length: 11 }, (_, index) => ({ login: `reviewer-${index}` })),
+    }]), (api: OctokitGitHubReadApi) => api.listPullRequests({
+      target: { repository }, page_size: 5,
+    }, signal)],
+  ] as const)("rejects over-limit %s instead of silently omitting values", async (_name, route, data, execute) => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (actualRoute) =>
+      actualRoute === route ? { data: data(), headers: {} } : response(actualRoute)
+    ));
+
+    await expect(execute(api)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    } satisfies Partial<GitHubProviderError>);
+  });
+
+  it("rejects check aggregates above twenty items with a stable response error", async () => {
+    const statuses = Array.from({ length: 11 }, (_, index) => ({
+      context: `status-${index}`,
+      state: "success",
+      target_url: null,
+      created_at: "2026-08-01T09:00:00Z",
+      updated_at: "2026-08-01T09:01:00Z",
+    }));
+    const checkRuns = Array.from({ length: 10 }, (_, index) => ({
+      name: `check-${index}`,
+      status: "completed",
+      conclusion: "success",
+      started_at: "2026-08-01T09:00:00Z",
+      completed_at: "2026-08-01T09:01:00Z",
+      html_url: `https://github.com/AgentEra/work-fabric/runs/${index}`,
+    }));
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) => {
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/status") {
+        return { data: { state: "success", total_count: statuses.length, statuses }, headers: {} };
+      }
+      if (route === "GET /repos/{owner}/{repo}/commits/{ref}/check-runs") {
+        return { data: { total_count: checkRuns.length, check_runs: checkRuns }, headers: {} };
+      }
+      return response(route);
+    }));
+
+    await expect(api.getChecks(repository, "abc123", signal)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    } satisfies Partial<GitHubProviderError>);
+  });
+
+  it("keeps a worst-case successful PR page below the Agent result byte ceiling", async () => {
+    const text = "界".repeat(170);
+    const names = Array.from({ length: 10 }, (_, index) => ({ login: `user-${index}-${"x".repeat(88)}` }));
+    const labels = Array.from({ length: 10 }, (_, index) => ({ name: `label-${index}-${"x".repeat(87)}` }));
+    const pullRequests = Array.from({ length: 5 }, (_, index) => ({
+      ...basePullRequest(index + 1),
+      title: text,
+      html_url: `https://github.com/AgentEra/work-fabric/pull/${index + 1}#${"x".repeat(1_990)}`,
+      assignees: names,
+      requested_reviewers: names,
+      labels,
+      base: { ref: "b".repeat(255) },
+      head: { ref: "h".repeat(255), sha: "a".repeat(64) },
+    }));
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /repos/{owner}/{repo}/pulls"
+        ? { data: pullRequests, headers: {} }
+        : response(route)
+    ));
+
+    const page = await api.listPullRequests({ target: { repository }, page_size: 5 }, signal);
+    const result = {
+      outcome: "succeeded",
+      data: {
+        state: "complete",
+        items: page.items,
+        evidence: {
+          provider: "github",
+          fetched_at: "2026-08-03T00:00:00.000Z",
+          installation_id_hash: `sha256:${"a".repeat(64)}`,
+          api_version: "2022-11-28",
+          query_scope: ["github://repository/AgentEra/work-fabric"],
+          complete: true,
+        },
+      },
+      artifacts: [],
+    };
+
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(131_072);
   });
 
   it("rejects impossible upstream calendar timestamps", async () => {

@@ -195,9 +195,10 @@ export interface GitHubReadApi {
 
 - [ ] **Step 4: Add immutable JSON Schemas and digest-checked registry**
 
-Use `additionalProperties: false`, `page_size` bounds `1..100`, repository
+Use `additionalProperties: false`, MVP `page_size` bounds `1..5`, repository
 owner/name length bounds `1..100`, PR number minimum `1`, cursor maximum `4096`,
-text preview maximum `8192`, and arrays maximum `100`. Each declaration points
+normal text maximum `512`, body/comment/review preview maximum `1024`, repeated
+record arrays maximum `10`, and check arrays maximum `20`. Each declaration points
 to `urn:work-fabric:schema:github:<name>:1` and the digest of its exact schema.
 
 ```ts
@@ -254,7 +255,7 @@ it("rejects a repository outside the configured owner ceiling", () => {
   const policy = new GitHubPolicyEvaluator({
     allowed_owners: ["AgentEra"],
     allowed_repositories: [],
-    maximum_page_size: 100,
+    maximum_page_size: 5,
     maximum_aggregate_repositories: 100,
   });
   expect(() => policy.authorizeRepository({ owner: "other", name: "secret" }))
@@ -307,7 +308,7 @@ owner.
 
 `parseGitHubCapabilityInput(capabilityId, value, policy)` rejects unknown
 fields and validates the exact input schema before any API call. It resolves
-default `state: "open"`, default `page_size: 30`, and cursor page `1`.
+default `state: "open"`, default `page_size: 5`, and cursor page `1`.
 
 ```ts
 const parsed = parseGitHubCapabilityInput(
@@ -315,14 +316,14 @@ const parsed = parseGitHubCapabilityInput(
   {
     target: { owner: "AgentEra" },
     state: "open",
-    page_size: 30,
+    page_size: 5,
   },
   policy,
 );
 expect(parsed).toMatchObject({
   capability_id: "github.pull_request.list",
   page: 1,
-  page_size: 30,
+  page_size: 5,
 });
 ```
 
@@ -504,8 +505,8 @@ SHA, authorship, verification and time. Workflow runs omit logs/artifacts.
 - [ ] **Step 5: Enforce response shape and byte bounds**
 
 Every response parser validates arrays/objects before access, truncates text
-previews at 8192 UTF-8 bytes without splitting surrogate pairs, accepts no more
-than 100 items, and throws `github_response_invalid` rather than returning a
+body/comment/review previews at 1024 UTF-8 bytes without splitting surrogate
+pairs, accepts no more than 5 page items, and throws `github_response_invalid` rather than returning a
 partially trusted record.
 
 - [ ] **Step 6: Run tests and verify GREEN**
@@ -549,7 +550,7 @@ it.each([
 ])("distinguishes successful %s results", async (items, state, complete) => {
   const result = await service.execute(
     "github.pull_request.list",
-    { target: { owner: "AgentEra" }, state: "open", page_size: 30 },
+    { target: { owner: "AgentEra" }, state: "open", page_size: 5 },
     context,
   );
   expect(result).toMatchObject({
@@ -681,7 +682,7 @@ expect(await loadGitHubProviderConfiguration({ document, environment })).toMatch
     authentication: { mode: "github_app", credential_ref: "github-primary" },
     policy: {
       allowed_owners: ["AgentEra"],
-      maximum_page_size: 100,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 100,
     },
     citizen: { citizen_id: "citizen-github-read" },
@@ -882,7 +883,7 @@ git commit -m "feat(github): wire optional provider configuration"
 const request = capabilityInput("github.pull_request.list", {
   target: { owner: "AgentEra" },
   state: "open",
-  page_size: 30,
+  page_size: 5,
 });
 await expect(authority.authorize({ request })).resolves.toMatchObject({
   scopes: ["capability:invoke", "github:read"],
@@ -920,7 +921,7 @@ The fake model returns two structured turns. Turn one:
   "invocation_id": "github-pr-list-1",
   "capability_id": "github.pull_request.list",
   "version_constraint": "1.0.0",
-  "input": { "target": { "owner": "AgentEra" }, "state": "open", "page_size": 30 },
+  "input": { "target": { "owner": "AgentEra" }, "state": "open", "page_size": 5 },
   "reason": "需要当前 GitHub PR 事实",
   "private_state_action": "none",
   "private_state": {}

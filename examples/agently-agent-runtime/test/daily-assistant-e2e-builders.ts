@@ -254,7 +254,7 @@ export async function startGitHubReadProviderFixture(input: {
     policy: new GitHubPolicyEvaluator({
       allowed_owners: ["AgentEra"],
       allowed_repositories: [{ owner: "AgentEra", name: "work-fabric" }],
-      maximum_page_size: 30,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 10,
     }),
     cursor: new HmacGitHubCursorCodec({ key: Buffer.alloc(32, 8) }),

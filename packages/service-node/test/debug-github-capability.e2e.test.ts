@@ -173,7 +173,7 @@ describe("Debug Channel GitHub capability collaboration", () => {
         input: {
           target: { owner: "AgentEra" },
           state: "open",
-          page_size: 30,
+          page_size: 5,
         },
         reason: "需要当前 GitHub PR 事实",
         private_state_action: "none",

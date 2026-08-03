@@ -85,7 +85,57 @@ describe("GitHub capability schema registry", () => {
 
     const second = await registry.load(reference, new AbortController().signal);
     expect((second as { properties: { page_size: { maximum: number } } })
-      .properties.page_size.maximum).toBe(100);
+      .properties.page_size.maximum).toBe(5);
+  });
+
+  it("publishes the conservative MVP page, preview, array, and check bounds", async () => {
+    const documents = new Map(githubSchemaDocuments());
+    const declaration = githubReadCapabilityDeclarations().find((item) =>
+      item.declaration_id === "github.pull_request.list"
+    )!;
+    const input = documents.get(declaration.input_schema!.uri)! as {
+      readonly properties: {
+        readonly page_size: { readonly maximum: number };
+        readonly labels: { readonly maxItems: number };
+      };
+    };
+    const output = documents.get(declaration.output_schema!.uri)! as {
+      readonly oneOf: readonly [{}, {
+        readonly properties: {
+          readonly items: {
+            readonly maxItems: number;
+            readonly items: {
+              readonly properties: {
+                readonly title: { readonly maxLength: number };
+                readonly labels: { readonly maxItems: number };
+              };
+            };
+          };
+        };
+      }];
+    };
+    const detail = documents.get(githubReadCapabilityDeclarations().find((item) =>
+      item.declaration_id === "github.pull_request.get"
+    )!.output_schema!.uri)! as {
+      readonly properties: {
+        readonly item: { readonly properties: { readonly body_preview: { readonly maxLength: number } } };
+      };
+    };
+    const checks = documents.get(githubReadCapabilityDeclarations().find((item) =>
+      item.declaration_id === "github.pull_request.checks.get"
+    )!.output_schema!.uri)! as {
+      readonly properties: {
+        readonly item: { readonly properties: { readonly checks: { readonly maxItems: number } } };
+      };
+    };
+
+    expect(input.properties.page_size.maximum).toBe(5);
+    expect(input.properties.labels.maxItems).toBe(10);
+    expect(output.oneOf[1].properties.items.maxItems).toBe(5);
+    expect(output.oneOf[1].properties.items.items.properties.title.maxLength).toBe(512);
+    expect(output.oneOf[1].properties.items.items.properties.labels.maxItems).toBe(10);
+    expect(detail.properties.item.properties.body_preview.maxLength).toBe(1_024);
+    expect(checks.properties.item.properties.checks.maxItems).toBe(20);
   });
 
   it("rejects unknown, changed, and aborted schema loads", async () => {

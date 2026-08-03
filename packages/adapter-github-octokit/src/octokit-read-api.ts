@@ -1,6 +1,11 @@
 import {
   GitHubProviderError,
   GITHUB_REST_API_VERSION,
+  GITHUB_MAX_CHECK_ITEMS,
+  GITHUB_MAX_PAGE_SIZE,
+  GITHUB_MAX_PREVIEW_BYTES,
+  GITHUB_MAX_RECORD_ARRAY_ITEMS,
+  GITHUB_MAX_TEXT_BYTES,
   type GitHubApiCommitListInput,
   type GitHubApiPage,
   type GitHubApiPageInput,
@@ -25,8 +30,6 @@ import {
 import type { OctokitRequestClient } from "./authentication.js";
 import { mapGitHubApiError } from "./error-mapping.js";
 
-const MAX_ITEMS = 100;
-const MAX_TEXT_BYTES = 8_192;
 const INSTALLATION_REPOSITORIES_ROUTE = "GET /installation/repositories";
 const encoder = new TextEncoder();
 
@@ -56,13 +59,13 @@ function required(value: Source, field: string): unknown {
   return value[field];
 }
 
-function text(value: unknown, maximumBytes = MAX_TEXT_BYTES, allowEmpty = false): string {
+function text(value: unknown, maximumBytes = GITHUB_MAX_TEXT_BYTES, allowEmpty = false): string {
   if (typeof value !== "string" || (!allowEmpty && value.length === 0)) invalidResponse();
   if (encoder.encode(value).byteLength > maximumBytes) invalidResponse();
   return value;
 }
 
-function nullableText(value: unknown, maximumBytes = MAX_TEXT_BYTES): string | null {
+function nullableText(value: unknown, maximumBytes = GITHUB_MAX_TEXT_BYTES): string | null {
   return value === null ? null : text(value, maximumBytes);
 }
 
@@ -164,8 +167,8 @@ function assertRepositoryPath(value: string, repository: GitHubRepositoryRef): s
   return value;
 }
 
-function items(value: unknown): readonly unknown[] {
-  if (!Array.isArray(value) || value.length > MAX_ITEMS) invalidResponse();
+function items(value: unknown, maximum: number): readonly unknown[] {
+  if (!Array.isArray(value) || value.length > maximum) invalidResponse();
   return value;
 }
 
@@ -174,16 +177,19 @@ function login(value: unknown): string | null {
   return text(required(source(value), "login"), 100);
 }
 
-function preview(value: unknown): { readonly value: string; readonly truncated: boolean } {
+function preview(
+  value: unknown,
+  maximumBytes = GITHUB_MAX_PREVIEW_BYTES,
+): { readonly value: string; readonly truncated: boolean } {
   const input = value === null ? "" : textWithoutLimit(value);
-  if (encoder.encode(input).byteLength <= MAX_TEXT_BYTES) {
+  if (encoder.encode(input).byteLength <= maximumBytes) {
     return { value: input, truncated: false };
   }
   let result = "";
   let bytes = 0;
   for (const character of input) {
     const width = encoder.encode(character).byteLength;
-    if (bytes + width > MAX_TEXT_BYTES) break;
+    if (bytes + width > maximumBytes) break;
     result += character;
     bytes += width;
   }
@@ -224,7 +230,10 @@ function repository(value: unknown, expected?: GitHubRepositoryRef): GitHubRepos
   } else {
     invalidResponse();
   }
-  const topics = items(required(record, "topics")).map((topic) => text(topic, 100));
+  const topics = items(
+    required(record, "topics"),
+    GITHUB_MAX_RECORD_ARRAY_ITEMS,
+  ).map((topic) => text(topic, 100));
   const actualRepository = repositoryRef(record);
   if (expected !== undefined && !sameRepository(actualRepository, expected)) invalidResponse();
   return {
@@ -241,7 +250,7 @@ function repository(value: unknown, expected?: GitHubRepositoryRef): GitHubRepos
 }
 
 function namedLogins(value: unknown): readonly string[] {
-  return items(value).map((item) => {
+  return items(value, GITHUB_MAX_RECORD_ARRAY_ITEMS).map((item) => {
     const result = login(item);
     if (result === null) invalidResponse();
     return result;
@@ -249,7 +258,7 @@ function namedLogins(value: unknown): readonly string[] {
 }
 
 function labels(value: unknown): readonly string[] {
-  return items(value).map((label) => {
+  return items(value, GITHUB_MAX_RECORD_ARRAY_ITEMS).map((label) => {
     if (typeof label === "string") return text(label, 100);
     return text(required(source(label), "name"), 100);
   });
@@ -349,7 +358,7 @@ function commit(value: unknown, repository: GitHubRepositoryRef): GitHubCommitRe
   const message = textWithoutLimit(required(gitCommit, "message"));
   const firstLine = message.split(/\r?\n/u, 1)[0];
   if (firstLine === undefined || firstLine.length === 0) invalidResponse();
-  const subject = preview(firstLine);
+  const subject = preview(firstLine, GITHUB_MAX_TEXT_BYTES);
   const verification = gitCommit.verification;
   return {
     repository,
@@ -431,7 +440,10 @@ function aggregateState(statusState: string, checks: readonly GitHubCheckRecord[
 }
 
 function pageNumber(input: GitHubApiPageInput): number {
-  if (!Number.isSafeInteger(input.page_size) || input.page_size < 1 || input.page_size > MAX_ITEMS) invalidRequest();
+  if (
+    !Number.isSafeInteger(input.page_size) || input.page_size < 1 ||
+    input.page_size > GITHUB_MAX_PAGE_SIZE
+  ) invalidRequest();
   if (input.cursor === undefined) return 1;
   if (!/^[1-9]\d{0,3}$|^10000$/u.test(input.cursor)) invalidRequest();
   const result = Number(input.cursor);
@@ -500,7 +512,7 @@ function quotedQualifier(value: string): string {
 function targetRepositories(target: GitHubApiPullRequestListInput["target"]): readonly GitHubRepositoryRef[] | undefined {
   if ("repository" in target) return [requestedRepository(target.repository)];
   if ("repositories" in target) {
-    if (target.repositories.length < 1 || target.repositories.length > MAX_ITEMS) invalidRequest();
+    if (target.repositories.length < 1 || target.repositories.length > 100) invalidRequest();
     return target.repositories.map(requestedRepository);
   }
   return undefined;
@@ -675,7 +687,10 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       page: pageNumber(input),
       ...requestOptions(signal),
     });
-    const values = items(required(source(result.data), "repositories")).map((item) => repository(item));
+    const values = items(
+      required(source(result.data), "repositories"),
+      input.page_size,
+    ).map((item) => repository(item));
     return apiPage(values, result.headers);
   }
 
@@ -699,7 +714,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       ...requestOptions(signal),
     }, "github_repository_not_found");
     const values = filteredPullRequests(
-      items(result.data).map((item) => pullRequest(item, repositoryValue, false)),
+      items(result.data, input.page_size).map((item) => pullRequest(item, repositoryValue, false)),
       input,
     );
     return apiPage(values, result.headers);
@@ -716,7 +731,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
     });
     const record = source(result.data);
     if (boolean(required(record, "incomplete_results"))) invalidResponse();
-    const searchItems = items(required(record, "items"));
+    const searchItems = items(required(record, "items"), input.page_size);
     if (searchItems.length > input.page_size) invalidResponse();
     const searchInputs = searchItems.map((item) => {
       const searchItem = source(item);
@@ -739,7 +754,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
         const page = await this.listPullRequests({
           target: { repository },
           state: "all",
-          page_size: MAX_ITEMS,
+          page_size: GITHUB_MAX_PAGE_SIZE,
           ...(cursor === undefined ? {} : { cursor }),
         }, signal);
         for (const item of page.items) {
@@ -772,49 +787,54 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
   async listReviews(input: GitHubApiPullRequestPageInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubReviewRecord>> {
     const repository = requestedRepository(input.repository);
     const result = await this.pullPageRequest("GET /repos/{owner}/{repo}/pulls/{pull_number}/reviews", input, signal);
-    return apiPage(items(result.data).map((item) => review(item, repository, input.pull_request_number)), result.headers);
+    return apiPage(items(result.data, input.page_size).map((item) => review(item, repository, input.pull_request_number)), result.headers);
   }
 
   async listIssueComments(input: GitHubApiPullRequestPageInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubCommentRecord>> {
     const repository = requestedRepository(input.repository);
     const result = await this.pullPageRequest("GET /repos/{owner}/{repo}/issues/{issue_number}/comments", input, signal, true);
-    return apiPage(items(result.data).map((item) => comment(item, repository, input.pull_request_number, "issue")), result.headers);
+    return apiPage(items(result.data, input.page_size).map((item) => comment(item, repository, input.pull_request_number, "issue")), result.headers);
   }
 
   async listReviewComments(input: GitHubApiPullRequestPageInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubCommentRecord>> {
     const repository = requestedRepository(input.repository);
     const result = await this.pullPageRequest("GET /repos/{owner}/{repo}/pulls/{pull_number}/comments", input, signal);
-    return apiPage(items(result.data).map((item) => comment(item, repository, input.pull_request_number, "review")), result.headers);
+    return apiPage(items(result.data, input.page_size).map((item) => comment(item, repository, input.pull_request_number, "review")), result.headers);
   }
 
   async listFiles(input: GitHubApiPullRequestPageInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubChangedFileRecord>> {
     const repository = requestedRepository(input.repository);
     const result = await this.pullPageRequest("GET /repos/{owner}/{repo}/pulls/{pull_number}/files", input, signal);
-    return apiPage(items(result.data).map((item) => changedFile(item, repository, input.pull_request_number)), result.headers);
+    return apiPage(items(result.data, input.page_size).map((item) => changedFile(item, repository, input.pull_request_number)), result.headers);
   }
 
   async listPullRequestCommits(input: GitHubApiPullRequestPageInput, signal: AbortSignal): Promise<GitHubApiPage<GitHubCommitRecord>> {
     const repository = requestedRepository(input.repository);
     const result = await this.pullPageRequest("GET /repos/{owner}/{repo}/pulls/{pull_number}/commits", input, signal);
-    return apiPage(items(result.data).map((item) => commit(item, repository)), result.headers);
+    return apiPage(items(result.data, input.page_size).map((item) => commit(item, repository)), result.headers);
   }
 
   async getChecks(repositoryValue: GitHubRepositoryRef, ref: string, signal: AbortSignal): Promise<GitHubCheckSummary> {
     const repository = requestedRepository(repositoryValue);
     if (typeof ref !== "string" || ref.length === 0 || encoder.encode(ref).byteLength > 255) invalidRequest();
-    const parameters = { ...routeRepository(repository), ref, ...requestOptions(signal) };
+    const parameters = {
+      ...routeRepository(repository),
+      ref,
+      per_page: GITHUB_MAX_CHECK_ITEMS,
+      ...requestOptions(signal),
+    };
     const [statusesResult, checksResult] = await Promise.all([
       this.request("GET /repos/{owner}/{repo}/commits/{ref}/status", parameters, "github_repository_not_found"),
       this.request("GET /repos/{owner}/{repo}/commits/{ref}/check-runs", {
         ...parameters,
-        per_page: MAX_ITEMS,
+        per_page: GITHUB_MAX_CHECK_ITEMS,
       }, "github_repository_not_found"),
     ]);
     const statusesRecord = source(statusesResult.data);
     const checksRecord = source(checksResult.data);
     const statusState = text(required(statusesRecord, "state"), 100);
-    const statuses = items(required(statusesRecord, "statuses"));
-    const checkRuns = items(required(checksRecord, "check_runs"));
+    const statuses = items(required(statusesRecord, "statuses"), GITHUB_MAX_CHECK_ITEMS);
+    const checkRuns = items(required(checksRecord, "check_runs"), GITHUB_MAX_CHECK_ITEMS);
     if (
       integer(required(statusesRecord, "total_count"), 0) !== statuses.length ||
       integer(required(checksRecord, "total_count"), 0) !== checkRuns.length ||
@@ -825,7 +845,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       ...statuses.map(legacyStatus),
       ...checkRuns.map((item) => checkRun(item, repository)),
     ];
-    if (checks.length > MAX_ITEMS) invalidResponse();
+    if (checks.length > GITHUB_MAX_CHECK_ITEMS) invalidResponse();
     return {
       repository,
       ref,
@@ -845,7 +865,10 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       page: pageNumber(input),
       ...requestOptions(signal),
     }, "github_repository_not_found");
-    const values = items(required(source(result.data), "workflow_runs")).map((item) => workflowRun(item, repository));
+    const values = items(
+      required(source(result.data), "workflow_runs"),
+      input.page_size,
+    ).map((item) => workflowRun(item, repository));
     return apiPage(values, result.headers);
   }
 
@@ -860,7 +883,7 @@ export class OctokitGitHubReadApi implements GitHubReadApi {
       page: pageNumber(input),
       ...requestOptions(signal),
     }, "github_repository_not_found");
-    return apiPage(items(result.data).map((item) => commit(item, repository)), result.headers);
+    return apiPage(items(result.data, input.page_size).map((item) => commit(item, repository)), result.headers);
   }
 
   private async pullPageRequest(

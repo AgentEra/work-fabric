@@ -7,6 +7,14 @@ import {
   type CitizenSchemaReference,
 } from "@work-fabric/network-citizen-spi";
 
+import {
+  GITHUB_MAX_CHECK_ITEMS,
+  GITHUB_MAX_PAGE_SIZE,
+  GITHUB_MAX_PREVIEW_BYTES,
+  GITHUB_MAX_RECORD_ARRAY_ITEMS,
+  GITHUB_MAX_TEXT_BYTES,
+} from "./limits.js";
+
 export const GITHUB_READ_CAPABILITY_IDS = [
   "github.identity.get",
   "github.repository.list",
@@ -38,7 +46,7 @@ const nullable = (schema: CitizenJsonObject): CitizenJsonObject => ({
   oneOf: [schema, { type: "null" }],
 });
 
-const boundedText = (maximum = 8_192): CitizenJsonObject => ({
+const boundedText = (maximum = GITHUB_MAX_TEXT_BYTES): CitizenJsonObject => ({
   type: "string",
   minLength: 1,
   maxLength: maximum,
@@ -47,10 +55,10 @@ const boundedText = (maximum = 8_192): CitizenJsonObject => ({
 const previewText = (): CitizenJsonObject => ({
   type: "string",
   minLength: 0,
-  maxLength: 8_192,
+  maxLength: GITHUB_MAX_PREVIEW_BYTES,
 });
 
-const pageSize = { type: "integer", minimum: 1, maximum: 100 } as const;
+const pageSize = { type: "integer", minimum: 1, maximum: GITHUB_MAX_PAGE_SIZE } as const;
 const cursor = { type: "string", minLength: 1, maxLength: 4_096 } as const;
 const pullRequestNumber = { type: "integer", minimum: 1 } as const;
 const repository = objectSchema(["owner", "name"], {
@@ -83,7 +91,7 @@ const identityRecord = objectSchema([
 ], {
   app_id: boundedText(100),
   slug: boundedText(100),
-  name: boundedText(8_192),
+  name: boundedText(),
   url: boundedText(2_048),
   owner: nullable(boundedText(100)),
   installation_repository_count: { type: "integer", minimum: 0 },
@@ -98,7 +106,7 @@ const repositoryRecord = objectSchema([
   visibility: { enum: ["public", "private", "internal"] },
   archived: { type: "boolean" },
   default_branch: boundedText(255),
-  topics: { type: "array", maxItems: 100, items: boundedText(100) },
+  topics: { type: "array", maxItems: GITHUB_MAX_RECORD_ARRAY_ITEMS, items: boundedText(100) },
   pushed_at: nullable({ type: "string", format: "date-time" }),
   updated_at: { type: "string", format: "date-time" },
 });
@@ -116,9 +124,9 @@ const pullRequestRecord = objectSchema([
   base_branch: boundedText(255),
   head_branch: boundedText(255),
   head_sha: boundedText(64),
-  assignees: { type: "array", maxItems: 100, items: boundedText(100) },
-  requested_reviewers: { type: "array", maxItems: 100, items: boundedText(100) },
-  labels: { type: "array", maxItems: 100, items: boundedText(100) },
+  assignees: { type: "array", maxItems: GITHUB_MAX_RECORD_ARRAY_ITEMS, items: boundedText(100) },
+  requested_reviewers: { type: "array", maxItems: GITHUB_MAX_RECORD_ARRAY_ITEMS, items: boundedText(100) },
+  labels: { type: "array", maxItems: GITHUB_MAX_RECORD_ARRAY_ITEMS, items: boundedText(100) },
   mergeable: nullable({ type: "boolean" }),
   created_at: { type: "string", format: "date-time" },
   updated_at: { type: "string", format: "date-time" },
@@ -197,7 +205,7 @@ const checkSummary = objectSchema([
   repository,
   ref: boundedText(255),
   aggregate_state: { enum: ["pending", "success", "failure", "neutral", "unknown"] },
-  checks: { type: "array", maxItems: 100, items: checkRecord },
+  checks: { type: "array", maxItems: GITHUB_MAX_CHECK_ITEMS, items: checkRecord },
 });
 const workflowRunRecord = objectSchema([
   "repository", "id", "workflow_name", "run_number", "event", "branch", "head_sha",
@@ -231,12 +239,12 @@ const pageOutput = (item: CitizenJsonObject): CitizenJsonObject => ({
     }),
     objectSchema(["state", "items", "evidence"], {
       state: { const: "complete" },
-      items: { type: "array", minItems: 1, maxItems: 100, items: item },
+      items: { type: "array", minItems: 1, maxItems: GITHUB_MAX_PAGE_SIZE, items: item },
       evidence: evidence(true),
     }),
     objectSchema(["state", "items", "evidence"], {
       state: { const: "truncated" },
-      items: { type: "array", minItems: 1, maxItems: 100, items: item },
+      items: { type: "array", minItems: 1, maxItems: GITHUB_MAX_PAGE_SIZE, items: item },
       evidence: evidence(false),
     }),
   ],
@@ -273,7 +281,7 @@ const DOCUMENTS: ReadonlyMap<string, CitizenJsonObject> = new Map(
       author: boundedText(100),
       reviewer: boundedText(100),
       assignee: boundedText(100),
-      labels: { type: "array", maxItems: 100, items: boundedText(100) },
+      labels: { type: "array", maxItems: GITHUB_MAX_RECORD_ARRAY_ITEMS, items: boundedText(100) },
       draft: { type: "boolean" },
       base_branch: boundedText(255),
       updated_since: { type: "string", format: "date-time" },

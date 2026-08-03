@@ -9,7 +9,7 @@ import {
 const policy = new GitHubPolicyEvaluator({
   allowed_owners: ["AgentEra"],
   allowed_repositories: [{ owner: "AgentEra", name: "work-fabric" }],
-  maximum_page_size: 50,
+  maximum_page_size: 5,
   maximum_aggregate_repositories: 2,
 });
 
@@ -24,7 +24,7 @@ describe("parseGitHubCapabilityInput", () => {
     expect(parsed).toMatchObject({
       capability_id: "github.pull_request.list",
       page: 1,
-      page_size: 30,
+      page_size: 5,
       input: {
         target: { repositories: [{ owner: "AgentEra", name: "work-fabric" }] },
         state: "open",
@@ -46,9 +46,9 @@ describe("parseGitHubCapabilityInput", () => {
     )).toThrowError("github_forbidden");
     expect(() => parseGitHubCapabilityInput(
       "github.repository.list",
-      { page_size: 51 },
+      { page_size: 6 },
       policy,
-    )).toThrowError("github_forbidden");
+    )).toThrowError("github_invalid_request");
   });
 
   it("rejects present fields whose values are absent from the declared JSON schema", () => {
@@ -102,7 +102,7 @@ describe("parseGitHubCapabilityInput", () => {
         { owner: "AgentEra", name: "zeta" },
         { owner: "AgentEra", name: "alpha" },
       ],
-      maximum_page_size: 100,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 100,
     });
 
@@ -125,7 +125,7 @@ describe("parseGitHubCapabilityInput", () => {
       new GitHubPolicyEvaluator({
         allowed_owners: ["AgentEra"],
         allowed_repositories: [],
-        maximum_page_size: 50,
+        maximum_page_size: 5,
         maximum_aggregate_repositories: 2,
       }),
     ).input).toMatchObject({ target: { owner: "AgentEra" } });
@@ -135,7 +135,7 @@ describe("parseGitHubCapabilityInput", () => {
     const permissiveCeiling = new GitHubPolicyEvaluator({
       allowed_owners: ["AgentEra"],
       allowed_repositories: [],
-      maximum_page_size: 100,
+      maximum_page_size: 5,
       maximum_aggregate_repositories: 101,
     });
     const repository = { owner: "AgentEra", name: "work-fabric" };
