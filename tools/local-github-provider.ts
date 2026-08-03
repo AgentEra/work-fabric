@@ -6,7 +6,7 @@ import { provisionGitHubProvider } from "../examples/github-capability-provider/
 import { prepareLocalBundleEnvironment } from "./local-feishu-common.js";
 
 const DECLARED_ENVIRONMENT = /^\$\{([A-Z_][A-Z0-9_]*)\}$/u;
-const FORBIDDEN_PROVIDER_SECRET = /^(?:WORK_FABRIC_ADMIN_TOKEN|WORK_FABRIC_ENV_FILE|FEISHU_|AGENTLY_|MODEL_)/u;
+const PROVIDER_OWNED_ENVIRONMENT = /^(?:GITHUB|[A-Z][A-Z0-9_]*_GITHUB)_[A-Z0-9_]+$/u;
 const PROCESS_ENVIRONMENT_ALLOWLIST = Object.freeze([
   "PATH",
   "HOME",
@@ -23,7 +23,7 @@ const PROCESS_ENVIRONMENT_ALLOWLIST = Object.freeze([
   "LC_ALL",
   "LC_CTYPE",
   "TZ",
-  "NODE_OPTIONS",
+  "NODE_USE_ENV_PROXY",
   "NODE_EXTRA_CA_CERTS",
   "SSL_CERT_FILE",
   "SSL_CERT_DIR",
@@ -38,6 +38,10 @@ const PROVIDER_CONFIGURATION_ENVIRONMENT = Object.freeze([
   "WORK_FABRIC_GITHUB_PROVIDER_CONFIG",
   "WORK_FABRIC_GITHUB_PROVIDER_CONFIG_APPLICATION",
 ] as const);
+const RESERVED_ENVIRONMENT = new Set<string>([
+  ...PROCESS_ENVIRONMENT_ALLOWLIST,
+  ...PROVIDER_CONFIGURATION_ENVIRONMENT,
+].map((name) => name.toUpperCase()));
 
 function referencedEnvironment(value: string, path: string): string {
   const name = DECLARED_ENVIRONMENT.exec(value)?.[1];
@@ -48,7 +52,10 @@ function referencedEnvironment(value: string, path: string): string {
 }
 
 function providerOwnedEnvironment(name: string, path: string): string {
-  if (FORBIDDEN_PROVIDER_SECRET.test(name)) {
+  if (
+    !PROVIDER_OWNED_ENVIRONMENT.test(name)
+    || RESERVED_ENVIRONMENT.has(name.toUpperCase())
+  ) {
     throw new Error(`${path} must reference a GitHub Provider-owned environment variable`);
   }
   return name;
@@ -58,7 +65,7 @@ async function requiredGitHubProviderEnvironment(
   environment: Readonly<Record<string, string | undefined>>,
 ): Promise<readonly string[]> {
   const loaded = await loadGitHubProviderConfiguration({ environment });
-  return Object.freeze([
+  const names = [
     providerOwnedEnvironment(
       loaded.provider.authentication.app_id_environment,
       "provider.authentication.app_id_environment",
@@ -79,7 +86,11 @@ async function requiredGitHubProviderEnvironment(
       loaded.service.work_fabric.access_token,
       "service.work_fabric.access_token",
     ),
-  ]);
+  ];
+  if (new Set(names).size !== names.length) {
+    throw new Error("GitHub Provider secret environment variables must be distinct");
+  }
+  return Object.freeze(names);
 }
 
 function requireEnvironment(
@@ -119,13 +130,16 @@ export async function createGitHubProviderChildEnvironment(
 ): Promise<Readonly<Record<string, string>>> {
   const dynamicNames = await requiredGitHubProviderEnvironment(environment);
   requireEnvironment(environment, dynamicNames);
-  const allowed = new Set<string>([
-    ...PROCESS_ENVIRONMENT_ALLOWLIST,
-    ...PROVIDER_CONFIGURATION_ENVIRONMENT,
-    ...dynamicNames,
-  ]);
   const child: Record<string, string> = {};
-  for (const name of allowed) {
+  const processEnvironment = new Set<string>(
+    PROCESS_ENVIRONMENT_ALLOWLIST.map((name) => name.toUpperCase()),
+  );
+  for (const [name, value] of Object.entries(environment)) {
+    if (value !== undefined && processEnvironment.has(name.toUpperCase())) {
+      child[name] = value;
+    }
+  }
+  for (const name of [...PROVIDER_CONFIGURATION_ENVIRONMENT, ...dynamicNames]) {
     const value = environment[name];
     if (value !== undefined) child[name] = value;
   }

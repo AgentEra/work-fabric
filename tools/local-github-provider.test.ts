@@ -44,6 +44,84 @@ async function feishuOnlyInput(): Promise<{
 }
 
 describe("optional local GitHub Provider", () => {
+  it.each([
+    "PATH",
+    "NODE_OPTIONS",
+    "WORK_FABRIC_CURSOR_SECRET",
+    "INTAKE_AGENT_ACCESS_TOKEN",
+    "WORK_FABRIC_GITHUB_PROVIDER_CONFIG",
+    "custom_GITHUB_APP_ID",
+  ])("rejects a non-owned dynamic Provider secret name: %s", async (secretName) => {
+    const directory = await mkdtemp(join(tmpdir(), "work-fabric-github-secret-name-"));
+    try {
+      const envFile = join(directory, "github.env");
+      const enabledConfig = join(directory, "github-enabled.yaml");
+      const bundle = (await readFile(
+        resolve("examples/config/local-feishu-assistant.bundle.yaml"),
+        "utf8",
+      ))
+        .replace("enabled: false", "enabled: true")
+        .replace("app_id_environment: GITHUB_APP_ID", `app_id_environment: ${secretName}`);
+      await writeFile(enabledConfig, bundle);
+      await writeFile(envFile, [
+        "GITHUB_APP_ID=123",
+        "GITHUB_APP_INSTALLATION_ID=456",
+        "GITHUB_APP_PRIVATE_KEY=private-key",
+        "GITHUB_PROVIDER_ACCESS_TOKEN=provider-token",
+        `WORK_FABRIC_GITHUB_CURSOR_SECRET=${"g".repeat(32)}`,
+        `WORK_FABRIC_ADMIN_TOKEN=${"a".repeat(32)}`,
+        `${secretName}=collision-value`,
+      ].join("\n"));
+      await chmod(envFile, 0o600);
+
+      await expect(prepareLocalGitHubProviderEnvironment({
+        WORK_FABRIC_ENV_FILE: envFile,
+        WORK_FABRIC_CONFIG: enabledConfig,
+        WORK_FABRIC_RESOLVED_CONFIG: join(directory, "resolved.yaml"),
+        PATH: process.env.PATH,
+        NODE_OPTIONS: "--inspect",
+        WORK_FABRIC_CURSOR_SECRET: "core-secret",
+        INTAKE_AGENT_ACCESS_TOKEN: "intake-secret",
+      })).rejects.toThrow(/GitHub Provider-owned|invalid/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects duplicate dynamic Provider secret names", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "work-fabric-github-duplicate-secret-"));
+    try {
+      const envFile = join(directory, "github.env");
+      const enabledConfig = join(directory, "github-enabled.yaml");
+      const bundle = (await readFile(
+        resolve("examples/config/local-feishu-assistant.bundle.yaml"),
+        "utf8",
+      ))
+        .replace("enabled: false", "enabled: true")
+        .replace(
+          "installation_id_environment: GITHUB_APP_INSTALLATION_ID",
+          "installation_id_environment: GITHUB_APP_ID",
+        );
+      await writeFile(enabledConfig, bundle);
+      await writeFile(envFile, [
+        "GITHUB_APP_ID=123",
+        "GITHUB_APP_PRIVATE_KEY=private-key",
+        "GITHUB_PROVIDER_ACCESS_TOKEN=provider-token",
+        `WORK_FABRIC_GITHUB_CURSOR_SECRET=${"g".repeat(32)}`,
+        `WORK_FABRIC_ADMIN_TOKEN=${"a".repeat(32)}`,
+      ].join("\n"));
+      await chmod(envFile, 0o600);
+
+      await expect(prepareLocalGitHubProviderEnvironment({
+        WORK_FABRIC_ENV_FILE: envFile,
+        WORK_FABRIC_CONFIG: enabledConfig,
+        WORK_FABRIC_RESOLVED_CONFIG: join(directory, "resolved.yaml"),
+      })).rejects.toThrow(/distinct|duplicate/i);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the unified bundle GitHub Provider authority grant system-typed", async () => {
     const fixture = await feishuOnlyInput();
     try {
@@ -210,8 +288,13 @@ describe("optional local GitHub Provider", () => {
         WORK_FABRIC_ENV_FILE: envFile,
         WORK_FABRIC_CONFIG: enabledConfig,
         WORK_FABRIC_RESOLVED_CONFIG: resolvedConfig,
-        PATH: process.env.PATH,
+        Path: process.env.PATH,
+        SystemRoot: "C:\\Windows",
         HOME: process.env.HOME,
+        NODE_OPTIONS: "--inspect=127.0.0.1:0",
+        node_use_env_proxy: "1",
+        HTTP_PROXY: "http://proxy.example.test:8080",
+        http_proxy: "http://legacy-proxy.example.test:8080",
       }, {
         prepare: prepareLocalGitHubProviderEnvironment,
         provision: async (environment) => { provisionedEnvironment = environment; },
@@ -231,12 +314,18 @@ describe("optional local GitHub Provider", () => {
         CUSTOM_GITHUB_CURSOR_SECRET: "g".repeat(32),
         WORK_FABRIC_GITHUB_PROVIDER_CONFIG: resolvedConfig,
         WORK_FABRIC_GITHUB_PROVIDER_CONFIG_APPLICATION: "github-provider",
+        Path: process.env.PATH,
+        SystemRoot: "C:\\Windows",
+        node_use_env_proxy: "1",
+        HTTP_PROXY: "http://proxy.example.test:8080",
+        http_proxy: "http://legacy-proxy.example.test:8080",
       });
       expect(startedEnvironment).not.toHaveProperty("WORK_FABRIC_ADMIN_TOKEN");
       expect(startedEnvironment).not.toHaveProperty("WORK_FABRIC_ENV_FILE");
       expect(startedEnvironment).not.toHaveProperty("FEISHU_APP_SECRET");
       expect(startedEnvironment).not.toHaveProperty("AGENTLY_MODEL_API_KEY");
       expect(startedEnvironment).not.toHaveProperty("UNRELATED_SECRET");
+      expect(startedEnvironment).not.toHaveProperty("NODE_OPTIONS");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
