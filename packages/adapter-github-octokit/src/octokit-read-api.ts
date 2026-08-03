@@ -570,11 +570,27 @@ function filteredPullRequests(
   values: readonly GitHubPullRequestRecord[],
   input: GitHubApiPullRequestListInput,
 ): readonly GitHubPullRequestRecord[] {
+  const equalGitHubName = (left: string, right: string): boolean =>
+    left.toLowerCase() === right.toLowerCase();
+  const includesGitHubName = (values: readonly string[], expected: string): boolean =>
+    values.some((value) => equalGitHubName(value, expected));
   let result = values;
-  if (input.author !== undefined) result = result.filter((item) => item.author === input.author);
-  if (input.reviewer !== undefined) result = result.filter((item) => item.requested_reviewers.includes(input.reviewer!));
-  if (input.assignee !== undefined) result = result.filter((item) => item.assignees.includes(input.assignee!));
-  if (input.labels !== undefined) result = result.filter((item) => input.labels!.every((label) => item.labels.includes(label)));
+  if (input.author !== undefined) {
+    result = result.filter((item) =>
+      item.author !== null && equalGitHubName(item.author, input.author!)
+    );
+  }
+  if (input.reviewer !== undefined) {
+    result = result.filter((item) => includesGitHubName(item.requested_reviewers, input.reviewer!));
+  }
+  if (input.assignee !== undefined) {
+    result = result.filter((item) => includesGitHubName(item.assignees, input.assignee!));
+  }
+  if (input.labels !== undefined) {
+    result = result.filter((item) =>
+      input.labels!.every((label) => includesGitHubName(item.labels, label))
+    );
+  }
   if (input.draft !== undefined) result = result.filter((item) => item.draft === input.draft);
   if (input.updated_since !== undefined) {
     const threshold = Date.parse(timestamp(input.updated_since));

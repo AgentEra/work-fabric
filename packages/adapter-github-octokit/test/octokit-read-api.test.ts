@@ -394,6 +394,23 @@ describe("OctokitGitHubReadApi", () => {
     }, signal)).resolves.toMatchObject({ items: [{ number: 7 }] });
   });
 
+  it("matches GitHub logins and labels case-insensitively", async () => {
+    const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
+      route === "GET /repos/{owner}/{repo}/pulls"
+        ? { data: [basePullRequest(7)], headers: {} }
+        : response(route)
+    ));
+
+    await expect(api.listPullRequests({
+      target: { repository },
+      author: "OCTO",
+      reviewer: "Reviewer",
+      assignee: "OWNER",
+      labels: ["GitHub"],
+      page_size: 10,
+    }, signal)).resolves.toMatchObject({ items: [{ number: 7 }] });
+  });
+
   it("preserves upstream continuation when a repository PR page filters to zero matches", async () => {
     const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
       route === "GET /repos/{owner}/{repo}/pulls"
