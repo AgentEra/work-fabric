@@ -20,6 +20,8 @@
     "agent-runtime:start": "tsx examples/agently-agent-runtime/src/main.ts",
     "feishu-provider:provision": "tsx examples/feishu-capability-provider/src/provision.ts",
     "feishu-provider:start": "tsx examples/feishu-capability-provider/src/main.ts",
+    "github-provider:provision": "tsx examples/github-capability-provider/src/provision.ts",
+    "github-provider:start": "tsx examples/github-capability-provider/src/main.ts",
     "feishu-calendar:admin": "tsx tools/feishu-calendar-admin.ts",
     "local:feishu:provision": "tsx tools/local-feishu-provision.ts",
     "local:feishu:start": "tsx tools/local-feishu-stack.ts",
