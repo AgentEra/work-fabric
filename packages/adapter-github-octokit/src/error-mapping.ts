@@ -42,7 +42,7 @@ function apiFailure(value: unknown): GitHubApiFailure | undefined {
 function isoAt(time: number, now: number): string | undefined {
   if (
     !Number.isFinite(time) ||
-    time < now ||
+    time <= now ||
     time - now > MAX_SAFE_RETRY_DELAY_MS
   ) return undefined;
   const date = new Date(time);
@@ -59,6 +59,7 @@ function retryAt(headers: Record<string, string>): string | undefined {
     }
     const date = Date.parse(retryAfter);
     if (!Number.isNaN(date)) return isoAt(date, now);
+    return undefined;
   }
   const reset = headers["x-ratelimit-reset"];
   if (reset !== undefined && /^\d+$/.test(reset)) {
@@ -67,9 +68,13 @@ function retryAt(headers: Record<string, string>): string | undefined {
   return undefined;
 }
 
-function metadata(headers: Record<string, string>, retryable: boolean) {
+function metadata(
+  headers: Record<string, string>,
+  retryable: boolean,
+  includeRetryAt: boolean,
+) {
   const request_id = headers["x-github-request-id"];
-  const retry_at = retryAt(headers);
+  const retry_at = includeRetryAt ? retryAt(headers) : undefined;
   return {
     retryable,
     ...(retry_at === undefined ? {} : { retry_at }),
@@ -82,7 +87,10 @@ function mapped(
   headers: Record<string, string>,
   retryable = false,
 ): GitHubProviderError {
-  return new GitHubProviderError(code, metadata(headers, retryable));
+  return new GitHubProviderError(
+    code,
+    metadata(headers, retryable, code === "github_rate_limited" && retryable),
+  );
 }
 
 function isGitHubNotFoundErrorCode(
@@ -106,8 +114,7 @@ export function mapGitHubApiError(
   if (status === 401) return mapped("github_authentication_failed", headers);
   if (status === 403) {
     return headers["x-ratelimit-remaining"] === "0" ||
-        (headers["retry-after"] !== undefined &&
-          retryAt({ "retry-after": headers["retry-after"] }) !== undefined)
+        headers["retry-after"] !== undefined
       ? mapped("github_rate_limited", headers, true)
       : mapped("github_forbidden", headers);
   }

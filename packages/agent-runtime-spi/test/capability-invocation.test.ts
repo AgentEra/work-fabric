@@ -118,10 +118,53 @@ describe("Agent capability invocation contracts", () => {
       ...failure,
       retry_after: "tomorrow",
     })).toThrow(/retry_after/i);
+    for (const retry_after of [
+      "2026-02-30T00:01:00.000Z",
+      "2026-07-27T00:01:00+24:00",
+      "2026-07-27T00:01:00+01:60",
+    ]) {
+      expect(() => validateCapabilityInvocationResult({
+        ...failure,
+        retry_after,
+      })).toThrow(/retry_after/i);
+    }
+    expect(() => validateCapabilityInvocationResult({
+      ...failure,
+      outcome: "rejected",
+      retry_after: "2026-07-27T00:01:00.000Z",
+    })).toThrow(/retry_after|fields/i);
+    expect(() => validateCapabilityInvocationResult({
+      ...failure,
+      retryable: false,
+      retry_after: "2026-07-27T00:01:00.000Z",
+    })).toThrow(/retry_after/i);
     expect(() => validateCapabilityInvocationResult({
       ...failure,
       retry_at: "2026-07-27T00:01:00.000Z",
     })).toThrow(/fields/i);
+    expect(() => validateCapabilityInvocationResult({
+      outcome: "succeeded",
+      invocation_id: request.invocation_id,
+      auxiliary_handoff_id: "handoff-capability-01",
+      candidate,
+      data: {},
+      artifacts: [],
+      retry_after: "2026-07-27T00:01:00.000Z",
+    })).toThrow(/fields/i);
+  });
+
+  it("keeps a retryable transient failure without retry_after compatible", () => {
+    expect(validateCapabilityInvocationResult({
+      outcome: "failed",
+      invocation_id: request.invocation_id,
+      auxiliary_handoff_id: null,
+      code: "github_upstream_unavailable",
+      message: "github_upstream_unavailable",
+      retryable: true,
+    })).toMatchObject({
+      outcome: "failed",
+      retryable: true,
+    });
   });
 
   it("validates Host-owned invocation lineage and rejects correlation changes", () => {

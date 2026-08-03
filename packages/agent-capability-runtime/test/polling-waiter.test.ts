@@ -153,4 +153,55 @@ describe("PollingAuxiliaryHandoffWaiter", () => {
       new AbortController().signal,
     )).rejects.toThrow(/retry_after/i);
   });
+
+  it.each([
+    [{
+      outcome: "rejected",
+      code: "target_not_allowed",
+      message: "not allowed",
+      retryable: false,
+      retry_after: "2026-07-27T10:00:30.000Z",
+    }, "rejected retry_after"],
+    [{
+      outcome: "failed",
+      code: "permanent_failure",
+      message: "permanent failure",
+      retryable: false,
+      retry_after: "2026-07-27T10:00:30.000Z",
+    }, "non-retryable retry_after"],
+    [{
+      outcome: "failed",
+      code: "github_rate_limited",
+      message: "github_rate_limited",
+      retryable: true,
+      retry_after: "2026-02-30T10:00:30.000Z",
+    }, "invalid calendar timestamp"],
+    [{
+      outcome: "failed",
+      code: "github_rate_limited",
+      message: "github_rate_limited",
+      retryable: true,
+      unexpected: true,
+    }, "unknown failure field"],
+    [{
+      outcome: "succeeded",
+      data: { message_id: "message-1" },
+      artifacts: [],
+      retry_after: "2026-07-27T10:00:30.000Z",
+    }, "success retry_after"],
+  ])("rejects Provider outcome with %s", async (outcome, _label) => {
+    const waiter = new PollingAuxiliaryHandoffWaiter({
+      queries: {
+        getHandoff: async () => snapshot("result_returned", outcome),
+      },
+      poll_interval_ms: 1,
+      now: () => "2026-07-27T10:00:00.000Z",
+      delay: async () => undefined,
+    });
+
+    await expect(waiter.wait(
+      bound,
+      new AbortController().signal,
+    )).rejects.toThrow(/invalid|fields|retry_after/i);
+  });
 });

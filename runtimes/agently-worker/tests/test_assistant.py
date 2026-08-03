@@ -410,6 +410,15 @@ def test_turn_prompt_requires_provider_owned_input_contract() -> None:
     ]
 
 
+def test_turn_prompt_constrains_model_owned_retry_timing_decisions() -> None:
+    prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
+
+    assert "must not request a new invocation before retry_after" in prompt
+    assert "at or after task.result_due_at" in prompt
+    assert "stop and explain" in prompt
+    assert "does not itself authorize" in prompt
+
+
 def test_historical_context_cannot_initiate_capability_side_effects() -> None:
     prompt = role_prompt(valid_request_v3()["task"]["role"], capability_turn=True)
 

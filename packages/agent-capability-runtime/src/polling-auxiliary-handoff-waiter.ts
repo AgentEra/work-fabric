@@ -30,15 +30,64 @@ function object(value: unknown): Record<string, unknown> | null {
 }
 
 const RFC3339 =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
+
+function exactOutcome(
+  value: Record<string, unknown>,
+  fields: readonly string[],
+): Record<string, unknown> {
+  const keys = Object.keys(value);
+  if (
+    keys.length !== fields.length ||
+    keys.some((key) => !fields.includes(key)) ||
+    fields.some((field) => !Object.hasOwn(value, field))
+  ) throw new TypeError("Capability Provider outcome fields are invalid");
+  return value;
+}
+
+function leapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function validRfc3339(value: string): boolean {
+  const match = RFC3339.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = Number(match[7] ?? 0);
+  const offsetMinute = Number(match[8] ?? 0);
+  const days = [
+    31,
+    leapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return year >= 1 &&
+    month >= 1 && month <= 12 &&
+    day >= 1 && day <= days[month - 1]! &&
+    hour <= 23 && minute <= 59 && second <= 59 &&
+    offsetHour <= 23 && offsetMinute <= 59 &&
+    Number.isFinite(Date.parse(value));
+}
 
 function retryAfter(value: unknown): string | undefined {
   if (value === undefined) return undefined;
   if (
     typeof value !== "string" ||
     value.length > 64 ||
-    !RFC3339.test(value) ||
-    !Number.isFinite(Date.parse(value))
+    !validRfc3339(value)
   ) throw new TypeError("Capability Provider failure retry_after is invalid");
   return value;
 }
@@ -58,28 +107,41 @@ function providerOutcome(snapshot: HandoffReadModel): AuxiliaryHandoffTerminal {
     outcome === null
   ) throw new TypeError("Capability Provider Result content is invalid");
   if (outcome.outcome === "succeeded") {
-    const data = object(outcome.data);
-    if (data === null || !Array.isArray(outcome.artifacts)) {
+    const succeeded = exactOutcome(outcome, ["outcome", "data", "artifacts"]);
+    const data = object(succeeded.data);
+    if (data === null || !Array.isArray(succeeded.artifacts)) {
       throw new TypeError("Capability Provider success is invalid");
     }
     return {
       outcome: "succeeded",
       data: data as RuntimeJsonObject,
-      artifacts: outcome.artifacts as readonly RuntimeJsonObject[],
+      artifacts: succeeded.artifacts as readonly RuntimeJsonObject[],
     };
   }
   if (outcome.outcome === "rejected" || outcome.outcome === "failed") {
+    const hasRetryAfter = Object.hasOwn(outcome, "retry_after");
+    const failure = exactOutcome(outcome, [
+      "outcome",
+      "code",
+      "message",
+      "retryable",
+      ...(hasRetryAfter ? ["retry_after"] : []),
+    ]);
     if (
-      typeof outcome.code !== "string" ||
-      typeof outcome.message !== "string" ||
-      typeof outcome.retryable !== "boolean"
+      typeof failure.code !== "string" ||
+      typeof failure.message !== "string" ||
+      typeof failure.retryable !== "boolean"
     ) throw new TypeError("Capability Provider failure is invalid");
-    const retry_after = retryAfter(outcome.retry_after);
+    if (
+      hasRetryAfter &&
+      (failure.outcome !== "failed" || failure.retryable !== true)
+    ) throw new TypeError("Capability Provider failure retry_after is invalid");
+    const retry_after = retryAfter(failure.retry_after);
     return {
       outcome: outcome.outcome,
-      code: outcome.code,
-      message: outcome.message,
-      retryable: outcome.retryable,
+      code: failure.code,
+      message: failure.message,
+      retryable: failure.retryable,
       ...(retry_after === undefined ? {} : { retry_after }),
     };
   }

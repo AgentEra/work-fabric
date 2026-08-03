@@ -23,7 +23,8 @@ CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 SEMVER = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
 DIGEST = re.compile(r"^sha256:[a-f0-9]{64}$")
 RFC3339 = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$"
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?"
+    r"(?:Z|[+-](\d{2}):(\d{2}))$"
 )
 
 JsonValue: TypeAlias = None | bool | int | float | str | list["JsonValue"] | dict[str, "JsonValue"]
@@ -263,6 +264,8 @@ def _validate_capability_result(value: object) -> dict[str, JsonValue]:
         if not isinstance(result["retryable"], bool):
             _fail("continuation.result.retryable is invalid")
         if has_retry_after:
+            if outcome != "failed" or result["retryable"] is not True:
+                _fail("continuation.result.retry_after is invalid")
             retry_after = _string(
                 result["retry_after"],
                 "continuation.result.retry_after",
@@ -274,10 +277,12 @@ def _validate_capability_result(value: object) -> dict[str, JsonValue]:
                 )
             except ValueError:
                 _fail("continuation.result.retry_after is invalid")
-            if (
-                RFC3339.fullmatch(retry_after) is None
-                or parsed_retry_after.tzinfo is None
-            ):
+            timestamp_match = RFC3339.fullmatch(retry_after)
+            if timestamp_match is None or parsed_retry_after.tzinfo is None:
+                _fail("continuation.result.retry_after is invalid")
+            offset_hour = int(timestamp_match.group(1) or "0")
+            offset_minute = int(timestamp_match.group(2) or "0")
+            if offset_hour > 23 or offset_minute > 59:
                 _fail("continuation.result.retry_after is invalid")
     else:
         _fail("continuation.result.outcome is invalid")

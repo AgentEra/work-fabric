@@ -43,12 +43,28 @@ export type CapabilityInvocationResult =
       readonly artifacts: readonly RuntimeJsonObject[];
     }
   | {
-      readonly outcome: "rejected" | "failed";
+      readonly outcome: "rejected";
       readonly invocation_id: string;
       readonly auxiliary_handoff_id: string | null;
       readonly code: string;
       readonly message: string;
       readonly retryable: boolean;
+    }
+  | {
+      readonly outcome: "failed";
+      readonly invocation_id: string;
+      readonly auxiliary_handoff_id: string | null;
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: false;
+    }
+  | {
+      readonly outcome: "failed";
+      readonly invocation_id: string;
+      readonly auxiliary_handoff_id: string | null;
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: true;
       readonly retry_after?: string;
     };
 
@@ -140,7 +156,7 @@ const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const CODE = /^[a-z][a-z0-9_]*$/;
 const RFC3339 =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](\d{2}):(\d{2}))$/;
 const FORBIDDEN_KEYS = new Set(["__proto__", "prototype", "constructor"]);
 const encoder = new TextEncoder();
 
@@ -220,6 +236,43 @@ function capabilityId(value: unknown): string {
 
 function versionConstraint(value: unknown): string {
   return string(value, "version_constraint", 256);
+}
+
+function leapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+}
+
+function validRfc3339(value: string): boolean {
+  const match = RFC3339.exec(value);
+  if (match === null) return false;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = Number(match[7] ?? 0);
+  const offsetMinute = Number(match[8] ?? 0);
+  const days = [
+    31,
+    leapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return year >= 1 &&
+    month >= 1 && month <= 12 &&
+    day >= 1 && day <= days[month - 1]! &&
+    hour <= 23 && minute <= 59 && second <= 59 &&
+    offsetHour <= 23 && offsetMinute <= 59 &&
+    Number.isFinite(Date.parse(value));
 }
 
 function json(
@@ -554,8 +607,11 @@ export function validateCapabilityInvocationResult(
   }
   let retryAfter: string | undefined;
   if (hasRetryAfter) {
+    if (outcome.value !== "failed" || source.retryable !== true) {
+      throw new TypeError("retry_after is invalid");
+    }
     retryAfter = string(source.retry_after, "retry_after", 64);
-    if (!RFC3339.test(retryAfter) || !Number.isFinite(Date.parse(retryAfter))) {
+    if (!validRfc3339(retryAfter)) {
       throw new TypeError("retry_after is invalid");
     }
   }

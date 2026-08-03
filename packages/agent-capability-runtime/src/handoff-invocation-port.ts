@@ -143,7 +143,7 @@ function terminalFailure(
     terminal.message,
     terminal.retryable,
     terminal.outcome,
-    terminal.retry_after,
+    "retry_after" in terminal ? terminal.retry_after : undefined,
   );
 }
 

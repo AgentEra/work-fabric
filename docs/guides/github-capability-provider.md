@@ -221,7 +221,7 @@ has write permissions.
 | `github_authentication_failed` | App ID, installation ID, PEM format, key rotation, and App installation do not agree. Correct credentials; do not retry blindly. |
 | `github_forbidden` | Provider policy, invocation Authority, selected-repository installation scope, or one of the exact read permissions denied the query. Fix the responsible layer deliberately; do not widen the ceiling to hide a configuration error. |
 | `github_repository_not_found` / `github_pull_request_not_found` | The approved resource no longer exists or is not visible to this installation. |
-| `github_rate_limited` | The Provider reports a safe optional `retry_after` time without exposing headers or credentials. The Agent or caller may retry only after that time and only if its Handoff deadline still permits it. |
+| `github_rate_limited` | A `403` with a `Retry-After` header, an exhausted primary quota, or a `429` was observed. A safe optional `retry_after` time may be reported without exposing headers or credentials. Unusable timing does not change the rate-limit classification. |
 | `github_upstream_unavailable` | A transient GitHub/network failure occurred. The Agent or caller decides whether a later attempt still fits its Handoff deadline. |
 | `github_response_invalid` | GitHub returned malformed, incomplete, or over-limit data outside the Provider's normalized contract. Preserve safe diagnostics and investigate the adapter. |
 | `github_result_truncated` | The normalized result could not fit the Provider's 122,880-byte serialized-data budget. Narrow the repository scope or filters; this is not an upstream availability failure. |
@@ -236,7 +236,11 @@ vendor response body, private repository text, or full invocation input/output.
 The MVP does not sleep or automatically retry inside the GitHub Provider,
 Fabric, or Agent runtime. A retryable failure and optional RFC3339
 `retry_after` are execution facts carried through the capability transcript;
-they do not themselves authorize or trigger another invocation.
+they do not themselves authorize or trigger another invocation. Only a
+`failed` result with `retryable: true` may carry the field. The Provider omits
+timing that is not strictly in the future or is more than 24 hours away. The
+Agent must not issue a new invocation before the reported time, and stops with
+an explanation when that time is at or beyond the current Handoff deadline.
 
 ## 7. Disable, rotate, and revoke
 

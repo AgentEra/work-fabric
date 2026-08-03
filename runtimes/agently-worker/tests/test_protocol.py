@@ -62,7 +62,13 @@ def test_v3_request_accepts_only_summaries_and_a_normalized_transcript() -> None
         parse_request(value)
 
 
-@pytest.mark.parametrize("retry_after", ["tomorrow", "2026-07-27 00:01:00Z"])
+@pytest.mark.parametrize("retry_after", [
+    "tomorrow",
+    "2026-07-27 00:01:00Z",
+    "2026-02-30T00:01:00.000Z",
+    "2026-07-27T00:01:00+24:00",
+    "2026-07-27T00:01:00+01:60",
+])
 def test_v3_request_rejects_invalid_failure_retry_after(retry_after: str) -> None:
     value = valid_request_v3()
     value["capability_transcript"] = {"entries": [{
@@ -86,6 +92,61 @@ def test_v3_request_rejects_invalid_failure_retry_after(retry_after: str) -> Non
 
     with pytest.raises(ProtocolError, match="retry_after"):
         parse_request(value)
+
+
+@pytest.mark.parametrize(("outcome", "retryable"), [
+    ("rejected", False),
+    ("failed", False),
+])
+def test_v3_request_rejects_retry_after_when_failure_cannot_retry(
+    outcome: str,
+    retryable: bool,
+) -> None:
+    value = valid_request_v3()
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "1.0.0",
+            "input": {"title": "项目需求"},
+            "reason": "创建团队文档",
+        },
+        "result": {
+            "outcome": outcome,
+            "invocation_id": "invocation-1",
+            "auxiliary_handoff_id": None,
+            "code": "provider_failure",
+            "message": "Provider failure",
+            "retryable": retryable,
+            "retry_after": "2026-07-27T00:01:00.000Z",
+        },
+    }]}
+
+    with pytest.raises(ProtocolError, match="retry_after"):
+        parse_request(value)
+
+
+def test_v3_request_keeps_retryable_failure_without_retry_after_compatible() -> None:
+    value = valid_request_v3()
+    value["capability_transcript"] = {"entries": [{
+        "request": {
+            "invocation_id": "invocation-1",
+            "capability_id": "feishu.document.create",
+            "version_constraint": "1.0.0",
+            "input": {"title": "项目需求"},
+            "reason": "创建团队文档",
+        },
+        "result": {
+            "outcome": "failed",
+            "invocation_id": "invocation-1",
+            "auxiliary_handoff_id": None,
+            "code": "github_upstream_unavailable",
+            "message": "github_upstream_unavailable",
+            "retryable": True,
+        },
+    }]}
+
+    assert parse_request(value).capability_transcript is not None
 
 
 def test_v3_transcript_allows_typed_resource_tokens_but_rejects_credentials() -> None:

@@ -340,7 +340,13 @@ when GitHub supplies usable timing metadata. The first usable release does not
 sleep or automatically retry inside the Provider or Fabric. The Agent or other
 caller may decide to create a later invocation only when the retry time and the
 Handoff deadline permit it. The timing field is evidence, not an automation or
-authorization decision.
+authorization decision. A `403` is classified as rate-limited whenever the
+normalized response contains `Retry-After` or reports an exhausted primary
+quota; unsafe, past, zero, malformed, or more-than-24-hour timing is omitted
+without changing that classification. Only `outcome=failed` together with
+`retryable=true` may carry `retry_after`. The Agent must not create a new
+invocation before it, and must stop with an explanation when it is at or after
+the current Handoff deadline.
 
 The first release uses no persistent business-data cache. Request-local
 deduplication may collapse identical reads within one accepted capability

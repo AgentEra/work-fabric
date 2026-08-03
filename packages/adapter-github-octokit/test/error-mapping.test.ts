@@ -113,10 +113,10 @@ describe("GitHub API error mapping", () => {
     });
   });
 
-  it("keeps an ordinary 403 forbidden", () => {
+  it("classifies Retry-After presence as a secondary limit even when unsafe timing is omitted", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-03T02:00:00.000Z"));
-    expect(mapGitHubApiError({
+    const result = mapGitHubApiError({
       status: 403,
       response: {
         headers: {
@@ -125,24 +125,77 @@ describe("GitHub API error mapping", () => {
           "retry-after": "",
         },
       },
+    });
+
+    expect(result).toMatchObject({ code: "github_rate_limited", retryable: true });
+    expect(result.retry_at).toBeUndefined();
+  });
+
+  it("keeps a 403 without Retry-After or exhausted quota forbidden", () => {
+    expect(mapGitHubApiError({
+      status: 403,
+      response: { headers: { "x-ratelimit-remaining": "4999" } },
     })).toMatchObject({ code: "github_forbidden", retryable: false });
   });
 
   it.each([
     ["past HTTP date", "Sun, 02 Aug 2026 02:00:00 GMT"],
     ["unreasonably distant delay", "90000"],
+    ["zero delay", "0"],
   ])("drops %s retry timing while retaining retryable rate-limit semantics", (_label, retryAfter) => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-03T02:00:00.000Z"));
 
-    const result = mapGitHubApiError({
-      status: 429,
-      response: { headers: { "retry-after": retryAfter } },
-    });
+    for (const status of [403, 429]) {
+      const result = mapGitHubApiError({
+        status,
+        response: {
+          headers: {
+            "x-ratelimit-remaining": "4999",
+            "retry-after": retryAfter,
+          },
+        },
+      });
 
-    expect(result).toMatchObject({ code: "github_rate_limited", retryable: true });
-    expect(result.retry_at).toBeUndefined();
+      expect(result).toMatchObject({ code: "github_rate_limited", retryable: true });
+      expect(result.retry_at).toBeUndefined();
+    }
   });
+
+  it("accepts a safe retry delay at the 24-hour ceiling", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T02:00:00.000Z"));
+
+    expect(mapGitHubApiError({
+      status: 429,
+      response: { headers: { "retry-after": "86400" } },
+    })).toMatchObject({
+      code: "github_rate_limited",
+      retryable: true,
+      retry_at: "2026-08-04T02:00:00.000Z",
+    });
+  });
+
+  it.each([401, 403, 503])(
+    "does not attach rate-limit timing to non-rate-limited status %i",
+    (status) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-03T02:00:00.000Z"));
+      const result = mapGitHubApiError({
+        status,
+        response: {
+          headers: {
+            "x-ratelimit-remaining": status === 403 ? "4999" : undefined,
+            "retry-after": status === 403 ? undefined : "60",
+            "x-ratelimit-reset": "1785726000",
+          },
+        },
+      });
+
+      expect(result.code).not.toBe("github_rate_limited");
+      expect(result.retry_at).toBeUndefined();
+    },
+  );
 
   it("drops invalid rate-limit timing metadata without changing the stable error", () => {
     const result = mapGitHubApiError({

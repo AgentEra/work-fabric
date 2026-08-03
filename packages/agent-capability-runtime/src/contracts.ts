@@ -117,10 +117,22 @@ export type AuxiliaryHandoffTerminal =
       readonly artifacts: readonly RuntimeJsonObject[];
     }
   | {
-      readonly outcome: "rejected" | "failed";
+      readonly outcome: "rejected";
       readonly code: string;
       readonly message: string;
       readonly retryable: boolean;
+    }
+  | {
+      readonly outcome: "failed";
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: false;
+    }
+  | {
+      readonly outcome: "failed";
+      readonly code: string;
+      readonly message: string;
+      readonly retryable: true;
       readonly retry_after?: string;
     };
 
