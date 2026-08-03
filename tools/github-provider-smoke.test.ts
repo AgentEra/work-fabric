@@ -224,6 +224,7 @@ describe("GitHub Provider live smoke", () => {
         tenant_id: "tenant-test",
         installation_id_hash: evidence.installation_id_hash,
         allowed_owners: ["AgentEra"],
+        allowed_repositories: [],
       }),
       write: (value) => output.push(value),
     });
@@ -281,10 +282,30 @@ describe("GitHub Provider live smoke", () => {
         tenant_id: "tenant-test",
         installation_id_hash: evidence.installation_id_hash,
         allowed_owners: ["DifferentOwner"],
+        allowed_repositories: [],
       }),
       write: () => undefined,
     })).rejects.toThrow("outside the Provider policy");
     expect(fake.calls).toEqual([]);
+  });
+
+  it("rejects result URLs outside a configured repository ceiling", async () => {
+    const { runGitHubProviderSmoke } = await smokeModule();
+    const fake = fakeQuery();
+    const output: string[] = [];
+
+    await expect(runGitHubProviderSmoke(enabledEnvironment, {
+      declarations: githubReadCapabilityDeclarations,
+      load: async () => ({
+        query: fake.query,
+        tenant_id: "tenant-test",
+        installation_id_hash: evidence.installation_id_hash,
+        allowed_owners: ["AgentEra"],
+        allowed_repositories: [{ owner: "AgentEra", name: "approved-only" }],
+      }),
+      write: (value) => output.push(value),
+    })).rejects.toThrow("outside the Provider repository policy");
+    expect(output).toEqual([]);
   });
 
   it("rejects secret-shaped output instead of printing it", async () => {
@@ -301,6 +322,7 @@ describe("GitHub Provider live smoke", () => {
         tenant_id: "tenant-test",
         installation_id_hash: evidence.installation_id_hash,
         allowed_owners: ["AgentEra"],
+        allowed_repositories: [],
       }),
       write: (value) => output.push(value),
     })).rejects.toThrow("secret-shaped");

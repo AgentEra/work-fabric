@@ -41,6 +41,10 @@ export interface GitHubSmokeRuntime {
   readonly tenant_id: string;
   readonly installation_id_hash: string;
   readonly allowed_owners: readonly string[];
+  readonly allowed_repositories: readonly {
+    readonly owner: string;
+    readonly name: string;
+  }[];
 }
 
 export interface GitHubProviderSmokeDependencies {
@@ -149,7 +153,21 @@ function equal(left: string, right: string): boolean {
   return left.toLowerCase() === right.toLowerCase();
 }
 
-function repositoryRecord(value: unknown, owner: string): {
+function allowedRepository(
+  owner: string,
+  name: string,
+  ceiling: GitHubSmokeRuntime["allowed_repositories"],
+): boolean {
+  return ceiling.length === 0 || ceiling.some((repository) =>
+    equal(repository.owner, owner) && equal(repository.name, name)
+  );
+}
+
+function repositoryRecord(
+  value: unknown,
+  owner: string,
+  ceiling: GitHubSmokeRuntime["allowed_repositories"],
+): {
   readonly owner: string;
   readonly name: string;
   readonly url: string;
@@ -162,6 +180,9 @@ function repositoryRecord(value: unknown, owner: string): {
   const resultOwner = text(repository.owner, "GitHub smoke received an invalid repository owner");
   const name = text(repository.name, "GitHub smoke received an invalid repository name");
   if (!equal(resultOwner, owner)) return null;
+  if (!allowedRepository(resultOwner, name, ceiling)) {
+    throw new Error("GitHub smoke result is outside the Provider repository policy");
+  }
   const url = parsedUrl(item.url);
   const path = segments(url);
   if (
@@ -171,7 +192,11 @@ function repositoryRecord(value: unknown, owner: string): {
   return { owner: resultOwner, name, url: url.href };
 }
 
-function pullRequestUrl(value: unknown, owner: string): string {
+function pullRequestUrl(
+  value: unknown,
+  owner: string,
+  ceiling: GitHubSmokeRuntime["allowed_repositories"],
+): string {
   const item = record(value, "GitHub smoke received an invalid pull request result");
   const repository = record(
     item.repository,
@@ -181,6 +206,9 @@ function pullRequestUrl(value: unknown, owner: string): string {
   const name = text(repository.name, "GitHub smoke received an invalid pull request repository");
   if (!equal(resultOwner, owner)) {
     throw new Error("GitHub smoke refused a cross-owner pull request");
+  }
+  if (!allowedRepository(resultOwner, name, ceiling)) {
+    throw new Error("GitHub smoke result is outside the Provider repository policy");
   }
   if (!Number.isSafeInteger(item.number) || (item.number as number) < 1) {
     throw new Error("GitHub smoke received an invalid pull request number");
@@ -275,6 +303,7 @@ async function loadLiveRuntime(
     installation_id_hash: `sha256:${createHash("sha256")
       .update(credentials.installation_id, "utf8").digest("hex")}`,
     allowed_owners: loaded.provider.policy.allowed_owners,
+    allowed_repositories: loaded.provider.policy.allowed_repositories,
   };
 }
 
@@ -318,7 +347,7 @@ export async function runGitHubProviderSmoke(
     "github.repository.list",
   );
   const repositories = pageItems(repositoryData, "github.repository.list")
-    .map((item) => repositoryRecord(item, owner))
+    .map((item) => repositoryRecord(item, owner, runtime.allowed_repositories))
     .filter((item): item is NonNullable<typeof item> => item !== null);
   const pullRequestData = succeededData(
     await runtime.query.execute("github.pull_request.list", {
@@ -329,7 +358,7 @@ export async function runGitHubProviderSmoke(
     "github.pull_request.list",
   );
   const pullRequestUrls = pageItems(pullRequestData, "github.pull_request.list")
-    .map((item) => pullRequestUrl(item, owner));
+    .map((item) => pullRequestUrl(item, owner, runtime.allowed_repositories));
   const output = JSON.stringify({
     counts: {
       identity: 1,
