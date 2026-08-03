@@ -64,20 +64,31 @@ export interface ManagedGitHubProviderCompositionDependencies {
 /** Owns only the provider process lifecycle; GitHub queries remain in the executor. */
 export class ManagedGitHubProviderComposition implements GitHubProviderComposition {
   private state: "starting" | "ready" | "failed" | "closed" = "starting";
-  private citizenStarted = false;
+  private starting: Promise<void> | null = null;
+  private citizenAttempted = false;
   private hostAttempted = false;
   private closing: Promise<void> | null = null;
 
   constructor(private readonly dependencies: ManagedGitHubProviderCompositionDependencies) {}
 
-  async start(): Promise<void> {
-    if (this.state === "ready") return;
+  start(): Promise<void> {
+    if (this.state === "ready") return Promise.resolve();
     if (this.state === "failed" || this.state === "closed") {
-      throw new Error("GitHub Provider composition cannot be restarted");
+      return Promise.reject(new Error("GitHub Provider composition cannot be restarted"));
     }
+    if (this.starting !== null) return this.starting;
+    const starting = this.startInternal();
+    this.starting = starting;
+    void starting.finally(() => {
+      if (this.starting === starting) this.starting = null;
+    }).catch(() => undefined);
+    return starting;
+  }
+
+  private async startInternal(): Promise<void> {
     try {
+      this.citizenAttempted = true;
       await this.dependencies.citizen.start();
-      this.citizenStarted = true;
       this.hostAttempted = true;
       await this.dependencies.host.start();
       this.state = "ready";
@@ -105,8 +116,15 @@ export class ManagedGitHubProviderComposition implements GitHubProviderCompositi
   }
 
   close(): Promise<void> {
-    this.closing ??= this.rollback().finally(() => { this.state = "closed"; });
+    this.closing ??= this.closeInternal();
     return this.closing;
+  }
+
+  private async closeInternal(): Promise<void> {
+    const starting = this.starting;
+    if (starting !== null) await starting.catch(() => undefined);
+    await this.rollback();
+    this.state = "closed";
   }
 
   private async rollback(): Promise<void> {
@@ -114,8 +132,8 @@ export class ManagedGitHubProviderComposition implements GitHubProviderCompositi
       this.hostAttempted = false;
       await this.dependencies.host.close().catch(() => undefined);
     }
-    if (this.citizenStarted || this.state === "failed") {
-      this.citizenStarted = false;
+    if (this.citizenAttempted) {
+      this.citizenAttempted = false;
       await this.dependencies.citizen.close().catch(() => undefined);
     }
   }

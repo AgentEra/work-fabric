@@ -20,6 +20,20 @@ export interface GitHubProviderProvisioningPorts {
   };
 }
 
+export interface GitHubProviderProvisioningResult {
+  readonly status: "provisioned";
+  readonly endpoint_id: string;
+}
+
+export interface RunGitHubProviderProvisioningOptions {
+  readonly environment?: Readonly<Record<string, string | undefined>>;
+  readonly load?: typeof loadGitHubProviderConfiguration;
+  readonly create_client?: (
+    loaded: Awaited<ReturnType<typeof loadGitHubProviderConfiguration>>,
+    adminToken: string,
+  ) => GitHubProviderProvisioningPorts;
+}
+
 export async function provisionGitHubProviderRecords(
   input: GitHubProviderProvisioningPorts & {
     readonly citizen: GitHubProviderCitizenConfiguration;
@@ -57,15 +71,16 @@ export async function provisionGitHubProviderRecords(
   });
 }
 
-export async function provisionGitHubProvider(
-  environment: Readonly<Record<string, string | undefined>> = process.env,
-): Promise<void> {
-  const loaded = await loadGitHubProviderConfiguration({ environment });
+export async function runGitHubProviderProvisioning(
+  options: RunGitHubProviderProvisioningOptions = {},
+): Promise<GitHubProviderProvisioningResult> {
+  const environment = options.environment ?? process.env;
+  const loaded = await (options.load ?? loadGitHubProviderConfiguration)({ environment });
   const adminToken = environment.WORK_FABRIC_ADMIN_TOKEN;
   if (adminToken === undefined || adminToken.length === 0) {
     throw new Error("WORK_FABRIC_ADMIN_TOKEN is required");
   }
-  const client = new WorkFabricClient({
+  const client = options.create_client?.(loaded, adminToken) ?? new WorkFabricClient({
     baseUrl: loaded.service.work_fabric.base_url,
     tenantId: loaded.service.work_fabric.tenant_id,
     exchangeId: loaded.service.work_fabric.exchange_id,
@@ -76,5 +91,41 @@ export async function provisionGitHubProvider(
     endpoints: client.endpoints,
     citizens: client.citizens,
     citizen: loaded.provider.citizen,
+  });
+  return { status: "provisioned", endpoint_id: loaded.provider.citizen.endpoint_id };
+}
+
+export async function provisionGitHubProvider(
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<GitHubProviderProvisioningResult> {
+  return runGitHubProviderProvisioning({ environment });
+}
+
+export interface ExecuteGitHubProviderProvisioningOptions {
+  readonly run?: () => Promise<GitHubProviderProvisioningResult>;
+  readonly write?: (message: string) => void;
+}
+
+/** CLI-safe wrapper: diagnostics deliberately exclude underlying error text. */
+export async function executeGitHubProviderProvisioning(
+  options: ExecuteGitHubProviderProvisioningOptions = {},
+): Promise<0 | 1> {
+  const write = options.write ?? ((message: string) => { console.log(message); });
+  try {
+    const result = await (options.run ?? (() => runGitHubProviderProvisioning()))();
+    write(`GitHub Provider provisioned: ${result.endpoint_id}`);
+    return 0;
+  } catch {
+    write("GitHub Provider provisioning failed");
+    return 1;
+  }
+}
+
+if (
+  process.argv[1] !== undefined &&
+  import.meta.url === new URL(`file://${process.argv[1]}`).href
+) {
+  void executeGitHubProviderProvisioning().then((code) => {
+    process.exitCode = code;
   });
 }

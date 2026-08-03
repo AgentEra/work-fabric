@@ -82,4 +82,64 @@ describe("ManagedGitHubProviderComposition", () => {
       citizen: "citizen-github-read",
     });
   });
+
+  it("serializes close with an in-flight start and closes each started dependency once", async () => {
+    let releaseCitizen!: () => void;
+    const citizenGate = new Promise<void>((resolve) => { releaseCitizen = resolve; });
+    const citizenClose = vi.fn(async () => undefined);
+    const hostClose = vi.fn(async () => undefined);
+    const hostStart = vi.fn(async () => undefined);
+    const composition = new ManagedGitHubProviderComposition({
+      citizen_id: "citizen-github-read",
+      citizen: {
+        start: async () => citizenGate,
+        health: async () => ({ status: "available" as const }),
+        close: citizenClose,
+      },
+      host: { start: hostStart, active: () => true, close: hostClose },
+    });
+
+    const firstStart = composition.start();
+    const concurrentStart = composition.start();
+    const closing = composition.close();
+    releaseCitizen();
+    await firstStart;
+    await concurrentStart;
+    await closing;
+
+    expect(hostStart).toHaveBeenCalledTimes(1);
+    expect(hostClose).toHaveBeenCalledTimes(1);
+    expect(citizenClose).toHaveBeenCalledTimes(1);
+    await expect(composition.health()).resolves.toEqual({
+      provider: "failed",
+      citizen: "citizen-github-read",
+    });
+  });
+
+  it("does not double-close when startup fails while close is waiting", async () => {
+    let releaseCitizen!: () => void;
+    const citizenGate = new Promise<void>((resolve) => { releaseCitizen = resolve; });
+    const citizenClose = vi.fn(async () => undefined);
+    const composition = new ManagedGitHubProviderComposition({
+      citizen_id: "citizen-github-read",
+      citizen: {
+        start: async () => citizenGate,
+        health: async () => ({ status: "available" as const }),
+        close: citizenClose,
+      },
+      host: {
+        start: async () => { throw new Error("host failed"); },
+        active: () => false,
+        close: vi.fn(async () => undefined),
+      },
+    });
+
+    const starting = composition.start();
+    const closing = composition.close();
+    releaseCitizen();
+    await expect(starting).rejects.toThrow("host failed");
+    await closing;
+    expect(citizenClose).toHaveBeenCalledTimes(1);
+    await expect(composition.health()).resolves.toMatchObject({ provider: "failed" });
+  });
 });
