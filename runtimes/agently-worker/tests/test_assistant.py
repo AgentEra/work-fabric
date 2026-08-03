@@ -20,7 +20,7 @@ from work_fabric_agently_runtime.assistant import (
     validate_scheduling_proposal_output,
     validate_turn_assistant_output,
 )
-from work_fabric_agently_runtime.protocol import parse_request
+from work_fabric_agently_runtime.protocol import ProtocolError, parse_request
 
 from .conftest import valid_request, valid_request_v3
 
@@ -206,6 +206,63 @@ def github_chain_request(entries: list[dict[str, object]]) -> dict[str, object]:
         "input_schema": {"type": "object"},
     })
     return value
+
+
+def intervening_history_entry(
+    *,
+    outcome: str = "succeeded",
+    include_receipt: bool = True,
+) -> dict[str, object]:
+    invocation_id = f"history-between-{outcome}"
+    candidate = {
+        "citizen_id": "citizen-feishu-message",
+        "endpoint_id": "endpoint-feishu",
+        "capability_id": "feishu.conversation.history.read",
+        "capability_version": "1.0.0",
+        "contract_digest": f"sha256:{'d' * 64}",
+    }
+    result: dict[str, object]
+    if outcome == "succeeded":
+        result = {
+            "outcome": "succeeded",
+            "invocation_id": invocation_id,
+            "auxiliary_handoff_id": f"handoff-{invocation_id}",
+            "candidate": candidate,
+            "data": {"messages": [], "has_more": False},
+            "artifacts": [],
+        }
+    else:
+        result = {
+            "outcome": "failed",
+            "invocation_id": invocation_id,
+            "auxiliary_handoff_id": None,
+            "code": "provider_unavailable",
+            "message": "history unavailable",
+            "retryable": True,
+        }
+    entry: dict[str, object] = {
+        "request": {
+            "invocation_id": invocation_id,
+            "capability_id": "feishu.conversation.history.read",
+            "version_constraint": "1.0.0",
+            "input": {
+                "conversation": {"kind": "current_conversation"},
+                "maximum_messages": 1,
+            },
+            "reason": "读取当前会话上下文",
+        },
+        "result": result,
+    }
+    if include_receipt:
+        entry["host_receipt"] = {
+            "operation_id": invocation_id,
+            "original_handoff_id": "handoff-1",
+            "auxiliary_handoff_id": result["auxiliary_handoff_id"],
+            "selected_candidate": candidate if outcome == "succeeded" else None,
+            "started_at": "2026-08-03T08:00:01.100Z",
+            "received_at": "2026-08-03T08:00:01.200Z",
+        }
+    return entry
 
 
 @pytest.mark.asyncio
@@ -1509,6 +1566,178 @@ async def test_valid_three_page_github_chain_accepts_casefolded_owner_scope() ->
         agent,
     )
     assert calls == 1
+    assert turn["kind"] == "final"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("intervening", [
+    "valid_non_github",
+    "failed_non_github",
+    "missing_receipt",
+])
+async def test_github_chain_requires_literal_transcript_adjacency_before_prose(
+    intervening: str,
+) -> None:
+    base = {
+        "target": {"owner": "AgentEra"},
+        "state": "open",
+        "page_size": 30,
+    }
+    scope = ["github://repository/AgentEra/work-fabric"]
+    first = github_chain_entry(
+        1,
+        query_input=base,
+        state="truncated",
+        items=[{"repository": {"owner": "AgentEra", "name": "work-fabric"}, "number": 41}],
+        query_scope=scope,
+        next_cursor="cursor-2",
+    )
+    second = github_chain_entry(
+        2,
+        query_input={**base, "cursor": "cursor-2"},
+        state="complete",
+        items=[{"repository": {"owner": "AgentEra", "name": "work-fabric"}, "number": 42}],
+        query_scope=scope,
+    )
+    between = intervening_history_entry(
+        outcome="failed" if intervening == "failed_non_github" else "succeeded",
+        include_receipt=intervening != "missing_receipt",
+    )
+    request_value = github_chain_request([first, between, second])
+    request_value["available_capabilities"].append({
+        "citizen_id": "citizen-feishu-message",
+        "capability_id": "feishu.conversation.history.read",
+        "version": "1.0.0",
+        "name": "Conversation history",
+        "description": "Reads current conversation history.",
+        "operation_kind": "query",
+        "input_schema": {"type": "object"},
+    })
+    agent = FakeAgent()
+    calls = 0
+
+    async def invented_final() -> object:
+        nonlocal calls
+        calls += 1
+        return contextual_turn({
+            "turn_type": "final",
+            "request_summary": "错误汇总",
+            "response": "当前有两个 PR。",
+            "invocation_id": "",
+            "capability_id": "",
+            "version_constraint": "",
+            "input": {},
+            "reason": "",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    agent.async_start = invented_final  # type: ignore[method-assign]
+    with pytest.raises(AssistantOutputError, match="continuation chain"):
+        await execute_turn_with_agent(parse_request(request_value), agent)
+    assert calls == 0
+
+
+def test_malformed_entry_between_github_pages_fails_at_protocol_boundary() -> None:
+    first = github_chain_entry(
+        1,
+        query_input={"target": {"owner": "AgentEra"}},
+        state="truncated",
+        items=[{"number": 41}],
+        query_scope=["github://owner/AgentEra"],
+        next_cursor="cursor-2",
+    )
+    malformed = intervening_history_entry()
+    malformed["unexpected"] = True
+    second = github_chain_entry(
+        2,
+        query_input={"target": {"owner": "AgentEra"}, "cursor": "cursor-2"},
+        state="complete",
+        items=[{"number": 42}],
+        query_scope=["github://owner/AgentEra"],
+    )
+
+    with pytest.raises(ProtocolError, match="unknown or missing fields"):
+        parse_request(github_chain_request([first, malformed, second]))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("nested_input", [
+    {"target": {"owner": "AgentEra", "cursor": "nested"}},
+    {"target": {"owner": "AgentEra"}, "constraints": {"cursor": "nested"}},
+    {"target": {"owner": "AgentEra"}, "labels": [{"cursor": "nested"}]},
+])
+async def test_nested_github_cursor_key_fails_before_final_prose(
+    nested_input: dict[str, object],
+) -> None:
+    entry = github_chain_entry(
+        1,
+        query_input=nested_input,
+        state="complete",
+        items=[{"number": 42}],
+        query_scope=["github://owner/AgentEra"],
+    )
+    agent = FakeAgent()
+    calls = 0
+
+    async def invented_final() -> object:
+        nonlocal calls
+        calls += 1
+        return contextual_turn({
+            "turn_type": "final",
+            "request_summary": "错误汇总",
+            "response": "当前有一个 PR。",
+            "invocation_id": "",
+            "capability_id": "",
+            "version_constraint": "",
+            "input": {},
+            "reason": "",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    agent.async_start = invented_final  # type: ignore[method-assign]
+    with pytest.raises(AssistantOutputError, match="GitHub evidence"):
+        await execute_turn_with_agent(
+            parse_request(github_chain_request([entry])),
+            agent,
+        )
+    assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_github_cursor_text_in_ordinary_string_is_allowed() -> None:
+    entry = github_chain_entry(
+        1,
+        query_input={
+            "target": {"owner": "AgentEra"},
+            "labels": ["contains cursor text"],
+        },
+        state="complete",
+        items=[{"number": 42}],
+        query_scope=["github://owner/AgentEra"],
+    )
+    agent = FakeAgent()
+
+    async def final() -> object:
+        return contextual_turn({
+            "turn_type": "final",
+            "request_summary": "汇总 PR",
+            "response": "当前有一个 PR。",
+            "invocation_id": "",
+            "capability_id": "",
+            "version_constraint": "",
+            "input": {},
+            "reason": "",
+            "private_state_action": "none",
+            "private_state": {},
+        })
+
+    agent.async_start = final  # type: ignore[method-assign]
+    turn = await execute_turn_with_agent(
+        parse_request(github_chain_request([entry])),
+        agent,
+    )
     assert turn["kind"] == "final"
 
 

@@ -11,7 +11,15 @@ from datetime import datetime, timedelta
 from typing import Any, Mapping, Protocol, TextIO, cast
 from urllib.parse import quote, unquote, urlsplit
 
-from .protocol import JsonValue, ProtocolError, WorkerRequest, usv_string, utf16_code_units
+from .protocol import (
+    MAX_JSON_DEPTH,
+    MAX_JSON_NODES,
+    JsonValue,
+    ProtocolError,
+    WorkerRequest,
+    usv_string,
+    utf16_code_units,
+)
 
 CAPABILITY_ID = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+$")
 ASSISTANT_OUTPUT_SCHEMA = {
@@ -815,7 +823,11 @@ def _canonical_github_query_arguments(
     capability_id: object,
     value: object,
 ) -> dict[str, JsonValue] | None:
-    if not isinstance(capability_id, str) or not isinstance(value, dict):
+    if (
+        not isinstance(capability_id, str)
+        or not isinstance(value, dict)
+        or _github_query_input_has_nested_cursor(value)
+    ):
         return None
     try:
         normalized = json.loads(json.dumps(value))
@@ -858,6 +870,27 @@ def _canonical_github_query_arguments(
         if not normalize_repository(normalized.get("repository")):
             return None
     return cast(dict[str, JsonValue], normalized)
+
+
+def _github_query_input_has_nested_cursor(value: object) -> bool:
+    if not isinstance(value, dict):
+        return True
+    visited = 0
+
+    def walk(node: object, depth: int) -> bool:
+        nonlocal visited
+        visited += 1
+        if visited > MAX_JSON_NODES or depth > MAX_JSON_DEPTH:
+            return True
+        if isinstance(node, dict):
+            if "cursor" in node:
+                return True
+            return any(walk(child, depth + 1) for child in node.values())
+        if isinstance(node, list):
+            return any(walk(child, depth + 1) for child in node)
+        return False
+
+    return any(walk(child, 1) for child in value.values())
 
 
 def _github_entry_scope_identities(
@@ -916,6 +949,13 @@ def _github_truncated_chain_error(
         evidence = data.get("evidence") if isinstance(data, dict) else None
         state = data.get("state") if isinstance(data, dict) else None
         capability_id = request.get("capability_id") if isinstance(request, dict) else None
+        if not (
+            isinstance(capability_id, str)
+            and capability_id.startswith("github.")
+        ):
+            seen_page_items.clear()
+            previous_was_truncated = False
+            continue
         if not previous_was_truncated:
             seen_page_items.clear()
         items = data.get("items") if isinstance(data, dict) else None
@@ -992,6 +1032,7 @@ def _github_evidence_entry_error(
         or receipt.get("original_handoff_id") != request.task.get("handoff_id")
         or receipt.get("auxiliary_handoff_id") != result.get("auxiliary_handoff_id")
         or not isinstance(data, dict)
+        or _github_query_input_has_nested_cursor(capability_request.get("input"))
     ):
         return "current GitHub evidence correlation is invalid"
     advertised = [
@@ -1080,7 +1121,7 @@ def _current_github_evidence_error(request: WorkerRequest) -> str | None:
     if not github_entries:
         return None
     chain_error = _github_truncated_chain_error(
-        cast(list[Mapping[str, JsonValue]], github_entries)
+        cast(list[Mapping[str, JsonValue]], entries)
     )
     if chain_error is not None:
         return chain_error
