@@ -212,10 +212,15 @@ static item or array bound fail closed as `github_response_invalid`; the
 Provider never silently drops facts to fit. Worst-case normalized Result tests
 must remain below the unified Agent `max_query_result_bytes: 131072` limit and
 therefore also below the generic 256 KiB Citizen JSON clone ceiling. A shared
-122,880-byte guard measures the actual JSON-stringified normalized data before
-`cloneCitizenJson`; serialization failure or budget overflow is the stable,
-non-retryable `github_result_truncated` outcome. The Executor preserves that
-code and never reclassifies it as `github_upstream_unavailable`.
+122,880-byte guard measures the actual JSON-stringified normalized data only
+after `cloneCitizenJson` has performed descriptor-based validation and produced
+a safe clone. The returned Result reuses that exact clone. Validation failures
+such as cycles, accessors/`toJSON`, functions, `undefined`, `BigInt`, non-finite
+numbers, and non-plain prototypes are stable `github_response_invalid`
+outcomes; the clone's generic maximum-JSON-bytes failure and the smaller
+Provider budget overflow are non-retryable `github_result_truncated` outcomes.
+The Executor preserves both codes and never reclassifies them as
+`github_upstream_unavailable`.
 
 ### 7.1 Repository reference
 
@@ -424,7 +429,7 @@ Result and event facts. It does not acquire GitHub-specific persistence.
     declarations and production policies cap pages at five items, and
     over-limit upstream arrays fail with `github_response_invalid`, while a
     final serialized result above 122,880 bytes fails with
-    `github_result_truncated` before Citizen JSON cloning.
+    `github_result_truncated` after safe cloning and before transport.
 
 ## 13. Deferred extensions
 

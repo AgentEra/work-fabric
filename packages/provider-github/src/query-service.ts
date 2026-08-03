@@ -327,18 +327,25 @@ function evidence(
 }
 
 function succeeded(data: unknown): CapabilityExecutionResult {
-  let serialized: string;
+  let cloned;
   try {
-    serialized = JSON.stringify(data);
-  } catch {
-    throw new GitHubProviderError("github_result_truncated");
+    cloned = cloneCitizenJson(data, "github capability result");
+  } catch (error) {
+    if (
+      error instanceof TypeError &&
+      error.message.endsWith("exceeds maximum JSON bytes")
+    ) {
+      throw new GitHubProviderError("github_result_truncated");
+    }
+    throw new GitHubProviderError("github_response_invalid");
   }
+  const serialized = JSON.stringify(cloned);
   if (new TextEncoder().encode(serialized).byteLength > GITHUB_MAX_RESULT_BYTES) {
     throw new GitHubProviderError("github_result_truncated");
   }
   return {
     outcome: "succeeded",
-    data: cloneCitizenJson(data, "github capability result") as CitizenJsonObject,
+    data: cloned as CitizenJsonObject,
     artifacts: [],
   };
 }

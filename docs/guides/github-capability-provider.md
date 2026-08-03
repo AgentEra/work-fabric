@@ -142,10 +142,13 @@ assignees and requested reviewers to 10 values, and a check summary to 20
 combined statuses/check runs. These conservative static bounds keep every
 successful capability Result below the unified Agent's 128 KiB input ceiling.
 The Provider also applies a shared 122,880-byte serialized-data guard immediately
-before Citizen JSON cloning, leaving protocol/transcript headroom. An upstream
-record outside a field bound fails as `github_response_invalid`; a result that
-cannot be JSON-stringified or exceeds the final byte guard fails as
-`github_result_truncated`, never as a generic upstream failure.
+after descriptor-based Citizen JSON validation/cloning and before transport,
+leaving protocol/transcript headroom. The Provider never invokes an untrusted
+getter or `toJSON` while measuring a result. Malformed structures—including
+cycles, accessors, functions, `undefined`, `BigInt`, non-finite numbers, and
+non-plain objects—fail as `github_response_invalid`. Generic clone byte overflow
+or overflow of the smaller Provider guard fails as `github_result_truncated`,
+never as a generic upstream failure.
 
 `github.identity.get` reports the App identity plus the bounded installation
 repository count. `github.repository.list` is always filtered by the Provider

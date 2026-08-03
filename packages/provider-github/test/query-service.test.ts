@@ -485,12 +485,70 @@ describe("GitHubQueryService", () => {
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(131_072);
   });
 
-  it("maps an unstringifiable successful result to the stable result budget error", async () => {
+  it("classifies cyclic successful data as an invalid Provider response", async () => {
     const cyclic = { ...identity } as GitHubIdentityRecord & { self?: unknown };
     cyclic.self = cyclic;
     const query = service(api({
       getIdentity: async () => cyclic,
     }));
+
+    await expect(query.execute("github.identity.get", {}, context)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    });
+  });
+
+  it.each([
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["undefined", undefined],
+    ["function", () => "unsafe"],
+    ["BigInt", BigInt(1)],
+  ])("classifies non-JSON %s data as an invalid Provider response", async (_name, value) => {
+    const malformed = { ...identity, name: value } as unknown as GitHubIdentityRecord;
+    const query = service(api({ getIdentity: async () => malformed }));
+
+    await expect(query.execute("github.identity.get", {}, context)).rejects.toMatchObject({
+      code: "github_response_invalid",
+      retryable: false,
+    });
+  });
+
+  it.each(["getter", "toJSON"] as const)(
+    "does not execute an untrusted %s while rejecting malformed result data",
+    async (kind) => {
+      let calls = 0;
+      const malformed = { ...identity } as GitHubIdentityRecord & Record<string, unknown>;
+      if (kind === "getter") {
+        Object.defineProperty(malformed, "unsafe", {
+          enumerable: true,
+          get: () => {
+            calls += 1;
+            return "executed";
+          },
+        });
+      } else {
+        malformed.toJSON = () => {
+          calls += 1;
+          return identity;
+        };
+      }
+      const query = service(api({ getIdentity: async () => malformed }));
+
+      await expect(query.execute("github.identity.get", {}, context)).rejects.toMatchObject({
+        code: "github_response_invalid",
+        retryable: false,
+      });
+      expect(calls).toBe(0);
+    },
+  );
+
+  it("classifies safe plain data above the generic clone ceiling as result truncation", async () => {
+    const oversized = {
+      ...identity,
+      name: "x".repeat(300_000),
+    };
+    const query = service(api({ getIdentity: async () => oversized }));
 
     await expect(query.execute("github.identity.get", {}, context)).rejects.toMatchObject({
       code: "github_result_truncated",
