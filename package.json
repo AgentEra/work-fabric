@@ -25,6 +25,7 @@
     "feishu-calendar:admin": "tsx tools/feishu-calendar-admin.ts",
     "local:feishu:provision": "tsx tools/local-feishu-provision.ts",
     "local:feishu:start": "tsx tools/local-feishu-stack.ts",
+    "local:github:start": "tsx tools/local-github-provider.ts",
     "local:feishu:status": "tsx tools/local-feishu-status.ts",
     "local:debug:start": "tsx tools/local-debug-stack.ts",
     "local:debug:status": "tsx tools/local-debug-status.ts",

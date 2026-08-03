@@ -64,6 +64,16 @@ applications:
                 actor_type: agent
                 endpoint_ids: [endpoint-feishu-provider]
             attributes: {}
+        - authentication_evidence:
+            bearer_token: ${GITHUB_PROVIDER_ACCESS_TOKEN}
+          principal:
+            principal_id: principal-github-provider
+            tenant_id: tenant-local
+            actor_claims:
+              - actor_id: actor-github-provider
+                actor_type: system
+                endpoint_ids: [endpoint-github-provider]
+            attributes: {}
       authority_rules:
         - tenant_id: tenant-local
           principal_id: principal-feishu-connector
@@ -112,6 +122,20 @@ applications:
           actor_id: actor-work-fabric-admin
           actor_type: system
           endpoint_id: endpoint-work-fabric-admin
+          action: workfabric.endpoint.provision.v1
+          resource_id: endpoint-github-provider
+        - tenant_id: tenant-local
+          principal_id: principal-work-fabric-admin
+          actor_id: actor-work-fabric-admin
+          actor_type: system
+          endpoint_id: endpoint-work-fabric-admin
+          action: workfabric.endpoint.read.v1
+          resource_id: endpoint-github-provider
+        - tenant_id: tenant-local
+          principal_id: principal-work-fabric-admin
+          actor_id: actor-work-fabric-admin
+          actor_type: system
+          endpoint_id: endpoint-work-fabric-admin
           action: workfabric.citizen.provision.v1
           resource_id: citizen-feishu-message
         - tenant_id: tenant-local
@@ -163,6 +187,20 @@ applications:
           endpoint_id: endpoint-work-fabric-admin
           action: workfabric.citizen.read.v1
           resource_id: citizen-feishu-context
+        - tenant_id: tenant-local
+          principal_id: principal-work-fabric-admin
+          actor_id: actor-work-fabric-admin
+          actor_type: system
+          endpoint_id: endpoint-work-fabric-admin
+          action: workfabric.citizen.provision.v1
+          resource_id: citizen-github-read
+        - tenant_id: tenant-local
+          principal_id: principal-work-fabric-admin
+          actor_id: actor-work-fabric-admin
+          actor_type: system
+          endpoint_id: endpoint-work-fabric-admin
+          action: workfabric.citizen.read.v1
+          resource_id: citizen-github-read
         - tenant_id: tenant-local
           principal_id: principal-feishu-provider
           actor_id: actor-feishu-provider
@@ -275,6 +313,34 @@ applications:
           endpoint_id: endpoint-feishu-provider
           action: workfabric.citizen.session.close.v1
           resource_id: citizen-feishu-context
+        - tenant_id: tenant-local
+          principal_id: principal-github-provider
+          actor_id: actor-github-provider
+          actor_type: system
+          endpoint_id: endpoint-github-provider
+          action: workfabric.citizen.session.open.v1
+          resource_id: citizen-github-read
+        - tenant_id: tenant-local
+          principal_id: principal-github-provider
+          actor_id: actor-github-provider
+          actor_type: system
+          endpoint_id: endpoint-github-provider
+          action: workfabric.citizen.session.heartbeat.v1
+          resource_id: citizen-github-read
+        - tenant_id: tenant-local
+          principal_id: principal-github-provider
+          actor_id: actor-github-provider
+          actor_type: system
+          endpoint_id: endpoint-github-provider
+          action: workfabric.citizen.session.declarations.replace.v1
+          resource_id: citizen-github-read
+        - tenant_id: tenant-local
+          principal_id: principal-github-provider
+          actor_id: actor-github-provider
+          actor_type: system
+          endpoint_id: endpoint-github-provider
+          action: workfabric.citizen.session.close.v1
+          resource_id: citizen-github-read
         - tenant_id: tenant-local
           principal_id: principal-intake-agent
           actor_id: actor-intake-agent
@@ -422,6 +488,90 @@ applications:
           endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
           resource_id: citizen-feishu-calendar/feishu.calendar.event.delete
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.identity.get
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.repository.list
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.repository.get
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.pull_request.list
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.pull_request.get
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.pull_request.reviews.list
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.pull_request.comments.list
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.pull_request.files.list
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.pull_request.commits.list
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.pull_request.checks.get
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.actions.workflow_runs.list
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration.read.v1
+          resource_id: citizen-github-read/github.commit.list
     agent_runtime_authority:
       grants:
         daily-assistant:
@@ -436,6 +586,12 @@ applications:
           actor_id: actor-feishu-provider
           endpoint_id: endpoint-feishu-provider
           subscription_id: subscription-feishu-provider
+        github-provider:
+          tenant_id: tenant-local
+          principal_id: principal-github-provider
+          actor_id: actor-github-provider
+          endpoint_id: endpoint-github-provider
+          subscription_id: subscription-github-provider
     admission:
       evidence_providers:
         feishu-directory-primary:
@@ -501,6 +657,7 @@ applications:
                   - calendar_event:write
                   - calendar_attendee:write
                   - calendar_event:delete
+                  - github:read
                 may_redelegate: true
             outbound:
               enabled: true
@@ -552,6 +709,7 @@ applications:
         max_query_result_bytes: 131072
         allowed_namespaces:
           - feishu.
+          - github.
     role:
       role_id: daily-assistant
       version: 1
@@ -656,4 +814,48 @@ applications:
               principal_id: principal-feishu-provider
               actor_id: actor-feishu-provider
               endpoint_id: endpoint-feishu-provider
+              registration_version: 1
+
+  github-provider:
+    api_version: workfabric.config/v1
+    service:
+      runtime_id: github-provider-local
+      development_mode: true
+      work_fabric:
+        base_url: http://127.0.0.1:8787
+        tenant_id: tenant-local
+        exchange_id: exchange-local
+        subscription_id: subscription-github-provider
+        access_token: ${GITHUB_PROVIDER_ACCESS_TOKEN}
+      concurrency:
+        max_active_runs: 2
+        queue_capacity: 16
+        max_active_partitions: 8
+      citizen_lease:
+        requested_lease_seconds: 60
+        heartbeat_safety_margin_ms: 5000
+    plugins:
+      instances:
+        github-primary:
+          type: capability-provider.github
+          enabled: false
+          config:
+            authentication:
+              mode: github_app
+              credential_ref: github-primary
+              app_id_environment: GITHUB_APP_ID
+              installation_id_environment: GITHUB_APP_INSTALLATION_ID
+              private_key_environment: GITHUB_APP_PRIVATE_KEY
+            cursor_signing_key: ${WORK_FABRIC_GITHUB_CURSOR_SECRET}
+            policy:
+              allowed_owners:
+                - AgentEra
+              allowed_repositories: []
+              maximum_page_size: 100
+              maximum_aggregate_repositories: 100
+            citizen:
+              citizen_id: citizen-github-read
+              principal_id: principal-github-provider
+              actor_id: actor-github-provider
+              endpoint_id: endpoint-github-provider
               registration_version: 1

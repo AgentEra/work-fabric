@@ -72,8 +72,9 @@ function replaceDeploymentValue(
   return source.replaceAll(marker, JSON.stringify(value));
 }
 
-export async function prepareLocalFeishuEnvironment(
+export async function prepareLocalBundleEnvironment(
   input: Readonly<Record<string, string | undefined>> = process.env,
+  requiredEnvironment: readonly string[] = LOCAL_FEISHU_REQUIRED_ENVIRONMENT,
 ): Promise<Readonly<Record<string, string>>> {
   const envFile = input.WORK_FABRIC_ENV_FILE;
   if (envFile === undefined || envFile.trim() === "") {
@@ -89,7 +90,11 @@ export async function prepareLocalFeishuEnvironment(
       ?? fileValues.WORK_FABRIC_LISTEN_HOST
       ?? "127.0.0.1",
   };
-  const missing = LOCAL_FEISHU_REQUIRED_ENVIRONMENT.filter(
+  const missing = [
+    ...requiredEnvironment,
+    "FEISHU_EXTERNAL_TENANT_ID",
+    "FEISHU_BOT_OPEN_ID",
+  ].filter(
     (name) => combined[name] === undefined || combined[name]!.length === 0,
   );
   if (missing.length > 0) {
@@ -127,6 +132,15 @@ export async function prepareLocalFeishuEnvironment(
   } else if (sourcePath !== resolvedPath) {
     throw new Error("Configuration listen marker is missing");
   }
+  if (
+    combined.GITHUB_PROVIDER_ACCESS_TOKEN === undefined
+    || combined.GITHUB_PROVIDER_ACCESS_TOKEN.length === 0
+  ) {
+    configuration = configuration.replaceAll(
+      "${GITHUB_PROVIDER_ACCESS_TOKEN}",
+      "${WORK_FABRIC_ADMIN_TOKEN}",
+    );
+  }
   await mkdir(dirname(resolvedPath), { recursive: true, mode: 0o700 });
   await writeFile(resolvedPath, configuration, { mode: 0o600 });
   return Object.freeze(Object.fromEntries(
@@ -138,10 +152,18 @@ export async function prepareLocalFeishuEnvironment(
       WORK_FABRIC_AGENT_RUNTIME_CONFIG_APPLICATION: "daily-assistant",
       WORK_FABRIC_FEISHU_PROVIDER_CONFIG: resolvedPath,
       WORK_FABRIC_FEISHU_PROVIDER_CONFIG_APPLICATION: "feishu-provider",
+      WORK_FABRIC_GITHUB_PROVIDER_CONFIG: resolvedPath,
+      WORK_FABRIC_GITHUB_PROVIDER_CONFIG_APPLICATION: "github-provider",
     }).filter((entry): entry is [string, string] =>
       typeof entry[1] === "string"
     ),
   ));
+}
+
+export async function prepareLocalFeishuEnvironment(
+  input: Readonly<Record<string, string | undefined>> = process.env,
+): Promise<Readonly<Record<string, string>>> {
+  return prepareLocalBundleEnvironment(input);
 }
 
 export interface LocalFeishuPidState {
