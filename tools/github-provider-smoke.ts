@@ -3,6 +3,7 @@ import {
   OctokitGitHubReadApi,
 } from "@work-fabric/adapter-github-octokit";
 import {
+  GITHUB_MAX_PAGE_SIZE,
   GITHUB_READ_CAPABILITY_IDS,
   GitHubPolicyEvaluator,
   GitHubQueryService,
@@ -249,7 +250,7 @@ function pageItems(data: Record<string, unknown>, capabilityId: GitHubSmokeCapab
   if (!["empty", "complete", "truncated"].includes(String(data.state))) {
     throw new Error(`GitHub smoke ${capabilityId} returned an invalid page state`);
   }
-  if (!Array.isArray(data.items) || data.items.length > 100) {
+  if (!Array.isArray(data.items) || data.items.length > GITHUB_MAX_PAGE_SIZE) {
     throw new Error(`GitHub smoke ${capabilityId} returned an invalid page`);
   }
   return data.items;

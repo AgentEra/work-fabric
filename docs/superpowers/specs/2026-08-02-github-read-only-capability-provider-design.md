@@ -211,7 +211,11 @@ combined status/check-run collection at 20 values. GitHub responses above a
 static item or array bound fail closed as `github_response_invalid`; the
 Provider never silently drops facts to fit. Worst-case normalized Result tests
 must remain below the unified Agent `max_query_result_bytes: 131072` limit and
-therefore also below the generic 256 KiB Citizen JSON clone ceiling.
+therefore also below the generic 256 KiB Citizen JSON clone ceiling. A shared
+122,880-byte guard measures the actual JSON-stringified normalized data before
+`cloneCitizenJson`; serialization failure or budget overflow is the stable,
+non-retryable `github_result_truncated` outcome. The Executor preserves that
+code and never reclassifies it as `github_upstream_unavailable`.
 
 ### 7.1 Repository reference
 
@@ -416,9 +420,11 @@ Result and event facts. It does not acquire GitHub-specific persistence.
     installation and never runs in the default test suite.
 11. Existing Feishu, Agent, Citizen, capability and full verification suites
     continue to pass without Core protocol changes.
-12. Every successful Result is statically bounded below 128 KiB; all list
+12. Every successful Result is guarded below 128 KiB; all list
     declarations and production policies cap pages at five items, and
-    over-limit upstream arrays fail with `github_response_invalid`.
+    over-limit upstream arrays fail with `github_response_invalid`, while a
+    final serialized result above 122,880 bytes fails with
+    `github_result_truncated` before Citizen JSON cloning.
 
 ## 13. Deferred extensions
 

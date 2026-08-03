@@ -133,4 +133,15 @@ describe("GitHubCapabilityExecutor", () => {
       retryable: true,
     });
   });
+
+  it("preserves the Provider result budget code instead of treating it as upstream failure", async () => {
+    await expect(executor(async () => {
+      throw new GitHubProviderError("github_result_truncated");
+    }).execute(request, context)).resolves.toEqual({
+      outcome: "failed",
+      code: "github_result_truncated",
+      message: "github_result_truncated",
+      retryable: false,
+    });
+  });
 });

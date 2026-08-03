@@ -358,12 +358,12 @@ function commit(value: unknown, repository: GitHubRepositoryRef): GitHubCommitRe
   const message = textWithoutLimit(required(gitCommit, "message"));
   const firstLine = message.split(/\r?\n/u, 1)[0];
   if (firstLine === undefined || firstLine.length === 0) invalidResponse();
-  const subject = preview(firstLine, GITHUB_MAX_TEXT_BYTES);
+  const subject = text(firstLine);
   const verification = gitCommit.verification;
   return {
     repository,
     sha: text(required(record, "sha"), 128),
-    subject: subject.value,
+    subject,
     author_name: authorRecord === null ? null : text(required(authorRecord, "name"), 255),
     author_login: login(required(record, "author")),
     verified: verification === null || verification === undefined

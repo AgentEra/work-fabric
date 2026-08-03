@@ -23,7 +23,7 @@ import type {
 } from "./cursor.js";
 import { GITHUB_READ_CAPABILITY_IDS } from "./declarations.js";
 import { GitHubProviderError } from "./errors.js";
-import { GITHUB_MAX_PAGE_SIZE } from "./limits.js";
+import { GITHUB_MAX_PAGE_SIZE, GITHUB_MAX_RESULT_BYTES } from "./limits.js";
 import { GitHubPolicyEvaluator } from "./policy.js";
 import {
   parseGitHubCapabilityInput,
@@ -327,6 +327,15 @@ function evidence(
 }
 
 function succeeded(data: unknown): CapabilityExecutionResult {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(data);
+  } catch {
+    throw new GitHubProviderError("github_result_truncated");
+  }
+  if (new TextEncoder().encode(serialized).byteLength > GITHUB_MAX_RESULT_BYTES) {
+    throw new GitHubProviderError("github_result_truncated");
+  }
   return {
     outcome: "succeeded",
     data: cloneCitizenJson(data, "github capability result") as CitizenJsonObject,

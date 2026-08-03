@@ -288,6 +288,27 @@ describe("GitHub Provider live smoke", () => {
     expect(output.join("")).not.toContain("Read-only GitHub Provider");
   });
 
+  it("rejects a successful page above the shared Provider MVP ceiling", async () => {
+    const { runGitHubProviderSmoke } = await smokeModule();
+    const repositoryItems = Array.from({ length: 6 }, (_, index) => ({
+      ...repository,
+      repository: { owner: "AgentEra", name: `repository-${index}` },
+      url: `https://github.com/AgentEra/repository-${index}`,
+    }));
+    const fake = fakeQuery({ repository_items: repositoryItems });
+
+    await expect(runGitHubProviderSmoke(enabledEnvironment, {
+      declarations: githubReadCapabilityDeclarations,
+      preflight: async () => fakePreflight(),
+      loadRuntime: async () => ({
+        query: fake.query,
+        tenant_id: "tenant-test",
+        installation_id_hash: evidence.installation_id_hash,
+      }),
+      write: () => undefined,
+    })).rejects.toThrow("invalid page");
+  });
+
   it("rejects a write declaration before loading credentials", async () => {
     const { runGitHubProviderSmoke } = await smokeModule();
     let runtimeLoads = 0;

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { GitHubProviderError } from "@work-fabric/provider-github";
+import {
+  GITHUB_MAX_RESULT_BYTES,
+  GitHubPolicyEvaluator,
+  GitHubProviderError,
+  GitHubQueryService,
+  HmacGitHubCursorCodec,
+} from "@work-fabric/provider-github";
 
 import {
   OctokitGitHubReadApi,
@@ -187,7 +193,84 @@ function recordingClient(
   };
 }
 
+async function executeMaximumPullRequestResult(fill: string) {
+  const repositories = Array.from({ length: 100 }, (_, index) => ({
+    owner: "AgentEra",
+    name: `r-${String(index).padStart(3, "0")}-${fill.repeat(94)}`,
+  }));
+  const client: OctokitRequestClient = {
+    request: (async (route: string, parameters: Record<string, unknown>) => {
+      if (route !== "GET /repos/{owner}/{repo}/pulls") {
+        throw new Error(`unexpected route ${route}`);
+      }
+      const owner = String(parameters.owner);
+      const name = String(parameters.repo);
+      const encodedOwner = encodeURIComponent(owner);
+      const encodedName = encodeURIComponent(name);
+      const repeatedLogin = fill.repeat(100);
+      return {
+        data: [{
+          number: 99_999,
+          title: fill.repeat(512),
+          html_url: `https://github.com/${encodedOwner}/${encodedName}/pull/99999#${"x".repeat(1_500)}`,
+          user: { login: repeatedLogin },
+          draft: false,
+          base: { ref: fill.repeat(255) },
+          head: { ref: fill.repeat(255), sha: fill.repeat(64) },
+          assignees: Array.from({ length: 10 }, () => ({ login: repeatedLogin })),
+          requested_reviewers: Array.from({ length: 10 }, () => ({ login: repeatedLogin })),
+          labels: Array.from({ length: 10 }, () => ({ name: repeatedLogin })),
+          mergeable: null,
+          created_at: "2026-08-01T09:00:00Z",
+          updated_at: "2026-08-02T09:00:00Z",
+          body: null,
+        }],
+        headers: {},
+      };
+    }) as OctokitRequestClient["request"],
+  };
+  const query = new GitHubQueryService({
+    api: new OctokitGitHubReadApi(client),
+    policy: new GitHubPolicyEvaluator({
+      allowed_owners: ["AgentEra"],
+      allowed_repositories: repositories,
+      maximum_page_size: 5,
+      maximum_aggregate_repositories: 100,
+    }),
+    cursor: new HmacGitHubCursorCodec({ key: Buffer.alloc(32, 9) }),
+    api_version: "2022-11-28",
+    now: () => "2026-08-03T00:00:00.000Z",
+  });
+  return query.execute("github.pull_request.list", {
+    target: { repositories },
+    state: "open",
+    page_size: 5,
+  }, {
+    tenant_id: "tenant-test",
+    installation_id_hash: `sha256:${"a".repeat(64)}`,
+    signal,
+  });
+}
+
 describe("OctokitGitHubReadApi", () => {
+  it("rejects a JSON-escaped real adapter result above the shared byte budget", async () => {
+    await expect(executeMaximumPullRequestResult("\0")).rejects.toMatchObject({
+      code: "github_result_truncated",
+      retryable: false,
+    } satisfies Partial<GitHubProviderError>);
+  });
+
+  it("keeps the equivalent maximum ASCII adapter result below the shared byte budget", async () => {
+    const result = await executeMaximumPullRequestResult("x");
+
+    expect(result).toMatchObject({
+      outcome: "succeeded",
+      data: { state: "truncated", items: { length: 5 } },
+    });
+    expect(Buffer.byteLength(JSON.stringify(result), "utf8"))
+      .toBeLessThan(GITHUB_MAX_RESULT_BYTES);
+  });
+
   it("uses only the approved GET routes and returns provider-owned records", async () => {
     const recorded: RecordedRequest[] = [];
     const api = new OctokitGitHubReadApi(recordingClient(recorded));
@@ -500,7 +583,7 @@ describe("OctokitGitHubReadApi", () => {
     expect(JSON.stringify(result)).not.toContain("secret-tail");
   });
 
-  it("bounds commit subjects at the default 512-byte text limit", async () => {
+  it("rejects commit subjects above the default 512-byte text limit", async () => {
     const commit = baseCommit();
     const api = new OctokitGitHubReadApi(recordingClient([], (route) =>
       route === "GET /repos/{owner}/{repo}/commits"
@@ -514,10 +597,11 @@ describe("OctokitGitHubReadApi", () => {
         : response(route)
     ));
 
-    const result = await api.listCommits({ repository, page_size: 5 }, signal);
-
-    expect(result.items[0]?.subject).toBe("s".repeat(512));
-    expect(JSON.stringify(result)).not.toContain("private body");
+    await expect(api.listCommits({ repository, page_size: 5 }, signal))
+      .rejects.toMatchObject({
+        code: "github_response_invalid",
+        retryable: false,
+      } satisfies Partial<GitHubProviderError>);
   });
 
   it("fails closed for malformed or over-limit upstream payloads", async () => {

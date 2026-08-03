@@ -140,9 +140,12 @@ at a time. Normal text is limited to 512 UTF-8 bytes, body/comment/review
 previews to 1024 bytes, repeated record fields such as topics, labels,
 assignees and requested reviewers to 10 values, and a check summary to 20
 combined statuses/check runs. These conservative static bounds keep every
-successful capability Result below the unified Agent's 128 KiB input ceiling;
-an upstream response outside them fails as `github_response_invalid` instead
-of being silently shortened or failing later during transport cloning.
+successful capability Result below the unified Agent's 128 KiB input ceiling.
+The Provider also applies a shared 122,880-byte serialized-data guard immediately
+before Citizen JSON cloning, leaving protocol/transcript headroom. An upstream
+record outside a field bound fails as `github_response_invalid`; a result that
+cannot be JSON-stringified or exceeds the final byte guard fails as
+`github_result_truncated`, never as a generic upstream failure.
 
 `github.identity.get` reports the App identity plus the bounded installation
 repository count. `github.repository.list` is always filtered by the Provider
@@ -218,7 +221,7 @@ has write permissions.
 | `github_rate_limited` | Stop retrying until the safe `retry_at` time. The Provider maps the vendor limit without exposing headers or credentials. |
 | `github_upstream_unavailable` | A transient GitHub/network failure occurred. Retry only according to the bounded Provider policy. |
 | `github_response_invalid` | GitHub returned malformed, incomplete, or over-limit data outside the Provider's normalized contract. Preserve safe diagnostics and investigate the adapter. |
-| `github_result_truncated` | Owner-wide aggregation exceeded the Provider's configured repository ceiling before it could form a valid page. Narrow the target or adjust the reviewed ceiling. |
+| `github_result_truncated` | The normalized result could not fit the Provider's 122,880-byte serialized-data budget. Narrow the repository scope or filters; this is not an upstream availability failure. |
 | `empty` | The query succeeded and found no matching item. Report “none found”; do not treat it as auth failure. |
 | `truncated` | More data exists after the current five-item page. `evidence.complete` is false and `next_cursor` is opaque; only the Agent decides whether another bounded page is relevant. |
 

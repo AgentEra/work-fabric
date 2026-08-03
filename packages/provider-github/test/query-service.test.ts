@@ -485,6 +485,19 @@ describe("GitHubQueryService", () => {
     expect(Buffer.byteLength(JSON.stringify(result), "utf8")).toBeLessThan(131_072);
   });
 
+  it("maps an unstringifiable successful result to the stable result budget error", async () => {
+    const cyclic = { ...identity } as GitHubIdentityRecord & { self?: unknown };
+    cyclic.self = cyclic;
+    const query = service(api({
+      getIdentity: async () => cyclic,
+    }));
+
+    await expect(query.execute("github.identity.get", {}, context)).rejects.toMatchObject({
+      code: "github_result_truncated",
+      retryable: false,
+    });
+  });
+
   it("signs the upstream continuation and marks incomplete evidence as truncated", async () => {
     const query = service(api({
       listCommits: async (input) => {
