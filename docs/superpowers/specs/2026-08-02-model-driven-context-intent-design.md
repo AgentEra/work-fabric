@@ -1,7 +1,7 @@
 # Model-Driven Context Intent Design
 
-**Date:** 2026-08-02  
-**Scope:** Daily Assistant context-sufficiency decisions and progressive source retrieval  
+**Date:** 2026-08-02
+**Scope:** Daily Assistant context-sufficiency decisions and progressive source retrieval
 **Supersedes:** The deterministic intent-classification portions of
 `2026-07-31-daily-assistant-progressive-context-design.md`, especially
 Sections 3.3, 5, 11 and acceptance criteria 2–3
