@@ -9,6 +9,7 @@ import {
   HandoffCapabilityInvocationPort,
   JsonSchemaInvocationValidator,
   PollingAuxiliaryHandoffWaiter,
+  RoutedInvocationSchemaRegistry,
   type AuxiliaryHandoffWaiter,
   type InvocationAuthorityProvider,
   type InvocationSchemaValidator,
@@ -28,12 +29,26 @@ import {
   type AgentRuntimeDriver,
   type AgentRuntimeStateStore,
 } from "@work-fabric/agent-runtime-spi";
+import { GitHubCapabilitySchemaRegistry } from "@work-fabric/provider-github";
 import { FeishuCapabilitySchemaRegistry } from "@work-fabric/provider-feishu";
 import { BearerTokenProvider, WorkFabricClient } from "@work-fabric/sdk-typescript";
 
 import { LocalInvocationAuthorityProvider } from "./local-invocation-authority.js";
 import { DailyAssistantDriver } from "./daily-assistant-driver.js";
 import { dailyAssistantGatewayConfig } from "./subscription.js";
+
+export function createDefaultInvocationSchemaRegistry(): RoutedInvocationSchemaRegistry {
+  return new RoutedInvocationSchemaRegistry([
+    {
+      uri_prefix: "urn:work-fabric:schema:feishu:",
+      registry: new FeishuCapabilitySchemaRegistry(),
+    },
+    {
+      uri_prefix: "urn:work-fabric:schema:github:",
+      registry: new GitHubCapabilitySchemaRegistry(),
+    },
+  ]);
+}
 
 export interface RuntimeComposition {
   readonly runtimeId: string;
@@ -86,7 +101,7 @@ export async function composeAgentRuntime(
         "A capability-aware Driver is required",
       );
     }
-    const schemaRegistry = new FeishuCapabilitySchemaRegistry();
+    const schemaRegistry = createDefaultInvocationSchemaRegistry();
     const capability = dependencies.capability ?? {
       authority: new LocalInvocationAuthorityProvider({
         tenant_id: loaded.service.work_fabric.tenant_id,

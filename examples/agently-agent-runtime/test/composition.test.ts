@@ -10,10 +10,13 @@ import type {
   InvocationAuthorityProvider,
   InvocationSchemaValidator,
 } from "@work-fabric/agent-capability-runtime";
+import { canonicalCitizenDigest } from "@work-fabric/network-citizen-spi";
+import { githubSchemaDocuments } from "@work-fabric/provider-github";
 import { describe, expect, it, vi } from "vitest";
 
 import {
   composeAgentRuntime,
+  createDefaultInvocationSchemaRegistry,
   ensureTrustedWorkspaceRoot,
   startComposedRuntime,
   type RuntimeComposition,
@@ -67,6 +70,15 @@ const fakeDriver: AgentRuntimeDriver = {
 };
 
 describe("Daily Assistant Runtime composition", () => {
+  it("installs GitHub schemas at the composition root without coupling Providers", async () => {
+    const [uri, document] = githubSchemaDocuments()[0]!;
+
+    await expect(createDefaultInvocationSchemaRegistry().load({
+      uri,
+      digest: canonicalCitizenDigest(document),
+    }, new AbortController().signal)).resolves.toEqual(document);
+  });
+
   it("keeps the executable alive until a termination signal closes the Host", async () => {
     const signals = new EventEmitter();
     const close = vi.fn(async () => undefined);

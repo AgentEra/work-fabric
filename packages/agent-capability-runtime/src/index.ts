@@ -4,3 +4,4 @@ export * from "./contracts.js";
 export * from "./handoff-invocation-port.js";
 export * from "./json-schema-validator.js";
 export * from "./polling-auxiliary-handoff-waiter.js";
+export * from "./routed-schema-registry.js";

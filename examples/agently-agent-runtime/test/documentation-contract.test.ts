@@ -1,7 +1,9 @@
 import { access, readFile } from "node:fs/promises";
 
 import { describe, expect, it } from "vitest";
+import { parse } from "yaml";
 
+import { LocalAuthorityPolicy } from "@work-fabric/adapter-identity-local";
 import { loadAgentRuntimeConfiguration } from "@work-fabric/agent-runtime-host";
 import { loadNodeConfiguration } from "@work-fabric/service-node";
 
@@ -175,5 +177,43 @@ describe("Agently Runtime operator guide", () => {
       "citizen-feishu-calendar/feishu.calendar.events.list",
     ]) expect(source).toContain(value);
     expect(source).not.toMatch(/calendar_(?:id|ids):/);
+  });
+
+  it("allows the Daily Assistant to progressively disclose the GitHub Citizen summary", async () => {
+    const bundle = parse(await readFile(localBundle, "utf8")) as {
+      applications: {
+        "work-fabric": {
+          service: {
+            identities: Array<{
+              principal: {
+                principal_id: string;
+                tenant_id: string;
+                actor_claims: Array<{
+                  actor_id: string;
+                  actor_type: "human" | "agent" | "system";
+                  endpoint_ids: string[];
+                }>;
+                attributes: Record<string, unknown>;
+              };
+            }>;
+            authority_rules: ConstructorParameters<typeof LocalAuthorityPolicy>[0];
+          };
+        };
+      };
+    };
+    const service = bundle.applications["work-fabric"].service;
+    const principal = service.identities.find(
+      (identity) => identity.principal.principal_id === "principal-intake-agent",
+    )?.principal;
+    expect(principal).toBeDefined();
+
+    await expect(new LocalAuthorityPolicy(service.authority_rules).authorize({
+      principal: principal!,
+      actor_id: "actor-intake-agent",
+      actor_type: "agent",
+      endpoint_id: "endpoint-intake-agent",
+      action: "workfabric.citizen.declaration-summary.read.v1",
+      resource_id: "citizen-github-read",
+    })).resolves.toEqual({ kind: "allow" });
   });
 });

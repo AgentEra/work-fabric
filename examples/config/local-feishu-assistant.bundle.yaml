@@ -381,6 +381,13 @@ applications:
           actor_id: actor-intake-agent
           actor_type: agent
           endpoint_id: endpoint-intake-agent
+          action: workfabric.citizen.declaration-summary.read.v1
+          resource_id: citizen-github-read
+        - tenant_id: tenant-local
+          principal_id: principal-intake-agent
+          actor_id: actor-intake-agent
+          actor_type: agent
+          endpoint_id: endpoint-intake-agent
           action: workfabric.citizen.declaration.read.v1
           resource_id: citizen-feishu-document/feishu.document.append
         - tenant_id: tenant-local
