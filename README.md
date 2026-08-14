@@ -32,43 +32,33 @@ Work Fabric 不执行参与方的专业工作。人的实际工作、Agent 的�
 
 Work Fabric 聚焦这些“协作对接”问题，使人、Agent 与系统可以在统一语义下互相替换、组合和协同。
 
-## 参与主体与 Network Citizen
+## 协作网络中的三类 Citizen
 
-Work Fabric 分别建模协作主体与接入模块的网络职责。
-
-`Actor type` 回答**谁参与或被代表**，WFPP v1 目前有 `human`、`agent`、`system`
-三种：
-
-| Actor type | 典型主体 | 说明 |
-|---|---|---|
-| `human` | 员工、专家、审批人、客户 | 人类责任主体，可通过 Channel、Console 或 API 被表示 |
-| `agent` | Daily Assistant、Codex、本地或远程 Agent | 能理解意图、作出选择、承担工作责任的智能主体 |
-| `system` | CRM、GitHub、知识库、部署或监控系统 | 外部系统主体，通常由 Connector 或 Provider 代表 |
-
-`Network Citizen kind` 回答**接入模块对协作网络闭环承担哪一种责任**，目前有
-六种：
+Work Fabric 只按模块在协作网络中的首要责任区分三类 Citizen：
 
 | Citizen kind | 对外闭环职责 | 典型实现 |
 |---|---|---|
-| `decision-body` | 理解意图、作出选择、发布任务、管理业务会话并解释结果 | Human Endpoint、Daily Assistant、外部调度大脑 |
-| `capability-provider` | 动态声明可执行 Contract，在自身边界完成领域动作并返回类型化事实 | 飞书 Message/Document/Calendar Provider、GitHub 只读 Provider |
-| `channel` | 外部消息的可信接入、来源表示、寻址、格式映射和投递 | 飞书 Channel、本地 Debug Channel、未来的邮件或企业微信 Channel |
-| `context-provider` | 按 Authority 返回有界、带来源和版本的上下文 | 飞书文档或会话 Context Provider |
-| `governance-provider` | 提供 Identity、Admission、Authority、委托、确认或策略证据 | Admission、单次确认和外部 IAM 适配模块 |
-| `observer` | 只读观察、审计导出、Console、指标或事件集成 | Read-mostly Console、审计或可观测性适配模块 |
+| `participant`（生成和消费主体） | 生成任务、消费信息、作出判断、承接责任并生产业务语义结果 | 人、Daily Assistant、Codex、外部调度大脑或业务系统 |
+| `capability-provider`（能力 Provider） | 动态声明有界能力，在自身边界执行动作或查询，并返回类型化事实 | 飞书 Message/Document/Calendar Provider、GitHub 只读 Provider、Context 或 Governance Provider |
+| `channel`（通道） | 可信接入外部消息，并负责来源表示、寻址、格式映射和结果投递 | 飞书 Channel、本地 Debug Channel、未来的邮件或企业微信 Channel |
 
-两者彼此正交：一个 Agent Actor 通常由 `decision-body` Citizen 接入；一个
-System Actor 可以代表 `capability-provider`、`context-provider` 或其他
-Citizen。一个进程可以托管多个 Citizen，但每个注册只能有一个
-`citizen_kind`，并分别拥有身份、租约、动态声明、Authority、状态和审计。
+生成和消费主体可以是 `human`、`agent` 或 `system`。这三个值描述主体的身份
+形态，不是额外的 Citizen 分类；`Initiator`、`Recipient`、`Verifier` 则是某次
+Handoff 中承担的临时协作角色。
 
-`Initiator`、`Recipient`、`Verifier` 是某次 Handoff 中的协作角色，不是新的
-Actor type 或 Citizen kind。认证调用者 `Principal`、责任主体 `Actor`、收发
-入口 `Endpoint` 和网络模块 `Citizen` 也必须分别建模。
+Context、Governance、Document、Calendar 等描述的是 Provider 对外声明的能力
+或能力组合，不再单独成为顶层 Citizen kind。Console、指标采集和审计导出如果
+只是读取网络事实，就是普通客户端或订阅者；只有当它们实际生成或消费协作任务
+时，才以 `participant` 身份接入。
 
-数据库、Broker、缓存、HTTP/SSE、SDK、YAML、Adapter、Runtime 和 Connector
-都是基础设施或接入机制，不会天然成为 Citizen；只有模块以独立身份进入网络、
-声明能力并对外承担一种完整责任时，才注册为 Network Citizen。
+同一个 Integration 或进程可以托管多个 Citizen。例如飞书集成可以同时托管
+一个 `channel` 和多个 `capability-provider`，但这些 Citizen 仍分别拥有身份、
+租约、动态声明、Authority、状态和审计，彼此不形成实现耦合。
+
+认证调用者 `Principal`、责任主体 `Actor`、收发入口 `Endpoint` 和网络模块
+`Citizen` 仍需分别建模。数据库、Broker、缓存、HTTP/SSE、SDK、YAML、Adapter、
+Runtime 和 Connector 都是基础设施或接入机制，不会天然成为 Citizen；只有模块
+以独立身份进入网络并对外闭环承担上述三类责任之一时，才注册为 Network Citizen。
 
 ## 核心思想
 
@@ -208,7 +198,7 @@ Work Fabric 由以下逻辑能力组成：
 - **Citizen Directory & Catalog**：Citizen 身份、租约、动态声明、可用性和按 Authority 渐进披露的 Contract 目录。
 - **Protocol & Contract**：统一领域语义、交互状态机、消息契约和传输绑定。
 - **Handoff Core**：参与者目录、工作引用、协作线程、目标绑定、交接、状态和回执。
-- **Capability Exchange**：用标准辅助 Handoff 连接 Decision Body 与 Capability Provider，并将类型化事实返回原协作链；Fabric 不直接调用 Provider。
+- **Capability Exchange**：用标准辅助 Handoff 连接 Participant 与 Capability Provider，并将类型化事实返回原协作链；Fabric 不直接调用 Provider。
 - **Signal Network**：事件、订阅、通知、确认、游标和重放。
 - **Context Exchange**：外部引用、必要快照、范围化 Context Bundle 和交接摘要。
 - **Trust & Trace**：身份、委托、权限、因果、审计和责任历史。
@@ -222,11 +212,11 @@ Work Fabric 由以下逻辑能力组成：
 ## 示例接入
 
 - 飞书消息以 `channel` Citizen 提供人类通知、提问、确认和人工接管通道。
-- Daily Assistant 以 `decision-body` Citizen 接收 Handoff、判断信息是否充分、选择能力并生成语义结果。
+- Daily Assistant 以 `participant` Citizen 接收 Handoff、判断信息是否充分、选择能力并生成语义结果。
 - 飞书 Message、Document 和 Calendar 以相互独立的 `capability-provider` Citizen 提供消息查询/发送、文档操作和日历操作。
 - GitHub 只读 Capability Provider 以 `capability-provider` Citizen 提供仓库、PR、Review、Check、Workflow Run 和 Commit 的有界查询。
-- 飞书文档或会话证据可以由独立 `context-provider` Citizen 按 Authority 提供。
-- 本地 Agent Runtime 作为 Agent Endpoint 和 `decision-body` Runtime，接收 Handoff 并返回结果。
+- 飞书文档或会话证据可以由 `capability-provider` Citizen 通过 Context Contract 按 Authority 提供。
+- 本地 Agent Runtime 作为 Agent Endpoint 和 `participant` Runtime，接收 Handoff 并返回结果。
 - Codex 作为 Agent Runtime 暴露的代码实施能力，或作为独立 Agent Endpoint。
 - 需求系统和部署平台可以通过 Connector 同步工作引用与状态，也可以将明确的领域动作注册为独立 Capability Provider；Connector 是接入机制，不是 Citizen kind。
 
@@ -316,11 +306,11 @@ Gateway 只处理连接机械：它不比较候选、不安排任务、不调用
 
 ## Network Citizen 与动态能力目录
 
-Network Citizen 把接入协作网络的模块按其对外责任分为
-`decision-body`、`capability-provider`、`channel`、`context-provider`、
-`governance-provider` 和 `observer`。Citizen kind 与 `human | agent |
-system` Actor type 正交；一个进程可以托管多个 Citizen，但一个注册只有一个
-kind，因而可以独立授权、租约、启停、扩缩和审计。
+Network Citizen 把接入协作网络的模块按首要责任分为 `participant`、
+`capability-provider` 和 `channel`。`human | agent | system` 是 Participant
+背后的主体形态；Context、Governance 等是 Provider 声明的能力方向，而不是
+新的 Citizen kind。一个进程可以托管多个 Citizen，但每个注册只有一个 kind，
+因而可以独立授权、租约、启停、扩缩和审计。
 
 管理员只 Provision 身份绑定、声明 namespace、最大风险等安全上限；外部
 Runtime 通过单活 fenced Session 动态声明当前能力与可用性。其他参与方按
@@ -347,7 +337,7 @@ Handoff 由目标 Capability Provider 自主接收和承担。Fabric 负责校�
 和记录，不直接调用 Provider，也不编排 Agent 与 Provider 的执行顺序。
 
 ```text
-Daily Assistant（decision-body）
+Daily Assistant（participant）
   -> Catalog + Contract + Authority
   -> auxiliary Capability Handoff
   -> selected capability-provider citizen
