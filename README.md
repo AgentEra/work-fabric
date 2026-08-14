@@ -2,6 +2,8 @@
 
 > **A protocol-driven collaboration interconnect for humans, agents, and work systems.**
 
+> **当前项目正在探索中，欢迎参与讨论和贡献。**
+
 从愿景上，Work Fabric 可以浓缩为：
 
 > **一个去中心化、AI 友好的智能与信息万物互联方案。**
@@ -12,11 +14,10 @@ Work Fabric 是面向人、AI Agent 与各类工作系统的协作对接和工�
 
 Work Fabric 不执行参与方的专业工作。人的实际工作、Agent 的规划与推理、Codex 的代码实施，以及飞书、CRM、Git、知识库和运维平台的业务逻辑，始终发生在各自系统内部。
 
-所有后续方案和实现必须遵守
-[Work Fabric 项目章程与不可妥协架构规则](PROJECT_CHARTER.md)：
-Fabric 只做公民接入、协议校验、可靠传播、浅层协作状态记录和审计；它不
-根据业务内容、时间或结果主动调用 Citizen、选择下一步或推进业务流程。
-局部功能 Spec 不能覆盖这些底线。
+项目的稳定边界由
+[Work Fabric 项目章程与不可妥协架构规则](PROJECT_CHARTER.md)定义：Fabric
+只做公民接入、协议校验、可靠传播、浅层协作状态记录和审计；它不根据业务
+内容、时间或结果主动调用 Citizen、选择下一步或推进业务流程。
 
 ## 为什么需要 Work Fabric
 
@@ -31,23 +32,48 @@ Fabric 只做公民接入、协议校验、可靠传播、浅层协作状态记�
 
 Work Fabric 聚焦这些“协作对接”问题，使人、Agent 与系统可以在统一语义下互相替换、组合和协同。
 
-## 协作网络中的三类公民
+## 参与主体与 Network Citizen
 
-Work Fabric 将所有能够独立参与协作、承担责任并返回结果的主体视为**协作公民**。这是产品层的统一视角；在 WFPP v1 中，它对应 `Actor`，并由 `actor_type` 明确分为三类：
+Work Fabric 分别建模协作主体与接入模块的网络职责。
 
-| 公民类型 | 协议类型 | 典型形态 | 参与方式 |
-|---|---|---|---|
-| 人类公民 | `human` | 员工、专家、审批人、客户 | 通过飞书、Console、API 或其他 Human Adapter 参与 |
-| 智能体公民 | `agent` | Daily Assistant、Codex、本地或远程 Agent | 通过 Agent Endpoint 声明能力、接收交接并返回结果 |
-| 系统公民 | `system` | CRM、Git、知识库、部署、监控或自动化服务 | 通过 Connector 暴露工作引用、状态、动作和结果 |
+`Actor type` 回答**谁参与或被代表**，WFPP v1 目前有 `human`、`agent`、`system`
+三种：
 
-三类公民共享同一套身份、能力、上下文、授权、Handoff、状态、结果和验收语义，不因入口不同而产生协议特权。差异只体现在身份凭据、Endpoint、Capability、Admission Policy 和实际执行方式。
+| Actor type | 典型主体 | 说明 |
+|---|---|---|
+| `human` | 员工、专家、审批人、客户 | 人类责任主体，可通过 Channel、Console 或 API 被表示 |
+| `agent` | Daily Assistant、Codex、本地或远程 Agent | 能理解意图、作出选择、承担工作责任的智能主体 |
+| `system` | CRM、GitHub、知识库、部署或监控系统 | 外部系统主体，通常由 Connector 或 Provider 代表 |
 
-“公民类型”和“协作角色”必须分开：同一个 Human、Agent 或 System Actor 在不同 Handoff 中都可以成为发起方 `Initiator`、接收方 `Recipient` 或验收方 `Verifier`；可选的 `Target Resolver` 是一次目标解析中的动态角色，不是第四类公民。认证调用者 `Principal`、责任主体 `Actor` 和收发入口 `Endpoint` 也必须分别建模。
+`Network Citizen kind` 回答**接入模块对协作网络闭环承担哪一种责任**，目前有
+六种：
+
+| Citizen kind | 对外闭环职责 | 典型实现 |
+|---|---|---|
+| `decision-body` | 理解意图、作出选择、发布任务、管理业务会话并解释结果 | Human Endpoint、Daily Assistant、外部调度大脑 |
+| `capability-provider` | 动态声明可执行 Contract，在自身边界完成领域动作并返回类型化事实 | 飞书 Message/Document/Calendar Provider、GitHub 只读 Provider |
+| `channel` | 外部消息的可信接入、来源表示、寻址、格式映射和投递 | 飞书 Channel、本地 Debug Channel、未来的邮件或企业微信 Channel |
+| `context-provider` | 按 Authority 返回有界、带来源和版本的上下文 | 飞书文档或会话 Context Provider |
+| `governance-provider` | 提供 Identity、Admission、Authority、委托、确认或策略证据 | Admission、单次确认和外部 IAM 适配模块 |
+| `observer` | 只读观察、审计导出、Console、指标或事件集成 | Read-mostly Console、审计或可观测性适配模块 |
+
+两者彼此正交：一个 Agent Actor 通常由 `decision-body` Citizen 接入；一个
+System Actor 可以代表 `capability-provider`、`context-provider` 或其他
+Citizen。一个进程可以托管多个 Citizen，但每个注册只能有一个
+`citizen_kind`，并分别拥有身份、租约、动态声明、Authority、状态和审计。
+
+`Initiator`、`Recipient`、`Verifier` 是某次 Handoff 中的协作角色，不是新的
+Actor type 或 Citizen kind。认证调用者 `Principal`、责任主体 `Actor`、收发
+入口 `Endpoint` 和网络模块 `Citizen` 也必须分别建模。
+
+数据库、Broker、缓存、HTTP/SSE、SDK、YAML、Adapter、Runtime 和 Connector
+都是基础设施或接入机制，不会天然成为 Citizen；只有模块以独立身份进入网络、
+声明能力并对外承担一种完整责任时，才注册为 Network Citizen。
 
 ## 核心思想
 
-Work Fabric 的中心不是内部工作流引擎，而是两个稳定能力：
+Work Fabric 的中心不是内部工作流引擎，而是围绕同一条交接主线组织的以下
+稳定能力：
 
 ### Unified Participation Protocol
 
@@ -103,7 +129,9 @@ flowchart LR
     Verifier -->|"request rework<br/>重新认领"| Recipient
 ```
 
-因此，“认领”不是无目标的公开抢单或首个响应者获胜，而是已经完成目标绑定的接收方对责任作出显式、可审计、可授权校验的承诺。若未来需要任务市场或竞争式认领，应由外部 Resolver 定义选择规则，再把唯一结果提交给 Work Fabric。
+因此，“认领”不是无目标的公开抢单或首个响应者获胜，而是已经完成目标绑定的
+接收方对责任作出显式、可审计、可授权校验的承诺。需要任务市场或竞争式认领
+时，由外部 Resolver 定义选择规则，再把唯一结果提交给 Work Fabric。
 
 ## 职责边界
 
@@ -176,36 +204,46 @@ Correlation       所属协作链和直接原因
 
 Work Fabric 由以下逻辑能力组成：
 
-- **Participation Edge**：Human Channel Adapter、Agent Endpoint 和 System Connector。
+- **Participation Edge**：Human Channel、Agent Endpoint、System Connector，以及外部 Citizen Runtime 的协议接入边界。
+- **Citizen Directory & Catalog**：Citizen 身份、租约、动态声明、可用性和按 Authority 渐进披露的 Contract 目录。
 - **Protocol & Contract**：统一领域语义、交互状态机、消息契约和传输绑定。
 - **Handoff Core**：参与者目录、工作引用、协作线程、目标绑定、交接、状态和回执。
+- **Capability Exchange**：用标准辅助 Handoff 连接 Decision Body 与 Capability Provider，并将类型化事实返回原协作链；Fabric 不直接调用 Provider。
 - **Signal Network**：事件、订阅、通知、确认、游标和重放。
 - **Context Exchange**：外部引用、必要快照、范围化 Context Bundle 和交接摘要。
 - **Trust & Trace**：身份、委托、权限、因果、审计和责任历史。
 - **Read Projections**：Inbox、项目状态、协作时间线和关系视图。
 
-详细说明见[整体架构文档](docs/architecture.md)，所有新模块和功能必须先通过
-[Architecture Boundary Check](PROJECT_CHARTER.md#12-architecture-boundary-check)。
+详细说明见[整体架构文档](docs/architecture.md)。扩展模块必须保持
+[Architecture Boundary Check](PROJECT_CHARTER.md#12-architecture-boundary-check)
+定义的连接、传播和浅层状态边界。
 可执行的协议规范、Canonical Schema、Handoff 状态机、Golden Fixtures 和参考序列见 [WFPP v1 Core Protocol](protocol/README.md)。
 
 ## 示例接入
 
-- 飞书消息作为人类通知、审批、提问和人工接管通道。
-- 飞书文档作为客户资料、需求和交付文档的内容来源。
-- 本地 Agent Runtime 作为可注册能力、接收 Handoff 和返回结果的 Agent Endpoint。
+- 飞书消息以 `channel` Citizen 提供人类通知、提问、确认和人工接管通道。
+- Daily Assistant 以 `decision-body` Citizen 接收 Handoff、判断信息是否充分、选择能力并生成语义结果。
+- 飞书 Message、Document 和 Calendar 以相互独立的 `capability-provider` Citizen 提供消息查询/发送、文档操作和日历操作。
+- GitHub 只读 Capability Provider 以 `capability-provider` Citizen 提供仓库、PR、Review、Check、Workflow Run 和 Commit 的有界查询。
+- 飞书文档或会话证据可以由独立 `context-provider` Citizen 按 Authority 提供。
+- 本地 Agent Runtime 作为 Agent Endpoint 和 `decision-body` Runtime，接收 Handoff 并返回结果。
 - Codex 作为 Agent Runtime 暴露的代码实施能力，或作为独立 Agent Endpoint。
-- Git、需求系统和部署平台通过 Connector 提供工作引用、状态事件和结果写回。
+- 需求系统和部署平台可以通过 Connector 同步工作引用与状态，也可以将明确的领域动作注册为独立 Capability Provider；Connector 是接入机制，不是 Citizen kind。
 
-The executable Daily Assistant Runtime reference and its local/Feishu/operator guide are in [docs/guides/agently-agent-runtime.md](docs/guides/agently-agent-runtime.md). It is an external Runtime Host: Work Fabric Core continues to own only protocol, authority, Handoff and delivery facts.
+可运行的 Daily Assistant Runtime 及其本地、飞书和运维接入方式见
+[Agently Agent Runtime 指南](docs/guides/agently-agent-runtime.md)。它作为外部
+Runtime Host 运行，Work Fabric Core 只拥有协议、授权、Handoff 和投递事实。
 
 不依赖飞书即可长期验证同一真实协作路径的入口见
 [本地 Debug Channel 指南](docs/guides/local-debug-channel.md)。它支持
-plain text、Markdown、typed data 和 resource 引用，并用确定性 Agent E2E
-证明 Channel 不绕过 Connector、Handoff、Agent Runtime 或 Signal。
+plain text、Markdown、typed data 和 resource 引用，并完整经过 Connector、
+Handoff、Agent Runtime 和 Signal 路径。
 
-## HTTP Service Binding
+## HTTP API
 
-阶段 3B 已提供 `@work-fabric/transport-http`。它把同一个 Exchange Application、Query、Subscription 与 Health 能力绑定为 Node.js HTTP 服务；Fastify 只是包内实现，不进入公共接口。人、Agent、Console 和外部系统使用同一套 API，差别只来自可信身份、代表关系与 Authority Policy，不存在 Console 专用或 Agent 专用的状态通道。
+Work Fabric 通过统一 HTTP API 提供命令、查询、订阅、运维与健康检查能力。
+人、Agent、Console 和外部系统使用同一组 Contract，差别只来自可信身份、
+代表关系与 Authority Policy，不存在 Console 专用或 Agent 专用的状态旁路。
 
 主要入口：
 
@@ -218,35 +256,8 @@ plain text、Markdown、typed data 和 resource 引用，并用确定性 Agent E
 | SSE | `GET /v1/subscriptions/{id}/events?partition_id=...` |
 | 协作视图 | `/v1/responsibilities`、`/v1/timeline`、`/v1/relationships` |
 | 运维视图与恢复意图 | `/v1/operations/*`（含 projection、delivery、connector、discrepancy、audit、recovery） |
-| 兼容管理查询 | `/v1/partitions/*`、`/v1/admin/*` |
+| 管理查询 | `/v1/partitions/*`、`/v1/admin/*` |
 | 健康检查 | `/health/live`、`/health/ready`、`/v1/admin/health` |
-
-程序化启动：
-
-```ts
-import {
-  BearerAuthenticationEvidenceMapper,
-  createHttpService,
-  normalizeHttpServiceConfig,
-} from "@work-fabric/transport-http";
-
-const service = createHttpService(
-  {
-    application,
-    authenticator: new BearerAuthenticationEvidenceMapper(),
-    identity,
-    authority,
-    query,
-    subscriptions,
-    schemas,
-    delivery,
-    health_probes,
-  },
-  normalizeHttpServiceConfig({}),
-);
-
-await service.listen({ host: "127.0.0.1", port: 8080 });
-```
 
 Query/Admin 请求使用 `X-WF-Actor-ID`、`X-WF-Endpoint-ID` 和可选 `X-WF-Delegation-ID` 声明代表关系；这些 Header 只是待验证声明，不是权限。默认 Bearer mapper 只生成 authentication evidence，令牌验证仍由 Identity Adapter 负责。
 
@@ -254,7 +265,9 @@ HTTP 配置统一限制请求体、默认/最大分页、请求超时、健康�
 
 ## TypeScript SDK
 
-阶段 3C 已提供 `@work-fabric/sdk-typescript`，在 Node.js 与兼容 Web Standards 的运行时上统一封装阶段 3B 的公共 HTTP Contract。Human 应用、Agent Runtime、Connector 和 Console 使用同一个 `WorkFabricClient`，不存在 Agent 专用或 Admin 旁路客户端。
+`@work-fabric/sdk-typescript` 在 Node.js 与兼容 Web Standards 的运行时中封装
+公共 HTTP Contract。Human 应用、Agent Runtime、Connector 和 Console 使用
+同一个 `WorkFabricClient`，不存在 Agent 专用或 Admin 旁路客户端。
 
 ```ts
 import { BearerTokenProvider, WorkFabricClient } from "@work-fabric/sdk-typescript";
@@ -281,7 +294,11 @@ SDK 提供 Canonical Command、完整 Handoff 便捷方法、Query、Operations�
 
 ## Endpoint 与外部 Agent Runtime
 
-阶段 4A 已提供生产形态的原生 Agent 连接边界：管理员注册绑定 Actor 的 Endpoint；外部 Runtime 通过单活 fenced Session 声明 Capability 和可用性；参与方可按 Identity、Capability Summary、Capability Contract 渐进披露；外部 Resolver 可提交明确目标，或 Endpoint 从权限与 Capability 过滤后的候选池显式 Claim；Endpoint Inbox 把已提交 Handoff Event 投影为可重建的路由事实；`@work-fabric/agent-gateway` 通过公开 TypeScript SDK 维护租约、发现分区、查询候选池并汇聚 Durable SSE。
+管理员可以注册绑定 Actor 的 Endpoint；外部 Agent Runtime 通过单活 fenced
+Session 声明 Capability 和可用性。参与方可以渐进发现 Identity、Capability
+Summary 和完整 Contract，再由外部 Resolver 提交明确目标，或由有权 Endpoint
+从候选池显式 Claim。`@work-fabric/agent-gateway` 通过公共 TypeScript SDK
+维护租约、发现 Inbox Partition 并接收 Durable SSE。
 
 ```text
 Admin provision
@@ -311,34 +328,45 @@ Citizen 列表、Citizen 描述、声明摘要、完整 Contract 四层分别授
 发现。声明能力不授予执行 Authority，Directory 也不评分、不推荐、不选择
 目标、不自动 Claim/Accept。
 
-Memory 和 SQLite 已进入 `service-node` 组合层，统一 HTTP 与 TypeScript SDK
-已覆盖 Provision、Session、Heartbeat、声明 CAS、Discovery 和 Close；
-外部存储继续通过 `NetworkCitizenStore` 注入。YAML 只是启动配置和安全上限
-的一个来源，不是动态能力事实库。完整规则、API 和 SDK 示例见
+HTTP API 与 TypeScript SDK 覆盖 Provision、Session、Heartbeat、声明 CAS、
+Discovery 和 Close。YAML 只用于启动配置和安全上限，不是动态能力事实库；
+Directory 的持久化实现可以替换而不改变公共 Contract。完整规则与接入示例见
 [Network Citizen 架构与接入](docs/architecture/network-citizens.md)。
 
-## Agent 能力调用与 Feishu Provider Facets
+## Capability Provider 与 Agent 能力调用
 
-阶段 11 已把 Agent 的能力请求接入同一条 Handoff 网络，而没有把工具调用
-塞进 Fabric Core。能力感知 Agent 从 Citizen Catalog 渐进发现声明并读取
-完整 Contract；独立 Authority Provider 下发更窄授权后，
-`@work-fabric/agent-capability-runtime` 创建并显式解析一个辅助 Handoff。
-原始 Handoff 的责任仍在 Agent，只有辅助 Handoff 由能力 Provider 接受。
+Capability Provider 是一等 Network Citizen，不是 Channel、Connector 的附属
+功能，也不是 Fabric Core 内部的“工具”。它动态声明带版本、Schema、风险和
+确认要求的 Capability Contract，在自身边界管理凭据、外部 API、幂等、副作用、
+领域状态和错误映射，只向协作网络返回类型化事实或稳定错误。
+
+能力感知 Agent 从 Citizen Catalog 渐进发现声明并读取完整 Contract；独立
+Authority Provider 下发更窄授权后，`@work-fabric/agent-capability-runtime`
+创建并显式解析一个辅助 Handoff。原始 Handoff 的责任仍在 Agent，只有辅助
+Handoff 由目标 Capability Provider 自主接收和承担。Fabric 负责校验、传播
+和记录，不直接调用 Provider，也不编排 Agent 与 Provider 的执行顺序。
 
 ```text
 Daily Assistant（decision-body）
   -> Catalog + Contract + Authority
   -> auxiliary Capability Handoff
-  -> Feishu Message / Document Provider（independent capability-provider citizens）
+  -> selected capability-provider citizen
   -> typed facts / stable error
   -> bounded Agent capability transcript
   -> Agent-authored original Result
-  -> Feishu Channel
+  -> selected Channel
 ```
 
 `@work-fabric/capability-provider-runtime` 把通用 Capability Executor 接到
-Handoff Host；`@work-fabric/provider-feishu` 提供可独立注册的 Message 与
-Document Facet，分别拥有会话查询/消息投递和简单文档 CRUD/追加能力。
+Handoff Host。Provider Facet 不依赖 Channel Facet：同一个厂商 Integration
+可以同时托管 Channel 与多个 Provider，也可以只启用其中一部分；更换消息
+Channel 不影响文档、日历或 GitHub 能力。
+
+### Feishu Provider Facets
+
+`@work-fabric/provider-feishu` 提供可独立注册的 Message、Document 和 Calendar
+Facet，分别拥有会话查询/消息投递、简单文档 CRUD/追加，以及日历查询和日程
+管理能力。
 `Feishu Integration` 只是虚拟分组，不是 Citizen 或 Runtime；各 Facet 即使
 由同一进程托管，也分别持有身份、租约、Authority 和状态。Provider Facet
 不依赖 Channel Facet，因此消息通道可替换而文档能力保持不变。
@@ -352,218 +380,187 @@ Provider 只返回类型化事实和签名 opaque cursor，Agent 独占相关性
 `@work-fabric/governance-confirmation` 消费绑定人、文档、输入摘要和过期时间
 的单次确认凭证。
 
-文档 Contract v2 不再把固定共享文件夹当成权限边界。Work Fabric 只传递原始
-派发人、委托谱系、操作范围和期限；Provider 在每一次增删改查前通过可替换的
-身份代理与文档系统原生 ACL 重新鉴权。文档/空间位置由使用侧动态解析，
-模板、目录和内容结构不进入工程部署配置。
-
-为了先完成真实飞书联调，独立 Provider 组合根还提供一个受双重门槛保护的
-开发期应用身份 Adapter：YAML 必须显式选择
-`development_app_identity`，进程必须同时设置
-`WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true`，且服务必须处于开发模式。
-它不进入 Fabric Core，不替代 Handoff scope，并拒绝删除；生产
-`brokered_native` 模式继续默认失败关闭。
-
-参考闭环已经通过 SQLite + 公共 HTTP/SSE + TypeScript SDK 验证：动态
-Citizen/Contract 绑定、辅助 Handoff Offer/目标解析、Provider
-Gateway/Host、类型化 Result 与 Agent 调用状态均走正式边界。目标约束默认
-精确绑定 Citizen 与 Contract digest；新的约束词汇通过 SPI 注入，不修改
-Core。
+文档权限以文档系统原生 ACL 为边界，而不是固定共享文件夹。Work Fabric 只
+传递原始派发人、委托谱系、操作范围和期限；Provider 在每一次增删改查前通过
+可替换的身份代理重新鉴权。文档/空间位置由使用侧动态解析，模板、目录和内容
+结构不进入工程部署配置。
 
 Provider 只返回类型化事实，不写用户文案；助理 Agent 独占最终语义回复；
 Channel 只运输 canonical Result。Agent 看不到飞书密钥和原始厂商响应，
 Core、Host 与 Catalog 均不依赖飞书实现。完整边界与接入说明见
 [飞书能力 Provider 指南](docs/guides/feishu-capability-provider.md)。
 
-## Feishu Connector
+### GitHub 只读 Capability Provider
 
-阶段 4B 已提供第一个具体协作系统连接器，同时把可复用的 Connector 边界从飞书实现中拆出：
+`@work-fabric/provider-github` 与独立的 GitHub Provider Runtime 已提供 12 个
+`github.*` 只读声明，覆盖安装身份、仓库、Pull Request、Review、评论、变更
+文件、提交、Check、Workflow Run 等有界查询。GitHub App 凭据、安装范围、
+仓库白名单、分页游标和厂商错误都封装在 Provider 内；Agent 负责选择能力、
+判断是否继续分页并生成最终答复，Channel 只负责投递。该 Provider 不提供
+创建、修改、合并、触发 Workflow 或其他写操作。配置与验收见
+[GitHub 只读 Capability Provider 指南](docs/guides/github-capability-provider.md)。
 
-- `@work-fabric/connector-spi`：技术中立的 durable ingress、映射、身份、资源和对账契约。
-- Memory 与 PostgreSQL ingress adapters：共享去重、租约、fencing、重试、死信、显式 requeue 和租户隔离行为。
-- `@work-fabric/connector-runtime`：异步映射 worker 和只比较、不静默修改任一侧的 reconciliation service。
-- `@work-fabric/connector-feishu`：Webhook 验签/解密、可选长连接、明确身份映射、受认证的交互动作、文档引用、OpenAPI 和既有 `SignalAdapter` 的飞书实现。
-- `@work-fabric/transport-http`：`POST /v1/connectors/feishu/{connector_id}/events` 只完成安全校验、归一化和 durable accept，不等待映射或 SDK 命令。
+## Channel 与 Connector
+
+Channel 负责人与协作网络之间的消息接入和结果投递；Connector 负责外部工作
+系统的事件、资源引用、状态和动作结果映射。它们只处理连接与协议适配，不理解
+业务意图，也不替 Agent 或外部系统执行工作。
+
+飞书集成同时支持 Webhook 和无需公网域名的长连接模式。入站消息先经过可信
+校验和 durable ingress，再由 Connector Worker 通过公共 SDK 创建 Handoff；
+出站结果通过标准 Subscription 和 Signal Adapter 返回飞书。
 
 ```text
 Feishu callback -> durable ingress -> Connector worker -> public TypeScript SDK
 Work Fabric event -> existing SignalDispatcher -> FeishuSignalAdapter -> Feishu
 ```
 
-完整 callback、SDK、Exchange、Subscription、卡片动作回流测试证明了连接闭环，同时保持四类事实独立：callback 被持久接收、映射完成、飞书接受出站消息、Actor 接受 Handoff 责任。任一前置事实都不能替代后一个事实。
-
 部署组合、权限、凭据、保留策略和本地验证见 [Feishu Connector 示例](examples/feishu-connector/README.md)；客户意向到交付运维的完整连接场景见 [飞书客户项目生命周期示例](docs/feishu-customer-lifecycle-example.md)。
 
-内置的 `collaboration-channel.feishu` 插件进一步提供可直接启动的双向协作通道：全局配置通过可替换的 Configuration Provider 加载，飞书 `@机器人` 文本进入一个外部 Agent 的 Intake Handoff，后续 Handoff 事件通过 canonical Subscription 返回原会话。插件只做连接和交接，不做自然语言理解或需求创建。双模式步骤见 [飞书协作通道接入](docs/guides/feishu-collaboration-channel.md)，无需域名的本地配置见 [SQLite 长连接示例](examples/config/service-feishu-long-connection.yaml)。
+内置的 `collaboration-channel.feishu` 插件提供可直接启动的双向协作通道：飞书
+`@机器人` 文本进入外部 Agent 的 Intake Handoff，Agent 的 canonical Result
+再返回原会话。双模式配置见
+[飞书协作通道接入](docs/guides/feishu-collaboration-channel.md)。
+
+## 快速开始
+
+运行要求为 Node.js 22.20 或更高版本。先安装依赖：
+
+```bash
+npm ci
+```
+
+最小本地服务可以使用 `sqlite-local`。复制并修改示例中的 tenant、identity、
+Authority 和 token 后启动：
+
+```bash
+cp examples/customer-project-lifecycle/config.example.json /absolute/path/work-fabric.local.json
+export WORK_FABRIC_CONFIG=/absolute/path/work-fabric.local.json
+npm run service:start
+```
+
+服务默认通过配置中的地址监听；使用 `/health/live` 和 `/health/ready` 检查进程
+与依赖状态。SQLite 只适合本地单进程或小型受控部署，详细边界见
+[SQLite 本地部署](docs/sqlite-deployment.md)。
+
+如果要在不接入飞书的情况下验证“消息 → Handoff → Agent → Result”完整链路，
+使用长期维护的 Debug Channel：
+
+```bash
+npm run local:debug:start
+npm run local:debug:status
+npm run local:debug:send -- \
+  --file examples/debug-channel/requests/plain.json \
+  --conversation local-trial-1 \
+  --wait-ms 15000
+```
+
+首次运行需要按[本地 Debug Channel 指南](docs/guides/local-debug-channel.md)
+配置本地 `.env`、模型凭据和 Debug Bundle。
+
+真实集成请使用对应指南：
+
+- [飞书协作通道接入](docs/guides/feishu-collaboration-channel.md)
+- [飞书 Message、Document、Calendar Provider](docs/guides/feishu-capability-provider.md)
+- [GitHub 只读 Capability Provider](docs/guides/github-capability-provider.md)
+- [Agently Daily Assistant Runtime](docs/guides/agently-agent-runtime.md)
 
 ## 查询、运维与 Console
 
-阶段 5 已完成责任、时间线和关系投影，以及 Projection、Delivery、Connector、差异和审计的有界运维视图。所有能力都通过同一 HTTP/TypeScript SDK 暴露，Human、Agent、Connector、客户服务与可选 Console 只有身份和 Authority 差异，没有专用数据旁路。
+责任、时间线、关系、Projection、Delivery、Connector、差异和审计均通过同一
+HTTP/TypeScript SDK 查询。恢复操作只提交带预期版本与幂等键的窄恢复意图，
+不会通过 Console 直接修改 Handoff 或数据库。
 
-恢复采用“显式意图 + 预期版本 + 幂等键 + fenced worker”模式，只能请求 Connector requeue、Delivery replay、投影重建或差异确认。它不直接编辑 Handoff，也不决定何时恢复。OpenTelemetry 适配只输出固定低基数语义；内容、凭据、Tenant/Actor/Handoff/Event ID 不进入指标标签。
-
-可运行组合提供：
-
-- `memory-demo`：显式开发模式、重启丢失；
-- `sqlite-local`：本地单进程、完整侧存储重启持久化；
-- `postgres`：由部署注入既有生产适配器，不隐式读取凭据。
-
-```bash
-export WORK_FABRIC_CONFIG=/absolute/path/work-fabric.yaml
-npm run service:start
-npm run console:build
-```
-
-完整的本地飞书链路使用同一个多应用 YAML 配置包，同时启动 Exchange/Channel、
-团队共享助理和独立飞书 Message/Document/Calendar Provider Facets：
-
-```bash
-uv sync --project runtimes/agently-worker
-export WORK_FABRIC_ENV_FILE=/absolute/path/to/feishu.env
-export WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml"
-# 仅本地临时文档联调；生产禁止
-export WORK_FABRIC_ALLOW_UNSAFE_DOCUMENT_ACCESS=true
-npm run local:feishu:start
-```
-
-首次使用日历前，另设
-`WORK_FABRIC_ADMIN_PRINCIPAL_ID=principal-work-fabric-admin`，再运行：
-
-```bash
-npm run feishu-calendar:admin -- \
-  create-and-bind --alias team --summary '团队协作日历' \
-  --permissions show_only_free_busy --default
-```
-
-日历 ID 不进入 YAML；Message 负责群成员，Calendar 负责日历事实，Agent 负责
-两者之间的调用顺序和最终回复。
-
-另一个终端用同一组环境执行 `npm run local:feishu:status`。Supervisor 只负责编排
-进程和就绪检查；动态能力仍由 Citizen session 声明，飞书动作仍通过辅助
-Handoff 进入独立 Provider。详细权限、共享目录和验收步骤见
-[飞书 Capability / Context Provider 指南](docs/guides/feishu-capability-provider.md#7-本地整套启动)。
-
-Read-mostly Console 只依赖公共 SDK，展示责任、时间线、关系、运维事实和窄恢复表单。它不是执行过程的必要组件，不保存协议真相，不运行 Agent/自动化，不自动 Ack SSE。部署与认证接入见 [Console 文档](docs/console.md)，运维与恢复见 [Operations 文档](docs/operations.md)，SQLite 本地部署见 [SQLite 文档](docs/sqlite-deployment.md)，性能证据见 [Phase 5 性能基线](docs/performance-baseline.md)。
+Read-mostly Console 是可选状态界面，不是协作或 Agent 执行链路的必要组件。
+它只使用公共 SDK，不保存协议真相，也不运行 Agent 或自动化。部署和认证见
+[Console 文档](docs/console.md)，运维与恢复见
+[Operations 文档](docs/operations.md)。
 
 ## 集群分区运行时
 
-阶段 6A 已完成可水平协调的机械 Owner 运行时：数据库 Journal、Outbox、投影检查点、投递位置和租约保持权威；可选 Wakeup 只携带 Tenant、Partition、Work Kind 和观察位置，可以丢失或重复。定期有界扫描恢复丢失提示，Tenant 公平队列合并重复提示，租约与 fencing 阻止过期 Owner 推进状态。
+集群部署以数据库 Journal、Outbox、投影检查点、投递位置和租约为权威；可选
+Wakeup 只传递可丢失、可重复的元数据提示。定期有界扫描负责恢复丢失提示，
+租约与 fencing 阻止过期 Owner 推进状态。
 
 运行时只拥有四类机械 Turn：Outbox Wakeup、Handoff Projection、Collaboration Projection 和 Signal Delivery。它不选择接收方、不拆解 Workflow、不安排 Agent、不调用模型/工具，也不执行参与方工作。`service-node` 支持 `api`、`worker` 和 `all` 角色；Worker 端口与凭据由部署显式注入，`sqlite-local` 明确拒绝集群配置。
 
-真实 HTTP/TypeScript SDK 的五步 Handoff 生命周期已通过双 Host、丢失/重复 Wakeup、外部 Signal Probe 和过期 Owner 接管测试。阶段 6B 又增加了可选 NATS JetStream 元数据提示：严格 4,096 字节 payload、HMAC Tenant Subject、有界 Pull/Ack/Retry、显式非破坏拓扑管理和 Broker 断线回退；数据库扫描始终保持开启与权威。部署边界见[集群分区运行时](docs/cluster-runtime.md)和 [NATS Wakeup 部署](docs/nats-wakeup-deployment.md)。
+可选 NATS JetStream 仅加速 Wakeup，不替代数据库权威或恢复扫描。部署边界见
+[集群分区运行时](docs/cluster-runtime.md)和
+[NATS Wakeup 部署](docs/nats-wakeup-deployment.md)。
 
 ## 跨 Exchange Federation
 
-阶段 7 已完成 `workfabric.federation.v1`。当 Source 已明确选择 Target Exchange 后，双方通过 Ed25519 签名的 `transfer_offer` / `transfer_receipt` 完成交接对接：严格校验受众、TTL、canonical digest 和显式 Peer/Key 信任；重复请求返回 byte-identical Receipt，冲突重放 fail closed，传输故障只重发原始签名字节。
+`workfabric.federation.v1` 允许已经明确 Source 与 Target 的 Exchange 通过 Ed25519
+签名 `transfer_offer` / `transfer_receipt` 完成交接。双方严格校验受众、TTL、
+canonical digest 和显式 Peer/Key 信任；每个 Exchange 只对本地事实权威。
 
-Federation Gateway 仍不是大脑。它不发现或排名 Peer、不选择目标、不复制远端状态、不建立全局事务，也不执行参与方工作。部署 Bridge 通过目标 Exchange 的既有公共 API/SDK 幂等创建本地 Handoff；每个 Exchange 只对自己的 Handoff、Journal、版本和 Authority 决策权威。HTTP Federation Binding 与生产 Replay Store 是可独立替换的后续 Adapter，不进入 Core、Cluster Runtime、公共 HTTP 或统一 SDK。
+Federation Gateway 不发现或排名 Peer、不选择目标、不复制远端状态、不建立全局
+事务，也不执行参与方工作。Participation Discovery 可以提供经授权的 Peer 和
+能力事实，但候选比较与目标选择仍由调用方完成。
 
-参考实现提供技术中立 SPI、严格 Runtime、Memory Replay Store、Node Ed25519 Adapter、可复用 Conformance Profile、边界门禁，以及两套真实 HTTP/TypeScript SDK/Exchange 的本地权威隔离端到端证明。部署、信任轮换和失败语义见[跨 Exchange Federation](docs/federation.md)。
+部署、信任轮换和失败语义见[跨 Exchange Federation](docs/federation.md)，参与
+发现与 Peer 同步见[Participation Discovery](docs/participation-discovery.md)。
 
-## 当前状态
+## 当前可用能力
 
-项目已经完成阶段 1–11：从 WFPP/Exchange Core、生产持久化、HTTP/SDK、Endpoint/Agent、Connector/飞书、查询运维 Console、集群与 Federation，到配置、Admission、Network Citizen 动态目录和 Agent 到独立 Capability Provider 的辅助 Handoff 闭环。Human、Agent、Connector、Console 和开放服务共享同一个公共协议与权限链；参与方的专业工作与 Agent 执行始终在 Work Fabric 之外。
+| 能力 | 用户可获得的结果 |
+|---|---|
+| WFPP 与 Exchange | 统一的身份、委托、Handoff、状态、结果、验收和审计语义 |
+| HTTP API 与 TypeScript SDK | 人、Agent、系统和 Console 使用同一接入面 |
+| Endpoint 与 Agent Gateway | 外部 Agent 动态声明能力、接收交接并返回结果 |
+| Network Citizen Catalog | 按 Authority 渐进发现 Citizen、声明和完整 Contract |
+| Capability Exchange | Agent 通过辅助 Handoff 使用独立 Provider，并获得类型化事实 |
+| Channel 与 Connector | 接入飞书、本地 Debug Channel 和其他工作系统 |
+| Provider | 飞书消息/文档/日历能力，以及 GitHub 只读查询能力 |
+| Operations 与 Console | 查询责任、时间线、关系、投递、差异、审计和窄恢复意图 |
+| 持久化与运行 | Memory 参考、SQLite 单进程、PostgreSQL 适配、集群机械运行与可选 NATS Wakeup |
+| Federation 与 Discovery | 显式 Exchange 交接、签名 Peer 事实和有预算的联邦查询 |
 
-当前阶段路线：
+这些能力组成的是协作连接基础设施，不是开箱即用的业务自动化产品。具体 Agent
+角色、模型、业务流程、Provider 策略、外部系统权限和领域执行仍由使用方接入。
+完整里程碑、完成边界与后续方向见 [Roadmap](docs/roadmap.md)。
 
-| 阶段 | 范围 | 状态 |
-|---|---|---|
-| 1 | Exchange Core + Memory Reference | 已完成 |
-| 2 | PostgreSQL Production Adapter Foundation | 已完成 |
-| 3A | Target Resolution Protocol / Core | 已完成 |
-| 3B | HTTP Service Binding | 已完成 |
-| 3C | TypeScript SDK | 已完成 |
-| 4A | Endpoint 与外部 Agent Runtime 连接边界 | 已完成 |
-| 4B | Generic Connector + 飞书 Connector | 已完成 |
-| 5 | 查询、运维、可观测性与 Read-mostly Console | 已完成 |
-| 6A | 集群分区所有权与数据库恢复 | 已完成 |
-| 6B | Broker-backed Signal/Wakeup 加速 | 已完成 |
-| 7 | 跨 Exchange Federation Profile | 已完成 |
-| 8 | Provider-backed 配置与协作通道插件运行时 | 已完成 |
-| 9 | Collaboration Admission 与稳定参与方表示 | 已完成 |
-| 10 | Network Citizen 动态目录、租约、HTTP/SDK 与 Runtime 基础 | 已完成 |
-| 11 | Agent 能力调用与 Feishu Capability/Context Provider | 已完成 |
-
-阶段严格按顺序推进。Console 没有进入阶段 3，也不是任务执行的必要组件；它在阶段 5 作为可关闭、可替换的查询与运维客户端，以状态呈现为主，并且任何人工干预都通过标准 API 提交恢复意图。
-
-当前实现边界如下：
-
-- `Handoff` 是责任与生命周期的权威事实；`Assignment` 只能从 Handoff 读模型投影得到，不能独立写入。
-- Capability Target 会先进入 `target_resolution_pending`；外部人、规则服务或 Agent Brain 通过统一命令提交一个明确 Actor/Endpoint，Core 只做授权、资格校验、原子绑定与审计，不做候选选择或调度。
-- 原始 Capability Requirement 保持不变，解析结果单独保存在 `TargetBinding`；未配置 `TargetEligibilityVerifier` 或资格服务不可用时，解析命令 fail-closed 且不落盘。
-- Journal、幂等记录、投影检查点、投递位置、重试和死信具有技术中立 SPI。
-- Memory Adapter 是可执行参考和一致性测试载体，不是生产存储。
-- PostgreSQL Production Adapter Foundation 已完成；它不是 Exchange Core 或 SPI 的依赖，也没有改变公共接口。
-- PostgreSQL 适配器已覆盖 authority、outbox、projection、subscription、delivery、lease 和 Context 元数据；部署与迁移说明见 [PostgreSQL 部署文档](docs/postgresql-deployment.md)。
-- `npm run postgres:migrate -- --dry-run` 可预览迁移，`npm run postgres:smoke` 在设置 `PG_TEST_URL` 后执行租户 RLS 烟测。
-- “全局订阅”是跨逻辑 Partition 的查询与消费视图；恢复、确认和重放位置始终按 Subscription × Partition 独立保存，不承诺全局顺序。
-- 公共 WFPP Protocol Event 只包含协议字段，不暴露内部 `domain_data`、Partition position、Commit ID 或其他存储游标元数据。
-- HTTP Route 只做传输映射、身份/代表关系校验、Authority 调用和有界序列化；它不调用 Decider、不选择目标、不直接访问数据库。
-- Pull 与 SSE 是同一个 Durable Subscription 的两种呈现，复用交付位置、Pending Delivery、Ack、重放和至少一次语义；WebSocket 未进入 3B。
-- TypeScript SDK 只封装公共 HTTP Contract；Human、Agent、Connector 与 Operations 调用共享认证、表示和 Authority 链，不创建第二套状态、Admin 旁路或自动执行层。
-- Endpoint Directory 保存注册、Capability、Binding、租约和 availability 事实；Discovery 只返回确定分页的事实，不包含 score、rank、recommendation 或 selected target。
-- Network Citizen Directory 保存按责任分类的模块注册、单活 session、动态声明和 schema digest 绑定；Actor type 与 Citizen kind 正交，声明不授予调用 Authority。
-- Network Citizen 的配置只 Provision 信任与安全上限；当前能力以 Runtime session 为真，并通过 registration version、fencing token 和 declaration CAS 防止旧实例覆盖新实例。
-- Network Citizen 渐进披露按列表、描述、声明摘要和完整 Contract 分别授权；数据库、Broker、transport、SDK、YAML 和缓存等基础设施本身不注册为 Citizen。
-- Agent 能力调用以辅助 Handoff 表达并持久恢复；原 Handoff 不 Transfer，Provider 只返回类型化事实，最终用户文案只由原 Agent 产生。
-- Feishu Integration 只是虚拟分组，不注册 Citizen 或 Runtime；Message、Document、Channel 等 Facet 分别注册独立 Citizen，并可独立启停、授权、扩缩和审计。
-- Provider Facet 不依赖 Channel Facet；OpenAPI、凭据、幂等、文档所有权、revision 和确认消费均封装在各自 Provider，不进入 Core、Agent Host 或 Channel。
-- `agent_managed` 上下文模式由 Agent 判断信息是否充分并调用 Message Provider query capability；Channel 只提供可信来源锚点，Context Store 只被动持久化显式事实。
-- Agent Gateway 只依赖公开 TypeScript SDK，处理 Session 续租、Inbox Partition 刷新、SSE 汇聚和有界背压；Agent Runtime、Resolver、模型、工具与执行回调都在包外。
-- Endpoint Inbox 是可重建的路由投影，不复制 Context、Prompt、结果正文、凭据或外部执行状态；Delivery Ack 与 Handoff Accept 保持独立。
-- Connector ingress 是有界、可保留清理的操作缓冲，不是新的业务真相库；Webhook/长连接只 durable accept，映射 worker 才通过公开 SDK 提交命令。
-- 飞书身份必须映射到已有 Actor/Endpoint；任意聊天默认 inert，只有配置策略或本 Connector 签发的受限动作可以产生协议操作。
-- 飞书文档仍由飞书持有，Exchange 只保存版本化引用和有界元数据；凭据只以 opaque reference 出现在配置中。
-- 文档 Provider 必须以原始派发人的代理身份通过文档系统原生 ACL；应用自身的广泛技术权限、Provider 所有权和固定目录都不能替代业务授权。
-- Reconciliation 只产生可见 discrepancy，不静默覆盖 Work Fabric 或外部系统状态。
-- Connector Worker 在公共 side effect 前续租并校验 fencing；PostgreSQL retention 使用有界 `pruneExpired()` 批次，不让 ingress 成为永久内容库。
-- 交互动作同时绑定飞书用户与签发时的 Work Fabric 身份快照；文档原文读取需要 tenant/connector scope 和显式授权。
-- `/health/live` 与 `/health/ready` 只返回有界进程状态；受保护的 `/v1/admin/health` 才返回不含错误文本的依赖摘要。
-- Responsibility、Timeline 与 Relationship 是可重建投影；每页显式返回 projected/journal position 和 observed time，不把滞后伪装为实时。
-- Operation Audit 是不可变、有界分页的租户事实；保留清理由部署按合规策略显式批处理，不记录 Header、命令体、Context 或结果正文。
-- 运维恢复只提交幂等、expected-version 检查的窄意图；实际动作由 fenced worker 和专用端口执行，不经过 Console 直写。
-- `service-node` 是显式组合根；SQLite 使用同一技术中立 SPI 并声明单进程能力，PostgreSQL 仍是生产导向基线。
-- Console 仅使用公共 SDK；SSE 只使查询失效且不自动 Ack，轮询有间隔、抖动、Abort 和单并发上限。
-- Federation 只连接显式 Source/Target Exchange；每方只对本地记录权威，签名 Receipt 不能覆盖本地状态，Bridge 必须使用公共 API/SDK 且以 Transfer ID 幂等。
-- Federation 不做 Peer discovery/ranking、目标选择、状态复制、两阶段提交、全局顺序、Agent 推理或工作执行；生产 Transport、持久 Replay Store 与密钥托管保持可插拔。
-- Participation Discovery 只同步经发布/导出策略允许的签名事实；读取、转发和实际调用各自重新授权，停止发布后必须发送 Tombstone 或等待短 TTL 到期，不能把“停止同步”误当成立即撤回。
-
-可执行的人 → Agent → 人工验收参考流、并发与恢复场景以及公共 Reference Suite 已纳入：
+仓库提供统一验证入口：
 
 ```bash
 npm run verify
 npm run verify:exchange
 ```
 
-阶段 1–16 的当前架构闭环已经完成，包括 Network Citizen、技术中立的 Agent `CapabilityInvocationPort`、独立 Feishu Provider Facets、Agent 驱动的按需上下文查询，以及可验证、无广播且调用者范围化的 Participation Discovery；具体厂商调用仍未进入 Core 或 Agent Host。其他 HTTP Federation Binding、生产 Replay/Citizen Store、Peer Transport、Connector 或 A2A/MCP Binding 可以独立扩展，但不能改变 Exchange 权威与“连接/发现/交接而非决策/执行”的边界。Agent Brain 和业务自动化继续是外部参与模块。完整阶段状态见 [Roadmap](docs/roadmap.md)。
-
 ## 文档
 
+使用与接入：
+
+- [本地 Debug Channel](docs/guides/local-debug-channel.md)
+- [飞书协作通道](docs/guides/feishu-collaboration-channel.md)
+- [飞书 Capability / Context Provider](docs/guides/feishu-capability-provider.md)
+- [GitHub 只读 Capability Provider](docs/guides/github-capability-provider.md)
+- [Agently Daily Assistant Runtime](docs/guides/agently-agent-runtime.md)
+- [TypeScript SDK](packages/sdk-typescript/README.md)
+- [Read-mostly Console](docs/console.md)
+
+协议与架构：
+
 - [整体架构](docs/architecture.md)
+- [项目章程与不可妥协架构规则](PROJECT_CHARTER.md)
+- [Network Citizen 架构与接入](docs/architecture/network-citizens.md)
 - [WFPP v1 Core Protocol 与 Schema 索引](protocol/README.md)
 - [机器可读 Handoff 生命周期](protocol/spec/handoff-lifecycle.json)
 - [一致性用例与 Exchange Contract](protocol/conformance/)
 - [人、Agent 与系统参考序列](protocol/examples/)
-- [协作对接与工作交接详细设计](docs/superpowers/specs/2026-07-13-collaboration-handoff-fabric-design.md)
-- [Work Fabric Participation Protocol v1 设计](docs/superpowers/specs/2026-07-13-work-fabric-participation-protocol-v1-design.md)
-- [HTTP Service Binding 设计](docs/superpowers/specs/2026-07-15-http-service-binding-design.md)
-- [TypeScript SDK](packages/sdk-typescript/README.md)
 - [Endpoint 与外部 Agent Runtime 接入](docs/endpoint-agent-boundary.md)
-- [Network Citizen 架构与接入](docs/architecture/network-citizens.md)
-- [飞书 Capability / Context Provider](docs/guides/feishu-capability-provider.md)
-- [Agently Daily Assistant Runtime](docs/guides/agently-agent-runtime.md)
+
+部署与运维：
+
 - [Operations、审计与恢复](docs/operations.md)
 - [SQLite 本地部署](docs/sqlite-deployment.md)
-- [Read-mostly Console](docs/console.md)
-- [Phase 5 性能基线](docs/performance-baseline.md)
+- [PostgreSQL 部署](docs/postgresql-deployment.md)
 - [集群分区运行时](docs/cluster-runtime.md)
-- [Phase 6A 性能基线](docs/performance-cluster-baseline.md)
 - [NATS Wakeup 部署](docs/nats-wakeup-deployment.md)
-- [Phase 6B NATS Wakeup 性能基线](docs/performance-nats-wakeup-baseline.md)
 - [跨 Exchange Federation](docs/federation.md)
 - [Participation Discovery 部署与边界](docs/participation-discovery.md)
+- [性能基线](docs/performance-baseline.md)
+- [集群性能基线](docs/performance-cluster-baseline.md)
+- [NATS Wakeup 性能基线](docs/performance-nats-wakeup-baseline.md)
 - [Participation Discovery 性能基线](docs/performance-discovery-baseline.md)
-- [TypeScript SDK 设计](docs/superpowers/specs/2026-07-15-typescript-sdk-design.md)
-- [Core Protocol Artifacts 实施计划](docs/superpowers/plans/2026-07-14-core-protocol-artifacts.md)
-- [项目文档实施计划](docs/superpowers/plans/2026-07-13-project-documentation.md)
+- [Roadmap](docs/roadmap.md)

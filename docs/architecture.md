@@ -37,23 +37,38 @@ Projection 进程在部署上可以保持无状态并横向扩容，通过内部
 
 Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Broker Consumer、飞书调用或 Agent Runtime。阶段 3B/3C 在 Core 外提供 HTTP Service Binding 和统一 TypeScript SDK；阶段 4A/4B 增加 Endpoint/Agent 与 Connector 边界；阶段 6A/6B 增加数据库权威的集群机械所有权与可选 Wakeup；阶段 7 在 Core 外增加显式 Exchange 间的签名 Federation Profile。Core 仍只完成授权后的目标校验、责任移交和权威记录，所有外部 Runtime 与系统仍拥有决策和执行。
 
-### 1.1 协作公民分类
+### 1.1 Actor type 与 Network Citizen kind
 
-“协作公民”是 Work Fabric 的产品级参与模型，对应协议中能够独立承担协作责任的 `Actor`。WFPP v1 的 `actor_type` 是闭合分类：
+Work Fabric 分别建模协作主体与接入模块的网络职责。WFPP v1 的 `actor_type`
+描述谁参与或被代表：
 
-| 协作公民 | `actor_type` | 核心特征 | 典型入口 |
-|---|---|---|---|
-| 人类公民 | `human` | 以自然人身份承担、移交或验收责任 | Human Adapter、飞书、Console、API |
-| 智能体公民 | `agent` | 以独立 Agent 身份声明能力，通过外部 Runtime 执行 | Agent Endpoint、Agent Gateway、SDK |
-| 系统公民 | `system` | 以工作系统或自动化服务身份提供事实、动作和结果 | Connector、Webhook、SDK |
+| `actor_type` | 核心特征 | 典型入口 |
+|---|---|---|
+| `human` | 以自然人身份承担、移交或验收责任 | Human Channel、飞书、Console、API |
+| `agent` | 以独立 Agent 身份作出决策并通过外部 Runtime 执行 | Agent Endpoint、Agent Gateway、SDK |
+| `system` | 以外部工作系统或服务身份提供事实、动作和结果 | Connector、Provider、Webhook、SDK |
 
-三类公民在协议权利和责任语义上同构：都可以在授权范围内创建 Handoff、成为明确 Target、接受或拒绝责任、报告状态、返回结果或执行验收。入口、认证方式、能力声明和内部执行机制可以不同，但不能形成 Human 专用、Agent 专用或 System 专用的旁路状态机。
+`citizen_kind` 回答接入模块对网络闭环承担什么责任，当前为
+`decision-body`、`capability-provider`、`channel`、`context-provider`、
+`governance-provider` 和 `observer`。例如 Agent Actor 通常由
+`decision-body` Citizen 接入，GitHub System Actor 可以代表一个
+`capability-provider` Citizen。完整职责矩阵见下文
+[Network Citizens](#network-citizens)。
 
-公民类型不等于协作角色。`Initiator`、`Recipient`、`Verifier` 和可选 `Target Resolver` 是一个 Handoff 上下文中的动态角色，任意类型的 Actor 都可以在满足 Authority Policy 时承担其中一个角色。`Principal` 是经过 Binding 认证的调用身份，`Actor` 是责任主体，`Endpoint` 是该 Actor 收发协议消息的入口；三者必须分离，不能因一个 Runtime 或 Adapter 托管多个公民而合并身份和责任。
+三种 Actor type 在协议责任语义上同构：都可以在授权范围内创建 Handoff、
+成为明确 Target、接受或拒绝责任、报告状态、返回结果或执行验收。六种
+Citizen kind 则不能互相代替：Channel 不做 Decision Body 的推理，Provider
+不生成最终文案，Observer 不修改 Handoff。
 
-### 1.2 公民之间的协作协议
+`Initiator`、`Recipient`、`Verifier` 和可选 `Target Resolver` 是某次 Handoff
+中的动态角色，不是 Actor type 或 Citizen kind。`Principal` 是经过 Binding
+认证的调用身份，`Actor` 是责任主体，`Endpoint` 是该 Actor 收发协议消息的
+入口，`Citizen` 是对网络承担一种模块责任的注册实体；四者必须分离。
 
-所有公民通过同一个 Unified Participation Protocol 协作。协议不是聊天格式，而是一套可验证的责任协定：
+### 1.2 统一参与协议
+
+所有 Actor 与接入 Citizen 通过同一个 Unified Participation Protocol 协作。
+协议不是聊天格式，而是一套可验证的责任协定：
 
 ```text
 参与：Identity + Delegation + Endpoint + Capability
@@ -64,7 +79,10 @@ Exchange Core Phase 1 保持 **transport-free**：它不依赖 HTTP Server、Bro
 可靠传播：Event + Subscription + Delivery + Ack + Replay
 ```
 
-协议保证不同公民可以相互替换和组合，但不要求它们采用相同的内部工作方式。一个 Human 在飞书点击接受、一个 Agent 通过 SDK 调用 `handoff.accept`、一个 System Connector 提交相同命令，都表达同一个权威事实：该 Actor 明确承担了责任。
+协议保证不同 Actor 使用同一套责任语义，也保证职责不同的 Citizen 能通过稳定
+Contract 组合，但不要求它们采用相同内部实现。一个 Human 在飞书点击接受、
+一个 Agent 通过 SDK 调用 `handoff.accept`、一个 System Endpoint 提交相同命令，
+都表达同一个权威事实：该 Actor 明确承担了责任。
 
 ### 1.3 任务派发、认领与责任迁移
 
