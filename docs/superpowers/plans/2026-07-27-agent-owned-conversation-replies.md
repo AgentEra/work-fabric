@@ -370,7 +370,7 @@ and WFPP conformance checks pass.
 - [ ] **Step 3: Restart local service and Runtime**
 
 Start the existing local YAML compositions with
-`/Users/bottleliu/work/git/agently/work-fabric/feishu.env`, then verify liveness,
+`$REPOSITORY_ROOT/feishu.env`, then verify liveness,
 readiness, and Agent endpoint availability without printing secrets.
 
 - [ ] **Step 4: Execute local end-to-end verification**

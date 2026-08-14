@@ -217,7 +217,7 @@ admission:
         tenant_id: tenant-local
         connector_id: feishu-primary
         source_system: feishu
-        external_tenant_id: 16c27df0ae549758
+        external_tenant_id: tenant-example
 
       default: deny
 

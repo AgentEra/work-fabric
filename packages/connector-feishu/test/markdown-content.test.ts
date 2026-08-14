@@ -14,7 +14,7 @@ describe("assertSafeMarkdownLinks", () => {
 
   it("accepts a bare SSH username-at-host token in an Agent reply", () => {
     expect(() => assertSafeMarkdownLinks(
-      "> 登录方式 ssh -p 2222 deploy@192.168.0.66，首次登录前需要添加 authorized_keys",
+      "> 登录方式 ssh -p 2222 deploy@192.0.2.66，首次登录前需要添加 authorized_keys",
     )).not.toThrow();
   });
 

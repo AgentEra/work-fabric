@@ -471,7 +471,7 @@ Expected: all commands exit 0.
 Stop the currently running stack cleanly, then run:
 
 ```bash
-WORK_FABRIC_ENV_FILE=/Users/bottleliu/work/git/agently/work-fabric/feishu.env \
+WORK_FABRIC_ENV_FILE="$REPOSITORY_ROOT/feishu.env" \
 WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml" \
 npm run local:feishu:start
 ```
@@ -479,7 +479,7 @@ npm run local:feishu:start
 In another terminal run:
 
 ```bash
-WORK_FABRIC_ENV_FILE=/Users/bottleliu/work/git/agently/work-fabric/feishu.env \
+WORK_FABRIC_ENV_FILE="$REPOSITORY_ROOT/feishu.env" \
 WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml" \
 npm run local:feishu:status
 ```

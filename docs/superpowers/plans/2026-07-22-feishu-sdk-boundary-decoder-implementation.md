@@ -105,12 +105,12 @@ Expected: every command exits zero.
 - No source changes expected.
 
 **Interfaces:**
-- Consumes: `/Users/bottleliu/work/git/agently/work-fabric/feishu.env` and `var/service-feishu.local.yaml`.
+- Consumes: `$REPOSITORY_ROOT/feishu.env` and `var/service-feishu.local.yaml`.
 - Produces: one real `im.message.receive_v1` ingress record and one Handoff through the unchanged public pipeline.
 
 - [ ] **Step 1: Restart Work Fabric with the fixed adapter**
 
-Run: `node --env-file=/Users/bottleliu/work/git/agently/work-fabric/feishu.env --import tsx packages/service-node/src/main.ts`
+Run: `node --env-file="$REPOSITORY_ROOT/feishu.env" --import tsx packages/service-node/src/main.ts`
 
 Expected: `event-dispatch is ready`, listener output, and `/health/ready` HTTP 200.
 

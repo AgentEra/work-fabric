@@ -688,7 +688,7 @@ Expected: every command exits 0.
 Run from the worktree:
 
 ```bash
-WORK_FABRIC_ENV_FILE=/Users/bottleliu/work/git/agently/work-fabric/feishu.env \
+WORK_FABRIC_ENV_FILE="$REPOSITORY_ROOT/feishu.env" \
 WORK_FABRIC_CONFIG="$PWD/examples/config/local-feishu-assistant.bundle.yaml" \
 npm run local:feishu:start
 ```

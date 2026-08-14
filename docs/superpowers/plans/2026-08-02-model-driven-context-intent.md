@@ -632,7 +632,7 @@ secrets.
 
 **Files:**
 - No Work Fabric source changes expected.
-- Deployment state: an exact detached worktree at `/opt/agently/deploy-worktrees/work-fabric-office-$commit` on `deploy@192.168.0.66:2222`, where `$commit` is assigned from `git rev-parse HEAD` before deployment.
+- Deployment state: an exact detached worktree at `$DEPLOY_WORKTREE_ROOT/work-fabric-office-$commit` on `<deployment-user>@<office-host>:<ssh-port>`, where `$commit` is assigned from `git rev-parse HEAD` before deployment.
 
 **Interfaces:**
 - Consumes: a verified Work Fabric commit and the existing private-deploy runbook.
@@ -642,7 +642,7 @@ secrets.
 
 ```bash
 sed -n '1,260p' \
-  /Users/bottleliu/work/git/agently/agently-private-deploy/docs/runbooks/agent-deployment-guide.md
+  "$PRIVATE_DEPLOY_ROOT/docs/runbooks/agent-deployment-guide.md"
 git status --short --branch
 git log -1 --oneline
 ```
